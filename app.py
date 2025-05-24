@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template, request, url_for, redirect # Added redirect
+from flask import Flask, jsonify, render_template, request, url_for, redirect, session # Added redirect and session
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func # Add this
 from datetime import datetime, date, timedelta, time # Ensure all are here
@@ -8,6 +8,11 @@ from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash # For User model and init_db
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from authlib.integrations.flask_client import OAuth # Added for Google Sign-In
+
+from google_auth_oauthlib.flow import Flow
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+import pathlib # For finding the client_secret.json file path
 
 # Base directory of the app - project root
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -33,6 +38,35 @@ if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(DATA_DIR, 'site.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # silence the warning
+
+# Google OAuth Configuration - Placeholders
+app.config['GOOGLE_CLIENT_ID'] = 'YOUR_GOOGLE_CLIENT_ID_HERE'
+app.config['GOOGLE_CLIENT_SECRET'] = 'YOUR_GOOGLE_CLIENT_SECRET_HERE'
+
+# OAuth 2.0 setup
+# Note: client_secret.json is not used directly by google-auth-oauthlib Flow if client_id and client_secret are set in config.
+# However, if you were to use it, this is how you might define its path:
+# CLIENT_SECRET_FILE = os.path.join(pathlib.Path(__file__).parent, 'client_secret.json') 
+
+# Ensure this URL is exactly as registered in your Google Cloud Console Authorized redirect URIs
+REDIRECT_URI = 'http://127.0.0.1:5000/login/google/callback' # Or https if using https
+
+# OAuth Scopes, request email and profile
+SCOPES = ['openid', 'https://www.googleapis.com/auth/userinfo.email', 'https://www.googleapis.com/auth/userinfo.profile']
+
+def get_google_flow():
+    return Flow.from_client_config(
+        client_config={'web': {
+            'client_id': app.config['GOOGLE_CLIENT_ID'],
+            'client_secret': app.config['GOOGLE_CLIENT_SECRET'],
+            'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
+            'token_uri': 'https://oauth2.googleapis.com/token',
+            'redirect_uris': [REDIRECT_URI], # Must match exactly what's in Google Cloud Console
+            'javascript_origins': ['http://127.0.0.1:5000'] # Or your app's origin
+        }},
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI
+    )
 
 db = SQLAlchemy(app)
 
@@ -65,6 +99,8 @@ class User(db.Model, UserMixin):
     email = db.Column(db.String(120), unique=True, nullable=False) # Optional for now, but good practice
     password_hash = db.Column(db.String(256), nullable=False) # Increased length for potentially longer hashes
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
+    google_id = db.Column(db.String(200), nullable=True, unique=True)
+    google_email = db.Column(db.String(200), nullable=True)
 
     def __repr__(self):
         return f'<User {self.username} (Admin: {self.is_admin})>'
@@ -147,69 +183,112 @@ def serve_map_view(map_id):
     # You could fetch map name here to pass to template title, but JS will fetch full details
     return render_template("map_view.html", map_id_from_flask=map_id)
 
-@app.route('/profile')
-@login_required
-def serve_profile_page():
-    # Assuming User model has 'username' and 'email' attributes
-    # current_user from Flask-Login provides the logged-in user object
-    return render_template('profile.html', 
-                           username=current_user.username, 
-                           email=current_user.email)
-
-
 @app.route('/login/google')
 def login_google():
-    # Redirect to Google's OAuth consent screen
-    # The redirect_uri must match one of the URIs configured in Google API Console
-    redirect_uri = url_for('authorize_google', _external=True)
-    return oauth.google.authorize_redirect(redirect_uri)
+    if current_user.is_authenticated:
+        return redirect(url_for('serve_index'))
+    
+    flow = get_google_flow()
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true'
+    )
+    # Store the state in the session to verify in the callback
+    session['oauth_state'] = state 
+    return redirect(authorization_url)
 
-@app.route('/login/google/authorized') # This is the redirect URI
-def authorize_google():
+@app.route('/login/google/callback')
+def login_google_callback():
+    state = session.pop('oauth_state', None)
+    # It's important to verify the state to prevent CSRF attacks.
+    # The flow.fetch_token method below implicitly handles state validation if the state
+    # was passed to authorization_url and is present in the callback request.
+    # For explicit state check (optional, as flow.fetch_token handles it):
+    # if state is None or state != request.args.get('state'):
+    #     # flash('Invalid state parameter. Please try logging in again.', 'danger')
+    #     print("Invalid state parameter from Google callback.")
+    #     return redirect(url_for('serve_login'))
+
+
+    flow = get_google_flow()
     try:
-        token = oauth.google.authorize_access_token()
-    except Exception as e:
-        # Log the error or flash a message
-        print(f"Error authorizing Google access token: {e}") # For debugging
-        # flash('Google login failed or was cancelled.', 'danger')
+        # Use the authorization server's response to fetch the OAuth 2.0 tokens.
+        flow.fetch_token(authorization_response=request.url)
+    except Exception as e: # Catches errors like MismatchingStateError
+        print(f"Error fetching token: {e}")
+        # flash(f"Authentication failed: {e}. Please try again.", "danger")
+        return redirect(url_for('serve_login')) # Or an error page
+
+    if not flow.credentials:
+        # flash("Failed to retrieve credentials from Google. Please try again.", "danger")
         return redirect(url_for('serve_login'))
 
-    if not token:
-        # flash('Google login failed: No token received.', 'danger')
-        return redirect(url_for('serve_login'))
 
-    # Get user info from Google
-    userinfo_response = oauth.google.get('openid/userinfo') # Standard OpenID Connect endpoint
+    # Extract the ID token from credentials
+    id_token_jwt = flow.credentials.id_token
+
     try:
-        userinfo_response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
-        userinfo = userinfo_response.json()
-    except Exception as e:
-        print(f"Error fetching userinfo from Google: {e}") # For debugging
-        # flash('Failed to fetch user information from Google.', 'danger')
-        return redirect(url_for('serve_login'))
-        
-    google_email = userinfo.get('email')
+        # Verify the ID token and extract user info
+        # The audience ('aud') parameter must match your Google Client ID
+        id_info = id_token.verify_oauth2_token(
+            id_token_jwt, google_requests.Request(), app.config['GOOGLE_CLIENT_ID']
+        )
 
-    if not google_email:
-        # flash('Could not retrieve email from Google. Please ensure your Google account has a verified email.', 'danger')
-        return redirect(url_for('serve_login'))
+        google_user_id = id_info.get('sub')
+        google_user_email = id_info.get('email')
 
-    # --- Admin Linking Logic ---
-    user = User.query.filter_by(email=google_email).first()
+        if not google_user_id or not google_user_email:
+            # flash("Could not retrieve Google ID or email. Please ensure your Google account has an email.", "danger")
+            return redirect(url_for('serve_login'))
 
-    if user and user.is_admin:
-        login_user(user) # Log in the existing admin user
-        # flash(f'Successfully logged in as {user.username} via Google.', 'success')
-        # The updateAuthLink in JS will handle welcome message, so redirect is enough
-        return redirect(url_for('serve_index')) # Redirect to homepage or admin dashboard
-    else:
-        # flash('Google account not associated with an admin user, or user is not an admin.', 'warning')
-        # For debugging, you might want to print a more specific message server-side
-        if user and not user.is_admin:
-            print(f"User {google_email} found but is not an admin.")
+        # Check if user exists by google_id
+        user = User.query.filter_by(google_id=google_user_id).first()
+
+        if user: # User found by google_id
+            if user.is_admin:
+                login_user(user)
+                # flash(f'Welcome back, {user.username}!', 'success')
+                return redirect(url_for('serve_index')) # Or admin dashboard
+            else:
+                # flash('Your Google account is linked, but it is not associated with an admin user.', 'danger')
+                return redirect(url_for('serve_login')) 
+
+        # If no user by google_id, check if an existing admin user has this email
+        # This is to link an existing admin account (username/password) to Google Sign-In
+        admin_with_email = User.query.filter_by(email=google_user_email, is_admin=True).first()
+
+        if admin_with_email:
+            # Check if this Google ID is already linked to another account (should be rare if google_id is unique)
+            existing_google_id_user = User.query.filter_by(google_id=google_user_id).first()
+            if existing_google_id_user and existing_google_id_user.id != admin_with_email.id:
+                # flash('This Google account is already linked to a different user. Please contact support.', 'danger')
+                return redirect(url_for('serve_login'))
+
+            admin_with_email.google_id = google_user_id
+            admin_with_email.google_email = google_user_email # Update google_email field
+            try:
+                db.session.commit()
+                login_user(admin_with_email)
+                # flash('Successfully linked your Google account to your admin profile.', 'success')
+                return redirect(url_for('serve_index')) # Or admin dashboard
+            except Exception as e:
+                db.session.rollback()
+                print(f"Database error linking Google ID: {e}")
+                # flash('Error linking Google account. Please try again.', 'danger')
+                return redirect(url_for('serve_login'))
         else:
-            print(f"No user found with email {google_email}.")
+            # No user found by google_id and no existing admin user found with this Google email
+            # flash('This Google account is not associated with an existing admin user. Please log in with your admin username and password first if you wish to link accounts, or contact support.', 'warning')
+            return redirect(url_for('serve_login'))
+
+    except ValueError as e:
+        # Invalid token
+        print(f"Invalid token: {e}")
+        # flash("Authentication failed due to an invalid token. Please try again.", "danger")
         return redirect(url_for('serve_login'))
+    except Exception as e:
+        print(f"An error occurred during Google login callback: {e}")
+        # flash("An unexpected error occurred during Google login. Please try again.", "danger")
 
 # Function to initialize the database
 def init_db():
