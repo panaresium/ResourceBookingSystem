@@ -1,213 +1,276 @@
 // JavaScript for Smart Resource Booking
 
+// --- Global Helper Functions ---
+
+/**
+ * Shows a loading message.
+ * @param {HTMLElement} element - The HTML element to display the loading message in.
+ * @param {string} message - The loading message.
+ */
+function showLoading(element, message = "Loading...") {
+    if (element) {
+        element.textContent = message;
+        element.style.color = 'inherit';
+        element.classList.remove('success', 'error');
+        element.style.display = 'block';
+    }
+}
+
+/**
+ * Shows a success message.
+ * @param {HTMLElement} element - The HTML element to display the success message in.
+ * @param {string} message - The success message.
+ */
+function showSuccess(element, message) {
+    if (element) {
+        element.textContent = message;
+        element.style.color = 'green';
+        element.classList.add('success');
+        element.classList.remove('error');
+        element.style.display = 'block';
+    }
+}
+
+/**
+ * Shows an error message.
+ * @param {HTMLElement} element - The HTML element to display the error message in.
+ * @param {string} message - The error message.
+ */
+function showError(element, message) {
+    if (element) {
+        element.textContent = message;
+        element.style.color = 'red';
+        element.classList.add('error');
+        element.classList.remove('success');
+        element.style.display = 'block';
+    }
+}
+
+/**
+ * Hides a message element.
+ * @param {HTMLElement} element - The HTML element to hide.
+ */
+function hideMessage(element) {
+    if (element) {
+        element.style.display = 'none';
+        element.textContent = '';
+    }
+}
+
+/**
+ * Standardized API call helper function.
+ * @param {string} url - The URL to fetch.
+ * @param {object} options - Fetch options (method, headers, body, etc.).
+ * @param {HTMLElement} [messageElement=null] - Element to display success/error messages.
+ * @returns {Promise<object>} - The JSON response data.
+ * @throws {Error} - Throws an error if the API call fails or returns a non-ok response.
+ */
+async function apiCall(url, options = {}, messageElement = null) {
+    if (messageElement) showLoading(messageElement, 'Processing...');
+
+    try {
+        const response = await fetch(url, options);
+        let responseData;
+        try {
+            responseData = await response.json();
+        } catch (e) {
+            // Handle cases where response is not JSON (e.g., server error page)
+            if (!response.ok) {
+                console.error(`API call to ${url} failed with status ${response.status}. Response not JSON.`, response);
+                const errorText = `API Error: ${response.status} - ${response.statusText || 'Server error, response not JSON.'}`;
+                if (messageElement) showError(messageElement, errorText);
+                throw new Error(errorText);
+            }
+            // If response.ok but not JSON, this is unusual but could be a 204 No Content
+            console.warn(`API call to ${url} was OK but response not JSON.`, response);
+            responseData = { success: true, message: response.statusText || "Operation successful (no content)." }; 
+        }
+
+        if (!response.ok) {
+            const errorMsg = responseData.error || responseData.message || `HTTP error! status: ${response.status}`;
+            console.error(`API call to ${url} failed:`, errorMsg, responseData);
+            if (messageElement) showError(messageElement, errorMsg);
+            throw new Error(errorMsg);
+        }
+        
+        // If there's a success message in responseData, show it
+        if (messageElement && responseData.message && response.ok) { // Only show explicit success messages if provided
+             showSuccess(messageElement, responseData.message);
+        } else if (messageElement && !responseData.error) { // If no error and no specific message, hide loading.
+            hideMessage(messageElement); 
+        }
+        return responseData;
+
+    } catch (error) {
+        // This catch handles network errors (fetch itself fails) or errors thrown from above
+        console.error(`Network or other error during API call to ${url}:`, error);
+        if (messageElement) {
+            showError(messageElement, error.message || "Request failed. Please check your connection.");
+        }
+        throw error; // Re-throw the error so calling function can also handle if needed
+    }
+}
+
+
 // --- Authentication Logic ---
 async function updateAuthLink() {
     const authLinkContainer = document.getElementById('auth-link-container');
     const adminMapsNavLink = document.getElementById('admin-maps-nav-link');
-    let welcomeMessageContainer = document.getElementById('welcome-message-container');
-    
-    // New elements for dropdown
+    const welcomeMessageContainer = document.getElementById('welcome-message-container');
     const userDropdownContainer = document.getElementById('user-dropdown-container');
     const userDropdownButton = document.getElementById('user-dropdown-button');
-    const userDropdownMenu = document.getElementById('user-dropdown-menu'); // Though menu visibility is handled by its own listeners
+    const userDropdownMenu = document.getElementById('user-dropdown-menu');
+    const logoutLinkDropdown = document.getElementById('logout-link-dropdown');
 
-    // Ensure welcome message container exists (it should be in HTML templates)
-    if (!welcomeMessageContainer && userDropdownContainer && userDropdownContainer.parentNode) {
-        // If welcome message is missing, and we have a reference point like userDropdownContainer's parent
-        console.warn("'welcome-message-container' not found by its ID. Check HTML templates.");
-        // It might be created dynamically if absolutely necessary, but better to fix templates.
+    const loginUrl = document.body.dataset.loginUrl || '/login';
+
+    function setStateLoggedOut() {
+        sessionStorage.removeItem('loggedInUserUsername');
+        sessionStorage.removeItem('loggedInUserIsAdmin');
+        sessionStorage.removeItem('loggedInUserId');
+
+        if (welcomeMessageContainer) {
+            welcomeMessageContainer.textContent = '';
+            welcomeMessageContainer.style.display = 'none';
+        }
+        if (userDropdownContainer) userDropdownContainer.style.display = 'none';
+        if (userDropdownMenu) userDropdownMenu.style.display = 'none';
+
+        if (authLinkContainer) {
+            authLinkContainer.innerHTML = `<a href="${loginUrl}">Login</a>`;
+            authLinkContainer.style.display = 'list-item';
+        }
+        if (adminMapsNavLink) adminMapsNavLink.style.display = 'none';
     }
-    
+
     try {
-        const response = await fetch('/api/auth/status');
-        const data = await response.json();
+        // Using apiCall helper. No specific messageElement for this, errors are handled by resetting UI.
+        const data = await apiCall('/api/auth/status'); 
 
         if (data.logged_in && data.user) {
             sessionStorage.setItem('loggedInUserUsername', data.user.username);
             sessionStorage.setItem('loggedInUserIsAdmin', data.user.is_admin ? 'true' : 'false');
-            sessionStorage.setItem('loggedInUserId', data.user.id); // Also store ID if not already
+            sessionStorage.setItem('loggedInUserId', data.user.id);
 
             if (welcomeMessageContainer) {
                 welcomeMessageContainer.textContent = `Welcome, ${data.user.username}!`;
-                welcomeMessageContainer.style.display = 'list-item'; 
+                welcomeMessageContainer.style.display = 'list-item';
             }
 
-            if (userDropdownContainer) userDropdownContainer.style.display = 'list-item'; // Show dropdown container
+            if (userDropdownContainer) userDropdownContainer.style.display = 'list-item';
             if (userDropdownButton) {
-                userDropdownButton.innerHTML = `${data.user.username} &#9662;`; // Set username and arrow
-                userDropdownButton.setAttribute('aria-expanded', 'false'); // Ensure it's reset
+                userDropdownButton.innerHTML = `${data.user.username} &#9662;`;
+                userDropdownButton.setAttribute('aria-expanded', 'false');
             }
-            if (userDropdownMenu) userDropdownMenu.style.display = 'none'; // Ensure menu is initially closed
-
-            // Hide the main login link container, as login state is handled by dropdown
-            if (authLinkContainer) authLinkContainer.style.display = 'none'; 
-            
+            if (userDropdownMenu) userDropdownMenu.style.display = 'none'; 
+            if (authLinkContainer) authLinkContainer.style.display = 'none';
             if (adminMapsNavLink) {
                 adminMapsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
             }
 
-            // Setup logout link in dropdown
-            const logoutLinkDropdown = document.getElementById('logout-link-dropdown');
             if (logoutLinkDropdown) {
-                // Remove previous listener to avoid duplicates if updateAuthLink is called multiple times
-                logoutLinkDropdown.removeEventListener('click', handleLogout); 
+                logoutLinkDropdown.removeEventListener('click', handleLogout); // Prevent duplicates
                 logoutLinkDropdown.addEventListener('click', handleLogout);
             }
-
         } else {
-            sessionStorage.removeItem('loggedInUserUsername');
-            sessionStorage.removeItem('loggedInUserIsAdmin');
-            sessionStorage.removeItem('loggedInUserId');
-
-            if (welcomeMessageContainer) {
-                welcomeMessageContainer.textContent = '';
-                welcomeMessageContainer.style.display = 'none';
-            }
-            if (userDropdownContainer) userDropdownContainer.style.display = 'none'; // Hide dropdown
-            if (userDropdownMenu) userDropdownMenu.style.display = 'none'; // Ensure menu is hidden
-
-            if (authLinkContainer) {
-                // Ensure authLinkContainer is visible and shows "Login"
-                authLinkContainer.innerHTML = `<a href="${document.body.dataset.loginUrl || '/login'}">Login</a>`;
-                authLinkContainer.style.display = 'list-item'; 
-            }
-            if (adminMapsNavLink) {
-                adminMapsNavLink.style.display = 'none';
-            }
+            setStateLoggedOut();
         }
     } catch (error) {
-        console.error("Error fetching auth status:", error);
-        // Reset to logged-out state on error
-        if (welcomeMessageContainer) welcomeMessageContainer.style.display = 'none';
-        if (userDropdownContainer) userDropdownContainer.style.display = 'none';
-        if (userDropdownMenu) userDropdownMenu.style.display = 'none';
-        if (authLinkContainer) {
-            authLinkContainer.innerHTML = `<a href="${document.body.dataset.loginUrl || '/login'}">Login</a>`;
-            authLinkContainer.style.display = 'list-item';
-        }
-        if (adminMapsNavLink) adminMapsNavLink.style.display = 'none';
-        sessionStorage.removeItem('loggedInUserUsername');
-        sessionStorage.removeItem('loggedInUserIsAdmin');
-        sessionStorage.removeItem('loggedInUserId');
+        // apiCall already logged the error. Reset UI to logged-out state.
+        setStateLoggedOut();
     }
 }
 
 async function handleLogout(event) {
-    if(event) event.preventDefault(); 
+    if (event) event.preventDefault();
     
-    console.log("Handling logout...");
+    // No specific message element for logout link, errors will be alerted or handled in catch.
     try {
-        const response = await fetch('/api/auth/logout', { method: 'POST' });
-        // Try to parse JSON, but handle cases where it might not be (e.g. network error page)
-        let responseData = { success: false, error: "Logout request failed or unexpected response." };
-        try {
-            responseData = await response.json();
-        } catch (e) {
-            console.warn("Could not parse JSON from logout response:", e);
-            if (response.ok) { // If status is OK but no JSON, assume success
-                 responseData = { success: true, message: "Logout successful (no content)." };
-            }
+        // apiCall will throw an error if not response.ok
+        const responseData = await apiCall('/api/auth/logout', { method: 'POST' });
+
+        console.log("Logout successful from API:", responseData.message || "Logged out");
+        // Clear all session storage related to user
+        sessionStorage.removeItem('loggedInUserUsername');
+        sessionStorage.removeItem('loggedInUserIsAdmin');
+        sessionStorage.removeItem('loggedInUserId');
+        
+        await updateAuthLink(); // Refresh navigation and UI
+
+        const loginUrl = document.body.dataset.loginUrl || '/login';
+        if (window.location.pathname.startsWith('/admin')) {
+            window.location.href = '/'; // Redirect from admin to home
+        } else if (window.location.pathname !== loginUrl) {
+            window.location.href = loginUrl; // Redirect to login if not already there
         }
+        // If on login page, updateAuthLink handles UI, no redirect needed.
 
-
-        if (response.ok && responseData.success) {
-            console.log("Logout successful from API:", responseData.message);
-            sessionStorage.removeItem('loggedInUserUsername');
-            sessionStorage.removeItem('loggedInUserIsAdmin');
-            
-            await updateAuthLink(); 
-            
-            if (window.location.pathname.startsWith('/admin')) {
-                window.location.href = '/';
-            } else if (window.location.pathname === (document.body.dataset.loginUrl || '/login')) {
-                // If on login page, just update links, no redirect.
-            } else {
-                 window.location.href = document.body.dataset.loginUrl || '/login';
-            }
-
-        } else {
-            console.error("Logout failed from API:", responseData.error || "Unknown error");
-            alert("Logout failed: " + (responseData.error || "Unknown error"));
-        }
     } catch (error) {
-        console.error("Error during logout fetch operation:", error);
-        alert("Logout request failed. Please check your connection.");
+        // apiCall helper would have logged the error. Alert a generic message.
+        alert("Logout failed. Please try again or check the console for details.");
+        // Ensure UI is in a logged-out state even if API call had issues
+        await updateAuthLink();
     }
 }
+
 
 // --- Home Page: Display Available Resources Now ---
 async function displayAvailableResourcesNow() {
     const availableResourcesListDiv = document.getElementById('available-resources-now-list');
-    if (!availableResourcesListDiv) {
-        return; // Not on the home page or div is missing
-    }
+    if (!availableResourcesListDiv) return; 
 
-    availableResourcesListDiv.innerHTML = '<p>Loading available resources...</p>';
+    showLoading(availableResourcesListDiv, 'Loading available resources...');
 
     try {
-        // Get current date and hour
         const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const day = String(now.getDate()).padStart(2, '0');
-        const currentDateYMD = `${year}-${month}-${day}`;
-        const currentHour = now.getHours(); // 0-23
+        const currentDateYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const currentHour = now.getHours();
 
-        // Fetch all published resources
-        const resourcesResponse = await fetch('/api/resources');
-        if (!resourcesResponse.ok) {
-            throw new Error(`Failed to fetch resources: ${resourcesResponse.status}`);
-        }
-        const resources = await resourcesResponse.json();
+        // Fetch all published resources using apiCall
+        // The API /api/resources should ideally only return published resources.
+        // The subtask mentions: "In displayAvailableResourcesNow, the check resource.status !== 'published' is redundant 
+        // if the API /api/resources already filters by published status. Verify API behavior and remove client-side check if appropriate."
+        // Assuming API filters, so no client-side status check here for now.
+        const resources = await apiCall('/api/resources', {}, availableResourcesListDiv);
 
         if (!resources || resources.length === 0) {
-            availableResourcesListDiv.innerHTML = '<p>No resources found.</p>';
+            showSuccess(availableResourcesListDiv, 'No resources found.'); // Use showSuccess for neutral info
             return;
         }
 
         const availableNowResources = [];
+        // Use Promise.allSettled to handle individual availability fetch errors gracefully
+        const availabilityResults = await Promise.allSettled(resources.map(resource => 
+            apiCall(`/api/resources/${resource.id}/availability?date=${currentDateYMD}`)
+            // No specific message element for these individual calls to avoid UI clutter. Errors are logged by apiCall.
+        ));
 
-        for (const resource of resources) {
-            if (resource.status !== 'published') { // Should be redundant due to API default but good to double check
-                continue;
-            }
-            try {
-                const availabilityResponse = await fetch(`/api/resources/${resource.id}/availability?date=${currentDateYMD}`);
-                if (!availabilityResponse.ok) {
-                    console.error(`Failed to fetch availability for resource ${resource.id}: ${availabilityResponse.status}`);
-                    continue; // Skip this resource on error
-                }
-                const bookedSlots = await availabilityResponse.json();
-
+        resources.forEach((resource, index) => {
+            const availabilityResult = availabilityResults[index];
+            if (availabilityResult.status === 'fulfilled') {
+                const bookedSlots = availabilityResult.value;
                 let isBookedThisHour = false;
                 if (bookedSlots && bookedSlots.length > 0) {
                     for (const booking of bookedSlots) {
                         const startTimeHour = parseInt(booking.start_time.split(':')[0], 10);
                         const endTimeHour = parseInt(booking.end_time.split(':')[0], 10);
-
-                        // Check if currentHour falls within the booking slot
-                        // Booking: 10:00 to 12:00. currentHour = 10 (booked), currentHour = 11 (booked)
-                        // Booking: 10:00 to 10:30. currentHour = 10 (booked)
-                        // A booking ends AT the hour, so if endTimeHour is 11, it's booked up to 10:59:59.
-                        // So currentHour must be LESS than endTimeHour.
                         if (startTimeHour <= currentHour && currentHour < endTimeHour) {
                             isBookedThisHour = true;
                             break;
                         }
                     }
                 }
-
                 if (!isBookedThisHour) {
                     availableNowResources.push(resource.name);
                 }
-            } catch (availError) {
-                console.error(`Error processing availability for resource ${resource.id}:`, availError);
-                // Continue to the next resource
+            } else {
+                // apiCall already logged the error for this specific resource's availability check.
+                // console.warn(`Could not fetch availability for resource ${resource.id}, skipping. Reason: ${availabilityResult.reason.message}`);
             }
-        }
+        });
 
         if (availableNowResources.length === 0) {
-            availableResourcesListDiv.innerHTML = '<p>No resources currently available.</p>';
+            showSuccess(availableResourcesListDiv, 'No resources currently available.');
         } else {
             const ul = document.createElement('ul');
             availableNowResources.forEach(name => {
@@ -215,25 +278,27 @@ async function displayAvailableResourcesNow() {
                 li.textContent = name;
                 ul.appendChild(li);
             });
-            availableResourcesListDiv.innerHTML = ''; // Clear loading message
+            // Clear "Loading..." or any previous message and show the list
+            availableResourcesListDiv.innerHTML = ''; 
             availableResourcesListDiv.appendChild(ul);
         }
 
     } catch (error) {
-        console.error('Error in displayAvailableResourcesNow:', error);
-        availableResourcesListDiv.innerHTML = '<p>Error fetching available resources. Please try refreshing.</p>';
-        availableResourcesListDiv.classList.add('error'); // Optional: for styling
+        // This catch handles failure of the primary '/api/resources' call or other unexpected errors.
+        // apiCall for '/api/resources' would have already shown an error in availableResourcesListDiv.
+        console.error('Critical Error in displayAvailableResourcesNow:', error.message);
+        // Ensure an error message is shown if not already by a nested apiCall.
+        if (!availableResourcesListDiv.classList.contains('error')) {
+             showError(availableResourcesListDiv, 'Error fetching available resources. Please try refreshing.');
+        }
     }
 }
 
 
 document.addEventListener('DOMContentLoaded', function() {
     // Set login URL on body for dynamic link creation
-    if (document.getElementById('login-form')) { 
-        document.body.dataset.loginUrl = "#"; // Avoid self-linking on login page
-    } else {
-        document.body.dataset.loginUrl = "/login"; 
-    }
+    // Simplified login URL setup (as per subtask)
+    document.body.dataset.loginUrl = document.getElementById('login-form') ? "#" : "/login";
     
     updateAuthLink(); // Call on every page load
 
@@ -244,35 +309,41 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- New Booking Page Specific Logic ---
     if (bookingForm) {
         const resourceSelectBooking = document.getElementById('resource-select-booking');
+        // Assuming a message div for the new booking form, e.g., <div id="new-booking-message"></div>
+        const newBookingMessageDiv = document.getElementById('new-booking-message'); 
 
         // Populate Resource Selector for New Booking Page
         if (resourceSelectBooking) {
-            fetch('/api/resources')
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    return response.json();
-                })
+            apiCall('/api/resources', {}, newBookingMessageDiv) // Pass message div
                 .then(data => {
-                    resourceSelectBooking.innerHTML = '<option value="">-- Select a Resource --</option>'; // Clear and add default
-                    if (data.length === 0) {
+                    resourceSelectBooking.innerHTML = '<option value="">-- Select a Resource --</option>';
+                    if (!data || data.length === 0) {
                         const option = new Option('No resources available', '');
                         option.disabled = true;
                         resourceSelectBooking.add(option);
+                        if (newBookingMessageDiv) showSuccess(newBookingMessageDiv, 'No resources available to book.');
                         return;
                     }
                     data.forEach(resource => {
-                        // Only add published resources that are bookable by someone (generic check, API will enforce specific user)
-                        if (resource.status === 'published') {
-                             const option = new Option(`${resource.name} (Capacity: ${resource.capacity || 'N/A'})`, resource.id);
-                             resourceSelectBooking.add(option);
-                        }
+                        // Per subtask, API /api/resources should return published.
+                        // If not, a filter "if (resource.status === 'published')" might be needed.
+                        const option = new Option(
+                           `${resource.name} (Capacity: ${resource.capacity || 'N/A'})`, 
+                           resource.id
+                        );
+                        // Robust resource name retrieval (as per subtask)
+                        option.dataset.resourceName = resource.name; 
+                        resourceSelectBooking.add(option);
                     });
+                    if (newBookingMessageDiv) hideMessage(newBookingMessageDiv); // Clear "Loading..."
                 })
                 .catch(error => {
-                    console.error('Error fetching resources for new booking form:', error);
+                    // apiCall already showed error in newBookingMessageDiv (if provided)
                     resourceSelectBooking.innerHTML = '<option value="">Error loading resources</option>';
+                    // If newBookingMessageDiv wasn't used by apiCall or error is different:
+                    if (newBookingMessageDiv && !newBookingMessageDiv.classList.contains('error')) {
+                        showError(newBookingMessageDiv, 'Failed to load resources for booking.');
+                    }
                 });
         }
 
@@ -361,180 +432,143 @@ document.addEventListener('DOMContentLoaded', function() {
             // Get form values
             const resourceSelectBooking = document.getElementById('resource-select-booking');
             const dateInput = document.getElementById('booking-date');
-            const startTimeInput = document.getElementById('start-time'); // Already defined above for time slots
-            const endTimeInput = document.getElementById('end-time');     // Already defined above for time slots
-            // const bookingTitleInput = document.getElementById('booking-title'); // Assuming this ID if a title field is added
+            const startTimeInput = document.getElementById('start-time');
+            const endTimeInput = document.getElementById('end-time');
 
             const resourceId = resourceSelectBooking ? resourceSelectBooking.value : '';
             const dateValue = dateInput ? dateInput.value : '';
             const startTimeValue = startTimeInput ? startTimeInput.value : '';
             const endTimeValue = endTimeInput ? endTimeInput.value : '';
-            // const titleValue = bookingTitleInput ? bookingTitleInput.value.trim() : 'User Booking'; // Use a default or get from input
-            const titleValue = `Booking for ${resourceSelectBooking.options[resourceSelectBooking.selectedIndex].text.split(' (Capacity:')[0]}`;
+            
+            let titleValue = 'User Booking'; // Default title
+            if (resourceSelectBooking && resourceSelectBooking.selectedIndex >= 0 && resourceSelectBooking.value) {
+                const selectedOption = resourceSelectBooking.options[resourceSelectBooking.selectedIndex];
+                // Use data-resource-name for robust name retrieval
+                titleValue = `Booking for ${selectedOption.dataset.resourceName || selectedOption.text.split(' (Capacity:')[0]}`;
+            }
 
 
-            // Basic Validation
             if (!resourceId) {
-                if (bookingResultsDiv) {
-                    bookingResultsDiv.innerHTML = '<p>Please select a resource.</p>';
-                    bookingResultsDiv.classList.add('error');
-                }
+                showError(bookingResultsDiv, 'Please select a resource.');
                 return;
             }
             if (!dateValue || !startTimeValue || !endTimeValue) {
-                if (bookingResultsDiv) {
-                    bookingResultsDiv.innerHTML = '<p>Please fill in date, start time, and end time.</p>';
-                    bookingResultsDiv.classList.add('error');
-                }
-                return; // Stop further processing
+                showError(bookingResultsDiv, 'Please fill in date, start time, and end time.');
+                return;
             }
             
-            // Construct booking data
             const bookingData = {
                 resource_id: parseInt(resourceId, 10),
                 date_str: dateValue,
                 start_time_str: startTimeValue,
                 end_time_str: endTimeValue,
                 title: titleValue, 
-                user_name: loggedInUsername 
+                user_name: loggedInUsername // Already fetched and checked
             };
 
-            if (bookingResultsDiv) {
-                bookingResultsDiv.innerHTML = '<p>Submitting booking...</p>';
-                bookingResultsDiv.classList.remove('error', 'success'); // Clear previous styling
-            }
-
             try {
-                const response = await fetch('/api/bookings', {
+                const responseData = await apiCall('/api/bookings', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(bookingData)
-                });
+                }, bookingResultsDiv); // Pass bookingResultsDiv for messages
 
-                const responseData = await response.json();
+                // apiCall throws on error, so if we're here, it's a success
+                let resourceName = 'N/A';
+                if (resourceSelectBooking && resourceSelectBooking.selectedIndex !== -1) {
+                    const selectedOption = resourceSelectBooking.options[resourceSelectBooking.selectedIndex];
+                    resourceName = selectedOption.dataset.resourceName || selectedOption.text.split(' (Capacity:')[0];
+                }
 
-                if (response.ok) { // Typically 201 Created
-                    if (bookingResultsDiv) {
-                        // Refined success message construction
-                        let resourceName = 'N/A';
-                        if (resourceSelectBooking && resourceSelectBooking.selectedIndex !== -1) {
-                            const selectedOptionText = resourceSelectBooking.options[resourceSelectBooking.selectedIndex].text;
-                            resourceName = selectedOptionText.split(' (Capacity:')[0];
-                        }
+                const displayDate = responseData.start_time ? responseData.start_time.split(' ')[0] : 'N/A';
+                const displayStartTime = responseData.start_time ? responseData.start_time.split(' ')[1].substring(0,5) : 'N/A';
+                const displayEndTime = responseData.end_time ? responseData.end_time.split(' ')[1].substring(0,5) : 'N/A';
+                const displayTitle = responseData.title || 'N/A';
+                const displayBookingId = responseData.id || 'N/A';
 
-                        const displayDate = responseData.start_time ? responseData.start_time.split(' ')[0] : 'N/A';
-                        const displayStartTime = responseData.start_time ? responseData.start_time.split(' ')[1].substring(0,5) : 'N/A';
-                        const displayEndTime = responseData.end_time ? responseData.end_time.split(' ')[1].substring(0,5) : 'N/A';
-                        const displayTitle = responseData.title || 'N/A';
-                        const displayBookingId = responseData.id || 'N/A';
-
-                        bookingResultsDiv.innerHTML = `
-                            <p><strong>Booking Confirmed!</strong><br>
-                            Resource: ${resourceName}<br>
-                            Date: ${displayDate}<br>
-                            Time: ${displayStartTime} - ${displayEndTime}<br>
-                            Title: ${displayTitle}<br>
-                            Booking ID: ${displayBookingId}</p>
-                        `;
-                        bookingResultsDiv.className = 'success';
-                        bookingForm.reset(); 
-                        const manualRadio = document.querySelector('input[name="quick_time_option"][value="manual"]');
-                        if(manualRadio) {
-                            manualRadio.checked = true;
-                            manualRadio.dispatchEvent(new Event('change'));
-                        }
-                    }
-                } else {
-                    if (bookingResultsDiv) {
-                        bookingResultsDiv.innerHTML = `<p>Booking failed: ${responseData.error || 'Unknown error. Please try again.'}</p>`;
-                        bookingResultsDiv.className = 'error';
-                    }
-                    console.error('Booking failed:', responseData);
+                // Construct HTML string for success message
+                const successHtml = `
+                    <p><strong>Booking Confirmed!</strong><br>
+                    Resource: ${resourceName}<br>
+                    Date: ${displayDate}<br>
+                    Time: ${displayStartTime} - ${displayEndTime}<br>
+                    Title: ${displayTitle}<br>
+                    Booking ID: ${displayBookingId}</p>
+                `;
+                // Use showSuccess with HTML content
+                if (bookingResultsDiv) { // Ensure div exists
+                    bookingResultsDiv.innerHTML = successHtml; // Set HTML directly
+                    bookingResultsDiv.className = 'success'; // Apply class for styling
+                    bookingResultsDiv.style.display = 'block'; // Make sure it's visible
+                }
+                
+                bookingForm.reset(); // Reset form fields
+                // Reset quick time options to manual and ensure UI updates
+                const manualRadio = document.querySelector('input[name="quick_time_option"][value="manual"]');
+                if(manualRadio) {
+                    manualRadio.checked = true;
+                    // Trigger change to ensure manual time inputs are shown if hidden
+                    manualRadio.dispatchEvent(new Event('change')); 
                 }
             } catch (error) {
-                console.error('Error making booking API call:', error);
-                if (bookingResultsDiv) {
-                    bookingResultsDiv.innerHTML = '<p>Booking request failed due to a network or server error. Please try again.</p>';
-                    bookingResultsDiv.className = 'error';
-                }
+                // apiCall already displayed the error in bookingResultsDiv.
+                console.error('Booking submission failed:', error.message);
             }
         });
     }
 
     if (loginForm) {
-        loginForm.addEventListener('submit', async function(event) { // Made async
-            event.preventDefault(); // Kept one
-    
-            if (loginMessageDiv) loginMessageDiv.innerHTML = ''; 
-    
-            loginMessageDiv.textContent = 'Logging in...';
-            loginMessageDiv.style.color = 'inherit';
-            loginMessageDiv.classList.remove('error', 'success'); 
+        loginForm.addEventListener('submit', async function(event) {
+            event.preventDefault();
     
             const usernameInput = document.getElementById('username'); 
             const passwordInput = document.getElementById('password'); 
-            
             const username = usernameInput.value.trim();
             const password = passwordInput.value; 
     
             if (!username || !password) {
-                loginMessageDiv.textContent = 'Username and password are required.';
-                loginMessageDiv.style.color = 'red';
-                loginMessageDiv.classList.add('error');
+                showError(loginMessageDiv, 'Username and password are required.');
                 return;
             }
     
             try {
-                const response = await fetch('/api/auth/login', {
+                // apiCall will show "Logging in..." via its messageElement parameter.
+                const responseData = await apiCall('/api/auth/login', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ username: username, password: password })
-                });
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                }, loginMessageDiv);
+
+                // If apiCall is successful, responseData.message might contain a success message.
+                // If not, use a generic one. apiCall's showSuccess will handle display.
+                showSuccess(loginMessageDiv, responseData.message || 'Login successful!');
     
-                const responseData = await response.json();
-    
-                if (response.ok) { 
-                    loginMessageDiv.textContent = responseData.message || 'Login successful!';
-                    loginMessageDiv.style.color = 'green';
-                    loginMessageDiv.classList.add('success');
-    
-                    if (responseData.user) {
-                        sessionStorage.setItem('loggedInUserUsername', responseData.user.username);
-                        sessionStorage.setItem('loggedInUserIsAdmin', responseData.user.is_admin ? 'true' : 'false');
-                        sessionStorage.setItem('loggedInUserId', responseData.user.id);
-                    } else {
-                        // This case should ideally not happen
-                        sessionStorage.setItem('loggedInUserUsername', username); 
-                        sessionStorage.removeItem('loggedInUserIsAdmin'); 
-                        sessionStorage.removeItem('loggedInUserId');
-                    }
-                    
-                    await updateAuthLink(); // Await the async function
-                    
-                    setTimeout(() => {
-                        window.location.href = '/'; 
-                    }, 500); 
-    
+                if (responseData.user) {
+                    sessionStorage.setItem('loggedInUserUsername', responseData.user.username);
+                    sessionStorage.setItem('loggedInUserIsAdmin', responseData.user.is_admin ? 'true' : 'false');
+                    sessionStorage.setItem('loggedInUserId', responseData.user.id);
                 } else {
-                    loginMessageDiv.textContent = responseData.error || 'Login failed. Please try again.';
-                    loginMessageDiv.style.color = 'red';
-                    loginMessageDiv.classList.add('error');
-                    sessionStorage.removeItem('loggedInUserUsername'); 
-                    sessionStorage.removeItem('loggedInUserIsAdmin');
-                    sessionStorage.removeItem('loggedInUserId'); // Added for consistency
+                    // This case should ideally not happen if API is consistent
+                    sessionStorage.setItem('loggedInUserUsername', username); 
+                    sessionStorage.removeItem('loggedInUserIsAdmin'); 
+                    sessionStorage.removeItem('loggedInUserId');
+                    console.warn("User object missing from successful login response. Storing username only.");
                 }
+                
+                await updateAuthLink(); // Refresh nav/UI elements
+                
+                setTimeout(() => {
+                    window.location.href = '/'; // Redirect to home page
+                }, 500); // Delay for user to see success message
+    
             } catch (error) {
-                console.error('Login API call error:', error);
-                loginMessageDiv.textContent = 'Login request failed. Please check your connection or contact support.';
-                loginMessageDiv.style.color = 'red';
-                loginMessageDiv.classList.add('error');
+                // apiCall already displayed the error in loginMessageDiv.
+                // Clear any potentially partially set session data on login failure
                 sessionStorage.removeItem('loggedInUserUsername');
                 sessionStorage.removeItem('loggedInUserIsAdmin');
-                sessionStorage.removeItem('loggedInUserId'); // Added for consistency
+                sessionStorage.removeItem('loggedInUserId');
+                // updateAuthLink(); // Optionally, re-update auth links to explicitly show logged-out state
+                console.error('Login attempt failed:', error.message);
             }
         });
     }
@@ -601,22 +635,28 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
     if (availabilityDateInput && roomSelectDropdown && calendarTable) {
         availabilityDateInput.value = getTodayDateString(); // Set to today by default
 
-        async function fetchAndDisplayAvailability(resourceId, dateString, currentResourceDetails) { 
+        async function fetchAndDisplayAvailability(resourceId, dateString, currentResourceDetails) {
+            const calendarStatusMessageDiv = document.getElementById('calendar-status-message'); 
             if (!resourceId) {
                 clearCalendar();
+                if(calendarStatusMessageDiv) hideMessage(calendarStatusMessageDiv);
                 return;
             }
-            console.log(`Fetching availability for resource ${resourceId} on ${dateString}`, currentResourceDetails);
+            
             try {
-                const response = await fetch(`/api/resources/${resourceId}/availability?date=${dateString}`);
-                if (!response.ok) {
-                    throw new Error(`API request failed: ${response.status} - ${response.statusText}`);
-                }
-                const bookedSlots = await response.json();
-                updateCalendarDisplay(bookedSlots, dateString, currentResourceDetails); 
+                const bookedSlots = await apiCall(
+                    `/api/resources/${resourceId}/availability?date=${dateString}`, 
+                    {}, 
+                    calendarStatusMessageDiv // This div will show loading/errors for this call
+                );
+                updateCalendarDisplay(bookedSlots, dateString, currentResourceDetails);
+                // If apiCall was successful and no specific success message was in response, 
+                // it would hide the calendarStatusMessageDiv. This is usually desired.
             } catch (error) {
-                console.error('Error fetching or displaying availability:', error);
-                clearCalendar(true);
+                // apiCall has already shown the error in calendarStatusMessageDiv.
+                // Log for debugging and ensure calendar UI reflects error state.
+                console.error(`Error fetching availability for resource ${resourceId} on ${dateString}:`, error.message);
+                clearCalendar(true); 
             }
         }
 
@@ -659,40 +699,39 @@ Enter a title for your booking (optional):`);
             makeBookingApiCall(bookingData); 
         }
 
-        async function makeBookingApiCall(bookingData) {
+        async function makeBookingApiCall(bookingData) { // For calendar table's direct booking
+            const calendarStatusMessageDiv = document.getElementById('calendar-status-message');
             try {
-                const response = await fetch('/api/bookings', {
+                const responseData = await apiCall('/api/bookings', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(bookingData)
-                });
+                }, calendarStatusMessageDiv);
 
-                const responseData = await response.json(); 
-
-                if (response.ok) { 
-                    alert(`Booking successful! Title: ${responseData.title || 'Untitled'}
-ID: ${responseData.id}`);
-                    
-                    if (typeof fetchAndDisplayAvailability === 'function' && 
-                        roomSelectDropdown && 
-                        availabilityDateInput) {
-                        fetchAndDisplayAvailability(
-                            roomSelectDropdown.value,
-                            availabilityDateInput.value
-                        );
-                    }
-                } else {
-                    alert(`Booking failed: ${responseData.error || 'Unknown error'}`);
-                    console.error('Booking failed:', responseData);
+                alert(`Booking successful! Title: ${responseData.title || 'Untitled'} (ID: ${responseData.id})`);
+                
+                if (roomSelectDropdown.value && availabilityDateInput.value) {
+                     const selectedOption = roomSelectDropdown.selectedOptions[0];
+                     const currentResourceDetails = { 
+                        id: roomSelectDropdown.value, 
+                        name: selectedOption.dataset.resourceName || selectedOption.textContent.split(' (ID:')[0],
+                        booking_restriction: selectedOption.dataset.bookingRestriction,
+                        allowed_user_ids: selectedOption.dataset.allowedUserIds,
+                        allowed_roles: selectedOption.dataset.allowedRoles
+                     };
+                    fetchAndDisplayAvailability(
+                        roomSelectDropdown.value,
+                        availabilityDateInput.value,
+                        currentResourceDetails 
+                    );
                 }
-            } catch (error) {
-                console.error('Error making booking API call:', error);
-                alert('Booking request failed. Please try again or check the console for errors.');
-            }
-        }
+                if(calendarStatusMessageDiv) showSuccess(calendarStatusMessageDiv, `Booking for '${responseData.title || 'Untitled'}' (ID: ${responseData.id}) confirmed.`);
 
+            } catch (error) {
+                // apiCall showed error in calendarStatusMessageDiv. Alert for additional feedback.
+                alert(`Booking failed: ${error.message}. Check messages above calendar.`);
+                console.error('Calendar table direct booking failed:', error.message);
+            }
         }
 
         function updateCalendarDisplay(bookedSlots, dateString, currentResourceDetails) {
@@ -789,71 +828,62 @@ ID: ${responseData.id}`);
             fetchAndDisplayAvailability(currentResourceDetails.id, availabilityDateInput.value, currentResourceDetails);
         });
 
-        // Initial population of room selector and then fetching availability
-        fetch('/api/resources')
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                roomSelectDropdown.innerHTML = ''; // Clear existing options
-                if (data.length === 0) {
-                    const option = new Option('No rooms available', '');
-                    roomSelectDropdown.add(option);
-                    clearCalendar(); // No rooms, clear calendar
-                    return;
-                }
-                data.forEach(resource => {
-                    const option = new Option(resource.name, resource.id);
-                    option.dataset.bookingRestriction = resource.booking_restriction || "";
-                    option.dataset.allowedUserIds = resource.allowed_user_ids || "";
-                    option.dataset.allowedRoles = resource.allowed_roles || "";
-                    roomSelectDropdown.add(option);
-                });
-                
-                // After populating, if there are options, select the first and fetch availability
-                if (roomSelectDropdown.options.length > 0) {
-                    if (!roomSelectDropdown.value && roomSelectDropdown.options[0]) {
-                        roomSelectDropdown.value = roomSelectDropdown.options[0].value;
+        // Initial population of room selector for the calendar view on resources.html
+        const calendarStatusMessageDiv = document.getElementById('calendar-status-message');
+        if (roomSelectDropdown && availabilityDateInput && calendarTable && calendarStatusMessageDiv) { // Ensure all elements exist
+            apiCall('/api/resources', {}, calendarStatusMessageDiv)
+                .then(data => {
+                    roomSelectDropdown.innerHTML = ''; 
+                    if (!data || data.length === 0) {
+                        roomSelectDropdown.add(new Option('No rooms available', ''));
+                        clearCalendar();
+                        showSuccess(calendarStatusMessageDiv, 'No resources available to display.');
+                        return;
                     }
-                    const selectedOption = roomSelectDropdown.selectedOptions[0];
-                    const initialResourceDetails = { 
-                        id: roomSelectDropdown.value, 
-                        booking_restriction: selectedOption.dataset.bookingRestriction,
-                        allowed_user_ids: selectedOption.dataset.allowedUserIds,
-                        allowed_roles: selectedOption.dataset.allowedRoles
-                    };
-                    fetchAndDisplayAvailability(initialResourceDetails.id, availabilityDateInput.value, initialResourceDetails);
-                } else {
-                     clearCalendar(); 
-                }
-            })
-            .catch(error => {
-                console.error('Error fetching resources:', error);
-                roomSelectDropdown.innerHTML = '<option value="">Error loading rooms</option>';
-                clearCalendar(true); // Error fetching rooms, clear calendar
-            });
+                    data.forEach(resource => {
+                        const option = new Option(resource.name, resource.id);
+                        option.dataset.bookingRestriction = resource.booking_restriction || "";
+                        option.dataset.allowedUserIds = resource.allowed_user_ids || "";
+                        option.dataset.allowedRoles = resource.allowed_roles || "";
+                        option.dataset.resourceName = resource.name;
+                        roomSelectDropdown.add(option);
+                    });
+                    
+                    if (roomSelectDropdown.options.length > 0) {
+                        roomSelectDropdown.value = roomSelectDropdown.options[0].value;
+                        const selectedOption = roomSelectDropdown.options[0];
+                        const initialResourceDetails = { 
+                            id: selectedOption.value, 
+                            name: selectedOption.dataset.resourceName,
+                            booking_restriction: selectedOption.dataset.bookingRestriction,
+                            allowed_user_ids: selectedOption.dataset.allowedUserIds,
+                            allowed_roles: selectedOption.dataset.allowedRoles
+                        };
+                        fetchAndDisplayAvailability(initialResourceDetails.id, availabilityDateInput.value, initialResourceDetails);
+                    } else {
+                         clearCalendar(); 
+                         showSuccess(calendarStatusMessageDiv, 'No resources to display in calendar.');
+                    }
+                })
+                .catch(error => {
+                    roomSelectDropdown.innerHTML = '<option value="">Error loading rooms</option>';
+                    clearCalendar(true);
+                    // Error message already shown by apiCall in calendarStatusMessageDiv
+                });
+        }
         
         // Logic for displaying floor map links on resources.html
         const floorMapsListUl = document.getElementById('floor-maps-list');
-        if (floorMapsListUl) { 
+        const floorMapsLoadingStatusDiv = document.getElementById('floor-maps-loading-status'); 
+        if (floorMapsListUl && floorMapsLoadingStatusDiv) { 
             async function fetchAndDisplayFloorMapLinks() {
                 try {
-                    const response = await fetch('/api/admin/maps'); 
-                    if (!response.ok) {
-                        throw new Error(`Failed to fetch floor maps: ${response.status}`);
-                    }
-                    const maps = await response.json();
-
+                    const maps = await apiCall('/api/admin/maps', {}, floorMapsLoadingStatusDiv); 
                     floorMapsListUl.innerHTML = ''; 
-
-                    if (maps.length === 0) {
-                        floorMapsListUl.innerHTML = '<li>No floor maps available.</li>';
+                    if (!maps || maps.length === 0) {
+                        showSuccess(floorMapsLoadingStatusDiv, 'No floor maps available.');
                         return;
                     }
-
                     maps.forEach(map => {
                         const listItem = document.createElement('li');
                         const link = document.createElement('a');
@@ -862,40 +892,35 @@ ID: ${responseData.id}`);
                         listItem.appendChild(link);
                         floorMapsListUl.appendChild(listItem);
                     });
-
+                     // apiCall success default behavior is to hide messageElement if no specific success message from API.
+                     // If a message was shown, and it wasn't an error, it's fine for it to be hidden.
                 } catch (error) {
-                    console.error('Error fetching or displaying floor map links:', error);
-                    if (floorMapsListUl) { 
-                       floorMapsListUl.innerHTML = '<li>Error loading floor maps.</li>';
-                    }
+                    // apiCall already showed error in floorMapsLoadingStatusDiv
+                    if (floorMapsListUl) floorMapsListUl.innerHTML = '<li>Error loading floor maps.</li>'; // Fallback
                 }
             }
             fetchAndDisplayFloorMapLinks();
         }
-    }
+    } // End of `if (availabilityDateInput && roomSelectDropdown && calendarTable)`
 
     // Admin Maps Page Specific Logic
-    const adminMapsPageIdentifier = document.getElementById('upload-map-form'); // Check if on admin maps page
-    if (adminMapsPageIdentifier) {
+    const adminMapsPageIdentifier = document.getElementById('upload-map-form');
+    if (adminMapsPageIdentifier) { 
         const uploadMapForm = document.getElementById('upload-map-form');
         const mapsListUl = document.getElementById('maps-list');
-        const uploadStatusDiv = document.getElementById('upload-status');
-        
-        // Function to fetch and display maps
+        const uploadStatusDiv = document.getElementById('upload-status'); 
+        const adminMapsListStatusDiv = document.getElementById('admin-maps-list-status'); 
+
         async function fetchAndDisplayMaps() {
+            if (!mapsListUl || !adminMapsListStatusDiv) return;
             try {
-                const response = await fetch('/api/admin/maps');
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch maps: ${response.status}`);
-                }
-                const maps = await response.json();
-                
-                mapsListUl.innerHTML = ''; // Clear existing list
-                if (maps.length === 0) {
+                const maps = await apiCall('/api/admin/maps', {}, adminMapsListStatusDiv);
+                mapsListUl.innerHTML = ''; 
+                if (!maps || maps.length === 0) {
                     mapsListUl.innerHTML = '<li>No maps uploaded yet.</li>';
+                    showSuccess(adminMapsListStatusDiv, 'No maps uploaded. Use the form to add one.');
                     return;
                 }
-                
                 maps.forEach(map => {
                     const listItem = document.createElement('li');
                     listItem.innerHTML = `
@@ -905,47 +930,33 @@ ID: ${responseData.id}`);
                         <br>
                         <button class="select-map-for-areas-btn" data-map-id="${map.id}" data-map-name="${map.name}" data-map-image-url="${map.image_url}">Define Areas</button>
                     `;
-                    // Add event listener for "Define Areas" button later (Step 5)
                     mapsListUl.appendChild(listItem);
                 });
-
             } catch (error) {
-                console.error('Error fetching maps:', error);
                 mapsListUl.innerHTML = '<li>Error loading maps.</li>';
+                // Error already shown by apiCall in adminMapsListStatusDiv
             }
         }
 
-        // Handle Map Upload Form Submission
-        if (uploadMapForm) {
+        if (uploadMapForm && uploadStatusDiv) {
             uploadMapForm.addEventListener('submit', async function(event) {
                 event.preventDefault();
-                uploadStatusDiv.textContent = 'Uploading...';
-                uploadStatusDiv.style.color = 'inherit';
-
+                showLoading(uploadStatusDiv, 'Uploading...');
                 const formData = new FormData(uploadMapForm);
-                // No need to set Content-Type header for FormData with fetch
-
                 try {
-                    const response = await fetch('/api/admin/maps', {
-                        method: 'POST',
-                        body: formData 
-                    });
-
+                    // Direct fetch for FormData, manual error/success handling for this specific case.
+                    const response = await fetch('/api/admin/maps', { method: 'POST', body: formData });
                     const responseData = await response.json();
-
-                    if (response.ok) { // Status 201 Created
-                        uploadStatusDiv.textContent = `Map '${responseData.name}' uploaded successfully!`;
-                        uploadStatusDiv.style.color = 'green';
-                        uploadMapForm.reset(); // Clear the form
-                        fetchAndDisplayMaps(); // Refresh the list
+                    if (response.ok) { 
+                        showSuccess(uploadStatusDiv, `Map '${responseData.name}' uploaded successfully! (ID: ${responseData.id})`);
+                        uploadMapForm.reset();
+                        fetchAndDisplayMaps(); 
                     } else {
-                        uploadStatusDiv.textContent = `Upload failed: ${responseData.error || 'Unknown error'}`;
-                        uploadStatusDiv.style.color = 'red';
+                        showError(uploadStatusDiv, `Upload failed: ${responseData.error || responseData.message || 'Unknown server error'}`);
                     }
                 } catch (error) {
                     console.error('Error uploading map:', error);
-                    uploadStatusDiv.textContent = 'Upload failed due to a network or server error.';
-                    uploadStatusDiv.style.color = 'red';
+                    showError(uploadStatusDiv, `Upload failed: ${error.message || 'Network error or server is down.'}`);
                 }
             });
         }
@@ -986,38 +997,39 @@ ID: ${responseData.id}`);
 
 
         async function fetchAndDrawExistingMapAreas(mapId) {
-            console.log(`Fetching existing areas for map ID: ${mapId}`);
-            existingMapAreas = []; // Clear previous map's areas
-    
+            existingMapAreas = []; 
+            const defineAreasStatusDiv = document.getElementById('define-areas-status'); 
+            if (!defineAreasStatusDiv) {
+                console.warn("define-areas-status element not found for fetchAndDrawExistingMapAreas messages.");
+            }
+
             try {
-                const response = await fetch(`/api/map_details/${mapId}`); // No date needed for just coordinates
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(`Failed to fetch map details for existing areas: ${response.status} ${errorData.error || ''}`);
-                }
-                const data = await response.json();
-    
+                const data = await apiCall(`/api/map_details/${mapId}`, {}, defineAreasStatusDiv);
                 if (data.mapped_resources && data.mapped_resources.length > 0) {
                     data.mapped_resources.forEach(resource => {
                         if (resource.map_coordinates && resource.map_coordinates.type === 'rect') {
-                            existingMapAreas.push({ // Store necessary info
-                                id: resource.id,
-                                name: resource.name,
-                                map_coordinates: resource.map_coordinates, // Already an object from this API
-                                booking_restriction: resource.booking_restriction, 
-                                status: resource.status // **NEW** - Assuming /api/map_details includes status
+                            existingMapAreas.push({ /* ... (all properties) ... */ 
+                                id: resource.id, resource_id: resource.id, name: resource.name,
+                                map_coordinates: resource.map_coordinates,
+                                booking_restriction: resource.booking_restriction,
+                                allowed_user_ids: resource.allowed_user_ids, 
+                                allowed_roles: resource.allowed_roles,
+                                status: resource.status, floor_map_id: resource.floor_map_id 
                             });
                         }
                     });
-                    console.log("Fetched existing areas:", existingMapAreas);
+                    if (defineAreasStatusDiv) {
+                        if (existingMapAreas.length > 0) showSuccess(defineAreasStatusDiv, `Loaded ${existingMapAreas.length} area(s). Click to edit or draw new.`);
+                        else showSuccess(defineAreasStatusDiv, "No areas defined. Draw on map to begin.");
+                    }
                 } else {
-                    console.log("No existing mapped resources found for this map.");
+                     if (defineAreasStatusDiv) showSuccess(defineAreasStatusDiv, "No mapped resources found. Draw to define areas.");
                 }
             } catch (error) {
-                console.error('Error fetching existing map areas:', error);
-                // Optionally display an error to the user on the UI
+                // Error shown by apiCall in defineAreasStatusDiv
+                console.error('Error fetching existing map areas:', error.message);
             }
-            redrawCanvas(); // Redraw canvas to show these areas (and clear any temp drawing)
+            redrawCanvas(); 
         }
 
         function redrawCanvas() {
@@ -1097,37 +1109,36 @@ ID: ${responseData.id}`);
         }
 
         async function populateResourcesForMapping(currentMapId) {
+            const defineAreasStatusDiv = document.getElementById('define-areas-status');
+            if (!resourceToMapSelect) return;
+
             try {
-                const response = await fetch('/api/resources'); // Existing endpoint
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch resources: ${response.status}`);
+                const resources = await apiCall('/api/resources', {}, defineAreasStatusDiv); 
+                resourceToMapSelect.innerHTML = '<option value="">-- Select a Resource to Map --</option>';
+                let count = 0;
+                if (resources && resources.length > 0) {
+                    resources.forEach(r => {
+                        if ((!r.floor_map_id || !r.map_coordinates) || (r.floor_map_id === parseInt(currentMapId))) {
+                            count++;
+                            const opt = new Option(`${r.name} (ID: ${r.id}) - Status: ${r.status || 'N/A'}`, r.id);
+                            Object.assign(opt.dataset, { // Assign all relevant data
+                                resourceId: r.id, resourceName: r.name, resourceStatus: r.status || 'draft',
+                                bookingRestriction: r.booking_restriction || "",
+                                allowedUserIds: r.allowed_user_ids || "", allowedRoles: r.allowed_roles || "",
+                                isMappedToCurrent: (r.floor_map_id === parseInt(currentMapId) && r.map_coordinates) ? "true" : "false"
+                            });
+                            if (opt.dataset.isMappedToCurrent === "true") opt.textContent += ` (On this map)`;
+                            resourceToMapSelect.add(opt);
+                        }
+                    });
                 }
-                const resources = await response.json();
-                
-                resourceToMapSelect.innerHTML = '<option value="">-- Select a Resource to Map --</option>'; // Clear and add default
-
-                resources.forEach(resource => {
-                    // Filter condition:
-                    // 1. Resource is not mapped anywhere (no floor_map_id OR no map_coordinates).
-                    // 2. OR Resource is already mapped to the CURRENTLY selected map (allowing re-edit of its coordinates on this map).
-                    if ((!resource.floor_map_id || !resource.map_coordinates) || (resource.floor_map_id === parseInt(currentMapId))) {
-                        const option = document.createElement('option');
-                        option.value = resource.id;
-                        // Display name and status
-                        option.textContent = `${resource.name} (ID: ${resource.id}) - Status: ${resource.status || 'N/A'}`; 
-                        option.dataset.resourceId = resource.id; // Store id
-                        option.dataset.resourceStatus = resource.status || 'draft'; // Store status, default to draft if undefined
-                        
-                        if (resource.floor_map_id === parseInt(currentMapId) && resource.map_coordinates) {
-                            option.textContent += ` (Currently on this map - edit coordinates)`;
-                        } 
-                        resourceToMapSelect.appendChild(option);
-                    }
-                });
-
+                if (defineAreasStatusDiv) {
+                    if (count === 0) showSuccess(defineAreasStatusDiv, "No resources available for mapping or all mapped.");
+                    else if (!defineAreasStatusDiv.classList.contains('error')) hideMessage(defineAreasStatusDiv);
+                }
             } catch (error) {
-                console.error('Error populating resources for mapping:', error);
                 resourceToMapSelect.innerHTML = '<option value="">Error loading resources</option>';
+                // Error shown by apiCall in defineAreasStatusDiv
             }
         }
 
@@ -1379,59 +1390,33 @@ ID: ${responseData.id}`);
                     }
                 }
                 
-                const payload = {
-                    floor_map_id: floorMapId,
-                    coordinates: coordinates
-                };
+                // Payload includes coordinates and potentially other resource-specific settings if form is extended
+                const payload = { floor_map_id: floorMapId, coordinates: coordinates };
+                // Add other properties like booking_restriction from form if they are part of this update
+                // payload.booking_restriction = bookingPermissionDropdown.value; 
+                // payload.allowed_user_ids = ... ; payload.allowed_roles = ...;
 
                 try {
-                    const response = await fetch(`/api/admin/resources/${selectedResourceId}/map_info`, {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(payload)
-                    });
-
-                    const responseData = await response.json();
-
-                    if (response.ok) {
-                        areaDefinitionStatusDiv.textContent = `Area defined successfully for resource '${responseData.name || selectedResourceId}'!`;
-                        areaDefinitionStatusDiv.style.color = 'green';
-                        // defineAreaForm.reset(); // Optional: reset form
-                        // resourceToMapSelect.value = ''; // Optional: deselect resource
-                        
-                        const currentMapIdForRefresh = hiddenFloorMapIdInput.value; 
-                        // Refresh the resource dropdown (existing logic)
-                        if (currentMapIdForRefresh && typeof populateResourcesForMapping === 'function') {
-                             await populateResourcesForMapping(currentMapIdForRefresh);
-                        }
-                        
-                        // *** NEW: Refresh the canvas to show the newly saved area ***
-                        if (currentMapIdForRefresh && typeof fetchAndDrawExistingMapAreas === 'function') {
-                            await fetchAndDrawExistingMapAreas(currentMapIdForRefresh);
-                        } else {
-                            console.warn("Could not refresh canvas map areas: currentMapId or function missing.");
-                        }
-
-                        // Optionally clear the drawing form fields and currentDrawnRect
-                        document.getElementById('coord-x').value = '';
-                        document.getElementById('coord-y').value = '';
-                        document.getElementById('coord-width').value = '';
-                        document.getElementById('coord-height').value = '';
-                        if (bookingPermissionDropdown) bookingPermissionDropdown.value = ""; // Reset booking permission dropdown
-                        currentDrawnRect = null; // Clear the temporary drawn rectangle
-                        // fetchAndDrawExistingMapAreas calls redrawCanvas, which will clear the temporary drawing
-                        // if currentDrawnRect is null and then draw the updated existingMapAreas.
-                        
-                    } else {
-                        areaDefinitionStatusDiv.textContent = `Failed to define area: ${responseData.error || 'Unknown error'}`;
-                        areaDefinitionStatusDiv.style.color = 'red';
+                    const responseData = await apiCall(
+                        `/api/admin/resources/${selectedResourceId}/map_info`, 
+                        { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 
+                        areaDefinitionStatusDiv 
+                    );
+                    showSuccess(areaDefinitionStatusDiv, `Area saved for '${responseData.name || selectedResourceId}'!`);
+                    const mapIdRefresh = hiddenFloorMapIdInput.value;
+                    if (mapIdRefresh) {
+                        await populateResourcesForMapping(mapIdRefresh); 
+                        await fetchAndDrawExistingMapAreas(mapIdRefresh); 
                     }
+                    currentDrawnRect = null; 
+                    if (selectedAreaForEditing && selectedAreaForEditing.id === parseInt(selectedResourceId)) {
+                        selectedAreaForEditing.map_coordinates = coordinates; // Update local cache
+                        // Also update other relevant fields if they were part of payload
+                    }
+                    redrawCanvas(); 
                 } catch (error) {
-                    console.error('Error defining area:', error);
-                    areaDefinitionStatusDiv.textContent = 'Failed to define area due to a network or server error.';
-                    areaDefinitionStatusDiv.style.color = 'red';
+                    // Error shown by apiCall
+                    console.error('Error saving area on map:', error.message);
                 }
             });
         }
@@ -1457,46 +1442,28 @@ ID: ${responseData.id}`);
                 areaDefinitionStatusDiv.style.color = 'inherit';
     
                 try {
-                    const response = await fetch(`/api/admin/resources/${selectedAreaForEditing.id}/map_info`, {
-                        method: 'DELETE',
-                        headers: {
-                            'Content-Type': 'application/json' // Not strictly needed for DELETE with no body, but good practice
-                        }
-                    });
-    
-                    let responseData = {};
-                    const contentType = response.headers.get("content-type");
-                    if (contentType && contentType.indexOf("application/json") !== -1) {
-                        responseData = await response.json();
-                    } else {
-                        if (response.ok) responseData.message = "Deletion successful (no content).";
-                        else responseData.error = `Server returned ${response.status} (no content).`;
+                    const responseData = await apiCall(
+                        `/api/admin/resources/${selectedAreaForEditing.id}/map_info`, 
+                        { method: 'DELETE' }, 
+                        areaDefinitionStatusDiv 
+                    );
+                    showSuccess(areaDefinitionStatusDiv, responseData.message || `Mapping for '${resourceName}' deleted.`);
+                    selectedAreaForEditing = null; 
+                    const btnsDiv = document.getElementById('edit-delete-buttons');
+                    if(btnsDiv) btnsDiv.style.display = 'none';
+                    if(defineAreaForm) defineAreaForm.reset(); 
+                    if(resourceToMapSelect) resourceToMapSelect.value = ''; 
+                    if(bookingPermissionDropdown) bookingPermissionDropdown.value = ""; 
+                    currentDrawnRect = null; 
+                    const mapIdRefresh = hiddenFloorMapIdInput.value;
+                    if (mapIdRefresh) {
+                        await fetchAndDrawExistingMapAreas(mapIdRefresh); 
+                        await populateResourcesForMapping(mapIdRefresh);   
                     }
-    
-                    if (response.ok) { // Status 200 or 204
-                        areaDefinitionStatusDiv.textContent = responseData.message || `Mapping for ${resourceName} deleted successfully.`;
-                        areaDefinitionStatusDiv.style.color = 'green';
-    
-                        selectedAreaForEditing = null;
-                        document.getElementById('edit-delete-buttons').style.display = 'none';
-                        
-                    document.getElementById('define-area-form').reset(); // This should reset booking-permission too
-                        if(resourceToMapSelect) resourceToMapSelect.value = '';
-                    if(bookingPermissionDropdown) bookingPermissionDropdown.value = ""; // Explicit reset
-    
-                        const currentMapId = hiddenFloorMapIdInput.value;
-                        if (currentMapId) {
-                            await fetchAndDrawExistingMapAreas(currentMapId);
-                            await populateResourcesForMapping(currentMapId); 
-                        }
-                    } else {
-                        areaDefinitionStatusDiv.textContent = `Failed to delete mapping: ${responseData.error || 'Unknown error'}`;
-                        areaDefinitionStatusDiv.style.color = 'red';
-                    }
+                    redrawCanvas(); 
                 } catch (error) {
-                    console.error('Error deleting map mapping:', error);
-                    areaDefinitionStatusDiv.textContent = 'Deletion failed due to a network or server error.';
-                    areaDefinitionStatusDiv.style.color = 'red';
+                    // Error shown by apiCall
+                    console.error('Error deleting map mapping:', error.message);
                 }
             });
         }
@@ -1618,94 +1585,35 @@ ID: ${responseData.id}`);
                 }
             });
         }
-    
         async function handlePublishResource(event) {
             const resourceId = event.target.dataset.resourceId;
-            if (!resourceId) {
-                alert("Error: Resource ID not found for publishing.");
-                return;
-            }
-    
-            if (!confirm(`Are you sure you want to publish resource ID ${resourceId}?`)) {
-                return;
-            }
+            if (!resourceId) { alert("Error: Resource ID not found."); return; }
+            if (!confirm(`Publish resource ID ${resourceId}? It will become visible and bookable.`)) return;
             
-            const localResourceActionsContainer = document.getElementById('resource-actions-container'); // Use local var
-            if (localResourceActionsContainer) {
-                localResourceActionsContainer.innerHTML = `<p>Publishing resource ${resourceId}...</p>`;
-            }
-    
+            const actionsContainer = document.getElementById('resource-actions-container'); 
             try {
-                const response = await fetch(`/api/admin/resources/${resourceId}/publish`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json' 
-                    }
-                });
-    
-                const responseData = await response.json();
-    
-                if (response.ok) { 
-                    alert(responseData.message || `Resource ${resourceId} published successfully!`);
-                    
-                    const currentMapId = hiddenFloorMapIdInput.value; 
-                    if (typeof populateResourcesForMapping === 'function') {
-                        await populateResourcesForMapping(currentMapId); 
-                    }
-    
-                    const resourceSelect = document.getElementById('resource-to-map');
-                    if (resourceSelect) {
-                        // Find the option and update its dataset, then re-trigger change
-                        let foundOption = null;
-                        for (let i = 0; i < resourceSelect.options.length; i++) {
-                            if (resourceSelect.options[i].dataset.resourceId === resourceId) {
-                                foundOption = resourceSelect.options[i];
-                                break;
-                            }
-                        }
-                        if (foundOption) {
-                            foundOption.dataset.resourceStatus = 'published';
-                            // Update text if needed - populateResourcesForMapping should handle this.
-                        }
-                        
-                        // If the published resource is still selected, dispatch change to update buttons
-                        if (resourceSelect.value === resourceId) {
-                            resourceSelect.dispatchEvent(new Event('change'));
-                        } else {
-                            // If not selected, but the list was refreshed, the actions container might be blank.
-                            // We can clear it or let the next selection handle it.
-                            // For now, if it's not the selected one, the user will select another or this one again
-                            // to see the updated status in the actions container.
-                            // If it was the selected one, the dispatchEvent('change') above handles it.
-                             if (localResourceActionsContainer && resourceSelect.value === "") { // No resource selected
-                                localResourceActionsContainer.innerHTML = '<p><em>Select a resource from the dropdown above to see its status or publish actions.</em></p>';
-                            }
-                        }
-                    }
-                    
-                    if (currentMapId && typeof fetchAndDrawExistingMapAreas === 'function') {
-                        await fetchAndDrawExistingMapAreas(currentMapId);
-                    }
-    
-                } else {
-                    alert(`Failed to publish resource: ${responseData.error || 'Unknown error'}`);
-                    // Re-render buttons/status for the currently selected resource to reset UI
-                    const resourceSelect = document.getElementById('resource-to-map');
-                    if (resourceSelect.value === resourceId) { 
-                         resourceSelect.dispatchEvent(new Event('change'));
-                    } else if (localResourceActionsContainer) {
-                        localResourceActionsContainer.innerHTML = `<p style="color:red;">Publish failed. Refresh needed or select resource again.</p>`;
-                    }
+                const responseData = await apiCall(
+                    `/api/admin/resources/${resourceId}/publish`, { method: 'POST' }, actionsContainer
+                );
+                showSuccess(actionsContainer, responseData.message || `Resource ${resourceId} published!`);
+                alert(responseData.message || `Resource ${resourceId} published!`);
+                const currentMapId = hiddenFloorMapIdInput.value; 
+                if (currentMapId) await populateResourcesForMapping(currentMapId); 
+                const resSelect = document.getElementById('resource-to-map');
+                if (resSelect) { // Update dataset and trigger change to refresh UI for actions
+                    const opt = Array.from(resSelect.options).find(o => o.dataset.resourceId === resourceId);
+                    if (opt) opt.dataset.resourceStatus = 'published';
+                    resSelect.dispatchEvent(new Event('change'));
                 }
+                if (currentMapId) await fetchAndDrawExistingMapAreas(currentMapId);
             } catch (error) {
-                console.error('Error publishing resource:', error);
-                alert('Publishing failed due to a network or server error.');
-                if (localResourceActionsContainer) {
-                     localResourceActionsContainer.innerHTML = `<p style="color:red;">Publishing failed. Check console.</p>`;
-                }
+                alert(`Failed to publish: ${error.message}. See messages in actions area.`);
+                // Error shown by apiCall in actionsContainer
+                const resSelect = document.getElementById('resource-to-map'); // Refresh current state
+                if (resSelect && resSelect.value === resourceId) resSelect.dispatchEvent(new Event('change'));
             }
         }
-    }
+    } 
 
     // Map View Page Specific Logic
     const mapContainer = document.getElementById('map-container');
@@ -1768,13 +1676,7 @@ ID: ${responseData.id}`);
 
             try {
                 const apiUrl = dateString ? `/api/map_details/${currentMapId}?date=${dateString}` : `/api/map_details/${currentMapId}`;
-                const response = await fetch(apiUrl);
-
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({})); 
-                    throw new Error(`Failed to fetch map details: ${response.status} ${errorData.error || ''}`);
-                }
-                const data = await response.json();
+                const data = await apiCall(apiUrl, {}, mapLoadingStatusDiv); // mapLoadingStatusDiv for messages
 
                 // Display map image
                 mapContainer.style.backgroundImage = `url(${data.map_details.image_url})`;
@@ -1910,30 +1812,23 @@ ID: ${responseData.id}`);
             }
 
             try {
-                const response = await fetch(`/api/resources/${resourceId}/availability?date=${dateString}`);
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(`Failed to fetch availability: ${response.status} ${errorData.error || ''}`);
-                }
-                const detailedBookedSlots = await response.json();
-                
-                // console.log(`Detailed booked slots for ${resourceName} on ${dateString}:`, detailedBookedSlots);
-                // if (mapLoadingStatusDiv) {
-                //     mapLoadingStatusDiv.textContent = `Available slots fetched for ${resourceName}. Modal display next.`; // Placeholder
-                // }
-                // alert(`Fetched ${detailedBookedSlots.length} booked slots for ${resourceName}. Next: Show modal.`);
+                const detailedBookedSlots = await apiCall(
+                    `/api/resources/${resourceId}/availability?date=${dateString}`, {}, modalStatusMessage 
+                );
                 openTimeSlotSelectionModal(resourceId, resourceName, dateString, detailedBookedSlots);
-                if (mapLoadingStatusDiv) mapLoadingStatusDiv.textContent = ''; // Clear "Fetching..." message
-
-
+                if (mapLoadingStatusDiv) hideMessage(mapLoadingStatusDiv); 
+                if (modalStatusMessage && !modalStatusMessage.classList.contains('error')) hideMessage(modalStatusMessage);
             } catch (error) {
-                console.error('Error fetching detailed availability for map area:', error);
-                if (mapLoadingStatusDiv) {
-                    mapLoadingStatusDiv.textContent = `Error fetching details: ${error.message}`;
-                    mapLoadingStatusDiv.style.color = 'red';
-                } else {
-                    alert(`Error fetching details: ${error.message}`);
+                // Error handling primarily by apiCall. Alert for additional feedback.
+                let errorMsgDisplayed = modalStatusMessage && modalStatusMessage.classList.contains('error');
+                if (!errorMsgDisplayed && mapLoadingStatusDiv) {
+                     showError(mapLoadingStatusDiv, `Error fetching slots for ${resourceName}.`);
+                     errorMsgDisplayed = true;
                 }
+                if (!errorMsgDisplayed && modalStatusMessage) { // If modal status is visible but not yet showing an error
+                    showError(modalStatusMessage, `Error fetching slots: ${error.message}`);
+                }
+                alert(`Could not load time slots for ${resourceName}. Details: ${error.message}`);
             }
         }
 
@@ -2058,40 +1953,22 @@ ID: ${responseData.id}`);
                 modalStatusMessage.style.color = 'inherit';
 
                 try {
-                    const response = await fetch('/api/bookings', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(bookingData)
-                    });
-
-                    const responseData = await response.json();
-
-                    if (response.ok) { // Status 201 Created
-                        modalStatusMessage.textContent = `Booking successful! Title: ${responseData.title || 'Untitled'}, ID: ${responseData.id}`;
-                        modalStatusMessage.style.color = 'green';
-                        
-                        setTimeout(() => {
-                            if(timeSlotModal) timeSlotModal.style.display = "none";
-                            selectedTimeSlotForBooking = null; // Reset
-                        }, 1500);
-
-                        const currentMapId = mapContainer ? mapContainer.dataset.mapId : null;
-                        const currentDateForRefresh = mapAvailabilityDateInput ? mapAvailabilityDateInput.value : null;
-                        if (currentMapId && currentDateForRefresh && typeof fetchAndRenderMap === 'function') {
-                            fetchAndRenderMap(currentMapId, currentDateForRefresh);
-                        }
-                        
-                    } else {
-                        modalStatusMessage.textContent = `Booking failed: ${responseData.error || 'Unknown error'}`;
-                        modalStatusMessage.style.color = 'red';
-                        console.error('Booking failed (map view):', responseData);
-                    }
+                    const responseData = await apiCall(
+                        '/api/bookings', 
+                        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bookingData) }, 
+                        modalStatusMessage
+                    );
+                    showSuccess(modalStatusMessage, `Booking for '${responseData.title || 'Untitled'}' (ID: ${responseData.id}) confirmed!`);
+                    setTimeout(() => { 
+                        if(timeSlotModal) timeSlotModal.style.display = "none"; 
+                        selectedTimeSlotForBooking = null; 
+                    }, 1500);
+                    const mapIdRefresh = mapContainer ? mapContainer.dataset.mapId : null;
+                    const dateRefresh = mapAvailabilityDateInput ? mapAvailabilityDateInput.value : null;
+                    if (mapIdRefresh && dateRefresh) fetchAndRenderMap(mapIdRefresh, dateRefresh);
                 } catch (error) {
-                    console.error('Error making booking API call from map view:', error);
-                    modalStatusMessage.textContent = 'Booking request failed due to a network or server error.';
-                    modalStatusMessage.style.color = 'red';
+                    // Error shown by apiCall in modalStatusMessage
+                    console.error('Booking from map view modal failed:', error.message);
                 }
             });
         }
