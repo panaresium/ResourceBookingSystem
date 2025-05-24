@@ -7,6 +7,7 @@ import json # For serializing coordinates
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash # For User model and init_db
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from authlib.integrations.flask_client import OAuth # Added for Google Sign-In
 
 from google_auth_oauthlib.flow import Flow
 from google.oauth2 import id_token
@@ -26,6 +27,11 @@ if not os.path.exists(DATA_DIR):
 app = Flask(__name__, template_folder='templates', static_folder='static')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['SECRET_KEY'] = 'dev_secret_key_123!@#' # CHANGE THIS in production!
+
+# Google OAuth Configuration - Recommended to use environment variables
+app.config['GOOGLE_CLIENT_ID'] = os.environ.get('GOOGLE_CLIENT_ID', 'YOUR_GOOGLE_CLIENT_ID_PLACEHOLDER')
+app.config['GOOGLE_CLIENT_SECRET'] = os.environ.get('GOOGLE_CLIENT_SECRET', 'YOUR_GOOGLE_CLIENT_SECRET_PLACEHOLDER')
+app.config['GOOGLE_DISCOVERY_URL'] = "https://accounts.google.com/.well-known/openid-configuration"
 
 # Ensure upload folder exists
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
@@ -63,6 +69,18 @@ def get_google_flow():
     )
 
 db = SQLAlchemy(app)
+
+# Authlib OAuth 2.0 Client Setup
+oauth = OAuth(app)
+oauth.register(
+    name='google',
+    client_id=app.config['GOOGLE_CLIENT_ID'],
+    client_secret=app.config['GOOGLE_CLIENT_SECRET'],
+    server_metadata_url=app.config['GOOGLE_DISCOVERY_URL'],
+    client_kwargs={
+        'scope': 'openid email profile'
+    }
+)
 
 # Flask-Login setup
 login_manager = LoginManager()
@@ -271,7 +289,6 @@ def login_google_callback():
     except Exception as e:
         print(f"An error occurred during Google login callback: {e}")
         # flash("An unexpected error occurred during Google login. Please try again.", "danger")
-        return redirect(url_for('serve_login'))
 
 # Function to initialize the database
 def init_db():

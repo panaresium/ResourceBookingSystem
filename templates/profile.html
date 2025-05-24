@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Profile - Smart Resource Booking</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .profile-container {
+            background-color: #fff;
+            padding: 20px;
+            margin: 20px auto;
+            width: 80%;
+            max-width: 600px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            border-radius: 8px;
+        }
+        .profile-container h2 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .profile-info p {
+            font-size: 1.1em;
+            line-height: 1.6;
+            color: #555;
+        }
+        .profile-info strong {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <ul>
+            <li id="welcome-message-container" style="display:none; margin-right: 10px;">
+                <!-- Welcome message will be populated by JS -->
+            </li>
+            <!-- User dropdown will be populated by JS if user is logged in -->
+            <li id="user-dropdown-container" style="display:none; position: relative;">
+                <button id="user-dropdown-button" aria-haspopup="true" aria-expanded="false">
+                    <!-- Username will be here -->
+                </button>
+                <ul id="user-dropdown-menu" class="dropdown-menu" aria-labelledby="user-dropdown-button" style="display:none; position: absolute; background-color: #f9f9f9; min-width: 160px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); z-index: 1; list-style-type: none; padding: 0; margin: 0;">
+                    <li><a href="{{ url_for('serve_profile_page') }}" style="display: block; padding: 12px 16px; text-decoration: none; color: black;">View Profile</a></li>
+                    <li><a href="#" id="logout-link-dropdown" style="display: block; padding: 12px 16px; text-decoration: none; color: black;">Logout</a></li>
+                </ul>
+            </li>
+            <li><a href="{{ url_for('serve_index') }}">Home</a></li>
+            <li><a href="{{ url_for('serve_new_booking') }}">New Booking</a></li>
+            <li><a href="{{ url_for('serve_resources') }}">View Resources</a></li>
+            <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">Admin Maps</a></li>
+            <li id="auth-link-container" style="display:none;"><!-- Login link if not logged in --></li> 
+        </ul>
+    </nav>
+    <main>
+        <div class="profile-container">
+            <h2>User Profile</h2>
+            <div class="profile-info">
+                <p><strong>Username:</strong> {{ username }}</p>
+                <p><strong>Email:</strong> {{ email }}</p>
+                <!-- More profile information can be added here in the future -->
+            </div>
+        </div>
+    </main>
+    <footer>
+        <p>&copy; 2024 Smart Resource Booking</p>
+    </footer>
+    <!-- Ensure this path is correct based on your project structure -->
+    <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
+</body>
+</html>
