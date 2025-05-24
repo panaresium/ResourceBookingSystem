@@ -106,6 +106,98 @@ async function handleLogout(event) {
     }
 }
 
+// --- Home Page: Display Available Resources Now ---
+async function displayAvailableResourcesNow() {
+    const availableResourcesListDiv = document.getElementById('available-resources-now-list');
+    if (!availableResourcesListDiv) {
+        return; // Not on the home page or div is missing
+    }
+
+    availableResourcesListDiv.innerHTML = '<p>Loading available resources...</p>';
+
+    try {
+        // Get current date and hour
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const currentDateYMD = `${year}-${month}-${day}`;
+        const currentHour = now.getHours(); // 0-23
+
+        // Fetch all published resources
+        const resourcesResponse = await fetch('/api/resources');
+        if (!resourcesResponse.ok) {
+            throw new Error(`Failed to fetch resources: ${resourcesResponse.status}`);
+        }
+        const resources = await resourcesResponse.json();
+
+        if (!resources || resources.length === 0) {
+            availableResourcesListDiv.innerHTML = '<p>No resources found.</p>';
+            return;
+        }
+
+        const availableNowResources = [];
+
+        for (const resource of resources) {
+            if (resource.status !== 'published') { // Should be redundant due to API default but good to double check
+                continue;
+            }
+            try {
+                const availabilityResponse = await fetch(`/api/resources/${resource.id}/availability?date=${currentDateYMD}`);
+                if (!availabilityResponse.ok) {
+                    console.error(`Failed to fetch availability for resource ${resource.id}: ${availabilityResponse.status}`);
+                    continue; // Skip this resource on error
+                }
+                const bookedSlots = await availabilityResponse.json();
+
+                let isBookedThisHour = false;
+                if (bookedSlots && bookedSlots.length > 0) {
+                    for (const booking of bookedSlots) {
+                        const startTimeHour = parseInt(booking.start_time.split(':')[0], 10);
+                        const endTimeHour = parseInt(booking.end_time.split(':')[0], 10);
+
+                        // Check if currentHour falls within the booking slot
+                        // Booking: 10:00 to 12:00. currentHour = 10 (booked), currentHour = 11 (booked)
+                        // Booking: 10:00 to 10:30. currentHour = 10 (booked)
+                        // A booking ends AT the hour, so if endTimeHour is 11, it's booked up to 10:59:59.
+                        // So currentHour must be LESS than endTimeHour.
+                        if (startTimeHour <= currentHour && currentHour < endTimeHour) {
+                            isBookedThisHour = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!isBookedThisHour) {
+                    availableNowResources.push(resource.name);
+                }
+            } catch (availError) {
+                console.error(`Error processing availability for resource ${resource.id}:`, availError);
+                // Continue to the next resource
+            }
+        }
+
+        if (availableNowResources.length === 0) {
+            availableResourcesListDiv.innerHTML = '<p>No resources currently available.</p>';
+        } else {
+            const ul = document.createElement('ul');
+            availableNowResources.forEach(name => {
+                const li = document.createElement('li');
+                li.textContent = name;
+                ul.appendChild(li);
+            });
+            availableResourcesListDiv.innerHTML = ''; // Clear loading message
+            availableResourcesListDiv.appendChild(ul);
+        }
+
+    } catch (error) {
+        console.error('Error in displayAvailableResourcesNow:', error);
+        availableResourcesListDiv.innerHTML = '<p>Error fetching available resources. Please try refreshing.</p>';
+        availableResourcesListDiv.classList.add('error'); // Optional: for styling
+    }
+}
+
+
 document.addEventListener('DOMContentLoaded', function() {
     // Set login URL on body for dynamic link creation
     if (document.getElementById('login-form')) { 
@@ -166,8 +258,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (this.checked) {
                     switch (this.value) {
                         case 'morning':
-                            if (startTimeInput) startTimeInput.value = '09:00';
-                            if (endTimeInput) endTimeInput.value = '13:00';
+                            if (startTimeInput) startTimeInput.value = '08:00';
+                            if (endTimeInput) endTimeInput.value = '12:00';
                             if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'none';
                             break;
                         case 'afternoon':
@@ -176,7 +268,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'none';
                             break;
                         case 'full_day':
-                            if (startTimeInput) startTimeInput.value = '09:00';
+                            if (startTimeInput) startTimeInput.value = '08:00';
                             if (endTimeInput) endTimeInput.value = '17:00';
                             if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'none';
                             break;
@@ -1654,7 +1746,7 @@ ID: ${responseData.id}`);
                                     availabilityClass = 'resource-area-available';
                                 } else {
                                     let totalBookedMinutes = 0;
-                                    const workDayStartHour = 9;
+                                    const workDayStartHour = 8; // Changed from 9 to 8
                                     const workDayEndHour = 17; // 5 PM
 
                                     bookings.forEach(booking => {
@@ -1805,8 +1897,8 @@ ID: ${responseData.id}`);
             }
 
 
-            // Define working hours (e.g., 9 AM to 5 PM) and slot duration (e.g., 1 hour)
-            const workDayStartHour = 9;
+            // Define working hours (e.g., 8 AM to 5 PM) and slot duration (e.g., 1 hour)
+            const workDayStartHour = 8; // Changed from 9 to 8
             const workDayEndHour = 17; // Ends at 17:00, so last slot is 16:00-17:00
             const slotDurationHours = 1;
 
@@ -1960,5 +2052,11 @@ ID: ${responseData.id}`);
                 fetchAndRenderMap(mapId, this.value);
             });
         }
+    }
+
+    // --- Home Page Specific Logic ---
+    const availableResourcesListDiv = document.getElementById('available-resources-now-list');
+    if (availableResourcesListDiv) {
+        displayAvailableResourcesNow();
     }
 });
