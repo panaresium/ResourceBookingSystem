@@ -119,10 +119,107 @@ document.addEventListener('DOMContentLoaded', function() {
     const bookingForm = document.getElementById('booking-form');
     const bookingResultsDiv = document.getElementById('booking-results');
     const loginForm = document.getElementById('login-form');
-    const loginMessageDiv = document.getElementById('login-message');
 
+    // --- New Booking Page Specific Logic ---
     if (bookingForm) {
-        bookingForm.addEventListener('submit', function(event) {
+        const resourceSelectBooking = document.getElementById('resource-select-booking');
+
+        // Populate Resource Selector for New Booking Page
+        if (resourceSelectBooking) {
+            fetch('/api/resources')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    resourceSelectBooking.innerHTML = '<option value="">-- Select a Resource --</option>'; // Clear and add default
+                    if (data.length === 0) {
+                        const option = new Option('No resources available', '');
+                        option.disabled = true;
+                        resourceSelectBooking.add(option);
+                        return;
+                    }
+                    data.forEach(resource => {
+                        // Only add published resources that are bookable by someone (generic check, API will enforce specific user)
+                        if (resource.status === 'published') {
+                             const option = new Option(`${resource.name} (Capacity: ${resource.capacity || 'N/A'})`, resource.id);
+                             resourceSelectBooking.add(option);
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching resources for new booking form:', error);
+                    resourceSelectBooking.innerHTML = '<option value="">Error loading resources</option>';
+                });
+        }
+
+        // Handle Predefined Time Slot Options
+        const quickTimeOptions = document.querySelectorAll('input[name="quick_time_option"]');
+        const manualTimeInputsDiv = document.getElementById('manual-time-inputs');
+        const startTimeInput = document.getElementById('start-time');
+        const endTimeInput = document.getElementById('end-time');
+
+        quickTimeOptions.forEach(radio => {
+            radio.addEventListener('change', function() {
+                if (this.checked) {
+                    switch (this.value) {
+                        case 'morning':
+                            if (startTimeInput) startTimeInput.value = '09:00';
+                            if (endTimeInput) endTimeInput.value = '13:00';
+                            if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'none';
+                            break;
+                        case 'afternoon':
+                            if (startTimeInput) startTimeInput.value = '13:00';
+                            if (endTimeInput) endTimeInput.value = '17:00';
+                            if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'none';
+                            break;
+                        case 'full_day':
+                            if (startTimeInput) startTimeInput.value = '09:00';
+                            if (endTimeInput) endTimeInput.value = '17:00';
+                            if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'none';
+                            break;
+                        case 'manual':
+                            // Optionally clear times or leave them for user to edit
+                            // if (startTimeInput) startTimeInput.value = '';
+                            // if (endTimeInput) endTimeInput.value = '';
+                            if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'block'; // Or 'flex' or '' depending on original
+                            break;
+                    }
+                }
+            });
+        });
+
+        // Initial state for manual time (ensure it's visible if manual is checked by default)
+        const manualRadio = document.querySelector('input[name="quick_time_option"][value="manual"]');
+        if (manualRadio && manualRadio.checked && manualTimeInputsDiv) {
+            manualTimeInputsDiv.style.display = 'block'; // Or 'flex' or ''
+        } else if (manualTimeInputsDiv && (!manualRadio || !manualRadio.checked)) {
+            // If manual is not checked by default, and another option is, hide manual inputs
+            // This case should be covered by the radio button's 'checked' attribute in HTML triggering the change listener.
+            // However, as a fallback:
+            const anyCheckedRadio = document.querySelector('input[name="quick_time_option"]:checked');
+            if (anyCheckedRadio && anyCheckedRadio.value !== 'manual' && manualTimeInputsDiv) {
+                 manualTimeInputsDiv.style.display = 'none';
+            }
+        }
+    } // This closes the outer if(bookingForm)
+
+    // The rest of the file continues from here...
+    // const loginMessageDiv = document.getElementById('login-message'); // This was duplicated, remove one
+
+    // Re-locating the bookingForm submit listener logic to be AFTER the time slot logic,
+    // but still within the main DOMContentLoaded.
+    // The original placement of the bookingForm event listener was outside the if(bookingForm) block
+    // which is fine, but for clarity, I will ensure all bookingForm related setup is grouped.
+    // The code below will be adjusted in the next step.
+
+    // This is the original location of the loginMessageDiv, keep it here.
+    const loginMessageDiv = document.getElementById('login-message'); 
+
+    if (bookingForm) { // This is the original bookingForm event listener block, now with updated logic
+        bookingForm.addEventListener('submit', async function(event) {
             event.preventDefault(); // Prevent default form submission
 
             if (bookingResultsDiv) {
@@ -131,24 +228,38 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             // Check if user is logged in
-            if (!sessionStorage.getItem('loggedInUser')) {
+            const loggedInUsername = sessionStorage.getItem('loggedInUserUsername');
+            if (!loggedInUsername) {
                 if (bookingResultsDiv) {
-                    bookingResultsDiv.innerHTML = '<p>Please <a href="/login">login</a> to book a resource.</p>'; // Updated path
+                    bookingResultsDiv.innerHTML = `<p>Please <a href="${document.body.dataset.loginUrl || '/login'}">login</a> to book a resource.</p>`;
                     bookingResultsDiv.classList.add('error');
                 }
                 return; // Stop further processing
             }
 
             // Get form values
+            const resourceSelectBooking = document.getElementById('resource-select-booking');
             const dateInput = document.getElementById('booking-date');
-            const startTimeInput = document.getElementById('start-time');
-            const endTimeInput = document.getElementById('end-time');
+            const startTimeInput = document.getElementById('start-time'); // Already defined above for time slots
+            const endTimeInput = document.getElementById('end-time');     // Already defined above for time slots
+            // const bookingTitleInput = document.getElementById('booking-title'); // Assuming this ID if a title field is added
 
+            const resourceId = resourceSelectBooking ? resourceSelectBooking.value : '';
             const dateValue = dateInput ? dateInput.value : '';
             const startTimeValue = startTimeInput ? startTimeInput.value : '';
             const endTimeValue = endTimeInput ? endTimeInput.value : '';
+            // const titleValue = bookingTitleInput ? bookingTitleInput.value.trim() : 'User Booking'; // Use a default or get from input
+            const titleValue = `Booking for ${resourceSelectBooking.options[resourceSelectBooking.selectedIndex].text.split(' (Capacity:')[0]}`;
+
 
             // Basic Validation
+            if (!resourceId) {
+                if (bookingResultsDiv) {
+                    bookingResultsDiv.innerHTML = '<p>Please select a resource.</p>';
+                    bookingResultsDiv.classList.add('error');
+                }
+                return;
+            }
             if (!dateValue || !startTimeValue || !endTimeValue) {
                 if (bookingResultsDiv) {
                     bookingResultsDiv.innerHTML = '<p>Please fill in date, start time, and end time.</p>';
@@ -156,21 +267,66 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 return; // Stop further processing
             }
+            
+            // Construct booking data
+            const bookingData = {
+                resource_id: parseInt(resourceId, 10),
+                date_str: dateValue,
+                start_time_str: startTimeValue,
+                end_time_str: endTimeValue,
+                title: titleValue, 
+                user_name: loggedInUsername 
+            };
 
-            // If validation passes, display searching message
             if (bookingResultsDiv) {
-                bookingResultsDiv.innerHTML = '<p>Searching for availability...</p>';
-                bookingResultsDiv.classList.add('success');
+                bookingResultsDiv.innerHTML = '<p>Submitting booking...</p>';
+                bookingResultsDiv.classList.remove('error', 'success'); // Clear previous styling
+            }
 
-                setTimeout(function() {
-                    bookingResultsDiv.innerHTML = `
-                        <p><strong>Booking Confirmed (Mock)!</strong><br>
-                        Room: Conference Room A<br>
-                        Date: ${dateValue || '[Selected Date]'}<br>
-                        Time: ${startTimeValue || '[Selected Start Time]'} - ${endTimeValue || '[Selected End Time]'}</p>
-                    `;
-                    bookingResultsDiv.className = 'success';
-                }, 1000);
+            try {
+                const response = await fetch('/api/bookings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(bookingData)
+                });
+
+                const responseData = await response.json();
+
+                if (response.ok) { // Typically 201 Created
+                    if (bookingResultsDiv) {
+                        bookingResultsDiv.innerHTML = `
+                            <p><strong>Booking Confirmed!</strong><br>
+                            Resource: ${resourceSelectBooking.options[resourceSelectBooking.selectedIndex].text.split(' (Capacity:')[0]}<br>
+                            Date: ${responseData.start_time.split(' ')[0]}<br>
+                            Time: ${responseData.start_time.split(' ')[1].substring(0,5)} - ${responseData.end_time.split(' ')[1].substring(0,5)}<br>
+                            Title: ${responseData.title || 'N/A'}<br>
+                            Booking ID: ${responseData.id}</p>
+                        `;
+                        bookingResultsDiv.className = 'success';
+                        bookingForm.reset(); // Reset form fields
+                        // Manually trigger change on radio to reset time inputs display if needed
+                        const manualRadio = document.querySelector('input[name="quick_time_option"][value="manual"]');
+                        if(manualRadio) {
+                            manualRadio.checked = true;
+                            manualRadio.dispatchEvent(new Event('change'));
+                        }
+
+                    }
+                } else {
+                    if (bookingResultsDiv) {
+                        bookingResultsDiv.innerHTML = `<p>Booking failed: ${responseData.error || 'Unknown error. Please try again.'}</p>`;
+                        bookingResultsDiv.className = 'error';
+                    }
+                    console.error('Booking failed:', responseData);
+                }
+            } catch (error) {
+                console.error('Error making booking API call:', error);
+                if (bookingResultsDiv) {
+                    bookingResultsDiv.innerHTML = '<p>Booking request failed due to a network or server error. Please try again.</p>';
+                    bookingResultsDiv.className = 'error';
+                }
             }
         });
     }

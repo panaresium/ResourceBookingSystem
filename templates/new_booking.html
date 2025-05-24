@@ -21,18 +21,47 @@
         <h1>Create New Booking</h1>
         <form id="booking-form">
             <div>
+                <label for="resource-select-booking">Resource:</label>
+                <select id="resource-select-booking" name="resource_id">
+                    <option value="">Loading resources...</option>
+                </select>
+            </div>
+            <div>
                 <label for="booking-date">Date:</label>
                 <input type="date" id="booking-date" name="booking_date">
             </div>
 
             <div>
-                <label for="start-time">Start Time:</label>
-                <input type="time" id="start-time" name="start_time">
+                <fieldset>
+                    <legend>Quick Time Options</legend>
+                    <div>
+                        <input type="radio" id="time-option-morning" name="quick_time_option" value="morning">
+                        <label for="time-option-morning">Morning (9 AM - 1 PM)</label>
+                    </div>
+                    <div>
+                        <input type="radio" id="time-option-afternoon" name="quick_time_option" value="afternoon">
+                        <label for="time-option-afternoon">Afternoon (1 PM - 5 PM)</label>
+                    </div>
+                    <div>
+                        <input type="radio" id="time-option-full-day" name="quick_time_option" value="full_day">
+                        <label for="time-option-full-day">Full Day (9 AM - 5 PM)</label>
+                    </div>
+                    <div>
+                        <input type="radio" id="time-option-manual" name="quick_time_option" value="manual" checked>
+                        <label for="time-option-manual">Manual Time</label>
+                    </div>
+                </fieldset>
             </div>
 
-            <div>
-                <label for="end-time">End Time:</label>
-                <input type="time" id="end-time" name="end_time">
+            <div id="manual-time-inputs">
+                <div>
+                    <label for="start-time">Start Time:</label>
+                    <input type="time" id="start-time" name="start_time">
+                </div>
+                <div>
+                    <label for="end-time">End Time:</label>
+                    <input type="time" id="end-time" name="end_time">
+                </div>
             </div>
 
             <div>
