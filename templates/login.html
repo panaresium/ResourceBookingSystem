@@ -29,6 +29,13 @@
             </div>
             <button type="submit">Login</button>
         </form>
+        <div style="margin-top: 20px; text-align: center;">
+            <p>Or</p>
+            <button type="button" id="google-signin-btn" class="button" style="background-color: #DB4437; color: white;" onclick="window.location.href='{{ url_for('login_google') }}'">
+                <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google logo" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 8px;">
+                Sign in with Google
+            </button>
+        </div>
         <div id="login-message" aria-live="polite"></div>
     </main>
     <footer>
