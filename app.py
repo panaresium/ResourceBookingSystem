@@ -7,6 +7,7 @@ import json # For serializing coordinates
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash # For User model and init_db
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from authlib.integrations.flask_client import OAuth # Added for Google Sign-In
 
 # Base directory of the app - project root
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -22,6 +23,11 @@ app = Flask(__name__, template_folder='templates', static_folder='static')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['SECRET_KEY'] = 'dev_secret_key_123!@#' # CHANGE THIS in production!
 
+# Google OAuth Configuration - Recommended to use environment variables
+app.config['GOOGLE_CLIENT_ID'] = os.environ.get('GOOGLE_CLIENT_ID', 'YOUR_GOOGLE_CLIENT_ID_PLACEHOLDER')
+app.config['GOOGLE_CLIENT_SECRET'] = os.environ.get('GOOGLE_CLIENT_SECRET', 'YOUR_GOOGLE_CLIENT_SECRET_PLACEHOLDER')
+app.config['GOOGLE_DISCOVERY_URL'] = "https://accounts.google.com/.well-known/openid-configuration"
+
 # Ensure upload folder exists
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
@@ -29,6 +35,18 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(DATA_DIR, 's
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # silence the warning
 
 db = SQLAlchemy(app)
+
+# Authlib OAuth 2.0 Client Setup
+oauth = OAuth(app)
+oauth.register(
+    name='google',
+    client_id=app.config['GOOGLE_CLIENT_ID'],
+    client_secret=app.config['GOOGLE_CLIENT_SECRET'],
+    server_metadata_url=app.config['GOOGLE_DISCOVERY_URL'],
+    client_kwargs={
+        'scope': 'openid email profile'
+    }
+)
 
 # Flask-Login setup
 login_manager = LoginManager()
@@ -137,6 +155,61 @@ def serve_profile_page():
     return render_template('profile.html', 
                            username=current_user.username, 
                            email=current_user.email)
+
+
+@app.route('/login/google')
+def login_google():
+    # Redirect to Google's OAuth consent screen
+    # The redirect_uri must match one of the URIs configured in Google API Console
+    redirect_uri = url_for('authorize_google', _external=True)
+    return oauth.google.authorize_redirect(redirect_uri)
+
+@app.route('/login/google/authorized') # This is the redirect URI
+def authorize_google():
+    try:
+        token = oauth.google.authorize_access_token()
+    except Exception as e:
+        # Log the error or flash a message
+        print(f"Error authorizing Google access token: {e}") # For debugging
+        # flash('Google login failed or was cancelled.', 'danger')
+        return redirect(url_for('serve_login'))
+
+    if not token:
+        # flash('Google login failed: No token received.', 'danger')
+        return redirect(url_for('serve_login'))
+
+    # Get user info from Google
+    userinfo_response = oauth.google.get('openid/userinfo') # Standard OpenID Connect endpoint
+    try:
+        userinfo_response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
+        userinfo = userinfo_response.json()
+    except Exception as e:
+        print(f"Error fetching userinfo from Google: {e}") # For debugging
+        # flash('Failed to fetch user information from Google.', 'danger')
+        return redirect(url_for('serve_login'))
+        
+    google_email = userinfo.get('email')
+
+    if not google_email:
+        # flash('Could not retrieve email from Google. Please ensure your Google account has a verified email.', 'danger')
+        return redirect(url_for('serve_login'))
+
+    # --- Admin Linking Logic ---
+    user = User.query.filter_by(email=google_email).first()
+
+    if user and user.is_admin:
+        login_user(user) # Log in the existing admin user
+        # flash(f'Successfully logged in as {user.username} via Google.', 'success')
+        # The updateAuthLink in JS will handle welcome message, so redirect is enough
+        return redirect(url_for('serve_index')) # Redirect to homepage or admin dashboard
+    else:
+        # flash('Google account not associated with an admin user, or user is not an admin.', 'warning')
+        # For debugging, you might want to print a more specific message server-side
+        if user and not user.is_admin:
+            print(f"User {google_email} found but is not an admin.")
+        else:
+            print(f"No user found with email {google_email}.")
+        return redirect(url_for('serve_login'))
 
 # Function to initialize the database
 def init_db():
