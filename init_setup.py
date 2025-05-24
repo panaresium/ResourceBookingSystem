@@ -3,6 +3,7 @@
 import sys
 import os
 import pathlib
+from app import app, init_db
 
 MIN_PYTHON_VERSION = (3, 7)
 DATA_DIR_NAME = "data"
@@ -71,7 +72,10 @@ def main():
     check_python_version()
     print("-" * 30)
     create_required_directories()
-    
+    print("-" * 30) 
+    print("Initializing database...")
+    init_db() 
+    print("Database initialization complete.")
     print("-" * 30)
     print("Project initialization script completed successfully.")
     print("Remember to activate your virtual environment if you haven't already.")
