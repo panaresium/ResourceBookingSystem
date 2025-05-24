@@ -34,8 +34,8 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(DATA_DIR, 's
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # silence the warning
 
 # Google OAuth Configuration - Placeholders
-app.config['GOOGLE_CLIENT_ID'] = 'YOUR_GOOGLE_CLIENT_ID_HERE'
-app.config['GOOGLE_CLIENT_SECRET'] = 'YOUR_GOOGLE_CLIENT_SECRET_HERE'
+app.config['GOOGLE_CLIENT_ID'] = '365817360521-ilj3v7uqhd0f7cu5lfr6mva9fmaepe15.apps.googleusercontent.com'
+app.config['GOOGLE_CLIENT_SECRET'] = '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'
 
 # OAuth 2.0 setup
 # Note: client_secret.json is not used directly by google-auth-oauthlib Flow if client_id and client_secret are set in config.
