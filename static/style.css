@@ -1,0 +1,250 @@
+body {
+    font-family: sans-serif;
+    margin: 0;
+    background-color: #f4f4f4;
+    color: #333;
+}
+
+nav {
+    background-color: #333;
+    color: white;
+    padding: 1em 0;
+    text-align: center;
+}
+
+nav ul {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+
+nav ul li {
+    display: inline;
+    margin-right: 20px;
+}
+
+nav ul li a {
+    color: white;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+nav ul li a:hover {
+    text-decoration: underline;
+}
+
+main {
+    width: 80%;
+    margin: 20px auto;
+    background-color: white;
+    padding: 20px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+h1, h2 {
+    color: #333;
+}
+
+button {
+    background-color: #333;
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+    margin: 4px 2px;
+    cursor: pointer;
+    border-radius: 5px;
+}
+
+button:hover {
+    background-color: #555;
+}
+
+footer {
+    text-align: center;
+    padding: 20px 0;
+    margin-top: 20px;
+    background-color: #333;
+    color: white;
+}
+
+#upcoming-bookings, #quick-actions {
+    margin-top: 20px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+}
+
+/* Calendar Styles */
+#calendar-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+#calendar-table th, #calendar-table td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: center;
+}
+
+#calendar-table th {
+    background-color: #f0f0f0;
+}
+
+.available {
+    background-color: #e6ffe6;
+    color: #006400;
+}
+
+.booked {
+    background-color: #ffe6e6;
+    color: #8b0000;
+    font-weight: bold;
+}
+
+/* Room Selector Styles */
+#room-select {
+    padding: 8px;
+    margin-bottom: 15px;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+}
+
+/* Booking Form Styles */
+#booking-form div {
+    margin-bottom: 15px;
+}
+
+#booking-form label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+#booking-form input[type="date"],
+#booking-form input[type="time"],
+#booking-form input[type="number"],
+#booking-form select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-sizing: border-box; /* Ensures padding doesn't affect overall width */
+}
+
+#booking-form fieldset {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    margin-bottom: 15px;
+}
+
+#booking-form legend {
+    font-weight: bold;
+    padding: 0 5px;
+}
+
+#booking-form fieldset div {
+    margin-bottom: 8px; /* Space between checkbox lines */
+}
+
+#booking-form input[type="checkbox"] {
+    margin-right: 5px;
+    vertical-align: middle;
+}
+
+#booking-form label[for^="equipment-"] { /* Targets labels for equipment checkboxes */
+    display: inline; /* Keep checkbox and label on the same line */
+    font-weight: normal;
+    margin-bottom: 0;
+}
+
+#booking-form button[type="submit"] {
+    width: 100%;
+    padding: 12px;
+    font-size: 18px;
+}
+
+/* Booking Results Styles */
+#booking-results {
+    margin-top: 20px;
+    padding: 10px;
+    border-radius: 4px;
+}
+
+#booking-results p {
+    margin: 0;
+}
+
+#booking-results ul {
+    list-style-type: disc;
+    margin-left: 20px;
+}
+
+.success {
+    color: #155724;
+    background-color: #d4edda;
+    border: 1px solid #c3e6cb;
+    padding: 10px;
+    border-radius: 4px; /* Ensure consistency */
+}
+
+.unavailable { /* For slots that are not bookable or outside working hours, if any */
+    background-color: #f0f0f0; /* Light grey */
+    color: #777;
+}
+
+.error-slot {
+    background-color: #cccccc; /* Darker grey for errors */
+    color: #555555;
+    font-style: italic;
+    font-weight: bold;
+}
+
+/* Login Form Styles */
+#login-form div {
+    margin-bottom: 15px;
+}
+
+#login-form label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+#login-form input[type="text"],
+#login-form input[type="password"] {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+#login-form button[type="submit"] {
+    width: 100%;
+    padding: 12px;
+    font-size: 18px;
+}
+
+#login-message {
+    margin-top: 15px;
+}
+
+/* Auth Link Styles in Nav */
+#auth-link-container span {
+    margin-right: 10px;
+    /* Add other styling as needed */
+}
+
+.error {
+    color: #721c24;
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    padding: 10px;
+    border-radius: 4px; /* Ensure consistency */
+}

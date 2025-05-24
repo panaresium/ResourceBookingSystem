@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Resource Booking - New Booking</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav>
+        <ul>
+            <li id="welcome-message-container" style="display:none; margin-right: 10px;"></li>
+            <li><a href="{{ url_for('serve_index') }}">Home</a></li>
+            <li><a href="{{ url_for('serve_new_booking') }}">New Booking</a></li>
+            <li><a href="{{ url_for('serve_resources') }}">View Resources</a></li>
+            <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">Admin Maps</a></li>
+            <li id="auth-link-container"><a href="{{ url_for('serve_login') }}">Login</a></li> 
+        </ul>
+    </nav>
+    <main>
+        <h1>Create New Booking</h1>
+        <form id="booking-form">
+            <div>
+                <label for="booking-date">Date:</label>
+                <input type="date" id="booking-date" name="booking_date">
+            </div>
+
+            <div>
+                <label for="start-time">Start Time:</label>
+                <input type="time" id="start-time" name="start_time">
+            </div>
+
+            <div>
+                <label for="end-time">End Time:</label>
+                <input type="time" id="end-time" name="end_time">
+            </div>
+
+            <div>
+                <label for="attendees">Number of Attendees:</label>
+                <input type="number" id="attendees" name="attendees" min="1" value="1">
+            </div>
+
+            <fieldset>
+                <legend>Required Equipment</legend>
+                <div>
+                    <input type="checkbox" id="equipment-projector" name="equipment" value="projector">
+                    <label for="equipment-projector">Projector</label>
+                </div>
+                <div>
+                    <input type="checkbox" id="equipment-teleconference" name="equipment" value="teleconference">
+                    <label for="equipment-teleconference">Teleconference</label>
+                </div>
+                <div>
+                    <input type="checkbox" id="equipment-whiteboard" name="equipment" value="whiteboard">
+                    <label for="equipment-whiteboard">Whiteboard</label>
+                </div>
+            </fieldset>
+
+            <div>
+                <label for="room-preference">Room Preference (Optional):</label>
+                <select id="room-preference" name="room_preference">
+                    <option value="">Any Available</option>
+                    <option value="room1">Conference Room A</option>
+                    <option value="room2">Meeting Room B</option>
+                    <option value="room3">Focus Room C</option>
+                </select>
+            </div>
+
+            <button type="submit">Find Availability</button>
+        </form>
+        <div id="booking-results" aria-live="polite"></div>
+    </main>
+    <footer>
+        <p>&copy; 2023 Smart Resource Booking</p>
+    </footer>
+    <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
+</body>
+</html>

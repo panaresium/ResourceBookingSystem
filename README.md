@@ -1,1 +1,87 @@
 # GeminiTest
+# Smart Resource Booking System
+
+This project is a web application designed to help manage and book resources such as meeting rooms and equipment efficiently. It aims to provide a centralized view of resource availability and streamline the booking process. This initial version focuses on the front-end user interface.
+
+## Getting Started
+
+These instructions will get you a copy of the project up and running on your local machine for development and testing purposes.
+
+### Prerequisites
+
+*   Python 3.7 or higher. You can download Python from [python.org](https://www.python.org/downloads/).
+
+### Setting up a Virtual Environment
+
+It is highly recommended to use a virtual environment to manage project dependencies and isolate this project from your global Python installation.
+
+1.  **Open your terminal or command prompt.**
+2.  **Navigate to the project's root directory** (where this `README.md` file is located).
+3.  **Create a virtual environment:**
+    ```bash
+    python3 -m venv venv
+    ```
+    (If `python3` doesn't work, try `python`)
+
+4.  **Activate the virtual environment:**
+    *   **On macOS and Linux:**
+        ```bash
+        source venv/bin/activate
+        ```
+    *   **On Windows:**
+        ```bash
+        .\venv\Scripts\activate
+        ```
+    Your terminal prompt should change to indicate that the virtual environment is active (e.g., `(venv) ...`).
+
+### Running the Initialization Script
+
+After activating your virtual environment, run the initialization script:
+
+```bash
+python init_setup.py
+```
+
+This script checks your Python version and creates a `data/` directory for potentially storing application data in the future. It's recommended to run this once after cloning the repository and setting up your virtual environment.
+
+### Installing Dependencies
+
+Install the necessary Python packages by running:
+```bash
+pip install -r requirements.txt
+```
+(This assumes the virtual environment is already activated as per previous instructions).
+
+### Running the Application
+
+To run the application:
+1.  Ensure your virtual environment is activated.
+2.  Make sure all dependencies are installed by running `pip install -r requirements.txt`.
+3.  Run the Flask development server:
+    ```bash
+    flask run
+    ```
+    Or, if you prefer (and if `app.py` includes `app.run()`):
+    ```bash
+    python app.py
+    ```
+4.  Open your web browser and navigate to `http://127.0.0.1:5000/`.
+    You should see the application's home page.
+
+### Initializing the Database
+
+The application uses an SQLite database to store resource information. If you haven't already, initialize the database and create the necessary tables (this also adds sample resources):
+1. Ensure your virtual environment is activated and dependencies are installed (`pip install -r requirements.txt`).
+2. Open a Python interactive shell in your project root:
+   ```bash
+   flask shell
+   ```
+   (Alternatively, you can use `python` and then `from app import app, db, init_db` if you are using the plain python interpreter)
+3. In the Flask shell, import the `init_db` function and run it:
+   ```python
+   >>> from app import init_db
+   >>> init_db() # This will also add sample resources
+   ```
+   This will create a `site.db` file in the `data/` directory and set up the tables.
+   You should see messages indicating success.
+   **Important:** You only need to run `init_db()` once. Running it again will not harm anything by default with `db.create_all()`, but it's not necessary.

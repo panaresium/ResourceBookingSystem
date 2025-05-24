@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Resource Booking - Resource Availability</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav>
+        <ul>
+            <li><a href="{{ url_for('serve_index') }}">Home</a></li>
+            <li><a href="{{ url_for('serve_new_booking') }}">New Booking</a></li>
+            <li><a href="{{ url_for('serve_resources') }}">View Resources</a></li>
+            <li id="auth-link-container"><a href="{{ url_for('serve_login') }}">Login</a></li>
+            <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">Admin Maps</a></li>
+        </ul>
+    </nav>
+    <main>
+        <h1>Resource Availability</h1>
+        <div>
+            <label for="availability-date">Select Date:</label>
+            <input type="date" id="availability-date" name="availability-date">
+        </div>
+        <div>
+            <label for="room-select">Select Room:</label>
+            <select id="room-select" name="room">
+                <!-- Options will be populated by JavaScript -->
+                <option value="">Loading rooms...</option>
+            </select>
+        </div>
+        <table id="calendar-table">
+            <thead>
+                <tr>
+                    <th>Time Slot</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>09:00 - 10:00</td>
+                    <td data-time-slot="09:00-10:00">Available</td>
+                </tr>
+                <tr>
+                    <td>10:00 - 11:00</td>
+                    <td data-time-slot="10:00-11:00">Available</td>
+                </tr>
+                <tr>
+                    <td>11:00 - 12:00</td>
+                    <td data-time-slot="11:00-12:00">Available</td>
+                </tr>
+                <tr>
+                    <td>12:00 - 13:00</td>
+                    <td data-time-slot="12:00-13:00">Available</td>
+                </tr>
+                <tr>
+                    <td>13:00 - 14:00</td>
+                    <td data-time-slot="13:00-14:00">Available</td>
+                </tr>
+                <tr>
+                    <td>14:00 - 15:00</td>
+                    <td data-time-slot="14:00-15:00">Available</td>
+                </tr>
+                <tr>
+                    <td>15:00 - 16:00</td>
+                    <td data-time-slot="15:00-16:00">Available</td>
+                </tr>
+                <tr>
+                    <td>16:00 - 17:00</td>
+                    <td data-time-slot="16:00-17:00">Available</td>
+                </tr>
+                <tr>
+                    <td>17:00 - 18:00</td>
+                    <td data-time-slot="17:00-18:00">Available</td>
+                </tr>
+            </tbody>
+        </table>
+        <hr> <!-- Optional separator -->
+        <section id="floor-maps-selection-section">
+            <h2>View by Floor Map</h2>
+            <ul id="floor-maps-list">
+                <!-- Map links will be populated here by JavaScript -->
+                <li>Loading floor maps...</li>
+            </ul>
+        </section>
+    </main>
+    <footer>
+        <p>&copy; 2023 Smart Resource Booking</p>
+    </footer>
+</body>
+</html>

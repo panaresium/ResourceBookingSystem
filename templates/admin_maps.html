@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Floor Maps - Smart Resource Booking</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header>
+        <nav>
+            <ul>
+                <li><a href="{{ url_for('serve_index') }}">Home</a></li>
+                <li><a href="{{ url_for('serve_new_booking') }}">New Booking</a></li>
+                <li><a href="{{ url_for('serve_resources') }}">View Resources</a></li>
+                <!-- Link to this admin page itself, or a parent admin dashboard if one existed -->
+                <li id="auth-link-container"><a href="{{ url_for('serve_login') }}">Login</a></li> 
+                <!-- Active Admin Link -->
+                <li><a href="{{ url_for('serve_admin_maps') }}">Admin Maps</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        <h1>Floor Map Management</h1>
+
+        <section id="upload-map-section">
+            <h2>Upload New Floor Map</h2>
+            <form id="upload-map-form">
+                <div>
+                    <label for="map-name">Map Name:</label>
+                    <input type="text" id="map-name" name="map_name" required>
+                </div>
+                <div>
+                    <label for="map-image">Map Image File:</label>
+                    <input type="file" id="map-image" name="map_image" accept="image/png, image/jpeg" required>
+                </div>
+                <button type="submit">Upload Map</button>
+            </form>
+            <div id="upload-status"></div>
+        </section>
+
+        <hr>
+
+        <section id="list-maps-section">
+            <h2>Existing Floor Maps</h2>
+            <ul id="maps-list">
+                <!-- Maps will be listed here by JavaScript -->
+                <li>Loading maps...</li>
+            </ul>
+        </section>
+
+        <hr>
+
+        <section id="define-areas-section" style="display:none;"> <!-- Hidden initially -->
+            <h2>Define Areas on Selected Map</h2>
+            <h3 id="selected-map-name"></h3>
+            <div id="map-image-wrapper" style="position: relative; width: fit-content; height: fit-content; border: 1px solid #ccc; margin-bottom: 10px;">
+                <img id="selected-map-image" src="#" alt="Selected Map" style="display: block; max-width: 800px; max-height: 600px;">
+                <canvas id="drawing-canvas" style="position: absolute; top: 0; left: 0;"></canvas>
+            </div>
+            <form id="define-area-form">
+                <h3>Assign Area to Resource</h3>
+                <div>
+                    <label for="resource-to-map">Select Resource:</label>
+                    <select id="resource-to-map" name="resource_id" required>
+                        <!-- Resources will be populated here by JavaScript -->
+                    </select>
+                </div>
+                <div>
+                    <label for="booking-permission">Booking Permission:</label>
+                    <select id="booking-permission" name="booking_restriction">
+                        <option value="">Default (Requires Login, No Admin Restriction)</option>
+                        <option value="admin_only">Admin Only</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label>Authorized Specific Users (Optional):</label>
+                    <div id="authorized-users-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;">
+                        <!-- User checkboxes will be populated here by JavaScript -->
+                        <small>Loading users...</small>
+                    </div>
+                </div>
+
+                <div>
+                    <label for="authorized-roles">Authorized Roles (Optional, comma-separated):</label>
+                    <input type="text" id="authorized-roles" name="authorized_roles" placeholder="e.g., admin,standard_user">
+                </div>
+
+                <div>
+                    <label>Coordinates Type: Rectangle (fixed for now)</label>
+                    <input type="hidden" id="coordinates-type" name="coordinates_type" value="rect">
+                </div>
+                <div>
+                    <label for="coord-x">X:</label>
+                    <input type="number" id="coord-x" name="x" required>
+                </div>
+                <div>
+                    <label for="coord-y">Y:</label>
+                    <input type="number" id="coord-y" name="y" required>
+                </div>
+                <div>
+                    <label for="coord-width">Width:</label>
+                    <input type="number" id="coord-width" name="width" required>
+                </div>
+                <div>
+                    <label for="coord-height">Height:</label>
+                    <input type="number" id="coord-height" name="height" required>
+                </div>
+                <input type="hidden" id="selected-floor-map-id" name="floor_map_id">
+                <button type="submit">Save Area for Resource</button>
+            </form>
+            <div id="area-definition-status"></div>
+            
+            <div id="edit-delete-buttons" style="margin-top: 10px; display:none;">
+                <button id="edit-selected-area-btn" class="button">Edit Selected Area</button>
+                <button id="delete-selected-area-btn" class="button" style="background-color: #dc3545; color:white;">Delete Selected Area Mapping</button>
+            </div>
+
+            <div id="resource-actions-container" style="margin-top: 15px; padding: 10px; border: 1px dashed #ccc;">
+                <!-- Publish button or status text will appear here based on selected resource -->
+                <p><em>Select a resource from the dropdown above to see its status or publish actions.</em></p>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2023 Smart Resource Booking</p>
+    </footer>
+    
+    <!-- Link to global script.js, or a new admin_maps.js if preferred -->
+    <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
+    <!-- If creating admin_maps.js, link it here instead or in addition -->
+</body>
+</html>

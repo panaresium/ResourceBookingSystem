@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Smart Resource Booking</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav>
+        <ul>
+            <li><a href="{{ url_for('serve_index') }}">Home</a></li>
+            <li><a href="{{ url_for('serve_new_booking') }}">New Booking</a></li>
+            <li><a href="{{ url_for('serve_resources') }}">View Resources</a></li>
+            <li id="auth-link-container"><a href="{{ url_for('serve_login') }}">Login</a></li>
+            <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">Admin Maps</a></li>
+        </ul>
+    </nav>
+    <main>
+        <h2>Login</h2>
+        <form id="login-form">
+            <div>
+                <label for="username">Username:</label>
+                <input type="text" id="username" name="username">
+            </div>
+            <div>
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password">
+            </div>
+            <button type="submit">Login</button>
+        </form>
+        <div id="login-message" aria-live="polite"></div>
+    </main>
+    <footer>
+        <p>&copy; 2023 Smart Resource Booking</p>
+    </footer>
+    <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
+</body>
+</html>

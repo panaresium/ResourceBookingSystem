@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Resource Booking - Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav>
+        <ul>
+            <li id="welcome-message-container" style="display:none; margin-right: 10px;"></li>
+            <li><a href="{{ url_for('serve_index') }}">Home</a></li>
+            <li><a href="{{ url_for('serve_new_booking') }}">New Booking</a></li>
+            <li><a href="{{ url_for('serve_resources') }}">View Resources</a></li>
+            <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">Admin Maps</a></li>
+            <li id="auth-link-container"><a href="{{ url_for('serve_login') }}">Login</a></li> 
+        </ul>
+    </nav>
+    <main>
+        <h1>Welcome to Smart Resource Booking</h1>
+        <p>Your smart solution for managing and booking resources efficiently.</p>
+        <section id="upcoming-bookings">
+            <h2>Your Upcoming Bookings</h2>
+            <!-- Placeholder for upcoming bookings list -->
+            <p>No upcoming bookings.</p>
+        </section>
+        <section id="quick-actions">
+            <h2>Quick Actions</h2>
+            <!-- Placeholder for quick actions -->
+            <button>Book a Room</button>
+        </section>
+    </main>
+    <footer>
+        <p>&copy; 2023 Smart Resource Booking</p>
+    </footer>
+</body>
+</html>
