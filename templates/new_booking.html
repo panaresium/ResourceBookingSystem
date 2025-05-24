@@ -36,15 +36,15 @@
                     <legend>Quick Time Options</legend>
                     <div>
                         <input type="radio" id="time-option-morning" name="quick_time_option" value="morning">
-                        <label for="time-option-morning">Morning (9 AM - 1 PM)</label>
+                        <label for="time-option-morning">Morning (8-12 AM)</label>
                     </div>
                     <div>
                         <input type="radio" id="time-option-afternoon" name="quick_time_option" value="afternoon">
-                        <label for="time-option-afternoon">Afternoon (1 PM - 5 PM)</label>
+                        <label for="time-option-afternoon">Afternoon (1-5 PM)</label>
                     </div>
                     <div>
                         <input type="radio" id="time-option-full-day" name="quick_time_option" value="full_day">
-                        <label for="time-option-full-day">Full Day (9 AM - 5 PM)</label>
+                        <label for="time-option-full-day">Full day (8AM-5PM)</label>
                     </div>
                     <div>
                         <input type="radio" id="time-option-manual" name="quick_time_option" value="manual" checked>
@@ -62,37 +62,6 @@
                     <label for="end-time">End Time:</label>
                     <input type="time" id="end-time" name="end_time">
                 </div>
-            </div>
-
-            <div>
-                <label for="attendees">Number of Attendees:</label>
-                <input type="number" id="attendees" name="attendees" min="1" value="1">
-            </div>
-
-            <fieldset>
-                <legend>Required Equipment</legend>
-                <div>
-                    <input type="checkbox" id="equipment-projector" name="equipment" value="projector">
-                    <label for="equipment-projector">Projector</label>
-                </div>
-                <div>
-                    <input type="checkbox" id="equipment-teleconference" name="equipment" value="teleconference">
-                    <label for="equipment-teleconference">Teleconference</label>
-                </div>
-                <div>
-                    <input type="checkbox" id="equipment-whiteboard" name="equipment" value="whiteboard">
-                    <label for="equipment-whiteboard">Whiteboard</label>
-                </div>
-            </fieldset>
-
-            <div>
-                <label for="room-preference">Room Preference (Optional):</label>
-                <select id="room-preference" name="room_preference">
-                    <option value="">Any Available</option>
-                    <option value="room1">Conference Room A</option>
-                    <option value="room2">Meeting Room B</option>
-                    <option value="room3">Focus Room C</option>
-                </select>
             </div>
 
             <button type="submit">Find Availability</button>
