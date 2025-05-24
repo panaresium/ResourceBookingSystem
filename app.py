@@ -129,6 +129,15 @@ def serve_map_view(map_id):
     # You could fetch map name here to pass to template title, but JS will fetch full details
     return render_template("map_view.html", map_id_from_flask=map_id)
 
+@app.route('/profile')
+@login_required
+def serve_profile_page():
+    # Assuming User model has 'username' and 'email' attributes
+    # current_user from Flask-Login provides the logged-in user object
+    return render_template('profile.html', 
+                           username=current_user.username, 
+                           email=current_user.email)
+
 # Function to initialize the database
 def init_db():
     with app.app_context(): # Create an application context

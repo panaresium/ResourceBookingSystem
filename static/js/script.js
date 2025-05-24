@@ -5,16 +5,17 @@ async function updateAuthLink() {
     const authLinkContainer = document.getElementById('auth-link-container');
     const adminMapsNavLink = document.getElementById('admin-maps-nav-link');
     let welcomeMessageContainer = document.getElementById('welcome-message-container');
+    
+    // New elements for dropdown
+    const userDropdownContainer = document.getElementById('user-dropdown-container');
+    const userDropdownButton = document.getElementById('user-dropdown-button');
+    const userDropdownMenu = document.getElementById('user-dropdown-menu'); // Though menu visibility is handled by its own listeners
 
-    // Ensure welcome message container exists or create it (it should be in HTML already)
-    if (!welcomeMessageContainer && authLinkContainer && authLinkContainer.parentNode) {
-        console.warn("'welcome-message-container' not found, creating dynamically. Best to add it to HTML templates.");
-        const newWelcomeLi = document.createElement('li');
-        newWelcomeLi.id = 'welcome-message-container';
-        newWelcomeLi.style.display = 'none'; // Initially hidden
-        newWelcomeLi.style.marginRight = '10px';
-        authLinkContainer.parentNode.insertBefore(newWelcomeLi, authLinkContainer.parentNode.firstChild); // Insert at the beginning
-        welcomeMessageContainer = newWelcomeLi; // Assign the newly created element
+    // Ensure welcome message container exists (it should be in HTML templates)
+    if (!welcomeMessageContainer && userDropdownContainer && userDropdownContainer.parentNode) {
+        // If welcome message is missing, and we have a reference point like userDropdownContainer's parent
+        console.warn("'welcome-message-container' not found by its ID. Check HTML templates.");
+        // It might be created dynamically if absolutely necessary, but better to fix templates.
     }
     
     try {
@@ -24,30 +25,51 @@ async function updateAuthLink() {
         if (data.logged_in && data.user) {
             sessionStorage.setItem('loggedInUserUsername', data.user.username);
             sessionStorage.setItem('loggedInUserIsAdmin', data.user.is_admin ? 'true' : 'false');
+            sessionStorage.setItem('loggedInUserId', data.user.id); // Also store ID if not already
 
             if (welcomeMessageContainer) {
                 welcomeMessageContainer.textContent = `Welcome, ${data.user.username}!`;
                 welcomeMessageContainer.style.display = 'list-item'; 
             }
-            if (authLinkContainer) {
-                authLinkContainer.innerHTML = '<a href="#" id="logout-link">Logout</a>';
-                const logoutLink = document.getElementById('logout-link');
-                if (logoutLink) {
-                    logoutLink.addEventListener('click', handleLogout);
-                }
+
+            if (userDropdownContainer) userDropdownContainer.style.display = 'list-item'; // Show dropdown container
+            if (userDropdownButton) {
+                userDropdownButton.innerHTML = `${data.user.username} &#9662;`; // Set username and arrow
+                userDropdownButton.setAttribute('aria-expanded', 'false'); // Ensure it's reset
             }
+            if (userDropdownMenu) userDropdownMenu.style.display = 'none'; // Ensure menu is initially closed
+
+            // Hide the main login link container, as login state is handled by dropdown
+            if (authLinkContainer) authLinkContainer.style.display = 'none'; 
+            
             if (adminMapsNavLink) {
                 adminMapsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
             }
+
+            // Setup logout link in dropdown
+            const logoutLinkDropdown = document.getElementById('logout-link-dropdown');
+            if (logoutLinkDropdown) {
+                // Remove previous listener to avoid duplicates if updateAuthLink is called multiple times
+                logoutLinkDropdown.removeEventListener('click', handleLogout); 
+                logoutLinkDropdown.addEventListener('click', handleLogout);
+            }
+
         } else {
             sessionStorage.removeItem('loggedInUserUsername');
             sessionStorage.removeItem('loggedInUserIsAdmin');
+            sessionStorage.removeItem('loggedInUserId');
+
             if (welcomeMessageContainer) {
                 welcomeMessageContainer.textContent = '';
                 welcomeMessageContainer.style.display = 'none';
             }
+            if (userDropdownContainer) userDropdownContainer.style.display = 'none'; // Hide dropdown
+            if (userDropdownMenu) userDropdownMenu.style.display = 'none'; // Ensure menu is hidden
+
             if (authLinkContainer) {
+                // Ensure authLinkContainer is visible and shows "Login"
                 authLinkContainer.innerHTML = `<a href="${document.body.dataset.loginUrl || '/login'}">Login</a>`;
+                authLinkContainer.style.display = 'list-item'; 
             }
             if (adminMapsNavLink) {
                 adminMapsNavLink.style.display = 'none';
@@ -55,11 +77,18 @@ async function updateAuthLink() {
         }
     } catch (error) {
         console.error("Error fetching auth status:", error);
+        // Reset to logged-out state on error
         if (welcomeMessageContainer) welcomeMessageContainer.style.display = 'none';
-        if (authLinkContainer) authLinkContainer.innerHTML = `<a href="${document.body.dataset.loginUrl || '/login'}">Login</a>`;
+        if (userDropdownContainer) userDropdownContainer.style.display = 'none';
+        if (userDropdownMenu) userDropdownMenu.style.display = 'none';
+        if (authLinkContainer) {
+            authLinkContainer.innerHTML = `<a href="${document.body.dataset.loginUrl || '/login'}">Login</a>`;
+            authLinkContainer.style.display = 'list-item';
+        }
         if (adminMapsNavLink) adminMapsNavLink.style.display = 'none';
         sessionStorage.removeItem('loggedInUserUsername');
         sessionStorage.removeItem('loggedInUserIsAdmin');
+        sessionStorage.removeItem('loggedInUserId');
     }
 }
 
@@ -343,31 +372,28 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     if (loginForm) {
-        loginForm.addEventListener('submit', function(event) {
-            event.preventDefault();
-            const usernameInput = document.getElementById('username');
-            const username = usernameInput ? usernameInput.value.trim() : '';
-
-            if (loginMessageDiv) loginMessageDiv.innerHTML = ''; // Clear previous messages
-
-            event.preventDefault(); // Prevent default form submission
+        loginForm.addEventListener('submit', async function(event) { // Made async
+            event.preventDefault(); // Kept one
+    
+            if (loginMessageDiv) loginMessageDiv.innerHTML = ''; 
+    
             loginMessageDiv.textContent = 'Logging in...';
             loginMessageDiv.style.color = 'inherit';
-            loginMessageDiv.classList.remove('error', 'success'); // Clear previous styling classes
-
+            loginMessageDiv.classList.remove('error', 'success'); 
+    
             const usernameInput = document.getElementById('username'); 
             const passwordInput = document.getElementById('password'); 
             
             const username = usernameInput.value.trim();
-            const password = passwordInput.value; // Do not trim password
-
+            const password = passwordInput.value; 
+    
             if (!username || !password) {
                 loginMessageDiv.textContent = 'Username and password are required.';
                 loginMessageDiv.style.color = 'red';
                 loginMessageDiv.classList.add('error');
                 return;
             }
-
+    
             try {
                 const response = await fetch('/api/auth/login', {
                     method: 'POST',
@@ -376,42 +402,38 @@ document.addEventListener('DOMContentLoaded', function() {
                     },
                     body: JSON.stringify({ username: username, password: password })
                 });
-
+    
                 const responseData = await response.json();
-
+    
                 if (response.ok) { 
                     loginMessageDiv.textContent = responseData.message || 'Login successful!';
                     loginMessageDiv.style.color = 'green';
                     loginMessageDiv.classList.add('success');
-
+    
                     if (responseData.user) {
                         sessionStorage.setItem('loggedInUserUsername', responseData.user.username);
                         sessionStorage.setItem('loggedInUserIsAdmin', responseData.user.is_admin ? 'true' : 'false');
-                        sessionStorage.setItem('loggedInUserId', responseData.user.id); // **Ensure this is present**
+                        sessionStorage.setItem('loggedInUserId', responseData.user.id);
                     } else {
-                        // This case should ideally not happen if API guarantees user object on success
+                        // This case should ideally not happen
                         sessionStorage.setItem('loggedInUserUsername', username); 
-                        sessionStorage.removeItem('loggedInUserIsAdmin'); // Clear if no specific info
-                        sessionStorage.removeItem('loggedInUserId');    // Clear if no specific info
+                        sessionStorage.removeItem('loggedInUserIsAdmin'); 
+                        sessionStorage.removeItem('loggedInUserId');
                     }
                     
-                    if (typeof updateAuthLink === 'function') {
-                        // updateAuthLink might become async if it directly calls /api/auth/status
-                        // For now, assume it's synchronous or handles its own async logic
-                        updateAuthLink(); 
-                    }
+                    await updateAuthLink(); // Await the async function
                     
-                    // Redirect after a short delay to allow user to see message, or immediately
                     setTimeout(() => {
-                        window.location.href = '/'; // Redirect to home page
-                    }, 500); // 0.5 second delay
-
+                        window.location.href = '/'; 
+                    }, 500); 
+    
                 } else {
                     loginMessageDiv.textContent = responseData.error || 'Login failed. Please try again.';
                     loginMessageDiv.style.color = 'red';
                     loginMessageDiv.classList.add('error');
                     sessionStorage.removeItem('loggedInUserUsername'); 
                     sessionStorage.removeItem('loggedInUserIsAdmin');
+                    sessionStorage.removeItem('loggedInUserId'); // Added for consistency
                 }
             } catch (error) {
                 console.error('Login API call error:', error);
@@ -420,6 +442,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 loginMessageDiv.classList.add('error');
                 sessionStorage.removeItem('loggedInUserUsername');
                 sessionStorage.removeItem('loggedInUserIsAdmin');
+                sessionStorage.removeItem('loggedInUserId'); // Added for consistency
             }
         });
     }
@@ -1594,6 +1617,40 @@ ID: ${responseData.id}`);
 
     // Map View Page Specific Logic
     const mapContainer = document.getElementById('map-container');
+
+    // --- User Dropdown Menu Logic (Global) ---
+    const userDropdownButtonGlobal = document.getElementById('user-dropdown-button');
+    const userDropdownMenuGlobal = document.getElementById('user-dropdown-menu');
+
+    if (userDropdownButtonGlobal && userDropdownMenuGlobal) {
+        userDropdownButtonGlobal.addEventListener('click', function(event) {
+            const isExpanded = userDropdownButtonGlobal.getAttribute('aria-expanded') === 'true' || false;
+            userDropdownButtonGlobal.setAttribute('aria-expanded', !isExpanded);
+            userDropdownMenuGlobal.style.display = isExpanded ? 'none' : 'block';
+            event.stopPropagation(); // Prevent window click listener from closing it immediately
+        });
+
+        // Close dropdown if clicked outside
+        window.addEventListener('click', function(event) {
+            // Check if the dropdown is visible before trying to close
+            if (userDropdownMenuGlobal.style.display === 'block') {
+                if (!userDropdownButtonGlobal.contains(event.target) && !userDropdownMenuGlobal.contains(event.target)) {
+                    userDropdownMenuGlobal.style.display = 'none';
+                    userDropdownButtonGlobal.setAttribute('aria-expanded', 'false');
+                }
+            }
+        });
+    }
+    // Ensure this event listener for logout in dropdown is correctly handled.
+    // It's also being handled within updateAuthLink to ensure it's added after login.
+    // If this causes issues, one location should be chosen (updateAuthLink is likely better).
+    // For now, this adds a safety net if updateAuthLink was not called after DOM is ready but before user action.
+    const logoutLinkDropdownGlobal = document.getElementById('logout-link-dropdown');
+    if (logoutLinkDropdownGlobal) {
+        logoutLinkDropdownGlobal.addEventListener('click', handleLogout);
+    }
+
+
     if (mapContainer) { // Check if we are on the map_view.html page
         const mapId = mapContainer.dataset.mapId;
         const mapLoadingStatusDiv = document.getElementById('map-loading-status');

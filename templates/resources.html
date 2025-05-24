@@ -9,11 +9,23 @@
 <body>
     <nav>
         <ul>
+            <li id="welcome-message-container" style="display:none; margin-right: 10px;">
+                <!-- Welcome message will be populated by JS -->
+            </li>
+            <li id="user-dropdown-container" style="display:none; position: relative; margin-right: 20px;">
+                <button id="user-dropdown-button" aria-haspopup="true" aria-expanded="false" style="background: none; border: none; color: white; font-size: 1em; font-weight: bold; cursor: pointer; padding: 0;">
+                    <!-- Username and ▼ icon will be here -->
+                </button>
+                <ul id="user-dropdown-menu" style="display:none; position: absolute; top: 100%; left: 0; background-color: #2c3e50; border: 1px solid #555; border-top: none; min-width: 160px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); z-index: 100; list-style-type: none; padding: 0; margin: 0; border-radius: 0 0 4px 4px;">
+                    <li><a href="{{ url_for('serve_profile_page') }}" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">View Profile</a></li>
+                    <li><a href="#" id="logout-link-dropdown" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">Logout</a></li>
+                </ul>
+            </li>
             <li><a href="{{ url_for('serve_index') }}">Home</a></li>
             <li><a href="{{ url_for('serve_new_booking') }}">New Booking</a></li>
             <li><a href="{{ url_for('serve_resources') }}">View Resources</a></li>
-            <li id="auth-link-container"><a href="{{ url_for('serve_login') }}">Login</a></li>
             <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">Admin Maps</a></li>
+            <li id="auth-link-container" style="display:none;"><!-- Login link if not logged in --></li> 
         </ul>
     </nav>
     <main>
@@ -85,7 +97,7 @@
         </section>
     </main>
     <footer>
-        <p>&copy; 2023 Smart Resource Booking</p>
+        <p>&copy; 2024 Smart Resource Booking</p>
     </footer>
 </body>
 </html>
