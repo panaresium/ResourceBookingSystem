@@ -294,9 +294,12 @@ def login_google_callback():
 def init_db():
     with app.app_context(): # Create an application context
         print("Initializing the database...")
+
+        print("Creating database tables FIRST...")
+        db.create_all() # Ensure tables are created (safe to call multiple times)
+        print("Database tables created/verified.")
         
-        # Delete existing data in reverse order of creation (bookings depend on resources)
-        # or more simply, respecting foreign key constraints
+        # Now, delete existing data in reverse order of creation
         print("Deleting existing bookings...")
         num_bookings_deleted = db.session.query(Booking).delete()
         print(f"Deleted {num_bookings_deleted} bookings.")
@@ -305,20 +308,16 @@ def init_db():
         num_resources_deleted = db.session.query(Resource).delete()
         print(f"Deleted {num_resources_deleted} resources.")
         
-        print("Deleting existing users...") # New
-        num_users_deleted = db.session.query(User).delete()     # New
+        print("Deleting existing users...") 
+        num_users_deleted = db.session.query(User).delete()     
         print(f"Deleted {num_users_deleted} users.")
             
-        print("Deleting existing floor maps...") # Moved FloorMap deletion after Resource
+        print("Deleting existing floor maps...") 
         num_floormaps_deleted = db.session.query(FloorMap).delete()
         print(f"Deleted {num_floormaps_deleted} floor maps.")
         
         db.session.commit() # Commit deletions
         print("Existing data deleted.")
-
-        print("Creating database tables...")
-        db.create_all() # Ensure tables are created (safe to call multiple times)
-        print("Database tables created/verified.")
         
         # Add sample FloorMaps (if you decide to have defaults, otherwise admin uploads)
         # ... (no sample FloorMaps for now) ...
