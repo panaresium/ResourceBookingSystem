@@ -296,23 +296,34 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 if (response.ok) { // Typically 201 Created
                     if (bookingResultsDiv) {
+                        // Refined success message construction
+                        let resourceName = 'N/A';
+                        if (resourceSelectBooking && resourceSelectBooking.selectedIndex !== -1) {
+                            const selectedOptionText = resourceSelectBooking.options[resourceSelectBooking.selectedIndex].text;
+                            resourceName = selectedOptionText.split(' (Capacity:')[0];
+                        }
+
+                        const displayDate = responseData.start_time ? responseData.start_time.split(' ')[0] : 'N/A';
+                        const displayStartTime = responseData.start_time ? responseData.start_time.split(' ')[1].substring(0,5) : 'N/A';
+                        const displayEndTime = responseData.end_time ? responseData.end_time.split(' ')[1].substring(0,5) : 'N/A';
+                        const displayTitle = responseData.title || 'N/A';
+                        const displayBookingId = responseData.id || 'N/A';
+
                         bookingResultsDiv.innerHTML = `
                             <p><strong>Booking Confirmed!</strong><br>
-                            Resource: ${resourceSelectBooking.options[resourceSelectBooking.selectedIndex].text.split(' (Capacity:')[0]}<br>
-                            Date: ${responseData.start_time.split(' ')[0]}<br>
-                            Time: ${responseData.start_time.split(' ')[1].substring(0,5)} - ${responseData.end_time.split(' ')[1].substring(0,5)}<br>
-                            Title: ${responseData.title || 'N/A'}<br>
-                            Booking ID: ${responseData.id}</p>
+                            Resource: ${resourceName}<br>
+                            Date: ${displayDate}<br>
+                            Time: ${displayStartTime} - ${displayEndTime}<br>
+                            Title: ${displayTitle}<br>
+                            Booking ID: ${displayBookingId}</p>
                         `;
                         bookingResultsDiv.className = 'success';
-                        bookingForm.reset(); // Reset form fields
-                        // Manually trigger change on radio to reset time inputs display if needed
+                        bookingForm.reset(); 
                         const manualRadio = document.querySelector('input[name="quick_time_option"][value="manual"]');
                         if(manualRadio) {
                             manualRadio.checked = true;
                             manualRadio.dispatchEvent(new Event('change'));
                         }
-
                     }
                 } else {
                     if (bookingResultsDiv) {
