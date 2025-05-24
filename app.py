@@ -167,7 +167,7 @@ def init_db():
         try:
             default_users = [
                 User(username='admin', email='admin@example.com', 
-                     password_hash=generate_password_hash('adminpass', method='pbkdf2:sha256'), 
+                     password_hash=generate_password_hash('admin', method='pbkdf2:sha256'), 
                      is_admin=True),
                 User(username='user', email='user@example.com', 
                      password_hash=generate_password_hash('userpass', method='pbkdf2:sha256'), 
