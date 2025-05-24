@@ -5,16 +5,17 @@ async function updateAuthLink() {
     const authLinkContainer = document.getElementById('auth-link-container');
     const adminMapsNavLink = document.getElementById('admin-maps-nav-link');
     let welcomeMessageContainer = document.getElementById('welcome-message-container');
+    
+    // New elements for dropdown
+    const userDropdownContainer = document.getElementById('user-dropdown-container');
+    const userDropdownButton = document.getElementById('user-dropdown-button');
+    const userDropdownMenu = document.getElementById('user-dropdown-menu'); // Though menu visibility is handled by its own listeners
 
-    // Ensure welcome message container exists or create it (it should be in HTML already)
-    if (!welcomeMessageContainer && authLinkContainer && authLinkContainer.parentNode) {
-        console.warn("'welcome-message-container' not found, creating dynamically. Best to add it to HTML templates.");
-        const newWelcomeLi = document.createElement('li');
-        newWelcomeLi.id = 'welcome-message-container';
-        newWelcomeLi.style.display = 'none'; // Initially hidden
-        newWelcomeLi.style.marginRight = '10px';
-        authLinkContainer.parentNode.insertBefore(newWelcomeLi, authLinkContainer.parentNode.firstChild); // Insert at the beginning
-        welcomeMessageContainer = newWelcomeLi; // Assign the newly created element
+    // Ensure welcome message container exists (it should be in HTML templates)
+    if (!welcomeMessageContainer && userDropdownContainer && userDropdownContainer.parentNode) {
+        // If welcome message is missing, and we have a reference point like userDropdownContainer's parent
+        console.warn("'welcome-message-container' not found by its ID. Check HTML templates.");
+        // It might be created dynamically if absolutely necessary, but better to fix templates.
     }
     
     try {
@@ -24,30 +25,51 @@ async function updateAuthLink() {
         if (data.logged_in && data.user) {
             sessionStorage.setItem('loggedInUserUsername', data.user.username);
             sessionStorage.setItem('loggedInUserIsAdmin', data.user.is_admin ? 'true' : 'false');
+            sessionStorage.setItem('loggedInUserId', data.user.id); // Also store ID if not already
 
             if (welcomeMessageContainer) {
                 welcomeMessageContainer.textContent = `Welcome, ${data.user.username}!`;
                 welcomeMessageContainer.style.display = 'list-item'; 
             }
-            if (authLinkContainer) {
-                authLinkContainer.innerHTML = '<a href="#" id="logout-link">Logout</a>';
-                const logoutLink = document.getElementById('logout-link');
-                if (logoutLink) {
-                    logoutLink.addEventListener('click', handleLogout);
-                }
+
+            if (userDropdownContainer) userDropdownContainer.style.display = 'list-item'; // Show dropdown container
+            if (userDropdownButton) {
+                userDropdownButton.innerHTML = `${data.user.username} &#9662;`; // Set username and arrow
+                userDropdownButton.setAttribute('aria-expanded', 'false'); // Ensure it's reset
             }
+            if (userDropdownMenu) userDropdownMenu.style.display = 'none'; // Ensure menu is initially closed
+
+            // Hide the main login link container, as login state is handled by dropdown
+            if (authLinkContainer) authLinkContainer.style.display = 'none'; 
+            
             if (adminMapsNavLink) {
                 adminMapsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
             }
+
+            // Setup logout link in dropdown
+            const logoutLinkDropdown = document.getElementById('logout-link-dropdown');
+            if (logoutLinkDropdown) {
+                // Remove previous listener to avoid duplicates if updateAuthLink is called multiple times
+                logoutLinkDropdown.removeEventListener('click', handleLogout); 
+                logoutLinkDropdown.addEventListener('click', handleLogout);
+            }
+
         } else {
             sessionStorage.removeItem('loggedInUserUsername');
             sessionStorage.removeItem('loggedInUserIsAdmin');
+            sessionStorage.removeItem('loggedInUserId');
+
             if (welcomeMessageContainer) {
                 welcomeMessageContainer.textContent = '';
                 welcomeMessageContainer.style.display = 'none';
             }
+            if (userDropdownContainer) userDropdownContainer.style.display = 'none'; // Hide dropdown
+            if (userDropdownMenu) userDropdownMenu.style.display = 'none'; // Ensure menu is hidden
+
             if (authLinkContainer) {
+                // Ensure authLinkContainer is visible and shows "Login"
                 authLinkContainer.innerHTML = `<a href="${document.body.dataset.loginUrl || '/login'}">Login</a>`;
+                authLinkContainer.style.display = 'list-item'; 
             }
             if (adminMapsNavLink) {
                 adminMapsNavLink.style.display = 'none';
@@ -55,11 +77,18 @@ async function updateAuthLink() {
         }
     } catch (error) {
         console.error("Error fetching auth status:", error);
+        // Reset to logged-out state on error
         if (welcomeMessageContainer) welcomeMessageContainer.style.display = 'none';
-        if (authLinkContainer) authLinkContainer.innerHTML = `<a href="${document.body.dataset.loginUrl || '/login'}">Login</a>`;
+        if (userDropdownContainer) userDropdownContainer.style.display = 'none';
+        if (userDropdownMenu) userDropdownMenu.style.display = 'none';
+        if (authLinkContainer) {
+            authLinkContainer.innerHTML = `<a href="${document.body.dataset.loginUrl || '/login'}">Login</a>`;
+            authLinkContainer.style.display = 'list-item';
+        }
         if (adminMapsNavLink) adminMapsNavLink.style.display = 'none';
         sessionStorage.removeItem('loggedInUserUsername');
         sessionStorage.removeItem('loggedInUserIsAdmin');
+        sessionStorage.removeItem('loggedInUserId');
     }
 }
 
@@ -119,10 +148,107 @@ document.addEventListener('DOMContentLoaded', function() {
     const bookingForm = document.getElementById('booking-form');
     const bookingResultsDiv = document.getElementById('booking-results');
     const loginForm = document.getElementById('login-form');
-    const loginMessageDiv = document.getElementById('login-message');
 
+    // --- New Booking Page Specific Logic ---
     if (bookingForm) {
-        bookingForm.addEventListener('submit', function(event) {
+        const resourceSelectBooking = document.getElementById('resource-select-booking');
+
+        // Populate Resource Selector for New Booking Page
+        if (resourceSelectBooking) {
+            fetch('/api/resources')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    resourceSelectBooking.innerHTML = '<option value="">-- Select a Resource --</option>'; // Clear and add default
+                    if (data.length === 0) {
+                        const option = new Option('No resources available', '');
+                        option.disabled = true;
+                        resourceSelectBooking.add(option);
+                        return;
+                    }
+                    data.forEach(resource => {
+                        // Only add published resources that are bookable by someone (generic check, API will enforce specific user)
+                        if (resource.status === 'published') {
+                             const option = new Option(`${resource.name} (Capacity: ${resource.capacity || 'N/A'})`, resource.id);
+                             resourceSelectBooking.add(option);
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching resources for new booking form:', error);
+                    resourceSelectBooking.innerHTML = '<option value="">Error loading resources</option>';
+                });
+        }
+
+        // Handle Predefined Time Slot Options
+        const quickTimeOptions = document.querySelectorAll('input[name="quick_time_option"]');
+        const manualTimeInputsDiv = document.getElementById('manual-time-inputs');
+        const startTimeInput = document.getElementById('start-time');
+        const endTimeInput = document.getElementById('end-time');
+
+        quickTimeOptions.forEach(radio => {
+            radio.addEventListener('change', function() {
+                if (this.checked) {
+                    switch (this.value) {
+                        case 'morning':
+                            if (startTimeInput) startTimeInput.value = '09:00';
+                            if (endTimeInput) endTimeInput.value = '13:00';
+                            if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'none';
+                            break;
+                        case 'afternoon':
+                            if (startTimeInput) startTimeInput.value = '13:00';
+                            if (endTimeInput) endTimeInput.value = '17:00';
+                            if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'none';
+                            break;
+                        case 'full_day':
+                            if (startTimeInput) startTimeInput.value = '09:00';
+                            if (endTimeInput) endTimeInput.value = '17:00';
+                            if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'none';
+                            break;
+                        case 'manual':
+                            // Optionally clear times or leave them for user to edit
+                            // if (startTimeInput) startTimeInput.value = '';
+                            // if (endTimeInput) endTimeInput.value = '';
+                            if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'block'; // Or 'flex' or '' depending on original
+                            break;
+                    }
+                }
+            });
+        });
+
+        // Initial state for manual time (ensure it's visible if manual is checked by default)
+        const manualRadio = document.querySelector('input[name="quick_time_option"][value="manual"]');
+        if (manualRadio && manualRadio.checked && manualTimeInputsDiv) {
+            manualTimeInputsDiv.style.display = 'block'; // Or 'flex' or ''
+        } else if (manualTimeInputsDiv && (!manualRadio || !manualRadio.checked)) {
+            // If manual is not checked by default, and another option is, hide manual inputs
+            // This case should be covered by the radio button's 'checked' attribute in HTML triggering the change listener.
+            // However, as a fallback:
+            const anyCheckedRadio = document.querySelector('input[name="quick_time_option"]:checked');
+            if (anyCheckedRadio && anyCheckedRadio.value !== 'manual' && manualTimeInputsDiv) {
+                 manualTimeInputsDiv.style.display = 'none';
+            }
+        }
+    } // This closes the outer if(bookingForm)
+
+    // The rest of the file continues from here...
+    // const loginMessageDiv = document.getElementById('login-message'); // This was duplicated, remove one
+
+    // Re-locating the bookingForm submit listener logic to be AFTER the time slot logic,
+    // but still within the main DOMContentLoaded.
+    // The original placement of the bookingForm event listener was outside the if(bookingForm) block
+    // which is fine, but for clarity, I will ensure all bookingForm related setup is grouped.
+    // The code below will be adjusted in the next step.
+
+    // This is the original location of the loginMessageDiv, keep it here.
+    const loginMessageDiv = document.getElementById('login-message'); 
+
+    if (bookingForm) { // This is the original bookingForm event listener block, now with updated logic
+        bookingForm.addEventListener('submit', async function(event) {
             event.preventDefault(); // Prevent default form submission
 
             if (bookingResultsDiv) {
@@ -131,24 +257,38 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             // Check if user is logged in
-            if (!sessionStorage.getItem('loggedInUser')) {
+            const loggedInUsername = sessionStorage.getItem('loggedInUserUsername');
+            if (!loggedInUsername) {
                 if (bookingResultsDiv) {
-                    bookingResultsDiv.innerHTML = '<p>Please <a href="/login">login</a> to book a resource.</p>'; // Updated path
+                    bookingResultsDiv.innerHTML = `<p>Please <a href="${document.body.dataset.loginUrl || '/login'}">login</a> to book a resource.</p>`;
                     bookingResultsDiv.classList.add('error');
                 }
                 return; // Stop further processing
             }
 
             // Get form values
+            const resourceSelectBooking = document.getElementById('resource-select-booking');
             const dateInput = document.getElementById('booking-date');
-            const startTimeInput = document.getElementById('start-time');
-            const endTimeInput = document.getElementById('end-time');
+            const startTimeInput = document.getElementById('start-time'); // Already defined above for time slots
+            const endTimeInput = document.getElementById('end-time');     // Already defined above for time slots
+            // const bookingTitleInput = document.getElementById('booking-title'); // Assuming this ID if a title field is added
 
+            const resourceId = resourceSelectBooking ? resourceSelectBooking.value : '';
             const dateValue = dateInput ? dateInput.value : '';
             const startTimeValue = startTimeInput ? startTimeInput.value : '';
             const endTimeValue = endTimeInput ? endTimeInput.value : '';
+            // const titleValue = bookingTitleInput ? bookingTitleInput.value.trim() : 'User Booking'; // Use a default or get from input
+            const titleValue = `Booking for ${resourceSelectBooking.options[resourceSelectBooking.selectedIndex].text.split(' (Capacity:')[0]}`;
+
 
             // Basic Validation
+            if (!resourceId) {
+                if (bookingResultsDiv) {
+                    bookingResultsDiv.innerHTML = '<p>Please select a resource.</p>';
+                    bookingResultsDiv.classList.add('error');
+                }
+                return;
+            }
             if (!dateValue || !startTimeValue || !endTimeValue) {
                 if (bookingResultsDiv) {
                     bookingResultsDiv.innerHTML = '<p>Please fill in date, start time, and end time.</p>';
@@ -156,51 +296,104 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 return; // Stop further processing
             }
+            
+            // Construct booking data
+            const bookingData = {
+                resource_id: parseInt(resourceId, 10),
+                date_str: dateValue,
+                start_time_str: startTimeValue,
+                end_time_str: endTimeValue,
+                title: titleValue, 
+                user_name: loggedInUsername 
+            };
 
-            // If validation passes, display searching message
             if (bookingResultsDiv) {
-                bookingResultsDiv.innerHTML = '<p>Searching for availability...</p>';
-                bookingResultsDiv.classList.add('success');
+                bookingResultsDiv.innerHTML = '<p>Submitting booking...</p>';
+                bookingResultsDiv.classList.remove('error', 'success'); // Clear previous styling
+            }
 
-                setTimeout(function() {
-                    bookingResultsDiv.innerHTML = `
-                        <p><strong>Booking Confirmed (Mock)!</strong><br>
-                        Room: Conference Room A<br>
-                        Date: ${dateValue || '[Selected Date]'}<br>
-                        Time: ${startTimeValue || '[Selected Start Time]'} - ${endTimeValue || '[Selected End Time]'}</p>
-                    `;
-                    bookingResultsDiv.className = 'success';
-                }, 1000);
+            try {
+                const response = await fetch('/api/bookings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(bookingData)
+                });
+
+                const responseData = await response.json();
+
+                if (response.ok) { // Typically 201 Created
+                    if (bookingResultsDiv) {
+                        // Refined success message construction
+                        let resourceName = 'N/A';
+                        if (resourceSelectBooking && resourceSelectBooking.selectedIndex !== -1) {
+                            const selectedOptionText = resourceSelectBooking.options[resourceSelectBooking.selectedIndex].text;
+                            resourceName = selectedOptionText.split(' (Capacity:')[0];
+                        }
+
+                        const displayDate = responseData.start_time ? responseData.start_time.split(' ')[0] : 'N/A';
+                        const displayStartTime = responseData.start_time ? responseData.start_time.split(' ')[1].substring(0,5) : 'N/A';
+                        const displayEndTime = responseData.end_time ? responseData.end_time.split(' ')[1].substring(0,5) : 'N/A';
+                        const displayTitle = responseData.title || 'N/A';
+                        const displayBookingId = responseData.id || 'N/A';
+
+                        bookingResultsDiv.innerHTML = `
+                            <p><strong>Booking Confirmed!</strong><br>
+                            Resource: ${resourceName}<br>
+                            Date: ${displayDate}<br>
+                            Time: ${displayStartTime} - ${displayEndTime}<br>
+                            Title: ${displayTitle}<br>
+                            Booking ID: ${displayBookingId}</p>
+                        `;
+                        bookingResultsDiv.className = 'success';
+                        bookingForm.reset(); 
+                        const manualRadio = document.querySelector('input[name="quick_time_option"][value="manual"]');
+                        if(manualRadio) {
+                            manualRadio.checked = true;
+                            manualRadio.dispatchEvent(new Event('change'));
+                        }
+                    }
+                } else {
+                    if (bookingResultsDiv) {
+                        bookingResultsDiv.innerHTML = `<p>Booking failed: ${responseData.error || 'Unknown error. Please try again.'}</p>`;
+                        bookingResultsDiv.className = 'error';
+                    }
+                    console.error('Booking failed:', responseData);
+                }
+            } catch (error) {
+                console.error('Error making booking API call:', error);
+                if (bookingResultsDiv) {
+                    bookingResultsDiv.innerHTML = '<p>Booking request failed due to a network or server error. Please try again.</p>';
+                    bookingResultsDiv.className = 'error';
+                }
             }
         });
     }
 
     if (loginForm) {
-        loginForm.addEventListener('submit', function(event) {
-            event.preventDefault();
-            const usernameInput = document.getElementById('username');
-            const username = usernameInput ? usernameInput.value.trim() : '';
-
-            if (loginMessageDiv) loginMessageDiv.innerHTML = ''; // Clear previous messages
-
-            event.preventDefault(); // Prevent default form submission
+        loginForm.addEventListener('submit', async function(event) { // Made async
+            event.preventDefault(); // Kept one
+    
+            if (loginMessageDiv) loginMessageDiv.innerHTML = ''; 
+    
             loginMessageDiv.textContent = 'Logging in...';
             loginMessageDiv.style.color = 'inherit';
-            loginMessageDiv.classList.remove('error', 'success'); // Clear previous styling classes
-
+            loginMessageDiv.classList.remove('error', 'success'); 
+    
             const usernameInput = document.getElementById('username'); 
             const passwordInput = document.getElementById('password'); 
             
             const username = usernameInput.value.trim();
-            const password = passwordInput.value; // Do not trim password
-
+            const password = passwordInput.value; 
+    
             if (!username || !password) {
                 loginMessageDiv.textContent = 'Username and password are required.';
                 loginMessageDiv.style.color = 'red';
                 loginMessageDiv.classList.add('error');
                 return;
             }
-
+    
             try {
                 const response = await fetch('/api/auth/login', {
                     method: 'POST',
@@ -209,42 +402,38 @@ document.addEventListener('DOMContentLoaded', function() {
                     },
                     body: JSON.stringify({ username: username, password: password })
                 });
-
+    
                 const responseData = await response.json();
-
+    
                 if (response.ok) { 
                     loginMessageDiv.textContent = responseData.message || 'Login successful!';
                     loginMessageDiv.style.color = 'green';
                     loginMessageDiv.classList.add('success');
-
+    
                     if (responseData.user) {
                         sessionStorage.setItem('loggedInUserUsername', responseData.user.username);
                         sessionStorage.setItem('loggedInUserIsAdmin', responseData.user.is_admin ? 'true' : 'false');
-                        sessionStorage.setItem('loggedInUserId', responseData.user.id); // **Ensure this is present**
+                        sessionStorage.setItem('loggedInUserId', responseData.user.id);
                     } else {
-                        // This case should ideally not happen if API guarantees user object on success
+                        // This case should ideally not happen
                         sessionStorage.setItem('loggedInUserUsername', username); 
-                        sessionStorage.removeItem('loggedInUserIsAdmin'); // Clear if no specific info
-                        sessionStorage.removeItem('loggedInUserId');    // Clear if no specific info
+                        sessionStorage.removeItem('loggedInUserIsAdmin'); 
+                        sessionStorage.removeItem('loggedInUserId');
                     }
                     
-                    if (typeof updateAuthLink === 'function') {
-                        // updateAuthLink might become async if it directly calls /api/auth/status
-                        // For now, assume it's synchronous or handles its own async logic
-                        updateAuthLink(); 
-                    }
+                    await updateAuthLink(); // Await the async function
                     
-                    // Redirect after a short delay to allow user to see message, or immediately
                     setTimeout(() => {
-                        window.location.href = '/'; // Redirect to home page
-                    }, 500); // 0.5 second delay
-
+                        window.location.href = '/'; 
+                    }, 500); 
+    
                 } else {
                     loginMessageDiv.textContent = responseData.error || 'Login failed. Please try again.';
                     loginMessageDiv.style.color = 'red';
                     loginMessageDiv.classList.add('error');
                     sessionStorage.removeItem('loggedInUserUsername'); 
                     sessionStorage.removeItem('loggedInUserIsAdmin');
+                    sessionStorage.removeItem('loggedInUserId'); // Added for consistency
                 }
             } catch (error) {
                 console.error('Login API call error:', error);
@@ -253,6 +442,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 loginMessageDiv.classList.add('error');
                 sessionStorage.removeItem('loggedInUserUsername');
                 sessionStorage.removeItem('loggedInUserIsAdmin');
+                sessionStorage.removeItem('loggedInUserId'); // Added for consistency
             }
         });
     }
@@ -1427,6 +1617,40 @@ ID: ${responseData.id}`);
 
     // Map View Page Specific Logic
     const mapContainer = document.getElementById('map-container');
+
+    // --- User Dropdown Menu Logic (Global) ---
+    const userDropdownButtonGlobal = document.getElementById('user-dropdown-button');
+    const userDropdownMenuGlobal = document.getElementById('user-dropdown-menu');
+
+    if (userDropdownButtonGlobal && userDropdownMenuGlobal) {
+        userDropdownButtonGlobal.addEventListener('click', function(event) {
+            const isExpanded = userDropdownButtonGlobal.getAttribute('aria-expanded') === 'true' || false;
+            userDropdownButtonGlobal.setAttribute('aria-expanded', !isExpanded);
+            userDropdownMenuGlobal.style.display = isExpanded ? 'none' : 'block';
+            event.stopPropagation(); // Prevent window click listener from closing it immediately
+        });
+
+        // Close dropdown if clicked outside
+        window.addEventListener('click', function(event) {
+            // Check if the dropdown is visible before trying to close
+            if (userDropdownMenuGlobal.style.display === 'block') {
+                if (!userDropdownButtonGlobal.contains(event.target) && !userDropdownMenuGlobal.contains(event.target)) {
+                    userDropdownMenuGlobal.style.display = 'none';
+                    userDropdownButtonGlobal.setAttribute('aria-expanded', 'false');
+                }
+            }
+        });
+    }
+    // Ensure this event listener for logout in dropdown is correctly handled.
+    // It's also being handled within updateAuthLink to ensure it's added after login.
+    // If this causes issues, one location should be chosen (updateAuthLink is likely better).
+    // For now, this adds a safety net if updateAuthLink was not called after DOM is ready but before user action.
+    const logoutLinkDropdownGlobal = document.getElementById('logout-link-dropdown');
+    if (logoutLinkDropdownGlobal) {
+        logoutLinkDropdownGlobal.addEventListener('click', handleLogout);
+    }
+
+
     if (mapContainer) { // Check if we are on the map_view.html page
         const mapId = mapContainer.dataset.mapId;
         const mapLoadingStatusDiv = document.getElementById('map-loading-status');
