@@ -10,3 +10,4 @@ data/site.db
 __pycache__/
 **/__pycache__/
 translations/**/LC_MESSAGES/*.mo
+*.db
