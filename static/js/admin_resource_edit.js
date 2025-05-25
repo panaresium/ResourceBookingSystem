@@ -6,6 +6,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const deleteResourceBtn = document.getElementById('delete-resource-btn'); // New button
     const editResourceModal = document.getElementById('edit-resource-modal');
     const editResourceForm = document.getElementById('edit-resource-form');
+    const editResourceImageInput = document.getElementById('edit-resource-image-file');
+    const editResourceImagePreview = document.getElementById('edit-resource-image-preview');
     const closeEditModalBtn = editResourceModal ? editResourceModal.querySelector('.close-modal-btn') : null;
     const editResourceStatusMessage = document.getElementById('edit-resource-status-message');
     const resourceToMapSelect = document.getElementById('resource-to-map'); // From main script
@@ -118,6 +120,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 await populateUsersCheckboxes(editAuthorizedUsersCheckboxContainer, resourceData.allowed_user_ids || selectedOption.dataset.allowedUserIds);
 
+                if (editResourceImagePreview) {
+                    if (resourceData.image_url) {
+                        editResourceImagePreview.src = resourceData.image_url;
+                        editResourceImagePreview.style.display = 'block';
+                    } else {
+                        editResourceImagePreview.style.display = 'none';
+                    }
+                }
+
                 // Populate roles checkboxes
                 const assignedRoleIds = resourceData.roles && Array.isArray(resourceData.roles) ? resourceData.roles.map(r => r.id) : [];
                 if (typeof window.populateRolesCheckboxesForResource === 'function') {
@@ -198,6 +209,21 @@ document.addEventListener('DOMContentLoaded', function() {
                     body: JSON.stringify(payload)
                 }, editResourceStatusMessage);
 
+                let imgResponse = null;
+                if (editResourceImageInput && editResourceImageInput.files.length > 0) {
+                    const formData = new FormData();
+                    formData.append('resource_image', editResourceImageInput.files[0]);
+                    imgResponse = await apiCall(`/api/admin/resources/${resourceId}/image`, {
+                        method: 'POST',
+                        body: formData
+                    }, editResourceStatusMessage);
+                    if (editResourceImagePreview && imgResponse.image_url) {
+                        editResourceImagePreview.src = imgResponse.image_url;
+                        editResourceImagePreview.style.display = 'block';
+                    }
+                    editResourceImageInput.value = '';
+                }
+
                 showSuccess(editResourceStatusMessage, `Resource '${responseData.name}' updated successfully!`);
                 
                 if (resourceToMapSelect) {
@@ -212,6 +238,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         optionToUpdate.dataset.bookingRestriction = responseData.booking_restriction || "";
                         optionToUpdate.dataset.allowedUserIds = responseData.allowed_user_ids || "";
                         optionToUpdate.dataset.allowedRoles = responseData.allowed_roles || "";
+                        if (imgResponse && imgResponse.image_url) {
+                            optionToUpdate.dataset.imageUrl = imgResponse.image_url;
+                        }
                          // Preserve map-specific dataset attributes if they exist
                         if (optionToUpdate.dataset.isMappedToCurrent === "true") {
                            optionToUpdate.textContent += ` (On this map)`;
