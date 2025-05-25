@@ -1,6 +1,7 @@
 import unittest
 import json
-from app import app, db, User # Removed Booking as it's not used in these tests
+from datetime import datetime, date, time
+from app import app, db, User, FloorMap, Resource, Booking
 # from flask_login import current_user # Not directly used for assertions here
 
 class AppTests(unittest.TestCase):
@@ -24,6 +25,31 @@ class AppTests(unittest.TestCase):
             user.set_password('password') # Standard password for test user
             db.session.add(user)
             db.session.commit()
+
+        # Create a floor map and some resources for testing
+        floor_map = FloorMap(name='Test Map', image_filename='map.png')
+        db.session.add(floor_map)
+        db.session.commit()
+
+        res1 = Resource(
+            name='Room A',
+            floor_map_id=floor_map.id,
+            map_coordinates=json.dumps({'type': 'rect', 'x': 10, 'y': 20, 'w': 30, 'h': 30}),
+            status='published'
+        )
+        res2 = Resource(
+            name='Room B',
+            floor_map_id=floor_map.id,
+            map_coordinates=json.dumps({'type': 'rect', 'x': 50, 'y': 20, 'w': 30, 'h': 30}),
+            status='published'
+        )
+        db.session.add_all([res1, res2])
+        db.session.commit()
+
+        # Store for use in tests
+        self.floor_map = floor_map
+        self.resource1 = res1
+        self.resource2 = res2
         
         self.client = app.test_client() # Use this single client instance for all requests
 
@@ -121,6 +147,94 @@ class AppTests(unittest.TestCase):
         response_logged_in = self.client.get('/new_booking')
         self.assertEqual(response_logged_in.status_code, 200)
         self.assertIn('<h1', response_logged_in.data.decode('utf-8'))
+
+    def test_map_details_includes_resources_and_bookings(self):
+        """Ensure map details endpoint returns resources and bookings."""
+        booking_date = date.today()
+        booking = Booking(
+            resource_id=self.resource1.id,
+            user_name='someone',
+            start_time=datetime.combine(booking_date, time(9, 0)),
+            end_time=datetime.combine(booking_date, time(10, 0)),
+            title='Morning'
+        )
+        db.session.add(booking)
+        db.session.commit()
+
+        resp = self.client.get(
+            f'/api/map_details/{self.floor_map.id}?date={booking_date.isoformat()}'
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data['map_details']['id'], self.floor_map.id)
+        self.assertEqual(len(data['mapped_resources']), 2)
+        res = next(r for r in data['mapped_resources'] if r['id'] == self.resource1.id)
+        self.assertEqual(len(res['bookings_on_date']), 1)
+        self.assertEqual(res['bookings_on_date'][0]['title'], 'Morning')
+
+    def test_booking_creation_success(self):
+        """Booking creation returns 201 and persists to DB."""
+        self.login('testuser', 'password')
+        payload = {
+            'resource_id': self.resource1.id,
+            'date_str': date.today().isoformat(),
+            'start_time_str': '11:00',
+            'end_time_str': '12:00',
+            'title': 'Test',
+            'user_name': 'testuser'
+        }
+        resp = self.client.post(
+            '/api/bookings', data=json.dumps(payload), content_type='application/json'
+        )
+        self.assertEqual(resp.status_code, 201)
+        data = resp.get_json()
+        self.assertEqual(data['resource_id'], self.resource1.id)
+        self.assertIsNotNone(Booking.query.get(data['id']))
+
+    def test_booking_creation_conflict(self):
+        """Overlapping booking should return HTTP 409."""
+        self.login('testuser', 'password')
+        booking_date = date.today()
+        existing = Booking(
+            resource_id=self.resource1.id,
+            user_name='someone',
+            start_time=datetime.combine(booking_date, time(9, 0)),
+            end_time=datetime.combine(booking_date, time(10, 0)),
+            title='Existing'
+        )
+        db.session.add(existing)
+        db.session.commit()
+
+        payload = {
+            'resource_id': self.resource1.id,
+            'date_str': booking_date.isoformat(),
+            'start_time_str': '09:30',
+            'end_time_str': '10:30',
+            'title': 'Conflict',
+            'user_name': 'testuser'
+        }
+        resp = self.client.post(
+            '/api/bookings', data=json.dumps(payload), content_type='application/json'
+        )
+        self.assertEqual(resp.status_code, 409)
+
+    def test_booking_cancellation(self):
+        """User can cancel own booking via API."""
+        self.login('testuser', 'password')
+        booking_date = date.today()
+        booking = Booking(
+            resource_id=self.resource1.id,
+            user_name='testuser',
+            start_time=datetime.combine(booking_date, time(13, 0)),
+            end_time=datetime.combine(booking_date, time(14, 0)),
+            title='To cancel'
+        )
+        db.session.add(booking)
+        db.session.commit()
+
+        resp = self.client.delete(f'/api/bookings/{booking.id}')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(Booking.query.get(booking.id))
 
 if __name__ == '__main__':
     unittest.main()
