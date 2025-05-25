@@ -2284,6 +2284,18 @@ def update_booking_by_user(booking_id):
 # Register blueprint after routes are defined
 app.register_blueprint(analytics_bp)
 
+# Exported names for easier importing in tests and other modules
+__all__ = [
+    "app",
+    "db",
+    "User",
+    "Resource",
+    "Booking",
+    "WaitlistEntry",
+    "FloorMap",
+    "email_log",
+]
+
 if __name__ == "__main__":
     # To initialize the DB, you can uncomment the next line and run 'python app.py' once.
     # Then comment it out again to prevent re-initialization on every run.
