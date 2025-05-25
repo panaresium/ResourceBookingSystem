@@ -2207,6 +2207,7 @@ Enter a title for your booking (optional):`);
 
     // --- Accessibility Controls ---
     const toggleHighContrastBtn = document.getElementById('toggle-high-contrast');
+    const themeToggleBtn = document.getElementById('theme-toggle');
     const increaseFontSizeBtn = document.getElementById('increase-font-size');
     const decreaseFontSizeBtn = document.getElementById('decrease-font-size');
     const resetFontSizeBtn = document.getElementById('reset-font-size');
@@ -2227,6 +2228,31 @@ Enter a title for your booking (optional):`);
 
     if (toggleHighContrastBtn) {
         toggleHighContrastBtn.addEventListener('click', toggleHighContrast);
+    }
+
+    // Theme Toggle
+    function applyTheme(theme) {
+        if (theme === 'dark') {
+            document.body.classList.add('dark-theme');
+        } else {
+            document.body.classList.remove('dark-theme');
+        }
+    }
+
+    function toggleTheme() {
+        const newTheme = document.body.classList.toggle('dark-theme') ? 'dark' : 'light';
+        localStorage.setItem('theme', newTheme);
+    }
+
+    function loadThemePreference() {
+        const storedTheme = localStorage.getItem('theme');
+        if (storedTheme === 'dark') {
+            applyTheme('dark');
+        }
+    }
+
+    if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', toggleTheme);
     }
 
     // Font Size Adjustment
@@ -2307,6 +2333,7 @@ Enter a title for your booking (optional):`);
     // Load preferences on script load
     loadHighContrastPreference();
     loadFontSizePreference();
+    loadThemePreference();
 
     // --- Language Selection ---
     const languageSelector = document.getElementById('language-selector');
