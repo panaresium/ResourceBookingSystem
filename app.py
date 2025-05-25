@@ -17,6 +17,7 @@ import logging # Added for logging
 from functools import wraps # For permission_required decorator
 from flask import abort # For permission_required decorator
 from flask_babel import Babel, gettext as _ # For i18n
+from flask_wtf.csrf import CSRFProtect # For CSRF protection
 
 # Base directory of the app - project root
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -30,23 +31,11 @@ if not os.path.exists(DATA_DIR):
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
-# Initialize Babel for i18n
-babel = Babel(app)
-
-# Configurations
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['SECRET_KEY'] = 'dev_secret_key_123!@#' # CHANGE THIS in production!
-
-# Babel Configuration
-app.config['BABEL_DEFAULT_LOCALE'] = 'en'
-app.config['BABEL_DEFAULT_TIMEZONE'] = 'UTC'
-app.config['LANGUAGES'] = ['en'] # Add other language codes here once translations exist e.g. ['en', 'es']
-
-@babel.localeselector
+# Define locale selector function first
 def get_locale():
     # Try to get language from query parameter first
     lang_query = request.args.get('lang')
-    if lang_query and lang_query in app.config.get('LANGUAGES', ['en']):
+    if lang_query and lang_query in app.config.get('LANGUAGES', ['en']): # app needs to be in scope or passed
         return lang_query
     
     # Attempt to get language from user's session (if stored there)
@@ -55,7 +44,24 @@ def get_locale():
     #    return user_lang
 
     # Fallback to Accept-Languages header
+    # Ensure 'app' is accessible here if app.config is used, or pass 'app' if necessary.
+    # For now, assume 'app' is in scope as it was in the original.
     return request.accept_languages.best_match(app.config.get('LANGUAGES', ['en']))
+
+# Initialize Babel for i18n
+babel = Babel(app, locale_selector=get_locale) # Pass the function here
+
+# Configurations
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev_secret_key_123!@#') # Ensure SECRET_KEY is set from env or default
+
+# Initialize CSRF Protection - AFTER app.config['SECRET_KEY'] is set
+csrf = CSRFProtect(app)
+
+# Babel Configuration
+app.config['BABEL_DEFAULT_LOCALE'] = 'en'
+app.config['BABEL_DEFAULT_TIMEZONE'] = 'UTC'
+app.config['LANGUAGES'] = ['en'] # Add other language codes here once translations exist e.g. ['en', 'es']
 
 # Google OAuth Configuration - Recommended to use environment variables
 app.config['GOOGLE_CLIENT_ID'] = os.environ.get('GOOGLE_CLIENT_ID', 'YOUR_GOOGLE_CLIENT_ID_PLACEHOLDER')
@@ -73,10 +79,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(mes
 # For Flask's built-in logger, you might configure it further if needed,
 # but basicConfig provides a good default if running app.py directly.
 # app.logger.setLevel(logging.INFO) # Example if using Flask's logger predominantly
-
-# Google OAuth Configuration - Placeholders
-app.config['GOOGLE_CLIENT_ID'] = ''
-app.config['GOOGLE_CLIENT_SECRET'] = ''
 
 # OAuth 2.0 setup
 # Note: client_secret.json is not used directly by google-auth-oauthlib Flow if client_id and client_secret are set in config.
