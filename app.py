@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template, request, url_for, redirect, session # Added redirect and session
+from flask import Flask, jsonify, render_template, request, url_for, redirect, session, Blueprint # Added Blueprint
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func # Add this
 from datetime import datetime, date, timedelta, time # Ensure all are here
@@ -106,6 +106,9 @@ def get_google_flow():
     )
 
 db = SQLAlchemy(app)
+
+# Blueprint for analytics routes
+analytics_bp = Blueprint('analytics', __name__, url_prefix='/admin/analytics')
 
 # Authlib OAuth 2.0 Client Setup
 oauth = OAuth(app)
@@ -359,8 +362,36 @@ def serve_audit_log_page():
 @permission_required('manage_floor_maps') # Or 'manage_resources' depending on primary function
 def serve_admin_maps():
     # if not current_user.is_admin: # Replaced by decorator
-    #     return redirect(url_for('serve_index')) 
+    #     return redirect(url_for('serve_index'))
     return render_template("admin_maps.html")
+
+# --- Analytics Routes ---
+@analytics_bp.route('/')
+@login_required
+@permission_required('view_analytics')
+def analytics_dashboard():
+    app.logger.info(f"User {current_user.username} accessed analytics dashboard.")
+    return render_template('analytics.html')
+
+
+@analytics_bp.route('/data/bookings')
+@login_required
+@permission_required('view_analytics')
+def analytics_bookings_data():
+    last_30_days = datetime.utcnow() - timedelta(days=30)
+    results = (
+        db.session.query(Resource.name, func.date(Booking.start_time), func.count(Booking.id))
+        .join(Resource)
+        .filter(Booking.start_time >= last_30_days)
+        .group_by(Resource.name, func.date(Booking.start_time))
+        .all()
+    )
+
+    data = {}
+    for resource_name, day, count in results:
+        day_str = day.isoformat()
+        data.setdefault(resource_name, []).append({'date': day_str, 'count': count})
+    return jsonify(data)
 
 @app.route('/map_view/<int:map_id>')
 def serve_map_view(map_id):
@@ -540,7 +571,7 @@ def init_db():
         
         app.logger.info("Adding default roles...")
         try:
-            admin_role = Role(name="Administrator", description="Full system access", permissions="all_permissions")
+            admin_role = Role(name="Administrator", description="Full system access", permissions="all_permissions,view_analytics")
             standard_role = Role(name="StandardUser", description="Can make bookings and view resources", permissions="make_bookings,view_resources")
             db.session.add_all([admin_role, standard_role])
             db.session.commit()
@@ -2034,6 +2065,9 @@ def update_booking_by_user(booking_id):
         app.logger.exception(f"Error updating booking ID {booking_id} for user '{current_user.username}':")
         add_audit_log(action="UPDATE_BOOKING_USER_FAILED", details=f"User '{current_user.username}' failed to update booking ID: {booking_id}. Error: {str(e)}")
         return jsonify({'error': 'Failed to update booking due to a server error.'}), 500
+
+# Register blueprint after routes are defined
+app.register_blueprint(analytics_bp)
 
 if __name__ == "__main__":
     # To initialize the DB, you can uncomment the next line and run 'python app.py' once.
