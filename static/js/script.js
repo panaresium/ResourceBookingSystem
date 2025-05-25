@@ -68,6 +68,32 @@ function hideMessage(element) {
 async function apiCall(url, options = {}, messageElement = null) {
     if (messageElement) showLoading(messageElement, 'Processing...');
 
+    // CSRF Token Handling
+    const protectedMethods = ['POST', 'PUT', 'DELETE', 'PATCH'];
+    const method = options.method ? options.method.toUpperCase() : 'GET';
+
+    if (protectedMethods.includes(method)) {
+        const csrfTokenTag = document.querySelector('meta[name="csrf-token"]');
+        let csrfToken = null;
+        if (csrfTokenTag) {
+            csrfToken = csrfTokenTag.content;
+        }
+
+        if (csrfToken) {
+            if (!options.headers) {
+                options.headers = {};
+            }
+            // Ensure 'Content-Type' for JSON is set if not already, for methods that might send a body
+            if (!options.headers['Content-Type'] && (method === 'POST' || method === 'PUT' || method === 'PATCH') && options.body) {
+                options.headers['Content-Type'] = 'application/json';
+            }
+            options.headers['X-CSRFToken'] = csrfToken;
+        } else {
+            console.warn('CSRF token not found in meta tag for a protected HTTP method.');
+            // Depending on policy, you might want to throw an error here or prevent the call
+        }
+    }
+
     try {
         const response = await fetch(url, options);
         let responseData;
@@ -118,6 +144,8 @@ async function updateAuthLink() {
         setStateLoggedOut();
         return;
     }
+    const userPerformedLoginActionBeforeApiCall = sessionStorage.getItem('userPerformedLoginAction');
+
     const authLinkContainer = document.getElementById('auth-link-container');
     const adminMapsNavLink = document.getElementById('admin-maps-nav-link');
     const welcomeMessageContainer = document.getElementById('welcome-message-container');
@@ -154,10 +182,20 @@ async function updateAuthLink() {
         const data = await apiCall('/api/auth/status'); 
 
         if (data.logged_in && data.user) {
+            // Auto-logout if session is found on startup without explicit login action in this tab
+            if (userPerformedLoginActionBeforeApiCall !== 'true' && 
+                sessionStorage.getItem('autoLoggedOutDueToStartupSession') !== 'true') {
+                console.warn('User authenticated on page load without prior login action in this tab. Performing auto-logout.');
+                sessionStorage.setItem('autoLoggedOutDueToStartupSession', 'true');
+                await handleLogout(); // This will set explicitlyLoggedOut and clear userPerformedLoginAction
+                return; 
+            }
+
             sessionStorage.setItem('loggedInUserUsername', data.user.username);
             sessionStorage.setItem('loggedInUserIsAdmin', data.user.is_admin ? 'true' : 'false');
             sessionStorage.setItem('loggedInUserId', data.user.id);
-            sessionStorage.removeItem('explicitlyLoggedOut'); // Clear flag on successful auth status
+            sessionStorage.removeItem('explicitlyLoggedOut'); 
+            sessionStorage.removeItem('autoLoggedOutDueToStartupSession'); // Clear this flag as user is legitimately logged in now
 
             if (welcomeMessageContainer) {
                 welcomeMessageContainer.textContent = `Welcome, ${data.user.username}!`;
@@ -182,8 +220,11 @@ async function updateAuthLink() {
                 logoutLinkDropdown.removeEventListener('click', handleLogout); // Prevent duplicates
                 logoutLinkDropdown.addEventListener('click', handleLogout);
             }
-        } else {
+        } else { // data.logged_in is false
             setStateLoggedOut();
+            if (sessionStorage.getItem('autoLoggedOutDueToStartupSession') === 'true') {
+                sessionStorage.removeItem('autoLoggedOutDueToStartupSession');
+            }
         }
     } catch (error) {
         // apiCall already logged the error. Reset UI to logged-out state.
@@ -196,19 +237,19 @@ async function handleLogout(event) {
     
     // No specific message element for logout link, errors will be alerted or handled in catch.
     try {
+        sessionStorage.removeItem('userPerformedLoginAction');
+        sessionStorage.removeItem('autoLoggedOutDueToStartupSession'); // Clear this on any explicit logout
+
         // apiCall will throw an error if not response.ok
         const responseData = await apiCall('/api/auth/logout', { method: 'POST' });
 
         console.log("Logout successful from API:", responseData.message || "Logged out");
         sessionStorage.setItem('explicitlyLoggedOut', 'true');
-        // Clear all session storage related to user (already done by setStateLoggedOut via updateAuthLink)
-        // sessionStorage.removeItem('loggedInUserUsername');
-        // sessionStorage.removeItem('loggedInUserIsAdmin');
-        // sessionStorage.removeItem('loggedInUserId');
+        // User data is cleared by setStateLoggedOut called via updateAuthLink
         
-        await updateAuthLink(); // Refresh navigation and UI (will call setStateLoggedOut)
+        await updateAuthLink(); // Refresh navigation and UI
 
-        const loginUrl = document.body.dataset.loginUrl || '/login'; // Ensure loginUrl is defined
+        const loginUrl = document.body.dataset.loginUrl || '/login';
         const currentPath = window.location.pathname;
 
         if (currentPath.startsWith('/admin') || currentPath.startsWith('/profile') || currentPath.startsWith('/my_bookings')) {
@@ -221,6 +262,8 @@ async function handleLogout(event) {
         // If already on login page, updateAuthLink handles UI, no redirect needed.
 
     } catch (error) {
+        sessionStorage.removeItem('userPerformedLoginAction'); // Also clear on failed logout attempt
+        sessionStorage.removeItem('autoLoggedOutDueToStartupSession');
         sessionStorage.setItem('explicitlyLoggedOut', 'true');
         // apiCall helper would have logged the error. Alert a generic message.
         alert("Logout failed. Please try again or check the console for details.");
@@ -570,7 +613,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     sessionStorage.removeItem('loggedInUserId');
                     console.warn("User object missing from successful login response. Storing username only.");
                 }
-                sessionStorage.removeItem('explicitlyLoggedOut'); // Clear flag on successful login
+                sessionStorage.setItem('userPerformedLoginAction', 'true');
+                sessionStorage.removeItem('explicitlyLoggedOut');
+                sessionStorage.removeItem('autoLoggedOutDueToStartupSession');
                 
                 await updateAuthLink(); // Refresh nav/UI elements
                 
@@ -594,7 +639,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const googleLoginBtn = document.getElementById('google-login-btn');
     if (googleLoginBtn) {
         googleLoginBtn.addEventListener('click', function() {
+            sessionStorage.setItem('userPerformedLoginAction', 'true');
             sessionStorage.removeItem('explicitlyLoggedOut');
+            sessionStorage.removeItem('autoLoggedOutDueToStartupSession');
             // Assuming the button itself doesn't have an href, or if it does, it's prevented.
             // The actual redirection to Google's login URL is handled by the backend route /login/google
             window.location.href = '/login/google'; 
