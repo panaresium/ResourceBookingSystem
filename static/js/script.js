@@ -114,6 +114,10 @@ async function apiCall(url, options = {}, messageElement = null) {
 
 // --- Authentication Logic ---
 async function updateAuthLink() {
+    if (sessionStorage.getItem('explicitlyLoggedOut') === 'true') {
+        setStateLoggedOut();
+        return;
+    }
     const authLinkContainer = document.getElementById('auth-link-container');
     const adminMapsNavLink = document.getElementById('admin-maps-nav-link');
     const welcomeMessageContainer = document.getElementById('welcome-message-container');
@@ -153,6 +157,7 @@ async function updateAuthLink() {
             sessionStorage.setItem('loggedInUserUsername', data.user.username);
             sessionStorage.setItem('loggedInUserIsAdmin', data.user.is_admin ? 'true' : 'false');
             sessionStorage.setItem('loggedInUserId', data.user.id);
+            sessionStorage.removeItem('explicitlyLoggedOut'); // Clear flag on successful auth status
 
             if (welcomeMessageContainer) {
                 welcomeMessageContainer.textContent = `Welcome, ${data.user.username}!`;
@@ -195,26 +200,32 @@ async function handleLogout(event) {
         const responseData = await apiCall('/api/auth/logout', { method: 'POST' });
 
         console.log("Logout successful from API:", responseData.message || "Logged out");
-        // Clear all session storage related to user
-        sessionStorage.removeItem('loggedInUserUsername');
-        sessionStorage.removeItem('loggedInUserIsAdmin');
-        sessionStorage.removeItem('loggedInUserId');
+        sessionStorage.setItem('explicitlyLoggedOut', 'true');
+        // Clear all session storage related to user (already done by setStateLoggedOut via updateAuthLink)
+        // sessionStorage.removeItem('loggedInUserUsername');
+        // sessionStorage.removeItem('loggedInUserIsAdmin');
+        // sessionStorage.removeItem('loggedInUserId');
         
-        await updateAuthLink(); // Refresh navigation and UI
+        await updateAuthLink(); // Refresh navigation and UI (will call setStateLoggedOut)
 
-        const loginUrl = document.body.dataset.loginUrl || '/login';
-        if (window.location.pathname.startsWith('/admin')) {
-            window.location.href = '/'; // Redirect from admin to home
-        } else if (window.location.pathname !== loginUrl) {
-            window.location.href = loginUrl; // Redirect to login if not already there
+        const loginUrl = document.body.dataset.loginUrl || '/login'; // Ensure loginUrl is defined
+        const currentPath = window.location.pathname;
+
+        if (currentPath.startsWith('/admin') || currentPath.startsWith('/profile') || currentPath.startsWith('/my_bookings')) {
+            window.location.href = loginUrl;
+        } else if (currentPath !== loginUrl && currentPath !== '/') {
+            window.location.href = loginUrl;
+        } else if (currentPath === '/' && loginUrl !== '/') { // Home page, not the login page itself
+            window.location.reload();
         }
-        // If on login page, updateAuthLink handles UI, no redirect needed.
+        // If already on login page, updateAuthLink handles UI, no redirect needed.
 
     } catch (error) {
+        sessionStorage.setItem('explicitlyLoggedOut', 'true');
         // apiCall helper would have logged the error. Alert a generic message.
         alert("Logout failed. Please try again or check the console for details.");
         // Ensure UI is in a logged-out state even if API call had issues
-        await updateAuthLink();
+        await updateAuthLink(); // This will execute setStateLoggedOut due to the flag
     }
 }
 
@@ -554,11 +565,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     sessionStorage.setItem('loggedInUserId', responseData.user.id);
                 } else {
                     // This case should ideally not happen if API is consistent
-                    sessionStorage.setItem('loggedInUserUsername', username); 
-                    sessionStorage.removeItem('loggedInUserIsAdmin'); 
+                    sessionStorage.setItem('loggedInUserUsername', username);
+                    sessionStorage.removeItem('loggedInUserIsAdmin');
                     sessionStorage.removeItem('loggedInUserId');
                     console.warn("User object missing from successful login response. Storing username only.");
                 }
+                sessionStorage.removeItem('explicitlyLoggedOut'); // Clear flag on successful login
                 
                 await updateAuthLink(); // Refresh nav/UI elements
                 
@@ -575,6 +587,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 // updateAuthLink(); // Optionally, re-update auth links to explicitly show logged-out state
                 console.error('Login attempt failed:', error.message);
             }
+        });
+    }
+
+    // Google Login Button Event Listener
+    const googleLoginBtn = document.getElementById('google-login-btn');
+    if (googleLoginBtn) {
+        googleLoginBtn.addEventListener('click', function() {
+            sessionStorage.removeItem('explicitlyLoggedOut');
+            // Assuming the button itself doesn't have an href, or if it does, it's prevented.
+            // The actual redirection to Google's login URL is handled by the backend route /login/google
+            window.location.href = '/login/google'; 
         });
     }
 
