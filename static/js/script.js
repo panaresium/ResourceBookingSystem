@@ -155,6 +155,7 @@ async function updateAuthLink() {
 
     const authLinkContainer = document.getElementById('auth-link-container');
     const adminMapsNavLink = document.getElementById('admin-maps-nav-link');
+    const userManagementNavLink = document.getElementById('user-management-nav-link');
     const welcomeMessageContainer = document.getElementById('welcome-message-container');
     const userDropdownContainer = document.getElementById('user-dropdown-container');
     const userDropdownButton = document.getElementById('user-dropdown-button');
@@ -181,6 +182,7 @@ async function updateAuthLink() {
             authLinkContainer.style.display = 'list-item';
         }
         if (adminMapsNavLink) adminMapsNavLink.style.display = 'none';
+        if (userManagementNavLink) userManagementNavLink.style.display = 'none';
         if (myBookingsNavLink) myBookingsNavLink.style.display = 'none'; // Added
     }
 
@@ -218,6 +220,9 @@ async function updateAuthLink() {
             if (authLinkContainer) authLinkContainer.style.display = 'none';
             if (adminMapsNavLink) {
                 adminMapsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
+            }
+            if (userManagementNavLink) {
+                userManagementNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
             }
             if (myBookingsNavLink) { // Added
                 myBookingsNavLink.style.display = 'list-item'; // Show if logged in
