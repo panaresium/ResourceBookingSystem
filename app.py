@@ -277,18 +277,18 @@ resource_roles_table = db.Table('resource_roles',
     db.Column('role_id', db.Integer, db.ForeignKey('role.id'), primary_key=True)
 )
 
-class Resource(db.Model): # UserMixin is correctly on User model, not Resource
+class Resource(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
-    capacity = db.Column(db.Integer, nullable=True) # Optional capacity
-    equipment = db.Column(db.String(200), nullable=True) 
-    booking_restriction = db.Column(db.String(50), nullable=True) # e.g., 'admin_only', 'all_users'
-    status = db.Column(db.String(50), nullable=False, default='draft') # Values: 'draft', 'published', 'archived'
+    capacity = db.Column(db.Integer, nullable=True)
+    equipment = db.Column(db.String(200), nullable=True)
+    booking_restriction = db.Column(db.String(50), nullable=True)
+    status = db.Column(db.String(50), nullable=False, default='draft')
     published_at = db.Column(db.DateTime, nullable=True)
-    allowed_user_ids = db.Column(db.Text, nullable=True)  # Comma-separated string of User IDs
-    # REMOVED: allowed_roles = db.Column(db.String(255), nullable=True) 
-    
-    # New fields for floor map integration
+    allowed_user_ids = db.Column(db.Text, nullable=True)
+
+    image_filename = db.Column(db.String(255), nullable=True)  # <-- Add this line
+
     floor_map_id = db.Column(db.Integer, db.ForeignKey('floor_map.id'), nullable=True)
     map_coordinates = db.Column(db.Text, nullable=True) # To store JSON like {'type':'rect', 'x':10, 'y':20, 'w':50, 'h':30}
     
