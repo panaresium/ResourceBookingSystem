@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>User Management - Smart Resource Booking</title>
+    <title>{{ _('User Management - Smart Resource Booking') }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -18,36 +18,36 @@
                         <!-- Username and ▼ icon will be here -->
                     </button>
                     <ul id="user-dropdown-menu" role="menu" style="display:none; position: absolute; top: 100%; left: 0; background-color: #2c3e50; border: 1px solid #555; border-top: none; min-width: 160px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); z-index: 100; list-style-type: none; padding: 0; margin: 0; border-radius: 0 0 4px 4px;">
-                        <li><a href="{{ url_for('serve_profile_page') }}" role="menuitem" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">View Profile</a></li>
-                        <li><a href="#" id="logout-link-dropdown" role="menuitem" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">Logout</a></li>
+                        <li><a href="{{ url_for('serve_profile_page') }}" role="menuitem" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('View Profile') }}</a></li>
+                        <li><a href="#" id="logout-link-dropdown" role="menuitem" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Logout') }}</a></li>
                     </ul>
                 </li>
-                <li><a href="{{ url_for('serve_index') }}">Home</a></li>
-                <li><a href="{{ url_for('serve_new_booking') }}">New Booking</a></li>
-                <li><a href="{{ url_for('serve_resources') }}">View Resources</a></li>
-                <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">Admin Maps</a></li>
-                <li id="user-management-nav-link" style="display:none;"><a href="{{ url_for('serve_user_management_page') }}">User Management</a></li>
-                <li id="log-nav-link" style="display:none;"><a href="{{ url_for('serve_audit_log_page') }}">Audit Logs</a></li>
+                <li><a href="{{ url_for('serve_index') }}">{{ _('Home') }}</a></li>
+                <li><a href="{{ url_for('serve_new_booking') }}">{{ _('New Booking') }}</a></li>
+                <li><a href="{{ url_for('serve_resources') }}">{{ _('View Resources') }}</a></li>
+                <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">{{ _('Admin Maps') }}</a></li>
+                <li id="user-management-nav-link" style="display:none;"><a href="{{ url_for('serve_user_management_page') }}">{{ _('User Management') }}</a></li>
+                <li id="log-nav-link" style="display:none;"><a href="{{ url_for('serve_audit_log_page') }}">{{ _('Audit Logs') }}</a></li>
                 <li id="auth-link-container" style="display:none;"><!-- Login link if not logged in --></li> 
             </ul>
         </nav>
     </header>
 
     <main>
-        <h1>User Management</h1>
-        <button id="add-new-user-btn" class="button">Add New User</button>
+        <h1>{{ _('User Management') }}</h1>
+        <button id="add-new-user-btn" class="button">{{ _('Add New User') }}</button>
         <div id="user-management-status" class="status-message" style="margin-top: 15px;"></div>
 
         <table id="users-table" class="styled-table" style="margin-top: 15px;">
             <thead>
                 <tr>
-                    <th>ID</th>
-                    <th>Username</th>
-                    <th>Email</th>
-                    <th>Admin Status</th>
-                    <th>Roles</th>
-                    <th>Google Connected</th>
-                    <th>Actions</th>
+                    <th>{{ _('ID') }}</th>
+                    <th>{{ _('Username') }}</th>
+                    <th>{{ _('Email') }}</th>
+                    <th>{{ _('Admin Status') }}</th>
+                    <th>{{ _('Roles') }}</th>
+                    <th>{{ _('Google Connected') }}</th>
+                    <th>{{ _('Actions') }}</th>
                 </tr>
             </thead>
             <tbody>
@@ -60,41 +60,41 @@
     <div id="user-form-modal" class="modal" style="display: none;">
         <div class="modal-content">
             <span class="close-modal-btn" data-modal-id="user-form-modal">&times;</span>
-            <h3 id="user-form-modal-title">Add New User</h3>
+            <h3 id="user-form-modal-title">{{ _('Add New User') }}</h3> {# Title will be changed by JS for edit #}
             <form id="user-form">
                 <input type="hidden" id="user-id" name="user_id">
                 
                 <div>
-                    <label for="username">Username:</label>
+                    <label for="username">{{ _('Username:') }}</label>
                     <input type="text" id="username" name="username" required>
                 </div>
                 <div>
-                    <label for="email">Email:</label>
+                    <label for="email">{{ _('Email:') }}</label>
                     <input type="email" id="email" name="email" required>
                 </div>
                 <div>
-                    <label for="password">Password:</label>
+                    <label for="password">{{ _('Password:') }}</label>
                     <input type="password" id="password" name="password">
-                    <small> (Leave blank if not changing for an existing user)</small>
+                    <small> {{ _('(Leave blank if not changing for an existing user)') }}</small>
                 </div>
                 <div>
-                    <label for="confirm-password">Confirm Password:</label>
+                    <label for="confirm-password">{{ _('Confirm Password:') }}</label>
                     <input type="password" id="confirm-password" name="confirm_password">
                 </div>
                 <div>
                     <input type="checkbox" id="is-admin" name="is_admin" value="true">
-                    <label for="is-admin">Is Admin</label>
+                    <label for="is-admin">{{ _('Is Admin') }}</label>
                 </div>
 
                 <div style="margin-top: 15px;">
-                    <h4>Assign Roles:</h4>
+                    <h4>{{ _('Assign Roles:') }}</h4>
                     <div id="user-roles-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;">
                         <!-- Role checkboxes will be populated here by JavaScript -->
-                        <small>Loading roles...</small>
+                        <small>{{ _('Loading roles...') }}</small>
                     </div>
                 </div>
                 
-                <button type="submit" class="button" style="margin-top: 15px;">Save User</button>
+                <button type="submit" class="button" style="margin-top: 15px;">{{ _('Save User') }}</button>
                 <div id="user-form-modal-status" class="status-message" style="margin-top: 10px;"></div>
             </form>
         </div>
@@ -103,18 +103,18 @@
     <hr style="margin-top: 30px; margin-bottom: 30px;">
 
     <section id="role-management-section">
-        <h2>Role Management</h2>
-        <button id="add-new-role-btn" class="button">Add New Role</button>
+        <h2>{{ _('Role Management') }}</h2>
+        <button id="add-new-role-btn" class="button">{{ _('Add New Role') }}</button>
         <div id="role-management-status" class="status-message" style="margin-top: 15px;"></div>
 
         <table id="roles-table" class="styled-table" style="margin-top: 15px;">
             <thead>
                 <tr>
-                    <th>ID</th>
-                    <th>Name</th>
-                    <th>Description</th>
-                    <th>Permissions</th>
-                    <th>Actions</th>
+                    <th>{{ _('ID') }}</th>
+                    <th>{{ _('Name') }}</th>
+                    <th>{{ _('Description') }}</th>
+                    <th>{{ _('Permissions') }}</th>
+                    <th>{{ _('Actions') }}</th>
                 </tr>
             </thead>
             <tbody>
@@ -127,31 +127,31 @@
     <div id="role-form-modal" class="modal" style="display: none;">
         <div class="modal-content">
             <span class="close-modal-btn" data-modal-id="role-form-modal">&times;</span>
-            <h3 id="role-form-modal-title">Add New Role</h3>
+            <h3 id="role-form-modal-title">{{ _('Add New Role') }}</h3> {# Title will be changed by JS for edit #}
             <form id="role-form">
                 <input type="hidden" id="role-id" name="role_id">
                 
                 <div>
-                    <label for="role-name">Role Name:</label>
+                    <label for="role-name">{{ _('Role Name:') }}</label>
                     <input type="text" id="role-name" name="role_name" required>
                 </div>
                 <div>
-                    <label for="role-description">Description:</label>
+                    <label for="role-description">{{ _('Description:') }}</label>
                     <textarea id="role-description" name="role_description" rows="3"></textarea>
                 </div>
                 <div>
-                    <label for="role-permissions">Permissions:</label>
-                    <textarea id="role-permissions" name="role_permissions" rows="3" placeholder="Comma-separated permissions, e.g., edit_resource,view_logs"></textarea>
+                    <label for="role-permissions">{{ _('Permissions:') }}</label>
+                    <textarea id="role-permissions" name="role_permissions" rows="3" placeholder="{{ _('Comma-separated permissions, e.g., edit_resource,view_logs') }}"></textarea>
                 </div>
                 
-                <button type="submit" class="button">Save Role</button>
+                <button type="submit" class="button">{{ _('Save Role') }}</button>
                 <div id="role-form-modal-status" class="status-message" style="margin-top: 10px;"></div>
             </form>
         </div>
     </div>
 
     <footer>
-        <p>&copy; 2024 Smart Resource Booking</p>
+        <p>{{ _('&copy; 2024 Smart Resource Booking') }}</p>
     </footer>
 
     <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>

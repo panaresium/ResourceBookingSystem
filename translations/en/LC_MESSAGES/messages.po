@@ -1,0 +1,640 @@
+# English translations for PROJECT.
+# Copyright (C) 2025 ORGANIZATION
+# This file is distributed under the same license as the PROJECT project.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2025.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PROJECT VERSION\n"
+"Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
+"POT-Creation-Date: 2025-05-25 13:42+0000\n"
+"PO-Revision-Date: 2025-05-25 13:42+0000\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.17.0\n"
+
+#: app.py:112
+msgid "Please log in to access this page."
+msgstr ""
+
+#: app.py:1829
+msgid "Flask app starting..."
+msgstr ""
+
+#: templates/admin_maps.html:6
+msgid "Admin - Floor Maps - Smart Resource Booking"
+msgstr ""
+
+#: templates/admin_maps.html:21 templates/index.html:20
+#: templates/log_view.html:41 templates/map_view.html:133
+#: templates/new_booking.html:20 templates/profile.html:45
+#: templates/resources.html:20 templates/user_management.html:21
+msgid "View Profile"
+msgstr ""
+
+#: templates/admin_maps.html:22 templates/index.html:21
+#: templates/log_view.html:42 templates/map_view.html:134
+#: templates/new_booking.html:21 templates/profile.html:46
+#: templates/resources.html:21 templates/user_management.html:22
+msgid "Logout"
+msgstr ""
+
+#: templates/admin_maps.html:25 templates/index.html:24
+#: templates/log_view.html:45 templates/login.html:12
+#: templates/map_view.html:137 templates/new_booking.html:24
+#: templates/profile.html:49 templates/resources.html:24
+#: templates/user_management.html:25
+msgid "Home"
+msgstr ""
+
+#: templates/admin_maps.html:26 templates/index.html:25
+#: templates/log_view.html:46 templates/login.html:13
+#: templates/map_view.html:138 templates/new_booking.html:25
+#: templates/profile.html:50 templates/resources.html:25
+#: templates/user_management.html:26
+msgid "New Booking"
+msgstr ""
+
+#: templates/admin_maps.html:27 templates/index.html:26
+#: templates/log_view.html:47 templates/login.html:14
+#: templates/map_view.html:139 templates/new_booking.html:26
+#: templates/profile.html:51 templates/resources.html:26
+#: templates/user_management.html:27
+msgid "View Resources"
+msgstr ""
+
+#: templates/admin_maps.html:28 templates/index.html:27
+#: templates/log_view.html:48 templates/login.html:16
+#: templates/map_view.html:140 templates/new_booking.html:27
+#: templates/profile.html:52 templates/resources.html:27
+#: templates/user_management.html:28
+msgid "Admin Maps"
+msgstr ""
+
+#: templates/admin_maps.html:29 templates/log_view.html:49
+#: templates/profile.html:53 templates/user_management.html:29
+#: templates/user_management.html:37
+msgid "User Management"
+msgstr ""
+
+#: templates/admin_maps.html:30 templates/log_view.html:50
+#: templates/log_view.html:57 templates/profile.html:54
+#: templates/user_management.html:30
+msgid "Audit Logs"
+msgstr ""
+
+#: templates/admin_maps.html:37
+msgid "Floor Map Management"
+msgstr ""
+
+#: templates/admin_maps.html:40
+msgid "Upload New Floor Map"
+msgstr ""
+
+#: templates/admin_maps.html:43
+msgid "Map Name:"
+msgstr ""
+
+#: templates/admin_maps.html:47
+msgid "Map Image File:"
+msgstr ""
+
+#: templates/admin_maps.html:50
+msgid "Upload Map"
+msgstr ""
+
+#: templates/admin_maps.html:58
+msgid "Existing Floor Maps"
+msgstr ""
+
+#: templates/admin_maps.html:62
+msgid "Loading maps..."
+msgstr ""
+
+#: templates/admin_maps.html:69
+msgid "Define Areas on Selected Map"
+msgstr ""
+
+#: templates/admin_maps.html:73
+msgid "Selected Map"
+msgstr ""
+
+#: templates/admin_maps.html:77
+msgid "Assign Area to Resource"
+msgstr ""
+
+#: templates/admin_maps.html:79
+msgid "Select Resource:"
+msgstr ""
+
+#: templates/admin_maps.html:85 templates/admin_maps.html:168
+msgid "Booking Permission:"
+msgstr ""
+
+#: templates/admin_maps.html:87
+msgid "Default (Requires Login, No Admin Restriction)"
+msgstr ""
+
+#: templates/admin_maps.html:88 templates/admin_maps.html:171
+msgid "Admin Only"
+msgstr ""
+
+#: templates/admin_maps.html:93
+msgid "Authorized Specific Users (Optional):"
+msgstr ""
+
+#: templates/admin_maps.html:96
+msgid "Loading users..."
+msgstr ""
+
+#: templates/admin_maps.html:101 templates/admin_maps.html:184
+msgid "Authorized Roles (Optional):"
+msgstr ""
+
+#: templates/admin_maps.html:103 templates/admin_maps.html:187
+#: templates/user_management.html:93
+msgid "Loading roles..."
+msgstr ""
+
+#: templates/admin_maps.html:108
+msgid "Coordinates Type: Rectangle (fixed for now)"
+msgstr ""
+
+#: templates/admin_maps.html:112
+msgid "X:"
+msgstr ""
+
+#: templates/admin_maps.html:116
+msgid "Y:"
+msgstr ""
+
+#: templates/admin_maps.html:120
+msgid "Width:"
+msgstr ""
+
+#: templates/admin_maps.html:124
+msgid "Height:"
+msgstr ""
+
+#: templates/admin_maps.html:128
+msgid "Save Area for Resource"
+msgstr ""
+
+#: templates/admin_maps.html:133
+msgid "Edit Selected Area"
+msgstr ""
+
+#: templates/admin_maps.html:134
+msgid "Delete Selected Area Mapping"
+msgstr ""
+
+#: templates/admin_maps.html:139
+msgid ""
+"Select a resource from the dropdown above to see its status or publish "
+"actions."
+msgstr ""
+
+#: templates/admin_maps.html:140
+msgid "Delete Resource"
+msgstr ""
+
+#: templates/admin_maps.html:148
+msgid "Edit Resource Details"
+msgstr ""
+
+#: templates/admin_maps.html:152
+msgid "Name:"
+msgstr ""
+
+#: templates/admin_maps.html:155
+msgid "Capacity:"
+msgstr ""
+
+#: templates/admin_maps.html:158
+msgid "Equipment:"
+msgstr ""
+
+#: templates/admin_maps.html:159
+msgid "e.g., Projector, Whiteboard"
+msgstr ""
+
+#: templates/admin_maps.html:161
+msgid "Status:"
+msgstr ""
+
+#: templates/admin_maps.html:163
+msgid "Draft"
+msgstr ""
+
+#: templates/admin_maps.html:164
+msgid "Published"
+msgstr ""
+
+#: templates/admin_maps.html:165
+msgid "Archived"
+msgstr ""
+
+#: templates/admin_maps.html:170
+msgid "Default (All Authenticated Users unless specified below)"
+msgstr ""
+
+#: templates/admin_maps.html:176
+msgid "Authorized Specific Users (Optional)"
+msgstr ""
+
+#: templates/admin_maps.html:177
+msgid "If specified, only these users (and admins) can book."
+msgstr ""
+
+#: templates/admin_maps.html:185
+msgid ""
+"If specified, only users with these roles can book. This complements "
+"user-specific permissions."
+msgstr ""
+
+#: templates/admin_maps.html:191
+msgid "Save Changes"
+msgstr ""
+
+#: templates/admin_maps.html:199 templates/index.html:46
+#: templates/log_view.html:100 templates/login.html:43
+#: templates/map_view.html:184 templates/new_booking.html:84
+#: templates/profile.html:70 templates/resources.html:102
+#: templates/user_management.html:154
+msgid "&copy; 2024 Smart Resource Booking"
+msgstr ""
+
+#: templates/index.html:6
+msgid "Smart Resource Booking - Dashboard"
+msgstr ""
+
+#: templates/index.html:32
+msgid "Welcome to Smart Resource Booking"
+msgstr ""
+
+#: templates/index.html:33
+msgid "Your smart solution for managing and booking resources efficiently."
+msgstr ""
+
+#: templates/index.html:35
+msgid "Available Resources (Now)"
+msgstr ""
+
+#: templates/index.html:40
+msgid "Quick Actions"
+msgstr ""
+
+#: templates/index.html:42
+msgid "Book a Room"
+msgstr ""
+
+#: templates/index.html:48
+msgid "Accessibility"
+msgstr ""
+
+#: templates/index.html:49
+msgid "Toggle High Contrast"
+msgstr ""
+
+#: templates/index.html:50
+msgid "Increase Font Size (A+)"
+msgstr ""
+
+#: templates/index.html:51
+msgid "Decrease Font Size (A-)"
+msgstr ""
+
+#: templates/index.html:52
+msgid "Reset Font Size"
+msgstr ""
+
+#: templates/log_view.html:6
+msgid "Audit Logs - Smart Resource Booking"
+msgstr ""
+
+#: templates/log_view.html:61
+msgid "Filters"
+msgstr ""
+
+#: templates/log_view.html:62
+msgid "Start Date:"
+msgstr ""
+
+#: templates/log_view.html:65
+msgid "End Date:"
+msgstr ""
+
+#: templates/log_view.html:68 templates/login.html:23 templates/profile.html:63
+#: templates/user_management.html:68
+msgid "Username:"
+msgstr ""
+
+#: templates/log_view.html:69
+msgid "Filter by Username"
+msgstr ""
+
+#: templates/log_view.html:71
+msgid "Action Type:"
+msgstr ""
+
+#: templates/log_view.html:72
+msgid "Filter by Action"
+msgstr ""
+
+#: templates/log_view.html:74
+msgid "Apply Filters"
+msgstr ""
+
+#: templates/log_view.html:75
+msgid "Clear Filters"
+msgstr ""
+
+#: templates/log_view.html:81
+msgid "Timestamp"
+msgstr ""
+
+#: templates/log_view.html:82
+msgid "User ID"
+msgstr ""
+
+#: templates/log_view.html:83 templates/user_management.html:45
+msgid "Username"
+msgstr ""
+
+#: templates/log_view.html:84
+msgid "Action"
+msgstr ""
+
+#: templates/log_view.html:85
+msgid "Details"
+msgstr ""
+
+#: templates/log_view.html:93
+msgid "Previous"
+msgstr ""
+
+#: templates/log_view.html:94
+msgid "Page 1 of 1"
+msgstr ""
+
+#: templates/log_view.html:95
+msgid "Next"
+msgstr ""
+
+#: templates/login.html:6
+msgid "Login - Smart Resource Booking"
+msgstr ""
+
+#: templates/login.html:15 templates/login.html:20 templates/login.html:30
+msgid "Login"
+msgstr ""
+
+#: templates/login.html:27 templates/user_management.html:76
+msgid "Password:"
+msgstr ""
+
+#: templates/login.html:34
+msgid "OR"
+msgstr ""
+
+#: templates/login.html:36
+msgid "Sign in with Google"
+msgstr ""
+
+#: templates/map_view.html:7
+msgid "Map View - Smart Resource Booking"
+msgstr ""
+
+#: templates/map_view.html:147
+msgid "Map View"
+msgstr ""
+
+#: templates/map_view.html:150
+msgid "View Availability for Date:"
+msgstr ""
+
+#: templates/map_view.html:158
+msgid "Loading map and resources..."
+msgstr ""
+
+#: templates/map_view.html:163
+msgid "Close modal"
+msgstr ""
+
+#: templates/map_view.html:164
+msgid "Book Resource"
+msgstr ""
+
+#: templates/map_view.html:165 templates/new_booking.html:36
+msgid "Resource:"
+msgstr ""
+
+#: templates/map_view.html:166 templates/new_booking.html:42
+msgid "Date:"
+msgstr ""
+
+#: templates/map_view.html:173
+msgid "Booking Title (optional):"
+msgstr ""
+
+#: templates/map_view.html:177
+msgid "Confirm Booking"
+msgstr ""
+
+#: templates/new_booking.html:6
+msgid "Smart Resource Booking - New Booking"
+msgstr ""
+
+#: templates/new_booking.html:32
+msgid "Create New Booking"
+msgstr ""
+
+#: templates/new_booking.html:38
+msgid "Loading resources..."
+msgstr ""
+
+#: templates/new_booking.html:48
+msgid "Quick Time Options"
+msgstr ""
+
+#: templates/new_booking.html:51
+msgid "Morning (8-12 AM)"
+msgstr ""
+
+#: templates/new_booking.html:55
+msgid "Afternoon (1-5 PM)"
+msgstr ""
+
+#: templates/new_booking.html:59
+msgid "Full day (8AM-5PM)"
+msgstr ""
+
+#: templates/new_booking.html:63
+msgid "Manual Time"
+msgstr ""
+
+#: templates/new_booking.html:70
+msgid "Start Time:"
+msgstr ""
+
+#: templates/new_booking.html:74
+msgid "End Time:"
+msgstr ""
+
+#: templates/new_booking.html:79
+msgid "Find Availability"
+msgstr ""
+
+#: templates/profile.html:6
+msgid "User Profile - Smart Resource Booking"
+msgstr ""
+
+#: templates/profile.html:60
+msgid "User Profile"
+msgstr ""
+
+#: templates/profile.html:64 templates/user_management.html:72
+msgid "Email:"
+msgstr ""
+
+#: templates/resources.html:6
+msgid "Smart Resource Booking - Resource Availability"
+msgstr ""
+
+#: templates/resources.html:32
+msgid "Resource Availability"
+msgstr ""
+
+#: templates/resources.html:34
+msgid "Select Date:"
+msgstr ""
+
+#: templates/resources.html:38
+msgid "Select Room:"
+msgstr ""
+
+#: templates/resources.html:41
+msgid "Loading rooms..."
+msgstr ""
+
+#: templates/resources.html:48
+msgid "Time Slot"
+msgstr ""
+
+#: templates/resources.html:49
+msgid "Status"
+msgstr ""
+
+#: templates/resources.html:55 templates/resources.html:59
+#: templates/resources.html:63 templates/resources.html:67
+#: templates/resources.html:71 templates/resources.html:75
+#: templates/resources.html:79 templates/resources.html:83
+#: templates/resources.html:87
+msgid "Available"
+msgstr ""
+
+#: templates/resources.html:93
+msgid "View by Floor Map"
+msgstr ""
+
+#: templates/resources.html:97
+msgid "Loading floor maps..."
+msgstr ""
+
+#: templates/user_management.html:6
+msgid "User Management - Smart Resource Booking"
+msgstr ""
+
+#: templates/user_management.html:38 templates/user_management.html:63
+msgid "Add New User"
+msgstr ""
+
+#: templates/user_management.html:44 templates/user_management.html:113
+msgid "ID"
+msgstr ""
+
+#: templates/user_management.html:46
+msgid "Email"
+msgstr ""
+
+#: templates/user_management.html:47
+msgid "Admin Status"
+msgstr ""
+
+#: templates/user_management.html:48
+msgid "Roles"
+msgstr ""
+
+#: templates/user_management.html:49
+msgid "Google Connected"
+msgstr ""
+
+#: templates/user_management.html:50 templates/user_management.html:117
+msgid "Actions"
+msgstr ""
+
+#: templates/user_management.html:78
+msgid "(Leave blank if not changing for an existing user)"
+msgstr ""
+
+#: templates/user_management.html:81
+msgid "Confirm Password:"
+msgstr ""
+
+#: templates/user_management.html:86
+msgid "Is Admin"
+msgstr ""
+
+#: templates/user_management.html:90
+msgid "Assign Roles:"
+msgstr ""
+
+#: templates/user_management.html:97
+msgid "Save User"
+msgstr ""
+
+#: templates/user_management.html:106
+msgid "Role Management"
+msgstr ""
+
+#: templates/user_management.html:107 templates/user_management.html:130
+msgid "Add New Role"
+msgstr ""
+
+#: templates/user_management.html:114
+msgid "Name"
+msgstr ""
+
+#: templates/user_management.html:115
+msgid "Description"
+msgstr ""
+
+#: templates/user_management.html:116
+msgid "Permissions"
+msgstr ""
+
+#: templates/user_management.html:135
+msgid "Role Name:"
+msgstr ""
+
+#: templates/user_management.html:139
+msgid "Description:"
+msgstr ""
+
+#: templates/user_management.html:143
+msgid "Permissions:"
+msgstr ""
+
+#: templates/user_management.html:144
+msgid "Comma-separated permissions, e.g., edit_resource,view_logs"
+msgstr ""
+
+#: templates/user_management.html:147
+msgid "Save Role"
+msgstr ""
+

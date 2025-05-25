@@ -3,44 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Smart Resource Booking</title>
+    <title>{{ _('Login - Smart Resource Booking') }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <nav>
         <ul>
-            <li><a href="{{ url_for('serve_index') }}">Home</a></li>
-            <li><a href="{{ url_for('serve_new_booking') }}">New Booking</a></li>
-            <li><a href="{{ url_for('serve_resources') }}">View Resources</a></li>
-            <li id="auth-link-container"><a href="{{ url_for('serve_login') }}">Login</a></li>
-            <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">Admin Maps</a></li>
+            <li><a href="{{ url_for('serve_index') }}">{{ _('Home') }}</a></li>
+            <li><a href="{{ url_for('serve_new_booking') }}">{{ _('New Booking') }}</a></li>
+            <li><a href="{{ url_for('serve_resources') }}">{{ _('View Resources') }}</a></li>
+            <li id="auth-link-container"><a href="{{ url_for('serve_login') }}">{{ _('Login') }}</a></li>
+            <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">{{ _('Admin Maps') }}</a></li>
         </ul>
     </nav>
     <main>
-        <h2>Login</h2>
+        <h2>{{ _('Login') }}</h2>
         <form id="login-form">
             <div>
-                <label for="username">Username:</label>
+                <label for="username">{{ _('Username:') }}</label>
                 <input type="text" id="username" name="username">
             </div>
             <div>
-                <label for="password">Password:</label>
+                <label for="password">{{ _('Password:') }}</label>
                 <input type="password" id="password" name="password">
             </div>
-            <button type="submit">Login</button>
+            <button type="submit">{{ _('Login') }}</button>
         </form>
         <div style="margin-top: 20px; text-align: center;">
 
-            <p>OR</p>
+            <p>{{ _('OR') }}</p>
             <a href="{{ url_for('login_google') }}" class="button google-signin-button">
-                Sign in with Google
+                {{ _('Sign in with Google') }}
             </a>
 
         </div>
         <div id="login-message" aria-live="polite"></div>
     </main>
     <footer>
-        <p>&copy; 2024 Smart Resource Booking</p>
+        <p>{{ _('&copy; 2024 Smart Resource Booking') }}</p>
     </footer>
     <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
 </body>

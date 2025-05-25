@@ -2003,4 +2003,157 @@ Enter a title for your booking (optional):`);
     if (availableResourcesListDiv) {
         displayAvailableResourcesNow();
     }
+
+    // --- Accessibility Controls ---
+    const toggleHighContrastBtn = document.getElementById('toggle-high-contrast');
+    const increaseFontSizeBtn = document.getElementById('increase-font-size');
+    const decreaseFontSizeBtn = document.getElementById('decrease-font-size');
+    const resetFontSizeBtn = document.getElementById('reset-font-size');
+
+    // High Contrast
+    function toggleHighContrast() {
+        document.body.classList.toggle('high-contrast');
+        const isEnabled = document.body.classList.contains('high-contrast');
+        localStorage.setItem('highContrastEnabled', isEnabled);
+    }
+
+    function loadHighContrastPreference() {
+        const isEnabled = localStorage.getItem('highContrastEnabled') === 'true';
+        if (isEnabled) {
+            document.body.classList.add('high-contrast');
+        }
+    }
+
+    if (toggleHighContrastBtn) {
+        toggleHighContrastBtn.addEventListener('click', toggleHighContrast);
+    }
+
+    // Font Size Adjustment
+    const BASE_FONT_SIZE_REM = 1.0; // Corresponds to 1rem, assuming root font-size in CSS is 16px
+    const FONT_SIZE_STEP_REM = 0.1;
+    const MAX_FONT_SIZE_REM = 2.0; // Max 2rem
+    const MIN_FONT_SIZE_REM = 0.7; // Min 0.7rem
+
+    function getCurrentRootFontSizeRem() {
+        const currentSizeStyle = document.documentElement.style.fontSize;
+        if (currentSizeStyle && currentSizeStyle.endsWith('rem')) {
+            return parseFloat(currentSizeStyle);
+        } else if (currentSizeStyle && currentSizeStyle.endsWith('px')) {
+            // Convert px to rem if :root has px (should not happen with current CSS)
+            const rootBasePx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-size').trim().replace('px','')) || 16;
+            return parseFloat(currentSizeStyle) / rootBasePx;
+        }
+        // If no style is set directly on <html>, check computed style from CSS (:root font-size)
+        const computedRootFontSize = getComputedStyle(document.documentElement).fontSize;
+        if (computedRootFontSize && computedRootFontSize.endsWith('px')) {
+             const rootBasePxFromCSS = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-size').trim().replace('px','')) || 16;
+            return parseFloat(computedRootFontSize) / rootBasePxFromCSS;
+        }
+        return BASE_FONT_SIZE_REM; // Default if nothing is found
+    }
+
+
+    function changeFontSize(amountInRem) {
+        let currentSizeRem = getCurrentRootFontSizeRem();
+        let newSizeRem = currentSizeRem + amountInRem;
+
+        // Clamp the new font size
+        newSizeRem = Math.max(MIN_FONT_SIZE_REM, Math.min(newSizeRem, MAX_FONT_SIZE_REM));
+        
+        document.documentElement.style.fontSize = `${newSizeRem}rem`;
+        localStorage.setItem('rootFontSize', `${newSizeRem}rem`);
+    }
+
+    function increaseFontSize() {
+        changeFontSize(FONT_SIZE_STEP_REM);
+    }
+
+    function decreaseFontSize() {
+        changeFontSize(-FONT_SIZE_STEP_REM);
+    }
+
+    function resetFontSize() {
+        document.documentElement.style.removeProperty('font-size');
+        localStorage.removeItem('rootFontSize');
+        // Re-apply the :root default from CSS by forcing a re-evaluation (if needed)
+        // Or simply rely on the CSS default to take over.
+        // Forcing a re-evaluation can be tricky. Easiest is to set it to initial or empty.
+        // The browser will then use the CSS defined on :root or its default.
+    }
+
+    function loadFontSizePreference() {
+        const savedFontSize = localStorage.getItem('rootFontSize');
+        if (savedFontSize) {
+            // Validate before applying (e.g. ensure it's a rem value)
+            if (savedFontSize.endsWith('rem') && !isNaN(parseFloat(savedFontSize))) {
+                 document.documentElement.style.fontSize = savedFontSize;
+            } else {
+                localStorage.removeItem('rootFontSize'); // Clear invalid value
+            }
+        }
+    }
+
+    if (increaseFontSizeBtn) {
+        increaseFontSizeBtn.addEventListener('click', increaseFontSize);
+    }
+    if (decreaseFontSizeBtn) {
+        decreaseFontSizeBtn.addEventListener('click', decreaseFontSize);
+    }
+    if (resetFontSizeBtn) {
+        resetFontSizeBtn.addEventListener('click', resetFontSize);
+    }
+
+    // Load preferences on script load
+    loadHighContrastPreference();
+    loadFontSizePreference();
+
+    // --- Language Selection ---
+    const languageSelector = document.getElementById('language-selector');
+
+    function handleLanguageChange() {
+        const selectedLang = languageSelector.value;
+        localStorage.setItem('selectedLanguage', selectedLang);
+        
+        // Update the lang query parameter and reload
+        const currentParams = new URLSearchParams(window.location.search);
+        currentParams.set('lang', selectedLang);
+        window.location.search = currentParams.toString();
+    }
+
+    function loadLanguagePreference() {
+        const storedLang = localStorage.getItem('selectedLanguage');
+        const currentParams = new URLSearchParams(window.location.search);
+        const queryLang = currentParams.get('lang');
+
+        if (storedLang) {
+            if (languageSelector) languageSelector.value = storedLang;
+            // If there's a language in localStorage, and it's not already in the URL,
+            // or if it's different from the one in the URL, update the URL.
+            if (queryLang !== storedLang) {
+                currentParams.set('lang', storedLang);
+                // This redirect ensures the URL reflects the stored preference,
+                // and the backend get_locale can pick it up.
+                // This should ideally only redirect if necessary to avoid loops.
+                // The condition queryLang !== storedLang helps prevent immediate redirect loops.
+                window.location.search = currentParams.toString();
+                return; // Return to avoid further processing if a redirect is happening
+            }
+        } else if (queryLang && languageSelector) {
+            // If no storedLang, but lang in query, update dropdown and localStorage
+            languageSelector.value = queryLang;
+            localStorage.setItem('selectedLanguage', queryLang);
+        }
+        // If languageSelector does not exist on the page, do nothing further.
+        // This can happen on pages that don't include the accessibility footer (e.g. login page if it uses a different base template)
+        // However, the task implies index.html is the primary target for the selector.
+    }
+
+    if (languageSelector) {
+        languageSelector.addEventListener('change', handleLanguageChange);
+    }
+
+    // Load language preference - this needs to be careful about redirect loops
+    // The current logic in loadLanguagePreference tries to mitigate this.
+    loadLanguagePreference();
+
 });
