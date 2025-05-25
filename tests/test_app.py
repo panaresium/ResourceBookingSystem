@@ -263,6 +263,48 @@ class AppTests(unittest.TestCase):
         self.assertIn('date', first_entry)
         self.assertIn('count', first_entry)
 
+    def test_calendar_page_and_api(self):
+        """Calendar page requires login and returns events."""
+        # Not logged in -> redirect
+        resp = self.client.get('/calendar', follow_redirects=False)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn('/login', resp.location)
+
+        self.login('testuser', 'password')
+
+        start = datetime.utcnow()
+        end = start + timedelta(hours=1)
+        booking = Booking(resource_id=self.resource1.id, user_name='testuser', start_time=start, end_time=end, title='CalTest')
+        db.session.add(booking)
+        db.session.commit()
+
+        resp_page = self.client.get('/calendar')
+        self.assertEqual(resp_page.status_code, 200)
+
+        resp_events = self.client.get('/api/bookings/calendar')
+        self.assertEqual(resp_events.status_code, 200)
+        events = resp_events.get_json()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['id'], booking.id)
+
+    def test_update_booking_time_via_api(self):
+        """Moving a booking updates its time."""
+        self.login('testuser', 'password')
+        start = datetime.utcnow()
+        end = start + timedelta(hours=1)
+        booking = Booking(resource_id=self.resource1.id, user_name='testuser', start_time=start, end_time=end, title='MoveMe')
+        db.session.add(booking)
+        db.session.commit()
+
+        new_start = start + timedelta(hours=2)
+        new_end = end + timedelta(hours=2)
+        payload = {'start_time': new_start.isoformat(), 'end_time': new_end.isoformat()}
+        resp = self.client.put(f'/api/bookings/{booking.id}', data=json.dumps(payload), content_type='application/json')
+        self.assertEqual(resp.status_code, 200)
+        updated = Booking.query.get(booking.id)
+        self.assertEqual(updated.start_time, new_start)
+        self.assertEqual(updated.end_time, new_end)
+
 
 
 if __name__ == '__main__':

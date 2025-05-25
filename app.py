@@ -395,6 +395,13 @@ def serve_my_bookings_page():
     app.logger.info(f"User {current_user.username} accessed My Bookings page.")
     return render_template("my_bookings.html")
 
+@app.route("/calendar")
+@login_required
+def serve_calendar():
+    """Serves the calendar view."""
+    app.logger.info(f"User {current_user.username} accessed Calendar page.")
+    return render_template("calendar.html")
+
 # --- Permission Decorator ---
 def permission_required(permission):
     def decorator(f):
@@ -2132,6 +2139,27 @@ def get_my_bookings():
         app.logger.exception(f"Error fetching bookings for user '{current_user.username}':")
         return jsonify({'error': 'Failed to fetch your bookings due to a server error.'}), 500
 
+@app.route('/api/bookings/calendar', methods=['GET'])
+@login_required
+def bookings_calendar():
+    """Return bookings for the current user in FullCalendar format."""
+    try:
+        user_bookings = Booking.query.filter_by(user_name=current_user.username).all()
+        events = []
+        for booking in user_bookings:
+            resource = Resource.query.get(booking.resource_id)
+            title = booking.title or (resource.name if resource else 'Booking')
+            events.append({
+                'id': booking.id,
+                'title': title,
+                'start': booking.start_time.isoformat(),
+                'end': booking.end_time.isoformat()
+            })
+        return jsonify(events), 200
+    except Exception as e:
+        app.logger.exception("Error fetching calendar bookings:")
+        return jsonify({'error': 'Failed to fetch bookings.'}), 500
+
 @app.route('/api/bookings/<int:booking_id>', methods=['DELETE'])
 @login_required
 def delete_booking_by_user(booking_id):
@@ -2218,32 +2246,52 @@ def update_booking_by_user(booking_id):
             app.logger.warning(f"User '{current_user.username}' unauthorized attempt to update booking ID: {booking_id} owned by '{booking.user_name}'.")
             return jsonify({'error': 'You are not authorized to update this booking.'}), 403
 
+        old_title = booking.title
+        old_start_time = booking.start_time
+        old_end_time = booking.end_time
+
         data = request.get_json()
         if not data:
             app.logger.warning(f"User '{current_user.username}' attempt to update booking ID: {booking_id} with no JSON data.")
             return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
 
-        new_title = data.get('title')
-        if not new_title or not str(new_title).strip():
-            app.logger.warning(f"User '{current_user.username}' attempt to update booking ID: {booking_id} without providing a title.")
-            return jsonify({'error': 'Title is required and cannot be empty.'}), 400
-        
-        new_title = str(new_title).strip()
-        old_title = booking.title
+        updated = False
 
-        if old_title == new_title:
-            app.logger.info(f"User '{current_user.username}' attempted to update booking ID: {booking_id} with the same title: '{new_title}'. No change made.")
-            # Return current booking details as if it were updated, to provide consistent response format
-            resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
-            return jsonify({
-                'id': booking.id, 'resource_id': booking.resource_id, 'resource_name': resource_name,
-                'user_name': booking.user_name, 'start_time': booking.start_time.isoformat(),
-                'end_time': booking.end_time.isoformat(), 'title': booking.title
-            }), 200
+        if 'title' in data:
+            new_title = str(data.get('title', '')).strip()
+            if not new_title:
+                return jsonify({'error': 'Title cannot be empty.'}), 400
+            old_title = booking.title
+            if new_title != old_title:
+                booking.title = new_title
+                updated = True
 
+        if 'start_time' in data or 'end_time' in data:
+            new_start_str = data.get('start_time')
+            new_end_str = data.get('end_time')
+            if not new_start_str or not new_end_str:
+                return jsonify({'error': 'start_time and end_time are required.'}), 400
+            try:
+                new_start = datetime.fromisoformat(new_start_str)
+                new_end = datetime.fromisoformat(new_end_str)
+            except ValueError:
+                return jsonify({'error': 'Invalid datetime format.'}), 400
+            booking.start_time = new_start
+            booking.end_time = new_end
+            updated = True
 
-        booking.title = new_title
+        if not updated:
+            return jsonify({'error': 'No changes supplied.'}), 400
+
         db.session.commit()
+
+        changes = []
+        if 'title' in data and booking.title != old_title:
+            changes.append(f"title from '{old_title}' to '{booking.title}'")
+        if ('start_time' in data or 'end_time' in data) and (booking.start_time != old_start_time or booking.end_time != old_end_time):
+            changes.append(
+                f"time from {old_start_time.isoformat()}-{old_end_time.isoformat()} to {booking.start_time.isoformat()}-{booking.end_time.isoformat()}"
+            )
 
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
 
@@ -2253,17 +2301,22 @@ def update_booking_by_user(booking_id):
                 msg = Message(
                     subject="Booking Updated",
                     recipients=[current_user.email],
-                    body=f"Your booking for {resource_name} on {booking.start_time.strftime('%Y-%m-%d')} has been updated. New title: {booking.title}."
+                    body=(
+                        f"Your booking for {resource_name} has been updated. "
+                        f"New time: {booking.start_time.strftime('%Y-%m-%d %H:%M')} - {booking.end_time.strftime('%Y-%m-%d %H:%M')}. "
+                        f"Title: {booking.title}."
+                    )
                 )
                 mail.send(msg)
             except Exception:
                 app.logger.exception(f"Failed to send booking update email to {current_user.email}:")
 
+        change_text = '; '.join(changes) if changes else 'no changes'
         add_audit_log(
             action="UPDATE_BOOKING_USER",
-            details=f"User '{current_user.username}' updated booking ID: {booking.id} for resource '{resource_name}'. Title changed from '{old_title}' to '{new_title}'.",
+            details=f"User '{current_user.username}' updated booking ID: {booking.id} for resource '{resource_name}'. Changes: {change_text}.",
         )
-        app.logger.info(f"User '{current_user.username}' successfully updated title for booking ID: {booking.id} from '{old_title}' to '{new_title}'.")
+        app.logger.info(f"User '{current_user.username}' updated booking ID: {booking.id}. Changes: {change_text}.")
         
         return jsonify({
             'id': booking.id,

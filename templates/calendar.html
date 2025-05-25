@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Booking Calendar') }}{% endblock %}
+
+{% block head_extra %}
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<h2>{{ _('Booking Calendar') }}</h2>
+<div id="calendar"></div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+<script src="{{ url_for('static', filename='js/calendar.js') }}" defer></script>
+{% endblock %}
