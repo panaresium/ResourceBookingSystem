@@ -68,6 +68,13 @@ function hideMessage(element) {
 async function apiCall(url, options = {}, messageElement = null) {
     if (messageElement) showLoading(messageElement, 'Processing...');
 
+    // Always include cookies for same-origin requests. This ensures CSRF-protected
+    // endpoints like logout receive the user's session cookie even when fetch
+    // options omit the credentials field.
+    if (!options.credentials) {
+        options.credentials = 'same-origin';
+    }
+
     // CSRF Token Handling
     const protectedMethods = ['POST', 'PUT', 'DELETE', 'PATCH'];
     const method = options.method ? options.method.toUpperCase() : 'GET';
