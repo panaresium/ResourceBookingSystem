@@ -100,14 +100,32 @@ login_manager.login_message = 'Please log in to access this page.'
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+# Association table for User and Role (Many-to-Many)
+user_roles_table = db.Table('user_roles',
+    db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key=True),
+    db.Column('role_id', db.Integer, db.ForeignKey('role.id'), primary_key=True)
+)
+
+class Role(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
+    description = db.Column(db.String(255), nullable=True)
+    permissions = db.Column(db.Text, nullable=True)  # e.g., comma-separated: "edit_resource,delete_user"
+
+    def __repr__(self):
+        return f'<Role {self.name}>'
+
 class User(db.Model, UserMixin): 
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False) # Optional for now, but good practice
     password_hash = db.Column(db.String(256), nullable=False) # Increased length for potentially longer hashes
-    is_admin = db.Column(db.Boolean, default=False, nullable=False)
+    is_admin = db.Column(db.Boolean, default=False, nullable=False) # Kept for now
     google_id = db.Column(db.String(200), nullable=True, unique=True)
     google_email = db.Column(db.String(200), nullable=True)
+    
+    roles = db.relationship('Role', secondary=user_roles_table,
+                            backref=db.backref('users', lazy='dynamic'))
 
     def __repr__(self):
         return f'<User {self.username} (Admin: {self.is_admin})>'
@@ -128,6 +146,12 @@ class FloorMap(db.Model):
     def __repr__(self):
         return f"<FloorMap {self.name} ({self.image_filename})>"
 
+# Association table for Resource and Role (Many-to-Many for resource-specific role permissions)
+resource_roles_table = db.Table('resource_roles',
+    db.Column('resource_id', db.Integer, db.ForeignKey('resource.id'), primary_key=True),
+    db.Column('role_id', db.Integer, db.ForeignKey('role.id'), primary_key=True)
+)
+
 class Resource(db.Model): # UserMixin is correctly on User model, not Resource
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
@@ -137,7 +161,7 @@ class Resource(db.Model): # UserMixin is correctly on User model, not Resource
     status = db.Column(db.String(50), nullable=False, default='draft') # Values: 'draft', 'published', 'archived'
     published_at = db.Column(db.DateTime, nullable=True)
     allowed_user_ids = db.Column(db.Text, nullable=True)  # Comma-separated string of User IDs
-    allowed_roles = db.Column(db.String(255), nullable=True) # Comma-separated string of role names (e.g., 'admin', 'standard_user')
+    # REMOVED: allowed_roles = db.Column(db.String(255), nullable=True) 
     
     # New fields for floor map integration
     floor_map_id = db.Column(db.Integer, db.ForeignKey('floor_map.id'), nullable=True)
@@ -146,6 +170,10 @@ class Resource(db.Model): # UserMixin is correctly on User model, not Resource
     # Relationships
     bookings = db.relationship('Booking', backref='resource_booked', lazy=True, cascade="all, delete-orphan")
     floor_map = db.relationship('FloorMap', backref=db.backref('resources', lazy='dynamic')) # Optional but useful
+    
+    # RBAC: Many-to-many relationship for roles that can book/access this resource
+    roles = db.relationship('Role', secondary=resource_roles_table,
+                            backref=db.backref('allowed_resources', lazy='dynamic'))
 
     def __repr__(self):
         return f"<Resource {self.name}>"
@@ -186,6 +214,15 @@ def serve_profile_page():
     return render_template("profile.html", 
                            username=current_user.username, 
                            email=current_user.email)
+
+@app.route('/admin/users_manage')
+@login_required
+def serve_user_management_page():
+    if not current_user.is_admin:
+        app.logger.warning(f"Non-admin user {current_user.username} attempted to access User Management page.")
+        return redirect(url_for('serve_index'))
+    app.logger.info(f"Admin user {current_user.username} accessed User Management page.")
+    return render_template("user_management.html")
 
 @app.route('/admin/maps')
 @login_required # Ensures user is logged in
@@ -313,10 +350,14 @@ def init_db():
         app.logger.info("Database tables creation/verification step completed.")
         
         app.logger.info("Attempting to delete existing data in corrected order...")
-        # Corrected Deletion Order: Booking -> Resource -> FloorMap -> User
+        # Corrected Deletion Order: Booking -> resource_roles_table -> Resource -> FloorMap -> user_roles_table -> User -> Role
         app.logger.info("Deleting existing Bookings...")
         num_bookings_deleted = db.session.query(Booking).delete()
         app.logger.info(f"Deleted {num_bookings_deleted} Bookings.")
+
+        app.logger.info("Deleting existing Resource-Role associations...")
+        db.session.execute(resource_roles_table.delete()) # Clear association table
+        app.logger.info("Resource-Role associations deleted.")
 
         app.logger.info("Deleting existing Resources...")
         num_resources_deleted = db.session.query(Resource).delete()
@@ -325,10 +366,18 @@ def init_db():
         app.logger.info("Deleting existing FloorMaps...") 
         num_floormaps_deleted = db.session.query(FloorMap).delete()
         app.logger.info(f"Deleted {num_floormaps_deleted} FloorMaps.")
+
+        app.logger.info("Deleting existing User-Role associations...")
+        db.session.execute(user_roles_table.delete()) # Clear association table
+        app.logger.info("User-Role associations deleted.")
             
         app.logger.info("Deleting existing Users...") 
         num_users_deleted = db.session.query(User).delete()     
         app.logger.info(f"Deleted {num_users_deleted} Users.")
+
+        app.logger.info("Deleting existing Roles...")
+        num_roles_deleted = db.session.query(Role).delete()
+        app.logger.info(f"Deleted {num_roles_deleted} Roles.")
         
         try:
             db.session.commit()
@@ -353,35 +402,92 @@ def init_db():
         except Exception as e:
             db.session.rollback()
             app.logger.exception("Error adding default users during DB initialization:")
+        
+        app.logger.info("Adding default roles...")
+        try:
+            admin_role = Role(name="Administrator", description="Full system access", permissions="all")
+            standard_role = Role(name="StandardUser", description="Can make bookings and view resources", permissions="make_bookings,view_resources")
+            db.session.add_all([admin_role, standard_role])
+            db.session.commit()
+            app.logger.info("Successfully added default roles.")
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception("Error adding default roles during DB initialization:")
+            # Ensure admin_role and standard_role are None if creation failed, to prevent errors below
+            admin_role = None
+            standard_role = None
+
+
+        app.logger.info("Assigning roles to default users...")
+        admin_user = User.query.filter_by(username='admin').first()
+        standard_user = User.query.filter_by(username='user').first()
+        
+        # Fetch roles again in case of session issues or if they were not committed properly
+        if not admin_role: admin_role = Role.query.filter_by(name="Administrator").first()
+        if not standard_role: standard_role = Role.query.filter_by(name="StandardUser").first()
+
+        if admin_user and admin_role:
+            admin_user.roles.append(admin_role)
+        if standard_user and standard_role:
+            standard_user.roles.append(standard_role)
+        
+        try:
+            db.session.commit()
+            app.logger.info("Successfully assigned roles to default users.")
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception("Error assigning roles to default users:")
+
 
         admin_user_for_perms = User.query.filter_by(username='admin').first()
         standard_user_for_perms = User.query.filter_by(username='user').first()
         
         admin_user_id_str = str(admin_user_for_perms.id) if admin_user_for_perms else "1" 
         standard_user_id_str = str(standard_user_for_perms.id) if standard_user_for_perms else "2"
+        
+        # Fetch roles for sample data assignment
+        admin_role_for_resource = Role.query.filter_by(name="Administrator").first()
+        standard_role_for_resource = Role.query.filter_by(name="StandardUser").first()
+
 
         app.logger.info("Adding sample resources...")
         try: 
-            sample_resources = [
-                Resource(name="Conference Room Alpha", capacity=10, equipment="Projector,Whiteboard,Teleconference", 
-                         booking_restriction=None, status='published', published_at=datetime.utcnow(),
-                         allowed_user_ids=None, allowed_roles=None),
-                Resource(name="Meeting Room Beta", capacity=6, equipment="Teleconference,Whiteboard", 
-                         booking_restriction='all_users', status='published', published_at=datetime.utcnow(),
-                         allowed_user_ids=f"{standard_user_id_str},{admin_user_id_str}", allowed_roles=None),
-                Resource(name="Focus Room Gamma", capacity=2, equipment="Whiteboard", 
-                         booking_restriction='admin_only', status='draft', published_at=None,
-                         allowed_user_ids=None, allowed_roles='admin'),
-                Resource(name="Quiet Pod Delta", capacity=1, equipment=None, 
-                         booking_restriction=None, status='draft', published_at=None,
-                         allowed_user_ids=None, allowed_roles='standard_user,admin'),
-                Resource(name="Archived Room Omega", capacity=5, equipment="Old Projector",
-                         booking_restriction=None, status='archived', published_at=datetime.utcnow() - timedelta(days=30),
-                         allowed_user_ids=None, allowed_roles=None)
-            ]
-            db.session.bulk_save_objects(sample_resources)
+            res_alpha = Resource(name="Conference Room Alpha", capacity=10, equipment="Projector,Whiteboard,Teleconference", 
+                                 booking_restriction=None, status='published', published_at=datetime.utcnow(),
+                                 allowed_user_ids=None) # No specific user IDs, open to roles
+            if standard_role_for_resource:
+                res_alpha.roles.append(standard_role_for_resource)
+            if admin_role_for_resource: # Admins can also book
+                res_alpha.roles.append(admin_role_for_resource)
+
+            res_beta = Resource(name="Meeting Room Beta", capacity=6, equipment="Teleconference,Whiteboard", 
+                                booking_restriction='all_users', status='published', published_at=datetime.utcnow(), # 'all_users' might be redundant now
+                                allowed_user_ids=f"{standard_user_id_str},{admin_user_id_str}") # Can keep user_ids for specific overrides
+            # No specific roles assigned to Beta, relies on allowed_user_ids or booking_restriction logic
+
+            res_gamma = Resource(name="Focus Room Gamma", capacity=2, equipment="Whiteboard", 
+                                 booking_restriction='admin_only', status='draft', published_at=None, # admin_only might be redundant
+                                 allowed_user_ids=None)
+            if admin_role_for_resource:
+                res_gamma.roles.append(admin_role_for_resource)
+
+            res_delta = Resource(name="Quiet Pod Delta", capacity=1, equipment=None, 
+                                 booking_restriction=None, status='draft', published_at=None,
+                                 allowed_user_ids=None)
+            if standard_role_for_resource:
+                 res_delta.roles.append(standard_role_for_resource)
+            # If admin should also have access by default to standard_user resources, add admin_role too.
+            # Or rely on a global admin override in permission checking logic.
+
+            res_omega = Resource(name="Archived Room Omega", capacity=5, equipment="Old Projector",
+                                 booking_restriction=None, status='archived', published_at=datetime.utcnow() - timedelta(days=30),
+                                 allowed_user_ids=None)
+            # Typically archived resources don't need role assignments unless there's a use case.
+            
+            sample_resources_list = [res_alpha, res_beta, res_gamma, res_delta, res_omega]
+            db.session.add_all(sample_resources_list)
             db.session.commit()
-            app.logger.info(f"Successfully added {len(sample_resources)} sample resources.")
+            app.logger.info(f"Successfully added {len(sample_resources_list)} sample resources with roles.")
         except Exception as e:
             db.session.rollback()
             app.logger.exception("Error adding sample resources during DB initialization:")
@@ -434,12 +540,12 @@ def get_resources():
                 'capacity': resource.capacity,
                 'equipment': resource.equipment,
                 'floor_map_id': resource.floor_map_id,
-                'map_coordinates': resource.map_coordinates, # This should be json.loads if stored as string
+                'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
                 'booking_restriction': resource.booking_restriction,
                 'status': resource.status, 
                 'published_at': resource.published_at.isoformat() if resource.published_at else None,
                 'allowed_user_ids': resource.allowed_user_ids,
-                'allowed_roles': resource.allowed_roles
+                'roles': [{'id': role.id, 'name': role.name} for role in resource.roles]
             })
         app.logger.info("Successfully fetched published resources.")
         return jsonify(resources_list), 200
@@ -621,18 +727,23 @@ def update_resource_map_info(resource_id):
 
 
     # Process allowed_roles
-    if 'allowed_roles' in data: # This key must be present to modify allowed_roles
-        roles_str = data.get('allowed_roles') # Expecting a string of comma-separated roles or null
-        if roles_str is None or roles_str.strip() == "":
-            resource.allowed_roles = None
-        elif isinstance(roles_str, str):
-            valid_roles = [role.strip().lower() for role in roles_str.split(',') if role.strip()]
-            # Optional: Validate against a predefined list of roles if you have one
-            resource.allowed_roles = ",".join(sorted(list(set(valid_roles)))) if valid_roles else None
-        else: # Should be string or null
-            app.logger.warning(f"Incorrect type for allowed_roles for resource {resource_id}: {type(roles_str)}")
-            return jsonify({'error': 'allowed_roles must be a string or null.'}), 400
-
+    # Process allowed_roles (now role_ids)
+    if 'role_ids' in data:
+        role_ids = data.get('role_ids')
+        if role_ids is None: # Explicitly setting to no roles
+            resource.roles = []
+        elif isinstance(role_ids, list):
+            new_roles = []
+            for r_id in role_ids:
+                if not isinstance(r_id, int):
+                    return jsonify({'error': f'Invalid role ID type: {r_id}. Must be integer.'}), 400
+                role = Role.query.get(r_id)
+                if not role:
+                    return jsonify({'error': f'Role with ID {r_id} not found.'}), 400
+                new_roles.append(role)
+            resource.roles = new_roles
+        else:
+            return jsonify({'error': 'role_ids must be a list of integers or null.'}), 400
 
     # Logic for map and coordinates
     # Only update map info if 'floor_map_id' is explicitly in the payload
@@ -673,7 +784,8 @@ def update_resource_map_info(resource_id):
             'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
             'booking_restriction': resource.booking_restriction, 'status': resource.status,
             'published_at': resource.published_at.isoformat() if resource.published_at else None,
-            'allowed_user_ids': resource.allowed_user_ids, 'allowed_roles': resource.allowed_roles,
+            'allowed_user_ids': resource.allowed_user_ids, 
+            'roles': [{'id': role.id, 'name': role.name} for role in resource.roles],
             'capacity': resource.capacity, 'equipment': resource.equipment
         }
         return jsonify(updated_resource_data), 200
@@ -726,6 +838,147 @@ def publish_resource(resource_id):
         app.logger.exception(f"Error publishing resource {resource_id}:")
         return jsonify({'error': 'Failed to publish resource due to a server error.'}), 500
 
+@app.route('/api/admin/resources/<int:resource_id>', methods=['PUT'])
+@login_required
+def update_resource_details(resource_id):
+    if not current_user.is_admin:
+        app.logger.warning(f"Non-admin user {current_user.username} attempted to update resource {resource_id}.")
+        return jsonify({'error': 'Admin access required.'}), 403
+
+    resource = Resource.query.get(resource_id)
+    if not resource:
+        app.logger.warning(f"Attempt to update non-existent resource ID: {resource_id}")
+        return jsonify({'error': 'Resource not found.'}), 404
+
+    data = request.get_json()
+    if not data:
+        app.logger.warning(f"Update attempt for resource {resource_id} with no JSON data.")
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+    # Fields that can be updated via this endpoint (excluding 'allowed_roles' string field)
+    allowed_fields = ['name', 'capacity', 'equipment', 'status', 'booking_restriction', 'allowed_user_ids'] # role_ids handled separately
+    
+    # Validate status if provided
+    if 'status' in data:
+        new_status = data.get('status')
+        valid_statuses = ['draft', 'published', 'archived']
+        if new_status not in valid_statuses:
+            app.logger.warning(f"Invalid status value '{new_status}' for resource {resource_id}.")
+            return jsonify({'error': f"Invalid status value. Allowed values are: {', '.join(valid_statuses)}."}), 400
+        
+        # Handle published_at logic
+        if new_status == 'published' and resource.status != 'published': # Changed to published
+            if resource.published_at is None:
+                resource.published_at = datetime.utcnow()
+        # If status changes away from 'published', current requirements are to leave published_at as is.
+        resource.status = new_status
+
+    for field in allowed_fields:
+        if field in data and field != 'status': # Status is handled separately
+            if field == 'capacity':
+                try:
+                    value = data[field]
+                    if value is not None: # Allow setting capacity to null
+                        value = int(value)
+                    setattr(resource, field, value)
+                except (ValueError, TypeError):
+                    app.logger.warning(f"Invalid capacity value '{data[field]}' for resource {resource_id}.")
+                    return jsonify({'error': f"Invalid value for capacity. Must be an integer or null."}), 400
+            elif field == 'booking_restriction':
+                booking_restriction_data = data.get('booking_restriction')
+                allowed_restrictions = ['admin_only', 'all_users', None, ""] 
+                if booking_restriction_data not in allowed_restrictions:
+                    app.logger.warning(f"Invalid booking_restriction value '{booking_restriction_data}' for resource {resource_id}.")
+                    return jsonify({'error': f'Invalid booking_restriction value. Allowed: {allowed_restrictions}. Received: {booking_restriction_data}'}), 400
+                resource.booking_restriction = booking_restriction_data if booking_restriction_data != "" else None
+            elif field == 'allowed_user_ids':
+                user_ids_str_list = data.get('allowed_user_ids')
+                if user_ids_str_list is None or user_ids_str_list.strip() == "":
+                    resource.allowed_user_ids = None
+                elif isinstance(user_ids_str_list, str):
+                    try:
+                        processed_ids = sorted(list(set(int(uid.strip()) for uid in user_ids_str_list.split(',') if uid.strip())))
+                        resource.allowed_user_ids = ",".join(map(str, processed_ids)) if processed_ids else None
+                    except ValueError:
+                        app.logger.warning(f"Invalid user ID in allowed_user_ids for resource {resource_id}: {user_ids_str_list}")
+                        return jsonify({'error': 'Invalid allowed_user_ids format. Expected a comma-separated string of integers or null.'}), 400
+                else:
+                    app.logger.warning(f"Incorrect type for allowed_user_ids for resource {resource_id}: {type(user_ids_str_list)}")
+                    return jsonify({'error': 'allowed_user_ids must be a string or null.'}), 400
+            elif field == 'allowed_roles':
+                roles_str = data.get('allowed_roles')
+                if roles_str is None or roles_str.strip() == "":
+                    resource.allowed_roles = None
+                # This was the old 'allowed_roles' string field logic, now replaced by 'role_ids'
+                pass 
+            else: # For 'name', 'equipment'
+                setattr(resource, field, data[field])
+
+    # Handle role_ids separately
+    if 'role_ids' in data:
+        role_ids = data.get('role_ids')
+        if role_ids is None: # Explicitly setting to no roles
+            resource.roles = []
+        elif isinstance(role_ids, list):
+            new_roles = []
+            for r_id in role_ids:
+                if not isinstance(r_id, int):
+                    return jsonify({'error': f'Invalid role ID type: {r_id}. Must be integer.'}), 400
+                role = Role.query.get(r_id)
+                if not role:
+                    return jsonify({'error': f'Role with ID {r_id} not found.'}), 400
+                new_roles.append(role)
+            resource.roles = new_roles
+        else:
+            return jsonify({'error': 'role_ids must be a list of integers or null.'}), 400
+            
+    try:
+        db.session.commit()
+        app.logger.info(f"Resource {resource_id} ('{resource.name}') updated successfully by {current_user.username}.")
+        # Return the updated resource
+        updated_resource_data = {
+            'id': resource.id,
+            'name': resource.name,
+            'capacity': resource.capacity,
+            'equipment': resource.equipment,
+            'status': resource.status,
+            'published_at': resource.published_at.isoformat() if resource.published_at else None,
+            'booking_restriction': resource.booking_restriction,
+            'allowed_user_ids': resource.allowed_user_ids,
+            'roles': [{'id': role.id, 'name': role.name} for role in resource.roles], # Return new roles list
+            # Map-related fields are not updated here, but returned for consistency
+            'floor_map_id': resource.floor_map_id,
+            'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None
+        }
+        return jsonify(updated_resource_data), 200
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error updating resource {resource_id}:")
+        return jsonify({'error': 'Failed to update resource due to a server error.'}), 500
+
+@app.route('/api/admin/resources/<int:resource_id>', methods=['DELETE'])
+@login_required
+def delete_resource(resource_id):
+    if not current_user.is_admin:
+        app.logger.warning(f"Non-admin user {current_user.username} attempted to delete resource {resource_id}.")
+        return jsonify({'error': 'Admin access required.'}), 403
+
+    resource = Resource.query.get(resource_id)
+    if not resource:
+        app.logger.warning(f"Attempt to delete non-existent resource ID: {resource_id}")
+        return jsonify({'error': 'Resource not found.'}), 404
+
+    try:
+        # Bookings associated with this resource will be deleted due to cascade="all, delete-orphan"
+        db.session.delete(resource)
+        db.session.commit()
+        app.logger.info(f"Resource {resource_id} ('{resource.name}') and its associated bookings deleted successfully by {current_user.username}.")
+        return jsonify({'message': f"Resource '{resource.name}' (ID: {resource_id}) and its bookings deleted successfully."}), 200
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error deleting resource {resource_id}:")
+        return jsonify({'error': 'Failed to delete resource due to a server error.'}), 500
+
 @app.route('/api/admin/users', methods=['GET'])
 @login_required
 def get_all_users():
@@ -735,12 +988,391 @@ def get_all_users():
 
     try:
         users = User.query.all()
-        users_list = [{'id': u.id, 'username': u.username, 'email': u.email, 'is_admin': u.is_admin} for u in users]
+        users_list = [{
+            'id': u.id, 
+            'username': u.username, 
+            'email': u.email, 
+            'is_admin': u.is_admin,
+            'google_id': u.google_id,
+            'roles': [{'id': role.id, 'name': role.name} for role in u.roles] # Added roles
+        } for u in users]
         app.logger.info(f"Admin user {current_user.username} fetched all users list.")
         return jsonify(users_list), 200
     except Exception as e:
         app.logger.exception("Error fetching all users:")
         return jsonify({'error': 'Failed to fetch users due to a server error.'}), 500
+
+@app.route('/api/admin/users', methods=['POST'])
+@login_required
+def create_user():
+    if not current_user.is_admin:
+        app.logger.warning(f"Non-admin user {current_user.username} attempted to create a user.")
+        return jsonify({'error': 'Admin access required.'}), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+    username = data.get('username')
+    email = data.get('email')
+    password = data.get('password')
+    is_admin = data.get('is_admin', False) # Default to False if not provided
+
+    if not username or not username.strip():
+        return jsonify({'error': 'Username is required.'}), 400
+    if not email or not email.strip():
+        return jsonify({'error': 'Email is required.'}), 400
+    if not password: # Password is required for new user
+        return jsonify({'error': 'Password is required.'}), 400
+    
+    # Basic email validation
+    if '@' not in email or '.' not in email.split('@')[-1]:
+        return jsonify({'error': 'Invalid email format.'}), 400
+
+    if User.query.filter_by(username=username).first():
+        return jsonify({'error': f"Username '{username}' already exists."}), 409
+    if User.query.filter_by(email=email).first():
+        return jsonify({'error': f"Email '{email}' already registered."}), 409
+
+    new_user = User(username=username.strip(), email=email.strip(), is_admin=is_admin)
+    new_user.set_password(password)
+    
+    try:
+        db.session.add(new_user)
+        db.session.commit()
+        app.logger.info(f"User '{new_user.username}' created successfully by {current_user.username}.")
+        return jsonify({
+            'id': new_user.id,
+            'username': new_user.username,
+            'email': new_user.email,
+            'is_admin': new_user.is_admin,
+            'google_id': new_user.google_id # Will be None initially
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error creating user '{username}':")
+        return jsonify({'error': 'Failed to create user due to a server error.'}), 500
+
+@app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
+@login_required
+def update_user(user_id):
+    if not current_user.is_admin:
+        app.logger.warning(f"Non-admin user {current_user.username} attempted to update user {user_id}.")
+        return jsonify({'error': 'Admin access required.'}), 403
+
+    user_to_update = User.query.get(user_id)
+    if not user_to_update:
+        return jsonify({'error': 'User not found.'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+    # Update username if provided and changed
+    new_username = data.get('username')
+    if new_username and new_username.strip() and user_to_update.username != new_username.strip():
+        if User.query.filter(User.id != user_id).filter_by(username=new_username.strip()).first():
+            return jsonify({'error': f"Username '{new_username.strip()}' already exists."}), 409
+        user_to_update.username = new_username.strip()
+
+    # Update email if provided and changed
+    new_email = data.get('email')
+    if new_email and new_email.strip() and user_to_update.email != new_email.strip():
+        if '@' not in new_email or '.' not in new_email.split('@')[-1]:
+            return jsonify({'error': 'Invalid email format.'}), 400
+        if User.query.filter(User.id != user_id).filter_by(email=new_email.strip()).first():
+            return jsonify({'error': f"Email '{new_email.strip()}' already registered."}), 409
+        user_to_update.email = new_email.strip()
+        # If email changes, should we reset google_id/google_email if they were linked to the old email?
+        # For now, this is not handled, but could be a consideration.
+
+    # Update password if provided
+    new_password = data.get('password')
+    if new_password: # Only update if password is not empty
+        user_to_update.set_password(new_password)
+        app.logger.info(f"Password updated for user ID {user_id} by {current_user.username}.")
+
+    # Update admin status if provided
+    if 'is_admin' in data and isinstance(data['is_admin'], bool):
+        # Prevent admin from accidentally de-admining themselves if they are the only admin
+        # This check is based on the is_admin flag. A similar check for roles will be added.
+        if user_to_update.id == current_user.id and not data['is_admin']:
+            num_admins_flag = User.query.filter_by(is_admin=True).count()
+            if num_admins_flag == 1:
+                app.logger.warning(f"Admin user {current_user.username} attempted to remove their own admin status (is_admin flag) as the sole admin flag holder.")
+                # This might be too restrictive if roles are the primary mechanism. Consider if this check is still needed.
+                # For now, keeping it as a defense layer.
+                # return jsonify({'error': 'Cannot remove is_admin flag from the only user with this flag.'}), 400
+        user_to_update.is_admin = data['is_admin']
+
+    # Update roles if 'role_ids' is provided in the payload
+    if 'role_ids' in data:
+        role_ids = data.get('role_ids', [])
+        if not isinstance(role_ids, list):
+            return jsonify({'error': 'role_ids must be a list of integers.'}), 400
+        
+        new_roles = []
+        for r_id in role_ids:
+            if not isinstance(r_id, int):
+                return jsonify({'error': f'Invalid role ID type: {r_id}. Must be integer.'}), 400
+            role = Role.query.get(r_id)
+            if not role:
+                return jsonify({'error': f'Role with ID {r_id} not found.'}), 400
+            new_roles.append(role)
+
+        # Safeguard: Prevent removal of "Administrator" role from the last admin user who has it.
+        # This counts users who currently have the "Administrator" role.
+        admin_role = Role.query.filter_by(name="Administrator").first()
+        if admin_role: # Ensure admin role exists
+            is_removing_admin_role_from_this_user = admin_role not in new_roles and admin_role in user_to_update.roles
+            
+            if is_removing_admin_role_from_this_user and user_to_update.id == current_user.id :
+                # Check if this user is one of the last users with the Administrator role
+                users_with_admin_role = User.query.filter(User.roles.any(id=admin_role.id)).all()
+                if len(users_with_admin_role) == 1 and users_with_admin_role[0].id == user_to_update.id:
+                    app.logger.warning(f"Admin user {current_user.username} attempted to remove their own 'Administrator' role as the sole holder of this role.")
+                    return jsonify({'error': 'Cannot remove the "Administrator" role from the only user holding it.'}), 403
+        
+        user_to_update.roles = new_roles
+        app.logger.info(f"Roles updated for user ID {user_id} by {current_user.username}. New roles: {[r.name for r in new_roles]}")
+
+
+    try:
+        db.session.commit()
+        app.logger.info(f"User ID {user_id} ('{user_to_update.username}') updated successfully by {current_user.username}.")
+        return jsonify({
+            'id': user_to_update.id,
+            'username': user_to_update.username,
+            'email': user_to_update.email,
+            'is_admin': user_to_update.is_admin,
+            'google_id': user_to_update.google_id,
+            'roles': [{'id': role.id, 'name': role.name} for role in user_to_update.roles] # Return updated roles
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error updating user {user_id}:")
+        return jsonify({'error': 'Failed to update user due to a server error.'}), 500
+
+@app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
+@login_required
+def delete_user(user_id):
+    if not current_user.is_admin:
+        app.logger.warning(f"Non-admin user {current_user.username} attempted to delete user {user_id}.")
+        return jsonify({'error': 'Admin access required.'}), 403
+
+    user_to_delete = User.query.get(user_id)
+    if not user_to_delete:
+        return jsonify({'error': 'User not found.'}), 404
+
+    # Safeguard: Prevent admin from deleting themselves via this endpoint
+    if current_user.id == user_to_delete.id:
+        app.logger.warning(f"Admin user {current_user.username} attempted to delete their own account (ID: {user_id}) via admin endpoint.")
+        return jsonify({'error': 'Admins cannot delete their own account through this endpoint. Use a different method if self-deletion is intended and supported.'}), 403
+
+    # Safeguard: Prevent deletion of the only admin user
+    if user_to_delete.is_admin:
+        num_admins = User.query.filter_by(is_admin=True).count()
+        if num_admins == 1:
+            app.logger.warning(f"Admin user {current_user.username} attempted to delete the only admin user (ID: {user_id}, Username: {user_to_delete.username}).")
+            return jsonify({'error': 'Cannot delete the only admin user in the system.'}), 403
+    
+    try:
+        # Note: Bookings are not directly linked via foreign key from User, but by user_name string.
+        # If there's a need to anonymize or reassign bookings, that would be a separate, more complex operation.
+        # For now, deleting the user does not affect booking records directly other than orphaning the user_name.
+        db.session.delete(user_to_delete)
+        db.session.commit()
+        app.logger.info(f"User ID {user_id} ('{user_to_delete.username}') deleted successfully by {current_user.username}.")
+        return jsonify({'message': f"User '{user_to_delete.username}' (ID: {user_id}) deleted successfully."}), 200
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error deleting user {user_id}:")
+        return jsonify({'error': 'Failed to delete user due to a server error.'}), 500
+
+@app.route('/api/admin/users/<int:user_id>/assign_google_auth', methods=['POST'])
+@login_required
+def assign_google_auth(user_id):
+    if not current_user.is_admin:
+        app.logger.warning(f"Non-admin user {current_user.username} attempted to assign Google ID to user {user_id}.")
+        return jsonify({'error': 'Admin access required.'}), 403
+
+    user_to_update = User.query.get(user_id)
+    if not user_to_update:
+        return jsonify({'error': 'User not found.'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+    google_id_to_assign = data.get('google_id')
+    if not google_id_to_assign or not isinstance(google_id_to_assign, str) or not google_id_to_assign.strip():
+        return jsonify({'error': 'google_id is required and must be a non-empty string.'}), 400
+    
+    google_id_to_assign = google_id_to_assign.strip()
+
+    # Check if this Google ID is already used by another user
+    existing_user_with_google_id = User.query.filter(User.google_id == google_id_to_assign, User.id != user_id).first()
+    if existing_user_with_google_id:
+        app.logger.warning(f"Attempt to assign already used Google ID '{google_id_to_assign}' to user {user_id}. It's already linked to user {existing_user_with_google_id.id}.")
+        return jsonify({'error': f"Google ID '{google_id_to_assign}' is already associated with another user (ID: {existing_user_with_google_id.id}, Username: {existing_user_with_google_id.username})."}), 409
+
+    user_to_update.google_id = google_id_to_assign
+    user_to_update.google_email = None # Clear associated email as it's a manual ID assignment
+
+    try:
+        db.session.commit()
+        app.logger.info(f"Google ID '{google_id_to_assign}' assigned to user ID {user_id} ('{user_to_update.username}') by {current_user.username}.")
+        return jsonify({
+            'id': user_to_update.id,
+            'username': user_to_update.username,
+            'email': user_to_update.email,
+            'is_admin': user_to_update.is_admin,
+            'google_id': user_to_update.google_id,
+            'google_email': user_to_update.google_email
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error assigning Google ID to user {user_id}:")
+        return jsonify({'error': 'Failed to assign Google ID due to a server error.'}), 500
+
+# --- Role Management APIs ---
+@app.route('/api/admin/roles', methods=['GET'])
+@login_required
+def get_roles():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required.'}), 403
+    
+    roles = Role.query.all()
+    roles_list = [{
+        'id': role.id,
+        'name': role.name,
+        'description': role.description,
+        'permissions': role.permissions
+    } for role in roles]
+    return jsonify(roles_list), 200
+
+@app.route('/api/admin/roles', methods=['POST'])
+@login_required
+def create_role():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required.'}), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+    name = data.get('name')
+    description = data.get('description')
+    permissions = data.get('permissions')
+
+    if not name or not name.strip():
+        return jsonify({'error': 'Role name is required.'}), 400
+    
+    # Case-insensitive check for uniqueness
+    if Role.query.filter(func.lower(Role.name) == func.lower(name.strip())).first():
+        return jsonify({'error': f"Role name '{name.strip()}' already exists."}), 409
+
+    new_role = Role(
+        name=name.strip(), 
+        description=description.strip() if description else None,
+        permissions=permissions.strip() if permissions else None
+    )
+    
+    try:
+        db.session.add(new_role)
+        db.session.commit()
+        app.logger.info(f"Role '{new_role.name}' created successfully by {current_user.username}.")
+        return jsonify({
+            'id': new_role.id,
+            'name': new_role.name,
+            'description': new_role.description,
+            'permissions': new_role.permissions
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error creating role '{name}':")
+        return jsonify({'error': 'Failed to create role due to a server error.'}), 500
+
+@app.route('/api/admin/roles/<int:role_id>', methods=['PUT'])
+@login_required
+def update_role(role_id):
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required.'}), 403
+
+    role_to_update = Role.query.get(role_id)
+    if not role_to_update:
+        return jsonify({'error': 'Role not found.'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+    # Protected role check for "Administrator"
+    if role_to_update.name == "Administrator":
+        if 'name' in data and data.get('name').strip() != "Administrator":
+            return jsonify({'error': 'Cannot rename the "Administrator" role.'}), 403
+        if 'permissions' in data and data.get('permissions') != "all":
+             return jsonify({'error': 'Cannot change permissions of the "Administrator" role.'}), 403
+        # Allow description update for Administrator role
+        if 'description' in data:
+            role_to_update.description = data.get('description', role_to_update.description).strip()
+
+    else: # For roles other than "Administrator"
+        new_name = data.get('name')
+        if new_name and new_name.strip() and role_to_update.name != new_name.strip():
+            # Case-insensitive check
+            if Role.query.filter(func.lower(Role.name) == func.lower(new_name.strip()), Role.id != role_id).first():
+                return jsonify({'error': f"Role name '{new_name.strip()}' already exists."}), 409
+            role_to_update.name = new_name.strip()
+
+        if 'description' in data:
+            role_to_update.description = data.get('description', role_to_update.description).strip()
+        
+        if 'permissions' in data:
+            role_to_update.permissions = data.get('permissions', role_to_update.permissions).strip()
+
+    try:
+        db.session.commit()
+        app.logger.info(f"Role ID {role_id} ('{role_to_update.name}') updated successfully by {current_user.username}.")
+        return jsonify({
+            'id': role_to_update.id,
+            'name': role_to_update.name,
+            'description': role_to_update.description,
+            'permissions': role_to_update.permissions
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error updating role {role_id}:")
+        return jsonify({'error': 'Failed to update role due to a server error.'}), 500
+
+@app.route('/api/admin/roles/<int:role_id>', methods=['DELETE'])
+@login_required
+def delete_role(role_id):
+    if not current_user.is_admin:
+        return jsonify({'error': 'Admin access required.'}), 403
+
+    role_to_delete = Role.query.get(role_id)
+    if not role_to_delete:
+        return jsonify({'error': 'Role not found.'}), 404
+
+    # Protected role check
+    if role_to_delete.name == "Administrator":
+        return jsonify({'error': 'Cannot delete the "Administrator" role.'}), 403
+    
+    # Check if role is assigned to any users
+    if role_to_delete.users.first(): # Checks if the 'users' backref yields any user
+        app.logger.warning(f"Attempt to delete role '{role_to_delete.name}' (ID: {role_id}) which is still assigned to users.")
+        return jsonify({'error': f"Cannot delete role '{role_to_delete.name}' because it is currently assigned to one or more users."}), 409
+
+    try:
+        db.session.delete(role_to_delete)
+        db.session.commit()
+        app.logger.info(f"Role '{role_to_delete.name}' (ID: {role_id}) deleted successfully by {current_user.username}.")
+        return jsonify({'message': f"Role '{role_to_delete.name}' deleted successfully."}), 200
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error deleting role {role_id}:")
+        return jsonify({'error': 'Failed to delete role due to a server error.'}), 500
 
 @app.route('/api/admin/resources/<int:resource_id>/map_info', methods=['DELETE'])
 @login_required
@@ -818,7 +1450,8 @@ def get_map_details(map_id):
                 'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
                 'booking_restriction': resource.booking_restriction, 'status': resource.status,
                 'published_at': resource.published_at.isoformat() if resource.published_at else None,
-                'allowed_user_ids': resource.allowed_user_ids, 'allowed_roles': resource.allowed_roles,
+                'allowed_user_ids': resource.allowed_user_ids, 
+                'roles': [{'id': role.id, 'name': role.name} for role in resource.roles], # Include roles
                 'bookings_on_date': bookings_info
             }
             mapped_resources_list.append(resource_info)
