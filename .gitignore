@@ -13,3 +13,4 @@ translations/**/LC_MESSAGES/*.mo
 *.db
 site.db
 data/site.db
+*.db
