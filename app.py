@@ -310,6 +310,13 @@ def serve_profile_page():
                            username=current_user.username, 
                            email=current_user.email)
 
+@app.route("/my_bookings")
+@login_required
+def serve_my_bookings_page():
+    """Serves the 'My Bookings' page."""
+    app.logger.info(f"User {current_user.username} accessed My Bookings page.")
+    return render_template("my_bookings.html")
+
 # --- Permission Decorator ---
 def permission_required(permission):
     def decorator(f):
@@ -1858,6 +1865,153 @@ def create_booking():
         app.logger.exception(f"Error creating booking for resource {resource_id} by {current_user.username}:")
         add_audit_log(action="CREATE_BOOKING_FAILED", details=f"Failed to create booking for resource ID {resource_id} by user '{current_user.username}'. Error: {str(e)}")
         return jsonify({'error': 'Failed to create booking due to a server error.'}), 500
+
+@app.route('/api/bookings/my_bookings', methods=['GET'])
+@login_required
+def get_my_bookings():
+    """
+    Fetches all bookings for the currently authenticated user.
+    Orders bookings by start_time descending (most recent/upcoming first).
+    """
+    try:
+        user_bookings = Booking.query.filter_by(user_name=current_user.username)\
+                                     .order_by(Booking.start_time.desc())\
+                                     .all()
+        
+        bookings_list = []
+        for booking in user_bookings:
+            resource = Resource.query.get(booking.resource_id)
+            resource_name = resource.name if resource else "Unknown Resource"
+            bookings_list.append({
+                'id': booking.id,
+                'resource_id': booking.resource_id,
+                'resource_name': resource_name,
+                'user_name': booking.user_name,
+                'start_time': booking.start_time.isoformat(),
+                'end_time': booking.end_time.isoformat(),
+                'title': booking.title
+            })
+        
+        app.logger.info(f"User '{current_user.username}' fetched their bookings. Count: {len(bookings_list)}")
+        return jsonify(bookings_list), 200
+
+    except Exception as e:
+        app.logger.exception(f"Error fetching bookings for user '{current_user.username}':")
+        return jsonify({'error': 'Failed to fetch your bookings due to a server error.'}), 500
+
+@app.route('/api/bookings/<int:booking_id>', methods=['DELETE'])
+@login_required
+def delete_booking_by_user(booking_id):
+    """
+    Allows an authenticated user to delete their own booking.
+    """
+    try:
+        booking = Booking.query.get(booking_id)
+
+        if not booking:
+            app.logger.warning(f"User '{current_user.username}' attempted to delete non-existent booking ID: {booking_id}")
+            return jsonify({'error': 'Booking not found.'}), 404
+
+        # Authorization: User can only delete their own bookings.
+        if booking.user_name != current_user.username:
+            app.logger.warning(f"User '{current_user.username}' unauthorized attempt to delete booking ID: {booking_id} owned by '{booking.user_name}'.")
+            return jsonify({'error': 'You are not authorized to delete this booking.'}), 403
+
+        # For audit log: get resource name before deleting booking
+        resource_name = "Unknown Resource"
+        if booking.resource_booked: # Check if backref is populated
+            resource_name = booking.resource_booked.name
+        
+        booking_details_for_log = (
+            f"Booking ID: {booking.id}, "
+            f"Resource: {resource_name} (ID: {booking.resource_id}), "
+            f"Title: '{booking.title}', "
+            f"Original User: '{booking.user_name}', "
+            f"Time: {booking.start_time.isoformat()} to {booking.end_time.isoformat()}"
+        )
+
+        db.session.delete(booking)
+        db.session.commit()
+
+        add_audit_log(
+            action="CANCEL_BOOKING_USER", 
+            details=f"User '{current_user.username}' cancelled their booking. {booking_details_for_log}"
+        )
+        app.logger.info(f"User '{current_user.username}' successfully deleted booking ID: {booking_id}. Details: {booking_details_for_log}")
+        return jsonify({'message': 'Booking cancelled successfully.'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error deleting booking ID {booking_id} for user '{current_user.username}':")
+        # Avoid logging potentially sensitive booking_id in generic error if booking object couldn't be fetched.
+        add_audit_log(action="CANCEL_BOOKING_USER_FAILED", details=f"User '{current_user.username}' failed to cancel booking ID: {booking_id}. Error: {str(e)}")
+        return jsonify({'error': 'Failed to cancel booking due to a server error.'}), 500
+
+@app.route('/api/bookings/<int:booking_id>', methods=['PUT'])
+@login_required
+def update_booking_by_user(booking_id):
+    """
+    Allows an authenticated user to update the title of their own booking.
+    """
+    try:
+        booking = Booking.query.get(booking_id)
+
+        if not booking:
+            app.logger.warning(f"User '{current_user.username}' attempted to update non-existent booking ID: {booking_id}")
+            return jsonify({'error': 'Booking not found.'}), 404
+
+        if booking.user_name != current_user.username:
+            app.logger.warning(f"User '{current_user.username}' unauthorized attempt to update booking ID: {booking_id} owned by '{booking.user_name}'.")
+            return jsonify({'error': 'You are not authorized to update this booking.'}), 403
+
+        data = request.get_json()
+        if not data:
+            app.logger.warning(f"User '{current_user.username}' attempt to update booking ID: {booking_id} with no JSON data.")
+            return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+        new_title = data.get('title')
+        if not new_title or not str(new_title).strip():
+            app.logger.warning(f"User '{current_user.username}' attempt to update booking ID: {booking_id} without providing a title.")
+            return jsonify({'error': 'Title is required and cannot be empty.'}), 400
+        
+        new_title = str(new_title).strip()
+        old_title = booking.title
+
+        if old_title == new_title:
+            app.logger.info(f"User '{current_user.username}' attempted to update booking ID: {booking_id} with the same title: '{new_title}'. No change made.")
+            # Return current booking details as if it were updated, to provide consistent response format
+            resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
+            return jsonify({
+                'id': booking.id, 'resource_id': booking.resource_id, 'resource_name': resource_name,
+                'user_name': booking.user_name, 'start_time': booking.start_time.isoformat(),
+                'end_time': booking.end_time.isoformat(), 'title': booking.title
+            }), 200
+
+        booking.title = new_title
+        db.session.commit()
+
+        resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
+        add_audit_log(
+            action="UPDATE_BOOKING_USER", 
+            details=f"User '{current_user.username}' updated booking ID: {booking.id} for resource '{resource_name}'. Title changed from '{old_title}' to '{new_title}'."
+        )
+        app.logger.info(f"User '{current_user.username}' successfully updated title for booking ID: {booking.id} from '{old_title}' to '{new_title}'.")
+        
+        return jsonify({
+            'id': booking.id,
+            'resource_id': booking.resource_id,
+            'resource_name': resource_name,
+            'user_name': booking.user_name,
+            'start_time': booking.start_time.isoformat(),
+            'end_time': booking.end_time.isoformat(),
+            'title': booking.title
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error updating booking ID {booking_id} for user '{current_user.username}':")
+        add_audit_log(action="UPDATE_BOOKING_USER_FAILED", details=f"User '{current_user.username}' failed to update booking ID: {booking_id}. Error: {str(e)}")
+        return jsonify({'error': 'Failed to update booking due to a server error.'}), 500
 
 if __name__ == "__main__":
     # To initialize the DB, you can uncomment the next line and run 'python app.py' once.
