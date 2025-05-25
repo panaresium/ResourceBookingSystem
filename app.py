@@ -381,6 +381,13 @@ def serve_profile_page():
                            username=current_user.username, 
                            email=current_user.email)
 
+@app.route("/profile/edit")
+@login_required
+def serve_edit_profile_page():
+    """Render form for editing profile."""
+    app.logger.info(f"User {current_user.username} accessed edit profile page.")
+    return render_template("edit_profile.html", email=current_user.email)
+
 @app.route("/my_bookings")
 @login_required
 def serve_my_bookings_page():
@@ -1901,6 +1908,41 @@ def api_auth_status():
     else:
         # app.logger.debug("Auth status check: No user logged in.") # Too verbose for INFO
         return jsonify({'logged_in': False}), 200
+
+@app.route('/api/profile', methods=['PUT'])
+@login_required
+def update_profile():
+    """Update current user's email or password."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+    email = data.get('email')
+    password = data.get('password')
+
+    if not email and not password:
+        return jsonify({'error': 'No changes submitted.'}), 400
+
+    if email:
+        if '@' not in email or '.' not in email.split('@')[-1]:
+            return jsonify({'error': 'Invalid email format.'}), 400
+        existing = User.query.filter(User.id != current_user.id).filter_by(email=email.strip()).first()
+        if existing:
+            return jsonify({'error': f"Email '{email.strip()}' already registered."}), 409
+        current_user.email = email.strip()
+
+    if password:
+        current_user.set_password(password)
+
+    try:
+        db.session.commit()
+        user_data = {'id': current_user.id, 'username': current_user.username, 'email': current_user.email}
+        app.logger.info(f"User {current_user.username} updated their profile.")
+        return jsonify({'success': True, 'user': user_data, 'message': 'Profile updated.'}), 200
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error updating profile for user {current_user.username}:")
+        return jsonify({'error': 'Failed to update profile due to a server error.'}), 500
 
 @app.route('/api/bookings', methods=['POST'])
 @login_required

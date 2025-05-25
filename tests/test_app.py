@@ -2,6 +2,7 @@ import unittest
 import json
 
 from datetime import datetime, time, date, timedelta
+
 from app import app, db, User, Resource, Booking, WaitlistEntry, FloorMap, email_log
 
 # from flask_login import current_user # Not directly used for assertions here
@@ -261,6 +262,7 @@ class AppTests(unittest.TestCase):
         self.assertIsInstance(first_entry, dict)
         self.assertIn('date', first_entry)
         self.assertIn('count', first_entry)
+
 
 
 if __name__ == '__main__':

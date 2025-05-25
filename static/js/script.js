@@ -1090,8 +1090,11 @@ Enter a title for your booking (optional):`);
 
         // Move Mode State Variables
         let isMovingArea = false;
-        let dragStartX, dragStartY; // Mouse start position for dragging
-        let initialAreaX, initialAreaY; // Initial top-left corner of the area being moved
+        let isResizingArea = false;
+        let resizeHandle = null; // 'nw','ne','sw','se'
+        let dragStartX, dragStartY; // Mouse start position for dragging/resizing
+        let initialAreaX, initialAreaY; // Initial top-left corner of the area being moved/resized
+        let initialAreaWidth, initialAreaHeight; // Initial size before resize starts
 
         // Resize Handle Properties
         const HANDLE_SIZE = 8; 
@@ -1212,6 +1215,32 @@ Enter a title for your booking (optional):`);
             }
         }
 
+        function updateCoordinateInputs(coords) {
+            document.getElementById('coord-x').value = Math.round(coords.x);
+            document.getElementById('coord-y').value = Math.round(coords.y);
+            document.getElementById('coord-width').value = Math.round(coords.width);
+            document.getElementById('coord-height').value = Math.round(coords.height);
+        }
+
+        async function saveSelectedAreaDimensions(coords) {
+            if (!selectedAreaForEditing) return;
+            const areaDefinitionStatusDiv = document.getElementById('area-definition-status');
+            const payload = {
+                floor_map_id: selectedAreaForEditing.floor_map_id,
+                coordinates: { type: 'rect', x: coords.x, y: coords.y, width: coords.width, height: coords.height }
+            };
+            try {
+                await apiCall(
+                    `/api/admin/resources/${selectedAreaForEditing.id}/map_info`,
+                    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
+                    areaDefinitionStatusDiv
+                );
+                if (areaDefinitionStatusDiv) showSuccess(areaDefinitionStatusDiv, 'Area updated.');
+            } catch (error) {
+                console.error('Error saving resized area:', error.message);
+            }
+        }
+
         async function populateResourcesForMapping(currentMapId) {
             const defineAreasStatusDiv = document.getElementById('define-areas-status');
             if (!resourceToMapSelect) return;
@@ -1304,29 +1333,58 @@ Enter a title for your booking (optional):`);
                                 const clickX = event.offsetX;
                                 const clickY = event.offsetY;
                                 const editDeleteButtonsDiv = document.getElementById('edit-delete-buttons');
-                                
-                                // TODO: Future: Check if click is on a resize handle of selectedAreaForEditing first
 
-                                if (selectedAreaForEditing && 
-                                    selectedAreaForEditing.map_coordinates && 
+                                const getHandleUnderCursor = (x, y, rect) => {
+                                    const half = HANDLE_SIZE / 2;
+                                    if (x >= rect.x - half && x <= rect.x + half &&
+                                        y >= rect.y - half && y <= rect.y + half) return 'nw';
+                                    if (x >= rect.x + rect.width - half && x <= rect.x + rect.width + half &&
+                                        y >= rect.y - half && y <= rect.y + half) return 'ne';
+                                    if (x >= rect.x - half && x <= rect.x + half &&
+                                        y >= rect.y + rect.height - half && y <= rect.y + rect.height + half) return 'sw';
+                                    if (x >= rect.x + rect.width - half && x <= rect.x + rect.width + half &&
+                                        y >= rect.y + rect.height - half && y <= rect.y + rect.height + half) return 'se';
+                                    return null;
+                                };
+
+                                if (selectedAreaForEditing &&
+                                    selectedAreaForEditing.map_coordinates &&
                                     selectedAreaForEditing.map_coordinates.type === 'rect') {
-                                    
+
                                     const coords = selectedAreaForEditing.map_coordinates;
-                                    // Check if click is within the main body of the selectedAreaForEditing
-                                    if (clickX >= coords.x && clickX <= coords.x + coords.width &&
-                                        clickY >= coords.y && clickY <= coords.y + coords.height) {
-                                        
-                                        isMovingArea = true;
-                                        isDrawing = false; 
-                                        currentDrawnRect = null; 
+                                    const handle = getHandleUnderCursor(clickX, clickY, coords);
+                                    if (handle) {
+                                        isResizingArea = true;
+                                        resizeHandle = handle;
+                                        isDrawing = false;
+                                        isMovingArea = false;
+                                        currentDrawnRect = null;
                                         dragStartX = clickX;
                                         dragStartY = clickY;
                                         initialAreaX = coords.x;
                                         initialAreaY = coords.y;
-                                        
+                                        initialAreaWidth = coords.width;
+                                        initialAreaHeight = coords.height;
+                                        console.log(`Resize (${handle}) started for area:`, selectedAreaForEditing.name);
+                                        redrawCanvas();
+                                        return;
+                                    }
+
+                                    // Check if click is within the main body of the selectedAreaForEditing
+                                    if (clickX >= coords.x && clickX <= coords.x + coords.width &&
+                                        clickY >= coords.y && clickY <= coords.y + coords.height) {
+
+                                        isMovingArea = true;
+                                        isDrawing = false;
+                                        currentDrawnRect = null;
+                                        dragStartX = clickX;
+                                        dragStartY = clickY;
+                                        initialAreaX = coords.x;
+                                        initialAreaY = coords.y;
+
                                         console.log("Move started for area:", selectedAreaForEditing.name);
-                                        redrawCanvas(); 
-                                        return; 
+                                        redrawCanvas();
+                                        return;
                                     }
                                 }
                         
@@ -1392,46 +1450,95 @@ Enter a title for your booking (optional):`);
                             };
 
                             drawingCanvas.onmousemove = function(event) {
-                                if (!isDrawing) return;
-                                
                                 const currentX = event.offsetX;
                                 const currentY = event.offsetY;
-                                
-                                currentDrawnRect.width = currentX - startX;
-                                currentDrawnRect.height = currentY - startY;
-                                
-                                redrawCanvas(); // Redraw with the current rectangle
+
+                                if (isDrawing) {
+                                    currentDrawnRect.width = currentX - startX;
+                                    currentDrawnRect.height = currentY - startY;
+                                    redrawCanvas();
+                                } else if (isMovingArea && selectedAreaForEditing) {
+                                    const deltaX = currentX - dragStartX;
+                                    const deltaY = currentY - dragStartY;
+                                    const coords = selectedAreaForEditing.map_coordinates;
+                                    coords.x = initialAreaX + deltaX;
+                                    coords.y = initialAreaY + deltaY;
+                                    updateCoordinateInputs(coords);
+                                    currentDrawnRect = { x: coords.x, y: coords.y, width: coords.width, height: coords.height };
+                                    redrawCanvas();
+                                } else if (isResizingArea && selectedAreaForEditing) {
+                                    const deltaX = currentX - dragStartX;
+                                    const deltaY = currentY - dragStartY;
+                                    const coords = selectedAreaForEditing.map_coordinates;
+                                    let newX = initialAreaX;
+                                    let newY = initialAreaY;
+                                    let newW = initialAreaWidth;
+                                    let newH = initialAreaHeight;
+                                    switch(resizeHandle) {
+                                        case 'nw':
+                                            newX = initialAreaX + deltaX;
+                                            newY = initialAreaY + deltaY;
+                                            newW = initialAreaWidth - deltaX;
+                                            newH = initialAreaHeight - deltaY;
+                                            break;
+                                        case 'ne':
+                                            newY = initialAreaY + deltaY;
+                                            newW = initialAreaWidth + deltaX;
+                                            newH = initialAreaHeight - deltaY;
+                                            break;
+                                        case 'sw':
+                                            newX = initialAreaX + deltaX;
+                                            newW = initialAreaWidth - deltaX;
+                                            newH = initialAreaHeight + deltaY;
+                                            break;
+                                        case 'se':
+                                            newW = initialAreaWidth + deltaX;
+                                            newH = initialAreaHeight + deltaY;
+                                            break;
+                                    }
+                                    if (newW < 1) newW = 1;
+                                    if (newH < 1) newH = 1;
+                                    coords.x = newX;
+                                    coords.y = newY;
+                                    coords.width = newW;
+                                    coords.height = newH;
+                                    updateCoordinateInputs(coords);
+                                    currentDrawnRect = { x: newX, y: newY, width: newW, height: newH };
+                                    redrawCanvas();
+                                }
                             };
 
-                            drawingCanvas.onmouseup = function(event) {
-                                if (!isDrawing) return;
-                                isDrawing = false;
-                                
-                                // Normalize the rectangle coordinates (if width/height are negative)
-                                let finalX = currentDrawnRect.x;
-                                let finalY = currentDrawnRect.y;
-                                let finalWidth = currentDrawnRect.width;
-                                let finalHeight = currentDrawnRect.height;
+                            drawingCanvas.onmouseup = async function(event) {
+                                if (isDrawing) {
+                                    isDrawing = false;
 
-                                if (finalWidth < 0) {
-                                    finalX = currentDrawnRect.x + finalWidth;
-                                    finalWidth = Math.abs(finalWidth);
-                                }
-                                if (finalHeight < 0) {
-                                    finalY = currentDrawnRect.y + finalHeight;
-                                    finalHeight = Math.abs(finalHeight);
-                                }
-                                
-                                currentDrawnRect = { x: finalX, y: finalY, width: finalWidth, height: finalHeight };
+                                    let finalX = currentDrawnRect.x;
+                                    let finalY = currentDrawnRect.y;
+                                    let finalWidth = currentDrawnRect.width;
+                                    let finalHeight = currentDrawnRect.height;
 
-                                // Populate the form fields
-                                document.getElementById('coord-x').value = Math.round(finalX);
-                                document.getElementById('coord-y').value = Math.round(finalY);
-                                document.getElementById('coord-width').value = Math.round(finalWidth);
-                                document.getElementById('coord-height').value = Math.round(finalHeight);
-                                
-                                redrawCanvas(); // Draw the final version of the new rect
-                                console.log("Rectangle drawn:", currentDrawnRect);
+                                    if (finalWidth < 0) {
+                                        finalX = currentDrawnRect.x + finalWidth;
+                                        finalWidth = Math.abs(finalWidth);
+                                    }
+                                    if (finalHeight < 0) {
+                                        finalY = currentDrawnRect.y + finalHeight;
+                                        finalHeight = Math.abs(finalHeight);
+                                    }
+
+                                    currentDrawnRect = { x: finalX, y: finalY, width: finalWidth, height: finalHeight };
+
+                                    updateCoordinateInputs(currentDrawnRect);
+                                    redrawCanvas();
+                                    console.log("Rectangle drawn:", currentDrawnRect);
+                                } else if ((isMovingArea || isResizingArea) && selectedAreaForEditing) {
+                                    isMovingArea = false;
+                                    isResizingArea = false;
+                                    const coords = selectedAreaForEditing.map_coordinates;
+                                    updateCoordinateInputs(coords);
+                                    await saveSelectedAreaDimensions(coords);
+                                    redrawCanvas();
+                                }
                             };
 
                             drawingCanvas.onmouseleave = function(event) {
