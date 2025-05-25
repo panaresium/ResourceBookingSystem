@@ -32,10 +32,15 @@
                 <a href="{{ url_for('serve_admin_maps') }}">{{ _('Admin Maps') }}</a>
             </li>
 
-            {# Container for User Management link - shown by JS if admin #}
-            <li id="user-management-nav-link" style="display:none;">
+
+            {# Additional admin links - shown by JS if admin #}
+            <li id="user-management-nav-link" style="display: none;">
                 <a href="{{ url_for('serve_user_management_page') }}">{{ _('User Management') }}</a>
             </li>
+            <li id="log-nav-link" style="display: none;">
+                <a href="{{ url_for('serve_audit_log_page') }}">{{ _('Audit Logs') }}</a>
+            </li>
+
 
             {# Container for user-specific welcome message - populated by JS when logged in #}
             <li id="welcome-message-container" style="display: none; margin-right: 10px; color: white; align-self: center;"></li>

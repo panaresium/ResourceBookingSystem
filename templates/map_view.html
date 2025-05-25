@@ -1,192 +1,138 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Title can be set dynamically later if needed -->
-    <title>{{ _('Map View - Smart Resource Booking') }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <style>
-        #map-container {
-            position: relative; /* Crucial for absolute positioning of resource areas */
-            width: 800px; /* Example fixed width, or make responsive */
-            height: 600px; /* Example fixed height, or make responsive */
-            background-size: contain; /* Or 'cover', or '100% 100%' */
-            background-repeat: no-repeat;
-            background-position: center center;
-            border: 1px solid #ccc;
-            margin-bottom: 20px;
-        }
-        .resource-area {
-            position: absolute;
-            border: 2px solid blue;
-            background-color: rgba(0, 0, 255, 0.3); /* Default semi-transparent blue */
-            box-sizing: border-box; /* So border doesn't add to width/height */
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            overflow: hidden;
-            color: white; /* Example text color */
-            font-size: 12px;
-        }
-        .resource-area-available {
-            background-color: rgba(0, 255, 0, 0.4); /* Greenish */
-            border-color: darkgreen;
-        }
-        .resource-area-partially-booked {
-            background-color: rgba(255, 255, 0, 0.5); /* Yellowish */
-            border-color: #cca300; /* Darker yellow */
-        }
-        .resource-area-fully-booked {
-            background-color: rgba(255, 0, 0, 0.5); /* Reddish */
-            border-color: darkred;
-        }
-        .resource-area-unknown { /* Fallback or if data is missing */
-            background-color: rgba(128, 128, 128, 0.3); /* Greyish */
-            border-color: #555;
-        }
-        .map-area-clickable:hover {
-            cursor: pointer;
-            filter: brightness(110%); 
-        }
+{% extends "base.html" %}
 
-        /* Modal Styles */
-        .modal {
-            /* display: none; /* Hidden by default - controlled by JS */
-            position: fixed; /* Stay in place */
-            z-index: 1000; /* Sit on top */
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            overflow: auto; /* Enable scroll if needed */
-            background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
-        }
-        .modal-content {
-            background-color: #fefefe;
-            margin: 10% auto; /* 10% from the top and centered */
-            padding: 20px;
-            border: 1px solid #888;
-            width: 80%; /* Could be more specific */
-            max-width: 500px;
-            border-radius: 8px;
-            position: relative;
-        }
-        .close-modal-btn {
-            color: #aaa;
-            float: right; /* Position to the top-right */
-            font-size: 28px;
-            font-weight: bold;
-        }
-        .close-modal-btn:hover,
-        .close-modal-btn:focus {
-            color: black;
-            text-decoration: none;
-            cursor: pointer;
-        }
-        .time-slots-container {
-            margin-top: 15px;
-            margin-bottom: 15px;
-            max-height: 200px;
-            overflow-y: auto;
-            border: 1px solid #eee;
-            padding: 10px;
-        }
-        .time-slot-item {
-            padding: 8px;
-            margin-bottom: 5px;
-            border-radius: 4px;
-        }
-        .time-slot-available {
-            background-color: #e7f7e7; /* Light green */
-            border: 1px solid #c8e6c9;
-            cursor: pointer;
-        }
-        .time-slot-available:hover {
-            background-color: #d0f0d0;
-        }
-        .time-slot-booked {
-            background-color: #fde0e0; /* Light red */
-            border: 1px solid #f9c0c0;
-            color: #777;
-            cursor: not-allowed;
-        }
-        .time-slot-selected { /* For styling the selected available slot */
-            background-color: #c8e6c9; /* Darker green */
-            font-weight: bold;
-        }
-    </style>
-</head>
-<body>
-    <header>
-        <nav>
-            <ul>
-                <li id="welcome-message-container" style="display:none; margin-right: 10px;">
-                    <!-- Welcome message will be populated by JS -->
-                </li>
-                <li id="user-dropdown-container" style="display:none; position: relative; margin-right: 20px;">
-                    <button id="user-dropdown-button" aria-haspopup="true" aria-expanded="false" aria-controls="user-dropdown-menu" style="background: none; border: none; color: white; font-size: 1em; font-weight: bold; cursor: pointer; padding: 0;">
-                        <!-- Username and ▼ icon will be here -->
-                    </button>
-                    <ul id="user-dropdown-menu" role="menu" style="display:none; position: absolute; top: 100%; left: 0; background-color: #2c3e50; border: 1px solid #555; border-top: none; min-width: 160px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); z-index: 100; list-style-type: none; padding: 0; margin: 0; border-radius: 0 0 4px 4px;">
-                        <li><a href="{{ url_for('serve_profile_page') }}" role="menuitem" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('View Profile') }}</a></li>
-                        <li><a href="#" id="logout-link-dropdown" role="menuitem" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Logout') }}</a></li>
-                    </ul>
-                </li>
-                <li><a href="{{ url_for('serve_index') }}">{{ _('Home') }}</a></li>
-                <li><a href="{{ url_for('serve_new_booking') }}">{{ _('New Booking') }}</a></li>
-                <li><a href="{{ url_for('serve_resources') }}">{{ _('View Resources') }}</a></li>
-                <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">{{ _('Admin Maps') }}</a></li>
-                <li id="auth-link-container" style="display:none;"><!-- Login link if not logged in --></li> 
-            </ul>
-        </nav>
-    </header>
+{% block title %}{{ _('Map View - Smart Resource Booking') }}{% endblock %}
 
-    <main>
-        <h1 id="map-view-title">{{ _('Map View') }}</h1>
-        <!-- Date picker to be added/activated in a later step -->
-        <div>
-            <label for="map-availability-date">{{ _('View Availability for Date:') }}</label>
-            <input type="date" id="map-availability-date" name="map-availability-date">
-        </div>
+{% block head_extra %}
+<style>
+    #map-container {
+        position: relative;
+        width: 800px;
+        height: 600px;
+        background-size: contain;
+        background-repeat: no-repeat;
+        background-position: center center;
+        border: 1px solid #ccc;
+        margin-bottom: 20px;
+    }
+    .resource-area {
+        position: absolute;
+        border: 2px solid blue;
+        background-color: rgba(0, 0, 255, 0.3);
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        overflow: hidden;
+        color: white;
+        font-size: 12px;
+    }
+    .resource-area-available {
+        background-color: rgba(0, 255, 0, 0.4);
+        border-color: darkgreen;
+    }
+    .resource-area-partially-booked {
+        background-color: rgba(255, 255, 0, 0.5);
+        border-color: #cca300;
+    }
+    .resource-area-fully-booked {
+        background-color: rgba(255, 0, 0, 0.5);
+        border-color: darkred;
+    }
+    .resource-area-unknown {
+        background-color: rgba(128, 128, 128, 0.3);
+        border-color: #555;
+    }
+    .map-area-clickable:hover {
+        cursor: pointer;
+        filter: brightness(110%);
+    }
+    .modal {
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        background-color: rgba(0,0,0,0.4);
+    }
+    .modal-content {
+        background-color: #fefefe;
+        margin: 10% auto;
+        padding: 20px;
+        border: 1px solid #888;
+        width: 80%;
+        max-width: 500px;
+        border-radius: 8px;
+        position: relative;
+    }
+    .close-modal-btn {
+        color: #aaa;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+    }
+    .close-modal-btn:hover,
+    .close-modal-btn:focus {
+        color: black;
+        text-decoration: none;
+        cursor: pointer;
+    }
+    .time-slots-container {
+        margin-top: 15px;
+        margin-bottom: 15px;
+        max-height: 200px;
+        overflow-y: auto;
+        border: 1px solid #eee;
+        padding: 10px;
+    }
+    .time-slot-item {
+        padding: 8px;
+        margin-bottom: 5px;
+        border-radius: 4px;
+    }
+    .time-slot-available {
+        background-color: #e7f7e7;
+        border: 1px solid #c8e6c9;
+        cursor: pointer;
+    }
+    .time-slot-available:hover { background-color: #d0f0d0; }
+    .time-slot-booked {
+        background-color: #fde0e0;
+        border: 1px solid #f9c0c0;
+        color: #777;
+        cursor: not-allowed;
+    }
+    .time-slot-selected {
+        background-color: #c8e6c9;
+        font-weight: bold;
+    }
+</style>
+{% endblock %}
 
-        <!-- Container for the map image and resource areas -->
-        <div id="map-container" data-map-id="{{ map_id_from_flask }}">
-            <!-- Resource areas will be appended here by JavaScript -->
-        </div>
-        <div id="map-loading-status">{{ _('Loading map and resources...') }}</div>
-
-        <!-- Time Slot Selection Modal -->
-        <div id="time-slot-modal" class="modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-            <div class="modal-content">
-                <span class="close-modal-btn" role="button" aria-label="{{ _('Close modal') }}">&times;</span>
-                <h3 id="modal-title">{{ _('Book Resource') }}</h3>
-                <p>{{ _('Resource:') }} <strong id="modal-resource-name">N/A</strong></p>
-                <p>{{ _('Date:') }} <strong id="modal-date">N/A</strong></p>
-                
-                <div id="modal-time-slots-list" class="time-slots-container">
-                    <!-- Time slots will be populated here -->
-                </div>
-
-                <div>
-                    <label for="modal-booking-title">{{ _('Booking Title (optional):') }}</label>
-                    <input type="text" id="modal-booking-title" name="booking_title">
-                </div>
-                
-                <button id="modal-confirm-booking-btn" class="button">{{ _('Confirm Booking') }}</button>
-                <p id="modal-status-message" style="margin-top:10px;"></p>
+{% block content %}
+    <h1 id="map-view-title">{{ _('Map View') }}</h1>
+    <div>
+        <label for="map-availability-date">{{ _('View Availability for Date:') }}</label>
+        <input type="date" id="map-availability-date" name="map-availability-date">
+    </div>
+    <div id="map-container" data-map-id="{{ map_id_from_flask }}"></div>
+    <div id="map-loading-status">{{ _('Loading map and resources...') }}</div>
+    <div id="time-slot-modal" class="modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-content">
+            <span class="close-modal-btn" role="button" aria-label="{{ _('Close modal') }}">&times;</span>
+            <h3 id="modal-title">{{ _('Book Resource') }}</h3>
+            <p>{{ _('Resource:') }} <strong id="modal-resource-name">N/A</strong></p>
+            <p>{{ _('Date:') }} <strong id="modal-date">N/A</strong></p>
+            <div id="modal-time-slots-list" class="time-slots-container"></div>
+            <div>
+                <label for="modal-booking-title">{{ _('Booking Title (optional):') }}</label>
+                <input type="text" id="modal-booking-title" name="booking_title">
             </div>
+            <button id="modal-confirm-booking-btn" class="button">{{ _('Confirm Booking') }}</button>
+            <p id="modal-status-message" style="margin-top:10px;"></p>
         </div>
-    </main>
+    </div>
+{% endblock %}
 
-    <footer>
-        <p>{{ _('&copy; 2024 Smart Resource Booking') }}</p>
-    </footer>
-    
-    <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
-    <!-- Or link to a new static/js/map_view.js if preferred: -->
-    <!-- <script src="{{ url_for('static', filename='js/map_view.js') }}" defer></script> -->
-</body>
-</html>
