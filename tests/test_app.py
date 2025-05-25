@@ -1,6 +1,7 @@
 import unittest
 import json
-from app import app, db, User # Removed Booking as it's not used in these tests
+from datetime import datetime, time, date
+from app import app, db, User, Resource, Booking, WaitlistEntry, email_log
 # from flask_login import current_user # Not directly used for assertions here
 
 class AppTests(unittest.TestCase):
@@ -17,6 +18,8 @@ class AppTests(unittest.TestCase):
         
         db.create_all()
         
+        email_log.clear()
+
         # Create a test user
         user = User.query.filter_by(username='testuser').first()
         if not user:
@@ -121,6 +124,65 @@ class AppTests(unittest.TestCase):
         response_logged_in = self.client.get('/new_booking')
         self.assertEqual(response_logged_in.status_code, 200)
         self.assertIn('<h1', response_logged_in.data.decode('utf-8'))
+
+    def test_conflicting_booking_adds_waitlist(self):
+        resource = Resource(name='Room1', status='published')
+        db.session.add(resource)
+        db.session.commit()
+
+        start = datetime.combine(date.today(), time(9, 0))
+        end = datetime.combine(date.today(), time(10, 0))
+        existing = Booking(resource_id=resource.id, user_name='testuser', start_time=start, end_time=end, title='Existing')
+        db.session.add(existing)
+        db.session.commit()
+
+        other = User(username='other', email='other@example.com', is_admin=False)
+        other.set_password('password')
+        db.session.add(other)
+        db.session.commit()
+
+        self.login('other', 'password')
+
+        payload = {
+            'resource_id': resource.id,
+            'date_str': date.today().strftime('%Y-%m-%d'),
+            'start_time_str': '09:00',
+            'end_time_str': '10:00',
+            'title': 'Conflict',
+            'user_name': 'other'
+        }
+        resp = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
+        self.assertEqual(resp.status_code, 409)
+        entries = WaitlistEntry.query.filter_by(resource_id=resource.id).all()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].user_id, other.id)
+
+    def test_cancellation_notifies_waitlisted_user(self):
+        resource = Resource(name='Room1', status='published')
+        db.session.add(resource)
+        db.session.commit()
+
+        start = datetime.combine(date.today(), time(9, 0))
+        end = datetime.combine(date.today(), time(10, 0))
+        booking = Booking(resource_id=resource.id, user_name='testuser', start_time=start, end_time=end, title='Existing')
+        db.session.add(booking)
+        db.session.commit()
+
+        other = User(username='other', email='other@example.com', is_admin=False)
+        other.set_password('password')
+        db.session.add(other)
+        db.session.commit()
+
+        entry = WaitlistEntry(resource_id=resource.id, user_id=other.id)
+        db.session.add(entry)
+        db.session.commit()
+
+        self.login('testuser', 'password')
+        resp = self.client.delete(f'/api/bookings/{booking.id}')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(WaitlistEntry.query.count(), 0)
+        self.assertEqual(len(email_log), 1)
+        self.assertEqual(email_log[0]['to'], other.email)
 
 if __name__ == '__main__':
     unittest.main()
