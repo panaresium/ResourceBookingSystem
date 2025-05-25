@@ -2230,6 +2230,7 @@ Enter a title for your booking (optional):`);
 
     // --- Accessibility Controls ---
     const toggleHighContrastBtn = document.getElementById('toggle-high-contrast');
+    const themeToggleBtn = document.getElementById('theme-toggle');
     const increaseFontSizeBtn = document.getElementById('increase-font-size');
     const decreaseFontSizeBtn = document.getElementById('decrease-font-size');
     const resetFontSizeBtn = document.getElementById('reset-font-size');
@@ -2250,6 +2251,31 @@ Enter a title for your booking (optional):`);
 
     if (toggleHighContrastBtn) {
         toggleHighContrastBtn.addEventListener('click', toggleHighContrast);
+    }
+
+    // Theme Toggle
+    function applyTheme(theme) {
+        if (theme === 'dark') {
+            document.body.classList.add('dark-theme');
+        } else {
+            document.body.classList.remove('dark-theme');
+        }
+    }
+
+    function toggleTheme() {
+        const newTheme = document.body.classList.toggle('dark-theme') ? 'dark' : 'light';
+        localStorage.setItem('theme', newTheme);
+    }
+
+    function loadThemePreference() {
+        const storedTheme = localStorage.getItem('theme');
+        if (storedTheme === 'dark') {
+            applyTheme('dark');
+        }
+    }
+
+    if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', toggleTheme);
     }
 
     // Font Size Adjustment
@@ -2330,6 +2356,7 @@ Enter a title for your booking (optional):`);
     // Load preferences on script load
     loadHighContrastPreference();
     loadFontSizePreference();
+    loadThemePreference();
 
     // --- Language Selection ---
     const languageSelector = document.getElementById('language-selector');
@@ -2379,5 +2406,31 @@ Enter a title for your booking (optional):`);
     // Load language preference - this needs to be careful about redirect loops
     // The current logic in loadLanguagePreference tries to mitigate this.
     loadLanguagePreference();
+
+    // --- Real-time Updates via Socket.IO ---
+    if (typeof io !== 'undefined') {
+        const socket = io();
+        socket.on('booking_updated', () => {
+            if (calendarTable && roomSelectDropdown && availabilityDateInput) {
+                const selectedOption = roomSelectDropdown.selectedOptions[0];
+                if (selectedOption) {
+                    const resourceDetails = {
+                        id: roomSelectDropdown.value,
+                        booking_restriction: selectedOption.dataset.bookingRestriction,
+                        allowed_user_ids: selectedOption.dataset.allowedUserIds,
+                        allowed_roles: selectedOption.dataset.allowedRoles
+                    };
+                    fetchAndDisplayAvailability(resourceDetails.id, availabilityDateInput.value, resourceDetails);
+                }
+            }
+
+            if (typeof fetchAndRenderMap === 'function' && mapContainer) {
+                const mapId = mapContainer.dataset.mapId;
+                const dateInput = document.getElementById('map-availability-date');
+                const dateStr = dateInput ? dateInput.value : null;
+                fetchAndRenderMap(mapId, dateStr);
+            }
+        });
+    }
 
 });

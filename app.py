@@ -19,6 +19,7 @@ from flask import abort # For permission_required decorator
 from flask_babel import Babel, gettext as _ # For i18n
 from flask_wtf.csrf import CSRFProtect # For CSRF protection
 
+
 # Attempt to import APScheduler; provide a basic fallback if unavailable
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -47,6 +48,7 @@ except ImportError:  # pragma: no cover - fallback if APScheduler isn't installe
             for func, minutes in self.jobs:
                 t = threading.Thread(target=run_job, args=(func, minutes), daemon=True)
                 t.start()
+
 
 # Attempt to import Flask-Mail; provide a fallback if unavailable
 try:
@@ -83,6 +85,7 @@ if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
+socketio = SocketIO(app)
 
 # Define locale selector function first
 def get_locale():
@@ -2136,6 +2139,7 @@ def create_booking():
             'end_time': new_booking.end_time.strftime('%Y-%m-%d %H:%M:%S')
         }
         add_audit_log(action="CREATE_BOOKING", details=f"Booking ID {new_booking.id} for resource ID {resource_id} ('{resource.name}') created by user '{user_name_for_record}'. Title: '{title}'.")
+        socketio.emit('booking_updated', {'action': 'created', 'booking_id': new_booking.id, 'resource_id': resource_id})
         return jsonify(created_booking_data), 201
         
     except Exception as e:
@@ -2245,6 +2249,7 @@ def delete_booking_by_user(booking_id):
             action="CANCEL_BOOKING_USER",
             details=f"User '{current_user.username}' cancelled their booking. {booking_details_for_log}"
         )
+        socketio.emit('booking_updated', {'action': 'deleted', 'booking_id': booking_id, 'resource_id': booking.resource_id})
         app.logger.info(f"User '{current_user.username}' successfully deleted booking ID: {booking_id}. Details: {booking_details_for_log}")
         return jsonify({'message': 'Booking cancelled successfully.'}), 200
 
@@ -2407,6 +2412,7 @@ __all__ = [
     "FloorMap",
     "email_log",
     "scheduler",
+
 ]
 
 if __name__ == "__main__":
@@ -2418,4 +2424,4 @@ if __name__ == "__main__":
     except Exception:
         app.logger.exception("Failed to start background scheduler")
     app.logger.info(_("Flask app starting...")) # Example of wrapping a log message, though not typically necessary for i18n
-    app.run(debug=True)
+    socketio.run(app, debug=True)
