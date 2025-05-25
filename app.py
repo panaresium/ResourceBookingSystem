@@ -19,6 +19,35 @@ from flask import abort # For permission_required decorator
 from flask_babel import Babel, gettext as _ # For i18n
 from flask_wtf.csrf import CSRFProtect # For CSRF protection
 
+# Attempt to import APScheduler; provide a basic fallback if unavailable
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    apscheduler_available = True
+except ImportError:  # pragma: no cover - fallback if APScheduler isn't installed
+    apscheduler_available = False
+
+    class BackgroundScheduler:  # Minimal fallback implementation
+        def __init__(self, *args, **kwargs):
+            self.jobs = []
+
+        def add_job(self, func, trigger=None, minutes=0, **kwargs):
+            self.jobs.append((func, minutes))
+
+        def start(self):
+            import threading, time
+
+            def run_job(job_func, interval):
+                while True:
+                    time.sleep(interval * 60)
+                    try:
+                        job_func()
+                    except Exception:
+                        logging.exception("Error in fallback scheduler job")
+
+            for func, minutes in self.jobs:
+                t = threading.Thread(target=run_job, args=(func, minutes), daemon=True)
+                t.start()
+
 # Attempt to import Flask-Mail; provide a fallback if unavailable
 try:
     from flask_mail import Mail, Message
@@ -111,6 +140,10 @@ app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', '')
 app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'false').lower() in ['true', '1', 'yes']
 app.config['MAIL_USE_SSL'] = os.environ.get('MAIL_USE_SSL', 'false').lower() in ['true', '1', 'yes']
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', app.config['MAIL_USERNAME'] or 'noreply@example.com')
+
+# Booking check-in configuration
+app.config['CHECK_IN_GRACE_MINUTES'] = int(os.environ.get('CHECK_IN_GRACE_MINUTES', '15'))
+app.config['AUTO_CANCEL_CHECK_INTERVAL_MINUTES'] = int(os.environ.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', '5'))
 
 # Basic Logging Configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]')
@@ -273,6 +306,8 @@ class Booking(db.Model):
     start_time = db.Column(db.DateTime, nullable=False)
     end_time = db.Column(db.DateTime, nullable=False)
     title = db.Column(db.String(100), nullable=True)
+    checked_in_at = db.Column(db.DateTime, nullable=True)
+    checked_out_at = db.Column(db.DateTime, nullable=True)
 
     def __repr__(self):
         return f"<Booking {self.title or self.id} for Resource {self.resource_id} from {self.start_time.strftime('%Y-%m-%d %H:%M')} to {self.end_time.strftime('%Y-%m-%d %H:%M')}>"
@@ -820,11 +855,21 @@ def get_resource_availability(resource_id):
 
         booked_slots = []
         for booking in bookings_on_date:
+            grace = app.config.get('CHECK_IN_GRACE_MINUTES', 15)
+            now = datetime.utcnow()
+            can_check_in = (
+                booking.checked_in_at is None and
+                booking.start_time - timedelta(minutes=grace) <= now <= booking.start_time + timedelta(minutes=grace)
+            )
             booked_slots.append({
-                'title': booking.title, # Optional: include title
-                'user_name': booking.user_name, # Optional: include user
+                'title': booking.title,
+                'user_name': booking.user_name,
                 'start_time': booking.start_time.strftime('%H:%M:%S'),
-                'end_time': booking.end_time.strftime('%H:%M:%S')
+                'end_time': booking.end_time.strftime('%H:%M:%S'),
+                'booking_id': booking.id,
+                'checked_in_at': booking.checked_in_at.isoformat() if booking.checked_in_at else None,
+                'checked_out_at': booking.checked_out_at.isoformat() if booking.checked_out_at else None,
+                'can_check_in': can_check_in
             })
         
         return jsonify(booked_slots), 200
@@ -2115,6 +2160,12 @@ def get_my_bookings():
         for booking in user_bookings:
             resource = Resource.query.get(booking.resource_id)
             resource_name = resource.name if resource else "Unknown Resource"
+            grace = app.config.get('CHECK_IN_GRACE_MINUTES', 15)
+            now = datetime.utcnow()
+            can_check_in = (
+                booking.checked_in_at is None and
+                booking.start_time - timedelta(minutes=grace) <= now <= booking.start_time + timedelta(minutes=grace)
+            )
             bookings_list.append({
                 'id': booking.id,
                 'resource_id': booking.resource_id,
@@ -2122,7 +2173,10 @@ def get_my_bookings():
                 'user_name': booking.user_name,
                 'start_time': booking.start_time.isoformat(),
                 'end_time': booking.end_time.isoformat(),
-                'title': booking.title
+                'title': booking.title,
+                'checked_in_at': booking.checked_in_at.isoformat() if booking.checked_in_at else None,
+                'checked_out_at': booking.checked_out_at.isoformat() if booking.checked_out_at else None,
+                'can_check_in': can_check_in
             })
         
         app.logger.info(f"User '{current_user.username}' fetched their bookings. Count: {len(bookings_list)}")
@@ -2281,8 +2335,66 @@ def update_booking_by_user(booking_id):
         add_audit_log(action="UPDATE_BOOKING_USER_FAILED", details=f"User '{current_user.username}' failed to update booking ID: {booking_id}. Error: {str(e)}")
         return jsonify({'error': 'Failed to update booking due to a server error.'}), 500
 
+
+@app.route('/api/bookings/<int:booking_id>/check_in', methods=['POST'])
+@login_required
+def check_in_booking(booking_id):
+    booking = Booking.query.get(booking_id)
+    if not booking:
+        return jsonify({'error': 'Booking not found.'}), 404
+    if booking.user_name != current_user.username:
+        return jsonify({'error': 'You are not authorized to check in for this booking.'}), 403
+    if booking.checked_in_at:
+        return jsonify({'error': 'Booking already checked in.'}), 400
+    now = datetime.utcnow()
+    grace = app.config.get('CHECK_IN_GRACE_MINUTES', 15)
+    if now < booking.start_time - timedelta(minutes=grace) or now > booking.start_time + timedelta(minutes=grace):
+        return jsonify({'error': 'Check-in not allowed at this time.'}), 400
+    booking.checked_in_at = now
+    db.session.commit()
+    return jsonify({'message': 'Checked in successfully.', 'checked_in_at': booking.checked_in_at.isoformat()}), 200
+
+
+@app.route('/api/bookings/<int:booking_id>/check_out', methods=['POST'])
+@login_required
+def check_out_booking(booking_id):
+    booking = Booking.query.get(booking_id)
+    if not booking:
+        return jsonify({'error': 'Booking not found.'}), 404
+    if booking.user_name != current_user.username:
+        return jsonify({'error': 'You are not authorized to check out of this booking.'}), 403
+    if not booking.checked_in_at:
+        return jsonify({'error': 'Cannot check out without checking in.'}), 400
+    if booking.checked_out_at:
+        return jsonify({'error': 'Booking already checked out.'}), 400
+    booking.checked_out_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'message': 'Checked out successfully.', 'checked_out_at': booking.checked_out_at.isoformat()}), 200
+
 # Register blueprint after routes are defined
 app.register_blueprint(analytics_bp)
+
+# --- Booking Check-in Background Job ---
+def cancel_unchecked_bookings():
+    with app.app_context():
+        grace_minutes = app.config.get('CHECK_IN_GRACE_MINUTES', 15)
+        cutoff = datetime.utcnow() - timedelta(minutes=grace_minutes)
+        stale = Booking.query.filter(
+            Booking.checked_in_at.is_(None),
+            Booking.start_time < cutoff
+        ).all()
+        if stale:
+            for b in stale:
+                db.session.delete(b)
+            db.session.commit()
+            app.logger.info(f"Auto-cancelled {len(stale)} unchecked bookings")
+
+scheduler = BackgroundScheduler()
+scheduler.add_job(
+    cancel_unchecked_bookings,
+    'interval',
+    minutes=app.config.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', 5)
+)
 
 # Exported names for easier importing in tests and other modules
 __all__ = [
@@ -2294,11 +2406,16 @@ __all__ = [
     "WaitlistEntry",
     "FloorMap",
     "email_log",
+    "scheduler",
 ]
 
 if __name__ == "__main__":
     # To initialize the DB, you can uncomment the next line and run 'python app.py' once.
     # Then comment it out again to prevent re-initialization on every run.
     # init_db() # Call this directly only for the very first setup
+    try:
+        scheduler.start()
+    except Exception:
+        app.logger.exception("Failed to start background scheduler")
     app.logger.info(_("Flask app starting...")) # Example of wrapping a log message, though not typically necessary for i18n
     app.run(debug=True)
