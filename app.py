@@ -18,6 +18,7 @@ from functools import wraps # For permission_required decorator
 from flask import abort # For permission_required decorator
 from flask_babel import Babel, gettext as _ # For i18n
 from flask_wtf.csrf import CSRFProtect # For CSRF protection
+from flask_socketio import SocketIO
 
 
 # Attempt to import APScheduler; provide a basic fallback if unavailable
