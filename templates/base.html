@@ -40,6 +40,9 @@
             <li id="log-nav-link" style="display: none;">
                 <a href="{{ url_for('serve_audit_log_page') }}">{{ _('Audit Logs') }}</a>
             </li>
+            <li id="analytics-nav-link" style="display: none;">
+                <a href="{{ url_for('analytics.analytics_dashboard') }}">{{ _('Analytics') }}</a>
+            </li>
 
 
             {# Container for user-specific welcome message - populated by JS when logged in #}

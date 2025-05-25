@@ -4,6 +4,7 @@
 /__pycache__/*
 data/site.db
 /tests/*
+!tests/__init__.py
 *.db
 /data
 __pycache__/
