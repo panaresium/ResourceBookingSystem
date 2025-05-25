@@ -79,7 +79,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Modal Handling
     if (addNewUserBtn) {
-        addNewUserBtn.addEventListener('click', () => {
+        addNewUserBtn.addEventListener('click', async () => {
             resetForm();
             if (userFormModalTitle) userFormModalTitle.textContent = 'Add New User';
             if (passwordInput) {
@@ -91,7 +91,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (userFormModal) userFormModal.style.display = 'block';
             
             // Populate roles checkboxes
-            await populateRolesForUserForm(user.roles.map(r => r.id));
+            await populateRolesForUserForm([]);
         });
     }
 
@@ -151,7 +151,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Event Delegation for Edit/Delete/Link Google buttons
     if (usersTableBody) {
-        usersTableBody.addEventListener('click', (event) => {
+        usersTableBody.addEventListener('click', async (event) => {
             const target = event.target;
             if (target.classList.contains('edit-user-btn')) {
                 const userId = target.dataset.userId;
