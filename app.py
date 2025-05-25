@@ -285,6 +285,7 @@ def add_audit_log(action: str, details: str, user_id: int = None, username: str 
         db.session.rollback() # Rollback in case of error during audit logging itself
 
 @app.route("/")
+@login_required
 def serve_index():
     return render_template("index.html")
 
