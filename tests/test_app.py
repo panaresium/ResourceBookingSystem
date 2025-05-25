@@ -2,7 +2,7 @@ import unittest
 import json
 
 from datetime import datetime, time, date
-from app import app, db, User, Resource, Booking, WaitlistEntry, email_log
+from app import app, db, User, Resource, Booking, WaitlistEntry, FloorMap, email_log
 
 # from flask_login import current_user # Not directly used for assertions here
 
@@ -210,6 +210,26 @@ class AppTests(unittest.TestCase):
         self.assertEqual(WaitlistEntry.query.count(), 0)
         self.assertEqual(len(email_log), 1)
         self.assertEqual(email_log[0]['to'], other.email)
+
+    def test_profile_update(self):
+        self.login('testuser', 'password')
+        resp = self.client.put('/api/profile', data=json.dumps({'email': 'new@example.com', 'password': 'newpass'}), content_type='application/json')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get('success'))
+        updated_user = User.query.filter_by(username='testuser').first()
+        self.assertEqual(updated_user.email, 'new@example.com')
+        self.assertTrue(updated_user.check_password('newpass'))
+
+    def test_profile_update_duplicate_email(self):
+        other = User(username='otheruser', email='dup@example.com', is_admin=False)
+        other.set_password('pass')
+        db.session.add(other)
+        db.session.commit()
+
+        self.login('testuser', 'password')
+        resp = self.client.put('/api/profile', data=json.dumps({'email': 'dup@example.com'}), content_type='application/json')
+        self.assertEqual(resp.status_code, 409)
 
 
 if __name__ == '__main__':
