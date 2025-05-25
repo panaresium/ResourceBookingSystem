@@ -2074,12 +2074,15 @@ Enter a title for your booking (optional):`);
                 const slotLabel = `${startTimeStr} - ${endTimeStr}`;
 
                 let isBooked = false;
+                let myBookingInfo = null;
                 for (const booked of detailedBookedSlots) {
                     const bookedStart = new Date(`${dateString}T${booked.start_time}`);
                     const bookedEnd = new Date(`${dateString}T${booked.end_time}`);
-                    // Check for overlap: (BookedStart < SlotEnd) and (BookedEnd > SlotStart)
                     if (bookedStart < slotEnd && bookedEnd > slotStart) {
                         isBooked = true;
+                        if (booked.user_name === sessionStorage.getItem('loggedInUser')) {
+                            myBookingInfo = booked;
+                        }
                         break;
                     }
                 }
@@ -2090,7 +2093,27 @@ Enter a title for your booking (optional):`);
 
                 if (isBooked) {
                     slotDiv.classList.add('time-slot-booked');
-                    slotDiv.textContent += ' (Booked)';
+                    if (myBookingInfo) {
+                        slotDiv.textContent += ' (Your Booking)';
+                        if (myBookingInfo.can_check_in) {
+                            const btn = document.createElement('button');
+                            btn.textContent = 'Check In';
+                            btn.classList.add('btn','btn-sm','btn-success','ms-2');
+                            btn.addEventListener('click', async (e)=>{
+                                e.stopPropagation();
+                                try {
+                                    await apiCall(`/api/bookings/${myBookingInfo.booking_id}/check_in`, 'POST', modalStatusMessage);
+                                    btn.remove();
+                                    slotDiv.textContent = slotLabel + ' (Checked In)';
+                                } catch (err) {
+                                    console.error('Check in failed', err);
+                                }
+                            });
+                            slotDiv.appendChild(btn);
+                        }
+                    } else {
+                        slotDiv.textContent += ' (Booked)';
+                    }
                 } else {
                     slotDiv.classList.add('time-slot-available');
                     slotDiv.dataset.startTime = startTimeStr;
@@ -2207,6 +2230,7 @@ Enter a title for your booking (optional):`);
 
     // --- Accessibility Controls ---
     const toggleHighContrastBtn = document.getElementById('toggle-high-contrast');
+    const themeToggleBtn = document.getElementById('theme-toggle');
     const increaseFontSizeBtn = document.getElementById('increase-font-size');
     const decreaseFontSizeBtn = document.getElementById('decrease-font-size');
     const resetFontSizeBtn = document.getElementById('reset-font-size');
@@ -2227,6 +2251,31 @@ Enter a title for your booking (optional):`);
 
     if (toggleHighContrastBtn) {
         toggleHighContrastBtn.addEventListener('click', toggleHighContrast);
+    }
+
+    // Theme Toggle
+    function applyTheme(theme) {
+        if (theme === 'dark') {
+            document.body.classList.add('dark-theme');
+        } else {
+            document.body.classList.remove('dark-theme');
+        }
+    }
+
+    function toggleTheme() {
+        const newTheme = document.body.classList.toggle('dark-theme') ? 'dark' : 'light';
+        localStorage.setItem('theme', newTheme);
+    }
+
+    function loadThemePreference() {
+        const storedTheme = localStorage.getItem('theme');
+        if (storedTheme === 'dark') {
+            applyTheme('dark');
+        }
+    }
+
+    if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', toggleTheme);
     }
 
     // Font Size Adjustment
@@ -2307,6 +2356,7 @@ Enter a title for your booking (optional):`);
     // Load preferences on script load
     loadHighContrastPreference();
     loadFontSizePreference();
+    loadThemePreference();
 
     // --- Language Selection ---
     const languageSelector = document.getElementById('language-selector');
@@ -2356,5 +2406,31 @@ Enter a title for your booking (optional):`);
     // Load language preference - this needs to be careful about redirect loops
     // The current logic in loadLanguagePreference tries to mitigate this.
     loadLanguagePreference();
+
+    // --- Real-time Updates via Socket.IO ---
+    if (typeof io !== 'undefined') {
+        const socket = io();
+        socket.on('booking_updated', () => {
+            if (calendarTable && roomSelectDropdown && availabilityDateInput) {
+                const selectedOption = roomSelectDropdown.selectedOptions[0];
+                if (selectedOption) {
+                    const resourceDetails = {
+                        id: roomSelectDropdown.value,
+                        booking_restriction: selectedOption.dataset.bookingRestriction,
+                        allowed_user_ids: selectedOption.dataset.allowedUserIds,
+                        allowed_roles: selectedOption.dataset.allowedRoles
+                    };
+                    fetchAndDisplayAvailability(resourceDetails.id, availabilityDateInput.value, resourceDetails);
+                }
+            }
+
+            if (typeof fetchAndRenderMap === 'function' && mapContainer) {
+                const mapId = mapContainer.dataset.mapId;
+                const dateInput = document.getElementById('map-availability-date');
+                const dateStr = dateInput ? dateInput.value : null;
+                fetchAndRenderMap(mapId, dateStr);
+            }
+        });
+    }
 
 });

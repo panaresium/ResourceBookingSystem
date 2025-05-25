@@ -263,6 +263,7 @@ class AppTests(unittest.TestCase):
         self.assertIn('date', first_entry)
         self.assertIn('count', first_entry)
 
+
     def test_calendar_page_and_api(self):
         """Calendar page requires login and returns events."""
         # Not logged in -> redirect
@@ -304,6 +305,7 @@ class AppTests(unittest.TestCase):
         updated = Booking.query.get(booking.id)
         self.assertEqual(updated.start_time, new_start)
         self.assertEqual(updated.end_time, new_end)
+
 
 
 

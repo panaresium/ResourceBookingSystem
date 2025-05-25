@@ -49,9 +49,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 const updateBtn = bookingItemClone.querySelector('.update-booking-btn');
                 updateBtn.dataset.bookingId = booking.id;
-                
+
                 const cancelBtn = bookingItemClone.querySelector('.cancel-booking-btn');
                 cancelBtn.dataset.bookingId = booking.id;
+
+                const checkInBtn = bookingItemClone.querySelector('.check-in-btn');
+                const checkOutBtn = bookingItemClone.querySelector('.check-out-btn');
+                checkInBtn.dataset.bookingId = booking.id;
+                checkOutBtn.dataset.bookingId = booking.id;
+                if (booking.can_check_in) {
+                    checkInBtn.style.display = 'inline-block';
+                }
+                if (booking.checked_in_at && !booking.checked_out_at) {
+                    checkOutBtn.style.display = 'inline-block';
+                }
 
                 bookingsListDiv.appendChild(bookingItemClone);
             });
@@ -96,6 +107,35 @@ document.addEventListener('DOMContentLoaded', () => {
             updateBookingModalLabel.textContent = `Update Booking Title for: ${resourceName}`;
             hideStatusMessage(updateModalStatusDiv);
             updateModal.show();
+        }
+
+        if (target.classList.contains('check-in-btn')) {
+            const bookingId = target.dataset.bookingId;
+            showLoading(statusDiv, 'Checking in...');
+            try {
+                await apiCall(`/api/bookings/${bookingId}/check_in`, 'POST');
+                target.style.display = 'none';
+                const bookingItemDiv = target.closest('.booking-item');
+                const checkOutBtn = bookingItemDiv.querySelector('.check-out-btn');
+                if (checkOutBtn) checkOutBtn.style.display = 'inline-block';
+                showSuccess(statusDiv, 'Checked in successfully.');
+            } catch (error) {
+                console.error('Check in failed:', error);
+                showError(statusDiv, error.message || 'Check in failed.');
+            }
+        }
+
+        if (target.classList.contains('check-out-btn')) {
+            const bookingId = target.dataset.bookingId;
+            showLoading(statusDiv, 'Checking out...');
+            try {
+                await apiCall(`/api/bookings/${bookingId}/check_out`, 'POST');
+                target.style.display = 'none';
+                showSuccess(statusDiv, 'Checked out successfully.');
+            } catch (error) {
+                console.error('Check out failed:', error);
+                showError(statusDiv, error.message || 'Check out failed.');
+            }
         }
     });
 

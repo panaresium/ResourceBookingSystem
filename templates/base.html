@@ -45,6 +45,10 @@
                 <a href="{{ url_for('analytics.analytics_dashboard') }}">{{ _('Analytics') }}</a>
             </li>
 
+            <li>
+                <button id="theme-toggle" type="button">{{ _('Toggle Theme') }}</button>
+            </li>
+
 
             {# Container for user-specific welcome message - populated by JS when logged in #}
             <li id="welcome-message-container" style="display: none; margin-right: 10px; color: white; align-self: center;"></li>
@@ -91,6 +95,7 @@
     </footer>
 
     {% block scripts %}
+    <script src="/socket.io/socket.io.js"></script>
     <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
     {% endblock %}
 </body>

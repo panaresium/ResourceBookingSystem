@@ -2,10 +2,14 @@
 /venv/*
 /__pycache__
 /__pycache__/*
-data/site.db
+/tests/__pycache__/
+/tests/*
+!tests/__init__.py
 *.db
-/data
+/data/
 __pycache__/
 **/__pycache__/
 translations/**/LC_MESSAGES/*.mo
 *.db
+site.db
+data/site.db
