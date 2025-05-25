@@ -85,3 +85,20 @@ The application uses an SQLite database to store resource information. If you ha
    This will create a `site.db` file in the `data/` directory and set up the tables.
    You should see messages indicating success.
    **Important:** You only need to run `init_db()` once. Running it again will not harm anything by default with `db.create_all()`, but it's not necessary.
+
+### Running Tests
+
+To run the test suite:
+1. Activate your virtual environment.
+2. Install dependencies from `requirements.txt`:
+   ```bash
+   pip install -r requirements.txt
+   ```
+   Alternatively, you can run the helper script:
+   ```bash
+   ./tests/setup.sh
+   ```
+3. Execute the tests with `pytest`:
+   ```bash
+   pytest
+   ```
