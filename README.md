@@ -102,3 +102,24 @@ To run the test suite:
    ```bash
    pytest
    ```
+
+### Enabling Multiple Languages
+
+The project uses **Flask-Babel** for translations. Available languages are configured in `app.py` under `app.config['LANGUAGES']`. To add or update locales:
+
+1. Ensure the desired language code is listed in `app.config['LANGUAGES']`.
+2. Generate a new translation catalog:
+   ```bash
+   pybabel init -i messages.pot -d translations -l <lang>
+   ```
+   For existing languages run:
+   ```bash
+   pybabel update -i messages.pot -d translations
+   ```
+3. Edit `translations/<lang>/LC_MESSAGES/messages.po` and provide translations for each string.
+4. Compile the catalogs so Flask can load them:
+   ```bash
+   pybabel compile -d translations
+   ```
+
+After compiling, restart the app and use the language selector in the page footer to switch between English (`en`) and Spanish (`es`).
