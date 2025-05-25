@@ -24,6 +24,7 @@
             <li><a href="{{ url_for('serve_index') }}">{{ _('Home') }}</a></li>
             <li><a href="{{ url_for('serve_new_booking') }}">{{ _('New Booking') }}</a></li>
             <li><a href="{{ url_for('serve_resources') }}">{{ _('View Resources') }}</a></li>
+            <li id="my-bookings-nav-link" style="display:none;"><a href="{{ url_for('serve_my_bookings_page') }}">{{ _('My Bookings') }}</a></li>
             <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">{{ _('Admin Maps') }}</a></li>
             <li id="auth-link-container" style="display:none;"><!-- Login link if not logged in --></li> 
         </ul>
