@@ -1720,18 +1720,38 @@ def api_login():
         return jsonify({'error': 'Invalid username or password.'}), 401
 
 @app.route('/api/auth/logout', methods=['POST'])
-@login_required
+
 def api_logout():
-    user_identifier = current_user.username if current_user else "Unknown user" # Should always be current_user due to @login_required
-    user_id_for_log = current_user.id if current_user else None
+    """Log out the current user if authenticated.
+
+    This endpoint previously required authentication which meant a stale session
+    cookie resulted in a failed logout attempt on page load.  By removing the
+    ``@login_required`` decorator and checking ``current_user`` ourselves we can
+    safely treat a request from an anonymous user as a successful logout.
+    """
+    user_identifier = current_user.username if current_user.is_authenticated else "Anonymous"
+    user_id_for_log = current_user.id if current_user.is_authenticated else None
+
     try:
+        # ``logout_user`` is safe to call for anonymous users; it simply clears
+        # any user-related session data if present.
         logout_user()
         app.logger.info(f"User '{user_identifier}' logged out successfully.")
-        add_audit_log(action="LOGOUT_SUCCESS", details=f"User '{user_identifier}' logged out.", user_id=user_id_for_log, username=user_identifier)
+        add_audit_log(
+            action="LOGOUT_SUCCESS",
+            details=f"User '{user_identifier}' logged out.",
+            user_id=user_id_for_log,
+            username=user_identifier,
+        )
         return jsonify({'success': True, 'message': 'Logout successful.'}), 200
     except Exception as e:
         app.logger.exception(f"Error during logout for user {user_identifier}:")
-        add_audit_log(action="LOGOUT_FAILED", details=f"Logout attempt failed for user '{user_identifier}'. Error: {str(e)}", user_id=user_id_for_log, username=user_identifier)
+        add_audit_log(
+            action="LOGOUT_FAILED",
+            details=f"Logout attempt failed for user '{user_identifier}'. Error: {str(e)}",
+            user_id=user_id_for_log,
+            username=user_identifier,
+        )
         return jsonify({'error': 'Logout failed due to a server error.'}), 500
 
 @app.route('/api/auth/status', methods=['GET'])
