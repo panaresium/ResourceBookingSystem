@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Edit Profile - Smart Resource Booking') }}{% endblock %}
+
+{% block content %}
+<h2>{{ _('Edit Profile') }}</h2>
+<form id="edit-profile-form">
+    <div>
+        <label for="email">{{ _('Email:') }}</label>
+        <input type="email" id="email" name="email" value="{{ email }}">
+    </div>
+    <div>
+        <label for="password">{{ _('New Password:') }}</label>
+        <input type="password" id="password" name="password">
+    </div>
+    <div>
+        <label for="confirm-password">{{ _('Confirm Password:') }}</label>
+        <input type="password" id="confirm-password" name="confirm_password">
+    </div>
+    <button type="submit">{{ _('Save Changes') }}</button>
+    <div id="edit-profile-message" aria-live="polite" style="margin-top: 10px;"></div>
+</form>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('edit-profile-form');
+        const msg = document.getElementById('edit-profile-message');
+        if (form) {
+            form.addEventListener('submit', async function(event) {
+                event.preventDefault();
+                const email = document.getElementById('email').value.trim();
+                const password = document.getElementById('password').value;
+                const confirm = document.getElementById('confirm-password').value;
+                if(password && password !== confirm){
+                    msg.textContent = '{{ _('Passwords do not match.') }}';
+                    msg.className = 'error';
+                    return;
+                }
+                msg.textContent = '{{ _('Saving...') }}';
+                msg.className = '';
+                try {
+                    const response = await fetch('/api/profile', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: email || null, password: password || null })
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        msg.textContent = data.message || '{{ _('Profile updated.') }}';
+                        msg.className = 'success';
+                    } else {
+                        msg.textContent = data.error || '{{ _('Update failed.') }}';
+                        msg.className = 'error';
+                    }
+                } catch(err){
+                    console.error(err);
+                    msg.textContent = '{{ _('Update failed.') }}';
+                    msg.className = 'error';
+                }
+            });
+        }
+    });
+</script>
+{% endblock %}
