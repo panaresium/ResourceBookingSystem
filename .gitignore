@@ -5,3 +5,6 @@
 data/site.db
 /tests/*
 *.db
+/data
+__pycache__/
+**/__pycache__/

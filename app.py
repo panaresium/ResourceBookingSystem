@@ -290,6 +290,7 @@ def serve_index():
     return render_template("index.html")
 
 @app.route("/new_booking")
+@login_required
 def serve_new_booking():
     return render_template("new_booking.html")
 

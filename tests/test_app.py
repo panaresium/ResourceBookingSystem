@@ -103,5 +103,24 @@ class AppTests(unittest.TestCase):
         self.assertEqual(response_profile.status_code, 302)
         self.assertTrue('/login' in response_profile.location)
 
+    def test_new_booking_requires_login(self):
+        """Ensure new booking page requires authentication."""
+        # Without logging in, should redirect to login
+        response = self.client.get('/new_booking', follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login', response.location)
+
+        # After login, should access successfully
+        login_response = self.login('testuser', 'password')
+        self.assertEqual(login_response.status_code, 200)
+        self.assertTrue(login_response.get_json().get('success'))
+
+        auth_status = self.client.get('/api/auth/status').get_json()
+        self.assertTrue(auth_status.get('logged_in'))
+
+        response_logged_in = self.client.get('/new_booking')
+        self.assertEqual(response_logged_in.status_code, 200)
+        self.assertIn('<h1', response_logged_in.data.decode('utf-8'))
+
 if __name__ == '__main__':
     unittest.main()
