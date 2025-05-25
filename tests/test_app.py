@@ -263,6 +263,22 @@ class AppTests(unittest.TestCase):
         self.assertIn('date', first_entry)
         self.assertIn('count', first_entry)
 
+    def test_check_in_and_out_endpoints(self):
+        self.login('testuser', 'password')
+        start = datetime.utcnow() - timedelta(minutes=1)
+        end = start + timedelta(hours=1)
+        booking = Booking(resource_id=self.resource1.id, user_name='testuser', start_time=start, end_time=end, title='CI Test')
+        db.session.add(booking)
+        db.session.commit()
+
+        resp = self.client.post(f'/api/bookings/{booking.id}/check_in')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNotNone(Booking.query.get(booking.id).checked_in_at)
+
+        resp = self.client.post(f'/api/bookings/{booking.id}/check_out')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNotNone(Booking.query.get(booking.id).checked_out_at)
+
 
 
 if __name__ == '__main__':

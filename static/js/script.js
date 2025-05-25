@@ -2074,12 +2074,15 @@ Enter a title for your booking (optional):`);
                 const slotLabel = `${startTimeStr} - ${endTimeStr}`;
 
                 let isBooked = false;
+                let myBookingInfo = null;
                 for (const booked of detailedBookedSlots) {
                     const bookedStart = new Date(`${dateString}T${booked.start_time}`);
                     const bookedEnd = new Date(`${dateString}T${booked.end_time}`);
-                    // Check for overlap: (BookedStart < SlotEnd) and (BookedEnd > SlotStart)
                     if (bookedStart < slotEnd && bookedEnd > slotStart) {
                         isBooked = true;
+                        if (booked.user_name === sessionStorage.getItem('loggedInUser')) {
+                            myBookingInfo = booked;
+                        }
                         break;
                     }
                 }
@@ -2090,7 +2093,27 @@ Enter a title for your booking (optional):`);
 
                 if (isBooked) {
                     slotDiv.classList.add('time-slot-booked');
-                    slotDiv.textContent += ' (Booked)';
+                    if (myBookingInfo) {
+                        slotDiv.textContent += ' (Your Booking)';
+                        if (myBookingInfo.can_check_in) {
+                            const btn = document.createElement('button');
+                            btn.textContent = 'Check In';
+                            btn.classList.add('btn','btn-sm','btn-success','ms-2');
+                            btn.addEventListener('click', async (e)=>{
+                                e.stopPropagation();
+                                try {
+                                    await apiCall(`/api/bookings/${myBookingInfo.booking_id}/check_in`, 'POST', modalStatusMessage);
+                                    btn.remove();
+                                    slotDiv.textContent = slotLabel + ' (Checked In)';
+                                } catch (err) {
+                                    console.error('Check in failed', err);
+                                }
+                            });
+                            slotDiv.appendChild(btn);
+                        }
+                    } else {
+                        slotDiv.textContent += ' (Booked)';
+                    }
                 } else {
                     slotDiv.classList.add('time-slot-available');
                     slotDiv.dataset.startTime = startTimeStr;
