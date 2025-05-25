@@ -768,6 +768,7 @@ def upload_floor_map():
             db.session.add(new_map)
             db.session.commit()
             app.logger.info(f"Floor map '{map_name}' uploaded successfully by {current_user.username}.")
+            add_audit_log(action="CREATE_MAP_SUCCESS", details=f"Floor map '{map_name}' (ID: {new_map.id}) uploaded successfully.")
             return jsonify({
                 'id': new_map.id,
                 'name': new_map.name,
@@ -913,10 +914,12 @@ def update_resource_map_info(resource_id):
             'roles': [{'id': role.id, 'name': role.name} for role in resource.roles],
             'capacity': resource.capacity, 'equipment': resource.equipment
         }
+        add_audit_log(action="UPDATE_RESOURCE_MAP_INFO_SUCCESS", details=f"Map/permission info for resource ID {resource.id} ('{resource.name}') updated.")
         return jsonify(updated_resource_data), 200
         
     except Exception as e:
         db.session.rollback()
+        add_audit_log(action="UPDATE_RESOURCE_MAP_INFO_FAILED", details=f"Failed to update map/permission info for resource ID {resource_id}. Error: {str(e)}")
         app.logger.exception(f"Error committing update_resource_map_info for resource {resource_id}:")
         return jsonify({'error': 'Failed to update resource due to a server error.'}), 500
 
@@ -956,10 +959,12 @@ def publish_resource(resource_id):
             'equipment': resource.equipment, 'floor_map_id': resource.floor_map_id,
             'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None
         }
+        add_audit_log(action="PUBLISH_RESOURCE_SUCCESS", details=f"Resource {resource_id} ('{resource.name}') published successfully.")
         return jsonify({'message': 'Resource published successfully.', 'resource': updated_resource_data}), 200
         
     except Exception as e:
         db.session.rollback()
+        add_audit_log(action="PUBLISH_RESOURCE_FAILED", details=f"Failed to publish resource {resource_id}. Error: {str(e)}")
         app.logger.exception(f"Error publishing resource {resource_id}:")
         return jsonify({'error': 'Failed to publish resource due to a server error.'}), 500
 
@@ -1075,12 +1080,12 @@ def update_resource_details(resource_id):
             'floor_map_id': resource.floor_map_id,
             'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None
         }
-        add_audit_log(action="UPDATE_RESOURCE", details=f"Resource ID {resource.id} ('{resource.name}') updated.")
+        add_audit_log(action="UPDATE_RESOURCE_DETAILS_SUCCESS", details=f"Resource ID {resource.id} ('{resource.name}') details updated. Data: {str(data)}")
         return jsonify(updated_resource_data), 200
     except Exception as e:
         db.session.rollback()
         app.logger.exception(f"Error updating resource {resource_id}:")
-        add_audit_log(action="UPDATE_RESOURCE_FAILED", details=f"Failed to update resource ID {resource_id}. Error: {str(e)}")
+        add_audit_log(action="UPDATE_RESOURCE_DETAILS_FAILED", details=f"Failed to update resource ID {resource_id}. Error: {str(e)}. Data: {str(data)}")
         return jsonify({'error': 'Failed to update resource due to a server error.'}), 500
 
 @app.route('/api/admin/resources/<int:resource_id>', methods=['DELETE'])
@@ -1101,12 +1106,12 @@ def delete_resource(resource_id):
         db.session.delete(resource)
         db.session.commit()
         app.logger.info(f"Resource {resource_id} ('{resource_name_for_log}') and its associated bookings deleted successfully by {current_user.username}.")
-        add_audit_log(action="DELETE_RESOURCE", details=f"Resource ID {resource_id} ('{resource_name_for_log}') deleted.")
+        add_audit_log(action="DELETE_RESOURCE_SUCCESS", details=f"Resource ID {resource_id} ('{resource_name_for_log}') deleted.")
         return jsonify({'message': f"Resource '{resource_name_for_log}' (ID: {resource_id}) and its bookings deleted successfully."}), 200
     except Exception as e:
         db.session.rollback()
         app.logger.exception(f"Error deleting resource {resource_id}:")
-        add_audit_log(action="DELETE_RESOURCE_FAILED", details=f"Failed to delete resource ID {resource_id}. Error: {str(e)}")
+        add_audit_log(action="DELETE_RESOURCE_FAILED", details=f"Failed to delete resource ID {resource_id} ('{resource_name_for_log}'). Error: {str(e)}")
         return jsonify({'error': 'Failed to delete resource due to a server error.'}), 500
 
 @app.route('/api/admin/users', methods=['GET'])
@@ -1170,6 +1175,7 @@ def create_user():
         db.session.add(new_user)
         db.session.commit()
         app.logger.info(f"User '{new_user.username}' created successfully by {current_user.username}.")
+        add_audit_log(action="CREATE_USER_SUCCESS", details=f"User '{new_user.username}' (ID: {new_user.id}) created. Admin: {new_user.is_admin}.")
         return jsonify({
             'id': new_user.id,
             'username': new_user.username,
@@ -1270,6 +1276,7 @@ def update_user(user_id):
     try:
         db.session.commit()
         app.logger.info(f"User ID {user_id} ('{user_to_update.username}') updated successfully by {current_user.username}.")
+        add_audit_log(action="UPDATE_USER_SUCCESS", details=f"User '{user_to_update.username}' (ID: {user_id}) updated. Data: {str(data)}")
         return jsonify({
             'id': user_to_update.id,
             'username': user_to_update.username,
@@ -1314,12 +1321,12 @@ def delete_user(user_id):
         db.session.delete(user_to_delete)
         db.session.commit()
         app.logger.info(f"User ID {user_id} ('{username_for_log}') deleted successfully by {current_user.username}.")
-        add_audit_log(action="DELETE_USER", details=f"User '{username_for_log}' (ID: {user_id}) deleted by '{current_user.username}'.")
+        add_audit_log(action="DELETE_USER_SUCCESS", details=f"User '{username_for_log}' (ID: {user_id}) deleted by '{current_user.username}'.")
         return jsonify({'message': f"User '{username_for_log}' (ID: {user_id}) deleted successfully."}), 200
     except Exception as e:
         db.session.rollback()
         app.logger.exception(f"Error deleting user {user_id}:")
-        add_audit_log(action="DELETE_USER_FAILED", details=f"Failed to delete user ID {user_id}. Error: {str(e)}")
+        add_audit_log(action="DELETE_USER_FAILED", details=f"Failed to delete user ID {user_id} ('{username_for_log}'). Error: {str(e)}")
         return jsonify({'error': 'Failed to delete user due to a server error.'}), 500
 
 @app.route('/api/admin/users/<int:user_id>/assign_google_auth', methods=['POST'])
@@ -1355,6 +1362,7 @@ def assign_google_auth(user_id):
     try:
         db.session.commit()
         app.logger.info(f"Google ID '{google_id_to_assign}' assigned to user ID {user_id} ('{user_to_update.username}') by {current_user.username}.")
+        add_audit_log(action="ASSIGN_GOOGLE_AUTH_SUCCESS", details=f"Google ID '{google_id_to_assign}' assigned to user '{user_to_update.username}' (ID: {user_id}).")
         return jsonify({
             'id': user_to_update.id,
             'username': user_to_update.username,
@@ -1480,6 +1488,7 @@ def create_role():
         db.session.add(new_role)
         db.session.commit()
         app.logger.info(f"Role '{new_role.name}' created successfully by {current_user.username}.")
+        add_audit_log(action="CREATE_ROLE_SUCCESS", details=f"Role '{new_role.name}' (ID: {new_role.id}) created with permissions: {new_role.permissions}.")
         return jsonify({
             'id': new_role.id,
             'name': new_role.name,
@@ -1533,6 +1542,7 @@ def update_role(role_id):
     try:
         db.session.commit()
         app.logger.info(f"Role ID {role_id} ('{role_to_update.name}') updated successfully by {current_user.username}.")
+        add_audit_log(action="UPDATE_ROLE_SUCCESS", details=f"Role '{role_to_update.name}' (ID: {role_id}) updated. New data: {str(data)}")
         return jsonify({
             'id': role_to_update.id,
             'name': role_to_update.name,
@@ -1565,13 +1575,16 @@ def delete_role(role_id):
         return jsonify({'error': f"Cannot delete role '{role_to_delete.name}' because it is currently assigned to one or more users."}), 409
 
     try:
+        role_name_for_log = role_to_delete.name # Capture before deletion
         db.session.delete(role_to_delete)
         db.session.commit()
-        app.logger.info(f"Role '{role_to_delete.name}' (ID: {role_id}) deleted successfully by {current_user.username}.")
-        return jsonify({'message': f"Role '{role_to_delete.name}' deleted successfully."}), 200
+        app.logger.info(f"Role '{role_name_for_log}' (ID: {role_id}) deleted successfully by {current_user.username}.")
+        add_audit_log(action="DELETE_ROLE_SUCCESS", details=f"Role '{role_name_for_log}' (ID: {role_id}) deleted.")
+        return jsonify({'message': f"Role '{role_name_for_log}' deleted successfully."}), 200
     except Exception as e:
         db.session.rollback()
         app.logger.exception(f"Error deleting role {role_id}:")
+        add_audit_log(action="DELETE_ROLE_FAILED", details=f"Failed to delete role ID {role_id} ('{role_to_delete.name}'). Error: {str(e)}")
         return jsonify({'error': 'Failed to delete role due to a server error.'}), 500
 
 @app.route('/api/admin/resources/<int:resource_id>/map_info', methods=['DELETE'])
@@ -1593,12 +1606,15 @@ def delete_resource_map_info(resource_id):
     try:
         resource.floor_map_id = None
         resource.map_coordinates = None
+        resource_name_for_log = resource.name # Capture before modification
         db.session.commit()
         app.logger.info(f"Map information for resource ID {resource_id} deleted by {current_user.username}.")
+        add_audit_log(action="DELETE_RESOURCE_MAP_INFO_SUCCESS", details=f"Map information for resource ID {resource_id} ('{resource_name_for_log}') deleted.")
         return jsonify({'message': f'Map information for resource ID {resource_id} has been deleted.'}), 200
     except Exception as e:
         db.session.rollback()
         app.logger.exception(f"Error deleting map info for resource {resource_id}:")
+        add_audit_log(action="DELETE_RESOURCE_MAP_INFO_FAILED", details=f"Failed to delete map info for resource ID {resource_id}. Error: {str(e)}")
         return jsonify({'error': 'Failed to delete map information due to a server error.'}), 500
 
 @app.route('/api/map_details/<int:map_id>', methods=['GET'])
@@ -1696,13 +1712,16 @@ def api_login():
 @app.route('/api/auth/logout', methods=['POST'])
 @login_required
 def api_logout():
-    user_identifier = current_user.username if current_user else "Unknown user"
+    user_identifier = current_user.username if current_user else "Unknown user" # Should always be current_user due to @login_required
+    user_id_for_log = current_user.id if current_user else None
     try:
         logout_user()
         app.logger.info(f"User '{user_identifier}' logged out successfully.")
+        add_audit_log(action="LOGOUT_SUCCESS", details=f"User '{user_identifier}' logged out.", user_id=user_id_for_log, username=user_identifier)
         return jsonify({'success': True, 'message': 'Logout successful.'}), 200
     except Exception as e:
         app.logger.exception(f"Error during logout for user {user_identifier}:")
+        add_audit_log(action="LOGOUT_FAILED", details=f"Logout attempt failed for user '{user_identifier}'. Error: {str(e)}", user_id=user_id_for_log, username=user_identifier)
         return jsonify({'error': 'Logout failed due to a server error.'}), 500
 
 @app.route('/api/auth/status', methods=['GET'])
