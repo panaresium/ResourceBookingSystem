@@ -25,9 +25,9 @@
                 <li><a href="{{ url_for('serve_index') }}">Home</a></li>
                 <li><a href="{{ url_for('serve_new_booking') }}">New Booking</a></li>
                 <li><a href="{{ url_for('serve_resources') }}">View Resources</a></li>
-                <!-- Active Admin Link -->
-                <li><a href="{{ url_for('serve_admin_maps') }}">Admin Maps</a></li>
-                <li id="auth-link-container" style="display:none;"><!-- Login link if not logged in --></li> 
+                <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">Admin Maps</a></li>
+                <li id="user-management-nav-link" style="display:none;"><a href="{{ url_for('serve_user_management_page') }}">User Management</a></li>
+                <!-- Active Admin Link was here, ensure admin-maps-nav-link is used by script.js -->
             </ul>
         </nav>
     </header>
@@ -134,8 +134,60 @@
             <div id="resource-actions-container" style="margin-top: 15px; padding: 10px; border: 1px dashed #ccc;">
                 <!-- Publish button or status text will appear here based on selected resource -->
                 <p><em>Select a resource from the dropdown above to see its status or publish actions.</em></p>
+                <button id="delete-resource-btn" class="button danger" style="display: none; margin-left: 10px;">Delete Resource</button>
             </div>
         </section>
+
+        <!-- Modal for Editing Resource Details -->
+        <div id="edit-resource-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <span class="close-modal-btn" data-modal-id="edit-resource-modal">&times;</span>
+                <h3>Edit Resource Details</h3>
+                <form id="edit-resource-form">
+                    <input type="hidden" id="edit-resource-id" name="resource_id">
+                    
+                    <label for="edit-resource-name">Name:</label>
+                    <input type="text" id="edit-resource-name" name="name" required>
+                    
+                    <label for="edit-resource-capacity">Capacity:</label>
+                    <input type="number" id="edit-resource-capacity" name="capacity" min="0">
+                    
+                    <label for="edit-resource-equipment">Equipment:</label>
+                    <input type="text" id="edit-resource-equipment" name="equipment" placeholder="e.g., Projector, Whiteboard">
+                    
+                    <label for="edit-resource-status">Status:</label>
+                    <select id="edit-resource-status" name="status">
+                        <option value="draft">Draft</option>
+                        <option value="published">Published</option>
+                        <option value="archived">Archived</option>
+                    </select>
+                    
+                    <label for="edit-resource-booking-permission">Booking Permission:</label>
+                    <select id="edit-resource-booking-permission" name="booking_restriction">
+                        <option value="">Default (All Authenticated Users unless specified below)</option>
+                        <option value="admin_only">Admin Only</option>
+                        <!-- More options can be added here if needed -->
+                    </select>
+
+                    <div class="permission-group">
+                        <h4>Authorized Specific Users (Optional)</h4>
+                        <p class="small-text">If specified, only these users (and admins) can book.</p>
+                        <div id="edit-authorized-users-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;">
+                            <!-- User checkboxes will be populated here by JS -->
+                        </div>
+                    </div>
+
+                    <div class="permission-group">
+                        <label for="edit-authorized-roles">Authorized Roles (Optional, comma-separated):</label>
+                        <p class="small-text">If specified, only users with these roles can book (e.g., admin, standard_user). Overrides global booking permission if more restrictive.</p>
+                        <input type="text" id="edit-authorized-roles" name="allowed_roles" placeholder="e.g., admin,standard_user">
+                    </div>
+                    
+                    <button type="submit" class="button">Save Changes</button>
+                    <div id="edit-resource-status-message" class="status-message" style="margin-top: 10px;"></div>
+                </form>
+            </div>
+        </div>
     </main>
 
     <footer>
@@ -144,6 +196,7 @@
     
     <!-- Link to global script.js, or a new admin_maps.js if preferred -->
     <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/admin_resource_edit.js') }}" defer></script>
     <!-- If creating admin_maps.js, link it here instead or in addition -->
 </body>
 </html>
