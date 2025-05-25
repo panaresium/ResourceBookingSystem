@@ -68,12 +68,10 @@ function hideMessage(element) {
 async function apiCall(url, options = {}, messageElement = null) {
     if (messageElement) showLoading(messageElement, 'Processing...');
 
-    // Always include cookies for same-origin requests. This ensures CSRF-protected
-    // endpoints like logout receive the user's session cookie even when fetch
-    // options omit the credentials field.
-    if (!options.credentials) {
-        options.credentials = 'same-origin';
-    }
+    // Always include cookies for same-origin requests unless explicitly overridden.
+    // This ensures CSRF-protected endpoints like logout receive the user's session
+    // cookie even when the fetch options omit the credentials field.
+    options.credentials = options.credentials || 'same-origin';
 
     // CSRF Token Handling
     const protectedMethods = ['POST', 'PUT', 'DELETE', 'PATCH'];
@@ -155,6 +153,7 @@ async function updateAuthLink() {
 
     const authLinkContainer = document.getElementById('auth-link-container');
     const adminMapsNavLink = document.getElementById('admin-maps-nav-link');
+    const userManagementNavLink = document.getElementById('user-management-nav-link');
     const welcomeMessageContainer = document.getElementById('welcome-message-container');
     const userDropdownContainer = document.getElementById('user-dropdown-container');
     const userDropdownButton = document.getElementById('user-dropdown-button');
@@ -181,6 +180,7 @@ async function updateAuthLink() {
             authLinkContainer.style.display = 'list-item';
         }
         if (adminMapsNavLink) adminMapsNavLink.style.display = 'none';
+        if (userManagementNavLink) userManagementNavLink.style.display = 'none';
         if (myBookingsNavLink) myBookingsNavLink.style.display = 'none'; // Added
     }
 
@@ -218,6 +218,9 @@ async function updateAuthLink() {
             if (authLinkContainer) authLinkContainer.style.display = 'none';
             if (adminMapsNavLink) {
                 adminMapsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
+            }
+            if (userManagementNavLink) {
+                userManagementNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
             }
             if (myBookingsNavLink) { // Added
                 myBookingsNavLink.style.display = 'list-item'; // Show if logged in
@@ -1037,7 +1040,11 @@ Enter a title for your booking (optional):`);
                 const formData = new FormData(uploadMapForm);
                 try {
                     // Direct fetch for FormData, manual error/success handling for this specific case.
-                    const response = await fetch('/api/admin/maps', { method: 'POST', body: formData });
+                    const response = await fetch('/api/admin/maps', {
+                        method: 'POST',
+                        body: formData,
+                        credentials: 'same-origin'
+                    });
                     const responseData = await response.json();
                     if (response.ok) { 
                         showSuccess(uploadStatusDiv, `Map '${responseData.name}' uploaded successfully! (ID: ${responseData.id})`);
