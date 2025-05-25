@@ -16,6 +16,15 @@
     font-size: 16px;
 }
 
+/* Dark theme color variables */
+body.dark-theme {
+    --background-color-light: #1e1e1e; /* Page background in dark mode */
+    --background-color-dark: #2c2c2c;  /* Nav and footer background in dark mode */
+    --text-color-dark: #e0e0e0;        /* Default text color in dark mode */
+    --text-color-light: #ffffff;       /* Light text for dark backgrounds */
+    --border-color: #555555;           /* Border color for dark mode */
+}
+
 body {
     font-family: var(--font-family-modern);
     margin: 0;
