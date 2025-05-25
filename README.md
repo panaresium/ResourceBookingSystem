@@ -97,6 +97,7 @@ Flask-Mail is used to send email notifications when bookings are created, update
 * `MAIL_USE_TLS` – set to `true` to enable TLS
 * `MAIL_USE_SSL` – set to `true` to enable SSL
 * `MAIL_DEFAULT_SENDER` – address used as the default sender
+* `SLACK_WEBHOOK_URL` – Slack Incoming Webhook URL for sending notifications
 
 If these variables are not provided, placeholder values from `app.py` will be used.
 

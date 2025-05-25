@@ -12,6 +12,7 @@ from authlib.integrations.flask_client import OAuth # Added for Google Sign-In
 from google_auth_oauthlib.flow import Flow
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+import requests
 import pathlib # For finding the client_secret.json file path
 import logging # Added for logging
 from functools import wraps # For permission_required decorator
@@ -111,6 +112,9 @@ app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', '')
 app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'false').lower() in ['true', '1', 'yes']
 app.config['MAIL_USE_SSL'] = os.environ.get('MAIL_USE_SSL', 'false').lower() in ['true', '1', 'yes']
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', app.config['MAIL_USERNAME'] or 'noreply@example.com')
+
+# Slack webhook URL for sending notifications
+app.config['SLACK_WEBHOOK_URL'] = os.environ.get('SLACK_WEBHOOK_URL')
 
 # Basic Logging Configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]')
@@ -352,6 +356,20 @@ def send_email(to_address: str, subject: str, body: str):
     }
     email_log.append(email_entry)
     app.logger.info(f"Email queued to {to_address}: {subject}")
+
+def send_slack_message(text: str):
+    """Send a message to Slack if a webhook URL is configured."""
+    webhook = app.config.get('SLACK_WEBHOOK_URL')
+    if not webhook:
+        return
+    try:
+        resp = requests.post(webhook, json={'text': text}, timeout=5)
+        if resp.status_code != 200:
+            app.logger.warning(
+                f"Slack webhook returned {resp.status_code}: {resp.text}"
+            )
+    except Exception as e:
+        app.logger.error(f"Error sending Slack message: {e}")
 
 @app.route("/")
 @login_required
@@ -2053,6 +2071,9 @@ def create_booking():
             app.logger.info(
                 f"User {current_user.username} added to waitlist for resource {resource_id}."
             )
+            send_slack_message(
+                f"{current_user.username} added to waitlist for {resource.name}"
+            )
             return (
                 jsonify({'error': 'This time slot is no longer available. You have been added to the waitlist.'}),
                 409,
@@ -2081,6 +2102,10 @@ def create_booking():
                 mail.send(msg)
             except Exception:
                 app.logger.exception(f"Failed to send booking confirmation email to {current_user.email}:")
+
+        send_slack_message(
+            f"New booking for {resource.name} by {user_name_for_record} on {new_booking.start_time.strftime('%Y-%m-%d %H:%M')}"
+        )
 
         created_booking_data = {
             'id': new_booking.id,
@@ -2185,6 +2210,9 @@ def delete_booking_by_user(booking_id):
                     f"Slot available for {resource_name}",
                     f"The slot you requested for {resource_name} is now available.",
                 )
+                send_slack_message(
+                    f"Waitlist notification sent to {user_to_notify.username} for {resource_name}"
+                )
 
 
         add_audit_log(
@@ -2192,6 +2220,9 @@ def delete_booking_by_user(booking_id):
             details=f"User '{current_user.username}' cancelled their booking. {booking_details_for_log}"
         )
         app.logger.info(f"User '{current_user.username}' successfully deleted booking ID: {booking_id}. Details: {booking_details_for_log}")
+        send_slack_message(
+            f"Booking cancelled for {resource_name} by {current_user.username}"
+        )
         return jsonify({'message': 'Booking cancelled successfully.'}), 200
 
     except Exception as e:
