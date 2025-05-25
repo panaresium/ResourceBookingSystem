@@ -79,6 +79,7 @@ except ImportError:  # pragma: no cover - fallback for environments without Flas
 basedir = os.path.abspath(os.path.dirname(__file__))
 DATA_DIR = os.path.join(basedir, 'data')
 UPLOAD_FOLDER = os.path.join(basedir, 'static', 'floor_map_uploads')
+RESOURCE_UPLOAD_FOLDER = os.path.join(basedir, 'static', 'resource_uploads')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
 # Ensure the data directory exists (it should be created by init_setup.py)
@@ -115,6 +116,7 @@ def inject_languages():
 
 # Configurations
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['RESOURCE_UPLOAD_FOLDER'] = RESOURCE_UPLOAD_FOLDER
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev_secret_key_123!@#') # Ensure SECRET_KEY is set from env or default
 
 # Initialize CSRF Protection - AFTER app.config['SECRET_KEY'] is set
@@ -133,6 +135,8 @@ app.config['GOOGLE_DISCOVERY_URL'] = "https://accounts.google.com/.well-known/op
 # Ensure upload folder exists
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
+if not os.path.exists(app.config['RESOURCE_UPLOAD_FOLDER']):
+    os.makedirs(app.config['RESOURCE_UPLOAD_FOLDER'])
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(DATA_DIR, 'site.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # silence the warning
 
@@ -286,6 +290,7 @@ class Resource(db.Model): # UserMixin is correctly on User model, not Resource
     status = db.Column(db.String(50), nullable=False, default='draft') # Values: 'draft', 'published', 'archived'
     published_at = db.Column(db.DateTime, nullable=True)
     allowed_user_ids = db.Column(db.Text, nullable=True)  # Comma-separated string of User IDs
+    image_filename = db.Column(db.String(255), nullable=True)
     # REMOVED: allowed_roles = db.Column(db.String(255), nullable=True) 
     
     # New fields for floor map integration
@@ -824,6 +829,7 @@ def get_resources():
                 'name': resource.name,
                 'capacity': resource.capacity,
                 'equipment': resource.equipment,
+                'image_url': url_for('static', filename=f'resource_uploads/{resource.image_filename}') if resource.image_filename else None,
                 'floor_map_id': resource.floor_map_id,
                 'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
                 'booking_restriction': resource.booking_restriction,
@@ -1259,6 +1265,48 @@ def update_resource_details(resource_id):
         add_audit_log(action="UPDATE_RESOURCE_DETAILS_FAILED", details=f"Failed to update resource ID {resource_id}. Error: {str(e)}. Data: {str(data)}")
         return jsonify({'error': 'Failed to update resource due to a server error.'}), 500
 
+@app.route('/api/admin/resources/<int:resource_id>/image', methods=['POST'])
+@login_required
+def upload_resource_image(resource_id):
+    if not current_user.has_permission('manage_resources'):
+        return jsonify({'error': 'Permission denied to manage resources.'}), 403
+
+    resource = Resource.query.get(resource_id)
+    if not resource:
+        return jsonify({'error': 'Resource not found.'}), 404
+
+    if 'resource_image' not in request.files:
+        return jsonify({'error': 'No resource_image file part in the request.'}), 400
+
+    file = request.files['resource_image']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file.'}), 400
+
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        existing_by_filename = Resource.query.filter_by(image_filename=filename).first()
+        if existing_by_filename and existing_by_filename.id != resource_id:
+            return jsonify({'error': 'A resource with this image filename already exists.'}), 409
+        file_path = os.path.join(app.config['RESOURCE_UPLOAD_FOLDER'], filename)
+        old_path = None
+        try:
+            file.save(file_path)
+            if resource.image_filename and resource.image_filename != filename:
+                old_path = os.path.join(app.config['RESOURCE_UPLOAD_FOLDER'], resource.image_filename)
+            resource.image_filename = filename
+            db.session.commit()
+            if old_path and os.path.exists(old_path):
+                os.remove(old_path)
+            return jsonify({'message': 'Image uploaded successfully.',
+                            'image_url': url_for('static', filename=f'resource_uploads/{filename}')}), 200
+        except Exception as e:
+            db.session.rollback()
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            return jsonify({'error': 'Failed to upload image due to a server error.'}), 500
+    else:
+        return jsonify({'error': 'File type not allowed. Allowed types are: png, jpg, jpeg.'}), 400
+
 @app.route('/api/admin/resources/<int:resource_id>', methods=['DELETE'])
 @login_required
 def delete_resource(resource_id):
@@ -1273,9 +1321,14 @@ def delete_resource(resource_id):
 
     try:
         # Bookings associated with this resource will be deleted due to cascade="all, delete-orphan"
-        resource_name_for_log = resource.name # Capture before deletion
+        resource_name_for_log = resource.name  # Capture before deletion
+        old_image = resource.image_filename
         db.session.delete(resource)
         db.session.commit()
+        if old_image:
+            old_path = os.path.join(app.config['RESOURCE_UPLOAD_FOLDER'], old_image)
+            if os.path.exists(old_path):
+                os.remove(old_path)
         app.logger.info(f"Resource {resource_id} ('{resource_name_for_log}') and its associated bookings deleted successfully by {current_user.username}.")
         add_audit_log(action="DELETE_RESOURCE_SUCCESS", details=f"Resource ID {resource_id} ('{resource_name_for_log}') deleted.")
         return jsonify({'message': f"Resource '{resource_name_for_log}' (ID: {resource_id}) and its bookings deleted successfully."}), 200
@@ -1871,6 +1924,7 @@ def get_map_details(map_id):
             resource_info = {
                 'id': resource.id, 'name': resource.name, 'capacity': resource.capacity,
                 'equipment': resource.equipment,
+                'image_url': url_for('static', filename=f'resource_uploads/{resource.image_filename}') if resource.image_filename else None,
                 'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
                 'booking_restriction': resource.booking_restriction, 'status': resource.status,
                 'published_at': resource.published_at.isoformat() if resource.published_at else None,

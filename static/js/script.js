@@ -723,6 +723,7 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
     const roomSelectDropdown = document.getElementById('room-select');
     const availabilityDateInput = document.getElementById('availability-date');
     const calendarTable = document.getElementById('calendar-table');
+    const resourceImageDisplay = document.getElementById('resource-image-display');
 
     function getTodayDateString() {
         const today = new Date();
@@ -907,8 +908,17 @@ Enter a title for your booking (optional):`);
         roomSelectDropdown.addEventListener('change', () => {
             const selectedOption = roomSelectDropdown.selectedOptions[0];
             if (!selectedOption) return; // Should not happen if list is populated
-            const currentResourceDetails = { 
-                id: roomSelectDropdown.value, 
+            if (resourceImageDisplay) {
+                const url = selectedOption.dataset.imageUrl;
+                if (url) {
+                    resourceImageDisplay.src = url;
+                    resourceImageDisplay.style.display = 'block';
+                } else {
+                    resourceImageDisplay.style.display = 'none';
+                }
+            }
+            const currentResourceDetails = {
+                id: roomSelectDropdown.value,
                 booking_restriction: selectedOption.dataset.bookingRestriction,
                 allowed_user_ids: selectedOption.dataset.allowedUserIds,
                 allowed_roles: selectedOption.dataset.allowedRoles
@@ -945,6 +955,7 @@ Enter a title for your booking (optional):`);
                         option.dataset.bookingRestriction = resource.booking_restriction || "";
                         option.dataset.allowedUserIds = resource.allowed_user_ids || "";
                         option.dataset.allowedRoles = resource.allowed_roles || "";
+                        option.dataset.imageUrl = resource.image_url || "";
                         option.dataset.resourceName = resource.name;
                         roomSelectDropdown.add(option);
                     });
@@ -952,8 +963,17 @@ Enter a title for your booking (optional):`);
                     if (roomSelectDropdown.options.length > 0) {
                         roomSelectDropdown.value = roomSelectDropdown.options[0].value;
                         const selectedOption = roomSelectDropdown.options[0];
-                        const initialResourceDetails = { 
-                            id: selectedOption.value, 
+                        if (resourceImageDisplay) {
+                            const url = selectedOption.dataset.imageUrl;
+                            if (url) {
+                                resourceImageDisplay.src = url;
+                                resourceImageDisplay.style.display = 'block';
+                            } else {
+                                resourceImageDisplay.style.display = 'none';
+                            }
+                        }
+                        const initialResourceDetails = {
+                            id: selectedOption.value,
                             name: selectedOption.dataset.resourceName,
                             booking_restriction: selectedOption.dataset.bookingRestriction,
                             allowed_user_ids: selectedOption.dataset.allowedUserIds,
@@ -1258,6 +1278,7 @@ Enter a title for your booking (optional):`);
                                 resourceId: r.id, resourceName: r.name, resourceStatus: r.status || 'draft',
                                 bookingRestriction: r.booking_restriction || "",
                                 allowedUserIds: r.allowed_user_ids || "", allowedRoles: r.allowed_roles || "",
+                                imageUrl: r.image_url || "",
                                 isMappedToCurrent: (r.floor_map_id === parseInt(currentMapId) && r.map_coordinates) ? "true" : "false"
                             });
                             if (opt.dataset.isMappedToCurrent === "true") opt.textContent += ` (On this map)`;
@@ -1899,13 +1920,16 @@ Enter a title for your booking (optional):`);
                         if (resource.map_coordinates && resource.map_coordinates.type === 'rect') {
                             const coords = resource.map_coordinates;
                             const areaDiv = document.createElement('div');
-                            areaDiv.className = 'resource-area'; 
+                            areaDiv.className = 'resource-area';
                             areaDiv.style.left = `${coords.x}px`;
                             areaDiv.style.top = `${coords.y}px`;
                             areaDiv.style.width = `${coords.width}px`;
                             areaDiv.style.height = `${coords.height}px`;
-                            areaDiv.textContent = resource.name; 
-                            areaDiv.dataset.resourceId = resource.id; 
+                            areaDiv.textContent = resource.name;
+                            areaDiv.dataset.resourceId = resource.id;
+                            if (resource.image_url) {
+                                areaDiv.dataset.imageUrl = resource.image_url;
+                            }
 
                             // Determine availability and set class
                             let availabilityClass = 'resource-area-unknown'; // Default or if no booking info
@@ -1981,7 +2005,7 @@ Enter a title for your booking (optional):`);
                                 areaDiv = newAreaDiv; 
 
                                 areaDiv.addEventListener('click', function() {
-                                    handleMapAreaClick(resource.id, resource.name, mapAvailabilityDateInput.value);
+                                    handleMapAreaClick(resource.id, resource.name, mapAvailabilityDateInput.value, areaDiv.dataset.imageUrl);
                                 });
                             } else {
                                 areaDiv.classList.remove('map-area-clickable');
@@ -2008,6 +2032,7 @@ Enter a title for your booking (optional):`);
         const timeSlotModal = document.getElementById('time-slot-modal');
         const modalCloseBtn = timeSlotModal ? timeSlotModal.querySelector('.close-modal-btn') : null;
         const modalResourceNameSpan = document.getElementById('modal-resource-name');
+        const modalResourceImage = document.getElementById('modal-resource-image');
         const modalDateSpan = document.getElementById('modal-date');
         const modalTimeSlotsListDiv = document.getElementById('modal-time-slots-list');
         const modalBookingTitleInput = document.getElementById('modal-booking-title');
@@ -2015,7 +2040,7 @@ Enter a title for your booking (optional):`);
         const modalStatusMessage = document.getElementById('modal-status-message');
         let selectedTimeSlotForBooking = null; // Variable to store selected slot
 
-        async function handleMapAreaClick(resourceId, resourceName, dateString) {
+        async function handleMapAreaClick(resourceId, resourceName, dateString, imageUrl) {
             console.log(`Map area clicked: Resource ID ${resourceId}, Name: ${resourceName}, Date: ${dateString}`);
             if (mapLoadingStatusDiv) {
                 mapLoadingStatusDiv.textContent = `Fetching available slots for ${resourceName} on ${dateString}...`;
@@ -2026,7 +2051,7 @@ Enter a title for your booking (optional):`);
                 const detailedBookedSlots = await apiCall(
                     `/api/resources/${resourceId}/availability?date=${dateString}`, {}, modalStatusMessage 
                 );
-                openTimeSlotSelectionModal(resourceId, resourceName, dateString, detailedBookedSlots);
+                openTimeSlotSelectionModal(resourceId, resourceName, dateString, detailedBookedSlots, imageUrl);
                 if (mapLoadingStatusDiv) hideMessage(mapLoadingStatusDiv); 
                 if (modalStatusMessage && !modalStatusMessage.classList.contains('error')) hideMessage(modalStatusMessage);
             } catch (error) {
@@ -2043,11 +2068,19 @@ Enter a title for your booking (optional):`);
             }
         }
 
-        function openTimeSlotSelectionModal(resourceId, resourceName, dateString, detailedBookedSlots) {
+        function openTimeSlotSelectionModal(resourceId, resourceName, dateString, detailedBookedSlots, imageUrl) {
             if (!timeSlotModal) return;
 
             modalResourceNameSpan.textContent = resourceName;
             modalDateSpan.textContent = dateString;
+            if (modalResourceImage) {
+                if (imageUrl) {
+                    modalResourceImage.src = imageUrl;
+                    modalResourceImage.style.display = 'block';
+                } else {
+                    modalResourceImage.style.display = 'none';
+                }
+            }
             modalBookingTitleInput.value = ''; // Clear previous title
             modalTimeSlotsListDiv.innerHTML = ''; // Clear previous slots
             modalStatusMessage.textContent = ''; // Clear status message
