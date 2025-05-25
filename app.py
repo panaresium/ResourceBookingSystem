@@ -19,6 +19,30 @@ from flask import abort # For permission_required decorator
 from flask_babel import Babel, gettext as _ # For i18n
 from flask_wtf.csrf import CSRFProtect # For CSRF protection
 
+# Attempt to import Flask-Mail; provide a fallback if unavailable
+try:
+    from flask_mail import Mail, Message
+    mail_available = True
+except ImportError:  # pragma: no cover - fallback for environments without Flask-Mail
+    mail_available = False
+
+    class Mail:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def init_app(self, app):
+            pass
+
+        def send(self, message):
+            # No-op if Flask-Mail isn't installed
+            pass
+
+    class Message:
+        def __init__(self, subject='', recipients=None, body=''):
+            self.subject = subject
+            self.recipients = recipients or []
+            self.body = body
+
 # Base directory of the app - project root
 basedir = os.path.abspath(os.path.dirname(__file__))
 DATA_DIR = os.path.join(basedir, 'data')
@@ -74,6 +98,15 @@ if not os.path.exists(app.config['UPLOAD_FOLDER']):
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(DATA_DIR, 'site.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # silence the warning
 
+# Flask-Mail configuration (defaults can be overridden with environment variables)
+app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'localhost')
+app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 25))
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', '')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', '')
+app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'false').lower() in ['true', '1', 'yes']
+app.config['MAIL_USE_SSL'] = os.environ.get('MAIL_USE_SSL', 'false').lower() in ['true', '1', 'yes']
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', app.config['MAIL_USERNAME'] or 'noreply@example.com')
+
 # Basic Logging Configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]')
 # For Flask's built-in logger, you might configure it further if needed,
@@ -106,6 +139,9 @@ def get_google_flow():
     )
 
 db = SQLAlchemy(app)
+
+# Initialize Flask-Mail
+mail = Mail(app)
 
 # Authlib OAuth 2.0 Client Setup
 oauth = OAuth(app)
@@ -1873,9 +1909,24 @@ def create_booking():
         db.session.add(new_booking)
         db.session.commit()
         app.logger.info(f"Booking ID {new_booking.id} created for resource {resource_id} by user {current_user.username} (record user: {user_name_for_record}).")
+
+        # Send confirmation email
+        if mail_available and current_user.email:
+            try:
+                msg = Message(
+                    subject="Booking Confirmation",
+                    recipients=[current_user.email],
+                    body=f"Your booking for {resource.name} on {new_booking.start_time.strftime('%Y-%m-%d')} from {new_booking.start_time.strftime('%H:%M')} to {new_booking.end_time.strftime('%H:%M')} has been created."
+                )
+                mail.send(msg)
+            except Exception:
+                app.logger.exception(f"Failed to send booking confirmation email to {current_user.email}:")
+
         created_booking_data = {
-            'id': new_booking.id, 'resource_id': new_booking.resource_id, 'title': new_booking.title,
-            'user_name': new_booking.user_name, 
+            'id': new_booking.id,
+            'resource_id': new_booking.resource_id,
+            'title': new_booking.title,
+            'user_name': new_booking.user_name,
             'start_time': new_booking.start_time.strftime('%Y-%m-%d %H:%M:%S'),
             'end_time': new_booking.end_time.strftime('%Y-%m-%d %H:%M:%S')
         }
@@ -1944,16 +1995,30 @@ def delete_booking_by_user(booking_id):
         if booking.resource_booked: # Check if backref is populated
             resource_name = booking.resource_booked.name
         
+        booking_start = booking.start_time
+        booking_end = booking.end_time
         booking_details_for_log = (
             f"Booking ID: {booking.id}, "
             f"Resource: {resource_name} (ID: {booking.resource_id}), "
             f"Title: '{booking.title}', "
             f"Original User: '{booking.user_name}', "
-            f"Time: {booking.start_time.isoformat()} to {booking.end_time.isoformat()}"
+            f"Time: {booking_start.isoformat()} to {booking_end.isoformat()}"
         )
 
         db.session.delete(booking)
         db.session.commit()
+
+        # Send cancellation email
+        if mail_available and current_user.email:
+            try:
+                msg = Message(
+                    subject="Booking Cancelled",
+                    recipients=[current_user.email],
+                    body=f"Your booking for {resource_name} on {booking_start.strftime('%Y-%m-%d')} from {booking_start.strftime('%H:%M')} to {booking_end.strftime('%H:%M')} has been cancelled."
+                )
+                mail.send(msg)
+            except Exception:
+                app.logger.exception(f"Failed to send cancellation email to {current_user.email}:")
 
         add_audit_log(
             action="CANCEL_BOOKING_USER", 
@@ -2009,13 +2074,27 @@ def update_booking_by_user(booking_id):
                 'end_time': booking.end_time.isoformat(), 'title': booking.title
             }), 200
 
+
         booking.title = new_title
         db.session.commit()
 
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
+
+        # Send update email
+        if mail_available and current_user.email:
+            try:
+                msg = Message(
+                    subject="Booking Updated",
+                    recipients=[current_user.email],
+                    body=f"Your booking for {resource_name} on {booking.start_time.strftime('%Y-%m-%d')} has been updated. New title: {booking.title}."
+                )
+                mail.send(msg)
+            except Exception:
+                app.logger.exception(f"Failed to send booking update email to {current_user.email}:")
+
         add_audit_log(
-            action="UPDATE_BOOKING_USER", 
-            details=f"User '{current_user.username}' updated booking ID: {booking.id} for resource '{resource_name}'. Title changed from '{old_title}' to '{new_title}'."
+            action="UPDATE_BOOKING_USER",
+            details=f"User '{current_user.username}' updated booking ID: {booking.id} for resource '{resource_name}'. Title changed from '{old_title}' to '{new_title}'.",
         )
         app.logger.info(f"User '{current_user.username}' successfully updated title for booking ID: {booking.id} from '{old_title}' to '{new_title}'.")
         
