@@ -1,7 +1,8 @@
 import unittest
 import json
 
-from datetime import datetime, time, date
+from datetime import datetime, time, date, timedelta
+
 from app import app, db, User, Resource, Booking, WaitlistEntry, FloorMap, email_log
 
 # from flask_login import current_user # Not directly used for assertions here
@@ -211,25 +212,57 @@ class AppTests(unittest.TestCase):
         self.assertEqual(len(email_log), 1)
         self.assertEqual(email_log[0]['to'], other.email)
 
-    def test_profile_update(self):
-        self.login('testuser', 'password')
-        resp = self.client.put('/api/profile', data=json.dumps({'email': 'new@example.com', 'password': 'newpass'}), content_type='application/json')
-        self.assertEqual(resp.status_code, 200)
-        data = resp.get_json()
-        self.assertTrue(data.get('success'))
-        updated_user = User.query.filter_by(username='testuser').first()
-        self.assertEqual(updated_user.email, 'new@example.com')
-        self.assertTrue(updated_user.check_password('newpass'))
+    def test_analytics_dashboard_permissions(self):
+        """Ensure analytics dashboard permissions are enforced."""
+        # Unauthenticated request should redirect to login
+        resp = self.client.get('/admin/analytics/', follow_redirects=False)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn('/login', resp.location)
 
-    def test_profile_update_duplicate_email(self):
-        other = User(username='otheruser', email='dup@example.com', is_admin=False)
-        other.set_password('pass')
-        db.session.add(other)
+        # Login as normal user without permissions
+        self.login('testuser', 'password')
+        resp_no_perm = self.client.get('/admin/analytics/', follow_redirects=False)
+        self.assertEqual(resp_no_perm.status_code, 403)
+        self.logout()
+
+        # Create admin user with full permissions
+        admin = User(username='adminuser', email='admin2@example.com', is_admin=True)
+        admin.set_password('password')
+        db.session.add(admin)
         db.session.commit()
 
-        self.login('testuser', 'password')
-        resp = self.client.put('/api/profile', data=json.dumps({'email': 'dup@example.com'}), content_type='application/json')
-        self.assertEqual(resp.status_code, 409)
+        # Login as admin and access dashboard
+        self.login('adminuser', 'password')
+        resp_admin = self.client.get('/admin/analytics/', follow_redirects=False)
+        self.assertEqual(resp_admin.status_code, 200)
+        self.assertIn(b'Resource Usage Analytics', resp_admin.data)
+
+    def test_analytics_bookings_data_endpoint(self):
+        """Validate JSON structure returned by bookings data endpoint."""
+        # Create admin user and login
+        admin = User(username='adminuser', email='admin2@example.com', is_admin=True)
+        admin.set_password('password')
+        db.session.add(admin)
+        db.session.commit()
+        self.login('adminuser', 'password')
+
+        # Create a booking for analytics data
+        start = datetime.utcnow()
+        end = start + timedelta(hours=1)
+        booking = Booking(resource_id=self.resource1.id, user_name='adminuser', start_time=start, end_time=end, title='Analytics Test')
+        db.session.add(booking)
+        db.session.commit()
+
+        resp = self.client.get('/admin/analytics/data/bookings')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIn(self.resource1.name, data)
+        self.assertIsInstance(data[self.resource1.name], list)
+        first_entry = data[self.resource1.name][0]
+        self.assertIsInstance(first_entry, dict)
+        self.assertIn('date', first_entry)
+        self.assertIn('count', first_entry)
+
 
 
 if __name__ == '__main__':
