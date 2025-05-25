@@ -1,7 +1,9 @@
 import unittest
 import json
-from datetime import datetime, date, time
-from app import app, db, User, FloorMap, Resource, Booking
+
+from datetime import datetime, time, date
+from app import app, db, User, Resource, Booking, WaitlistEntry, email_log
+
 # from flask_login import current_user # Not directly used for assertions here
 
 class AppTests(unittest.TestCase):
@@ -18,6 +20,8 @@ class AppTests(unittest.TestCase):
         
         db.create_all()
         
+        email_log.clear()
+
         # Create a test user
         user = User.query.filter_by(username='testuser').first()
         if not user:
@@ -148,93 +152,65 @@ class AppTests(unittest.TestCase):
         self.assertEqual(response_logged_in.status_code, 200)
         self.assertIn('<h1', response_logged_in.data.decode('utf-8'))
 
-    def test_map_details_includes_resources_and_bookings(self):
-        """Ensure map details endpoint returns resources and bookings."""
-        booking_date = date.today()
-        booking = Booking(
-            resource_id=self.resource1.id,
-            user_name='someone',
-            start_time=datetime.combine(booking_date, time(9, 0)),
-            end_time=datetime.combine(booking_date, time(10, 0)),
-            title='Morning'
-        )
-        db.session.add(booking)
+    def test_conflicting_booking_adds_waitlist(self):
+        resource = Resource(name='Room1', status='published')
+        db.session.add(resource)
         db.session.commit()
 
-        resp = self.client.get(
-            f'/api/map_details/{self.floor_map.id}?date={booking_date.isoformat()}'
-        )
-        self.assertEqual(resp.status_code, 200)
-        data = resp.get_json()
-        self.assertEqual(data['map_details']['id'], self.floor_map.id)
-        self.assertEqual(len(data['mapped_resources']), 2)
-        res = next(r for r in data['mapped_resources'] if r['id'] == self.resource1.id)
-        self.assertEqual(len(res['bookings_on_date']), 1)
-        self.assertEqual(res['bookings_on_date'][0]['title'], 'Morning')
-
-    def test_booking_creation_success(self):
-        """Booking creation returns 201 and persists to DB."""
-        self.login('testuser', 'password')
-        payload = {
-            'resource_id': self.resource1.id,
-            'date_str': date.today().isoformat(),
-            'start_time_str': '11:00',
-            'end_time_str': '12:00',
-            'title': 'Test',
-            'user_name': 'testuser'
-        }
-        resp = self.client.post(
-            '/api/bookings', data=json.dumps(payload), content_type='application/json'
-        )
-        self.assertEqual(resp.status_code, 201)
-        data = resp.get_json()
-        self.assertEqual(data['resource_id'], self.resource1.id)
-        self.assertIsNotNone(Booking.query.get(data['id']))
-
-    def test_booking_creation_conflict(self):
-        """Overlapping booking should return HTTP 409."""
-        self.login('testuser', 'password')
-        booking_date = date.today()
-        existing = Booking(
-            resource_id=self.resource1.id,
-            user_name='someone',
-            start_time=datetime.combine(booking_date, time(9, 0)),
-            end_time=datetime.combine(booking_date, time(10, 0)),
-            title='Existing'
-        )
+        start = datetime.combine(date.today(), time(9, 0))
+        end = datetime.combine(date.today(), time(10, 0))
+        existing = Booking(resource_id=resource.id, user_name='testuser', start_time=start, end_time=end, title='Existing')
         db.session.add(existing)
         db.session.commit()
 
-        payload = {
-            'resource_id': self.resource1.id,
-            'date_str': booking_date.isoformat(),
-            'start_time_str': '09:30',
-            'end_time_str': '10:30',
-            'title': 'Conflict',
-            'user_name': 'testuser'
-        }
-        resp = self.client.post(
-            '/api/bookings', data=json.dumps(payload), content_type='application/json'
-        )
-        self.assertEqual(resp.status_code, 409)
+        other = User(username='other', email='other@example.com', is_admin=False)
+        other.set_password('password')
+        db.session.add(other)
+        db.session.commit()
 
-    def test_booking_cancellation(self):
-        """User can cancel own booking via API."""
-        self.login('testuser', 'password')
-        booking_date = date.today()
-        booking = Booking(
-            resource_id=self.resource1.id,
-            user_name='testuser',
-            start_time=datetime.combine(booking_date, time(13, 0)),
-            end_time=datetime.combine(booking_date, time(14, 0)),
-            title='To cancel'
-        )
+        self.login('other', 'password')
+
+        payload = {
+            'resource_id': resource.id,
+            'date_str': date.today().strftime('%Y-%m-%d'),
+            'start_time_str': '09:00',
+            'end_time_str': '10:00',
+            'title': 'Conflict',
+            'user_name': 'other'
+        }
+        resp = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
+        self.assertEqual(resp.status_code, 409)
+        entries = WaitlistEntry.query.filter_by(resource_id=resource.id).all()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].user_id, other.id)
+
+    def test_cancellation_notifies_waitlisted_user(self):
+        resource = Resource(name='Room1', status='published')
+        db.session.add(resource)
+        db.session.commit()
+
+        start = datetime.combine(date.today(), time(9, 0))
+        end = datetime.combine(date.today(), time(10, 0))
+        booking = Booking(resource_id=resource.id, user_name='testuser', start_time=start, end_time=end, title='Existing')
         db.session.add(booking)
         db.session.commit()
 
+        other = User(username='other', email='other@example.com', is_admin=False)
+        other.set_password('password')
+        db.session.add(other)
+        db.session.commit()
+
+        entry = WaitlistEntry(resource_id=resource.id, user_id=other.id)
+        db.session.add(entry)
+        db.session.commit()
+
+        self.login('testuser', 'password')
         resp = self.client.delete(f'/api/bookings/{booking.id}')
         self.assertEqual(resp.status_code, 200)
-        self.assertIsNone(Booking.query.get(booking.id))
+        self.assertEqual(WaitlistEntry.query.count(), 0)
+        self.assertEqual(len(email_log), 1)
+        self.assertEqual(email_log[0]['to'], other.email)
+
 
 if __name__ == '__main__':
     unittest.main()

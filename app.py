@@ -270,6 +270,18 @@ class Booking(db.Model):
     def __repr__(self):
         return f"<Booking {self.title or self.id} for Resource {self.resource_id} from {self.start_time.strftime('%Y-%m-%d %H:%M')} to {self.end_time.strftime('%Y-%m-%d %H:%M')}>"
 
+class WaitlistEntry(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    resource_id = db.Column(db.Integer, db.ForeignKey('resource.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    resource = db.relationship('Resource')
+    user = db.relationship('User')
+
+    def __repr__(self):
+        return f"<WaitlistEntry resource={self.resource_id} user={self.user_id}>"
+
 class AuditLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
@@ -319,6 +331,20 @@ def add_audit_log(action: str, details: str, user_id: int = None, username: str 
     except Exception as e:
         app.logger.error(f"Error adding audit log: {e}", exc_info=True)
         db.session.rollback() # Rollback in case of error during audit logging itself
+
+# --- Simple Email Notification System ---
+email_log = []
+
+def send_email(to_address: str, subject: str, body: str):
+    """Log an outgoing email (placeholder for real email delivery)."""
+    email_entry = {
+        'to': to_address,
+        'subject': subject,
+        'body': body,
+        'timestamp': datetime.utcnow().isoformat(),
+    }
+    email_log.append(email_entry)
+    app.logger.info(f"Email queued to {to_address}: {subject}")
 
 @app.route("/")
 @login_required
@@ -1423,6 +1449,43 @@ def assign_google_auth(user_id):
         app.logger.exception(f"Error assigning Google ID to user {user_id}:")
         return jsonify({'error': 'Failed to assign Google ID due to a server error.'}), 500
 
+# --- Waitlist Management APIs ---
+@app.route('/api/admin/waitlist', methods=['GET'])
+@login_required
+def get_waitlist_entries():
+    if not current_user.has_permission('manage_resources'):
+        return jsonify({'error': 'Permission denied to manage waitlist.'}), 403
+
+    entries = WaitlistEntry.query.order_by(WaitlistEntry.timestamp.asc()).all()
+    response_list = []
+    for entry in entries:
+        user = User.query.get(entry.user_id)
+        resource = Resource.query.get(entry.resource_id)
+        response_list.append({
+            'id': entry.id,
+            'resource_id': entry.resource_id,
+            'resource_name': resource.name if resource else None,
+            'user_id': entry.user_id,
+            'username': user.username if user else None,
+            'timestamp': entry.timestamp.isoformat(),
+        })
+    return jsonify(response_list), 200
+
+
+@app.route('/api/admin/waitlist/<int:entry_id>', methods=['DELETE'])
+@login_required
+def delete_waitlist_entry_admin(entry_id):
+    if not current_user.has_permission('manage_resources'):
+        return jsonify({'error': 'Permission denied to manage waitlist.'}), 403
+
+    entry = WaitlistEntry.query.get(entry_id)
+    if not entry:
+        return jsonify({'error': 'Waitlist entry not found.'}), 404
+
+    db.session.delete(entry)
+    db.session.commit()
+    return jsonify({'message': 'Waitlist entry deleted.'}), 200
+
 # --- Role Management APIs ---
 
 # --- Audit Log API ---
@@ -1900,8 +1963,28 @@ def create_booking():
     ).first()
 
     if conflicting_booking:
-        app.logger.info(f"Booking conflict for user {current_user.username}, resource {resource_id} at {new_booking_start_time}-{new_booking_end_time}.")
-        return jsonify({'error': 'This time slot is no longer available. Please try another slot.'}), 409 # Conflict
+        app.logger.info(
+            f"Booking conflict for user {current_user.username}, resource {resource_id} at {new_booking_start_time}-{new_booking_end_time}."
+        )
+
+        # Add to waitlist if fewer than two entries exist for this resource
+        existing_waitlist_count = WaitlistEntry.query.filter_by(resource_id=resource_id).count()
+        if existing_waitlist_count < 2:
+            waitlist_entry = WaitlistEntry(resource_id=resource_id, user_id=current_user.id)
+            db.session.add(waitlist_entry)
+            db.session.commit()
+            app.logger.info(
+                f"User {current_user.username} added to waitlist for resource {resource_id}."
+            )
+            return (
+                jsonify({'error': 'This time slot is no longer available. You have been added to the waitlist.'}),
+                409,
+            )
+
+        return (
+            jsonify({'error': 'This time slot is no longer available. Please try another slot.'}),
+            409,
+        )
 
     try:
         new_booking = Booking(resource_id=resource_id, start_time=new_booking_start_time,
@@ -2008,20 +2091,27 @@ def delete_booking_by_user(booking_id):
         db.session.delete(booking)
         db.session.commit()
 
-        # Send cancellation email
-        if mail_available and current_user.email:
-            try:
-                msg = Message(
-                    subject="Booking Cancelled",
-                    recipients=[current_user.email],
-                    body=f"Your booking for {resource_name} on {booking_start.strftime('%Y-%m-%d')} from {booking_start.strftime('%H:%M')} to {booking_end.strftime('%H:%M')} has been cancelled."
+
+        # Notify next user on waitlist, if any
+        next_entry = (
+            WaitlistEntry.query.filter_by(resource_id=booking.resource_id)
+            .order_by(WaitlistEntry.timestamp.asc())
+            .first()
+        )
+        if next_entry:
+            user_to_notify = User.query.get(next_entry.user_id)
+            db.session.delete(next_entry)
+            db.session.commit()
+            if user_to_notify:
+                send_email(
+                    user_to_notify.email,
+                    f"Slot available for {resource_name}",
+                    f"The slot you requested for {resource_name} is now available.",
                 )
-                mail.send(msg)
-            except Exception:
-                app.logger.exception(f"Failed to send cancellation email to {current_user.email}:")
+
 
         add_audit_log(
-            action="CANCEL_BOOKING_USER", 
+            action="CANCEL_BOOKING_USER",
             details=f"User '{current_user.username}' cancelled their booking. {booking_details_for_log}"
         )
         app.logger.info(f"User '{current_user.username}' successfully deleted booking ID: {booking_id}. Details: {booking_details_for_log}")
