@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin - Floor Maps - Smart Resource Booking</title>
+    <title>{{ _('Admin - Floor Maps - Smart Resource Booking') }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -18,36 +18,36 @@
                         <!-- Username and ▼ icon will be here -->
                     </button>
                     <ul id="user-dropdown-menu" role="menu" style="display:none; position: absolute; top: 100%; left: 0; background-color: #2c3e50; border: 1px solid #555; border-top: none; min-width: 160px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); z-index: 100; list-style-type: none; padding: 0; margin: 0; border-radius: 0 0 4px 4px;">
-                        <li><a href="{{ url_for('serve_profile_page') }}" role="menuitem" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">View Profile</a></li>
-                        <li><a href="#" id="logout-link-dropdown" role="menuitem" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">Logout</a></li>
+                        <li><a href="{{ url_for('serve_profile_page') }}" role="menuitem" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('View Profile') }}</a></li>
+                        <li><a href="#" id="logout-link-dropdown" role="menuitem" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Logout') }}</a></li>
                     </ul>
                 </li>
-                <li><a href="{{ url_for('serve_index') }}">Home</a></li>
-                <li><a href="{{ url_for('serve_new_booking') }}">New Booking</a></li>
-                <li><a href="{{ url_for('serve_resources') }}">View Resources</a></li>
-                <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">Admin Maps</a></li>
-                <li id="user-management-nav-link" style="display:none;"><a href="{{ url_for('serve_user_management_page') }}">User Management</a></li>
-                <li id="log-nav-link" style="display:none;"><a href="{{ url_for('serve_audit_log_page') }}">Audit Logs</a></li>
+                <li><a href="{{ url_for('serve_index') }}">{{ _('Home') }}</a></li>
+                <li><a href="{{ url_for('serve_new_booking') }}">{{ _('New Booking') }}</a></li>
+                <li><a href="{{ url_for('serve_resources') }}">{{ _('View Resources') }}</a></li>
+                <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">{{ _('Admin Maps') }}</a></li>
+                <li id="user-management-nav-link" style="display:none;"><a href="{{ url_for('serve_user_management_page') }}">{{ _('User Management') }}</a></li>
+                <li id="log-nav-link" style="display:none;"><a href="{{ url_for('serve_audit_log_page') }}">{{ _('Audit Logs') }}</a></li>
                 <!-- Active Admin Link was here, ensure admin-maps-nav-link is used by script.js -->
             </ul>
         </nav>
     </header>
 
     <main>
-        <h1>Floor Map Management</h1>
+        <h1>{{ _('Floor Map Management') }}</h1>
 
         <section id="upload-map-section">
-            <h2>Upload New Floor Map</h2>
+            <h2>{{ _('Upload New Floor Map') }}</h2>
             <form id="upload-map-form">
                 <div>
-                    <label for="map-name">Map Name:</label>
+                    <label for="map-name">{{ _('Map Name:') }}</label>
                     <input type="text" id="map-name" name="map_name" required>
                 </div>
                 <div>
-                    <label for="map-image">Map Image File:</label>
+                    <label for="map-image">{{ _('Map Image File:') }}</label>
                     <input type="file" id="map-image" name="map_image" accept="image/png, image/jpeg" required>
                 </div>
-                <button type="submit">Upload Map</button>
+                <button type="submit">{{ _('Upload Map') }}</button>
             </form>
             <div id="upload-status"></div>
         </section>
@@ -55,89 +55,89 @@
         <hr>
 
         <section id="list-maps-section">
-            <h2>Existing Floor Maps</h2>
+            <h2>{{ _('Existing Floor Maps') }}</h2>
             <div id="admin-maps-list-status"></div> <!-- For map list loading/error messages -->
             <ul id="maps-list">
                 <!-- Maps will be listed here by JavaScript -->
-                <li>Loading maps...</li>
+                <li>{{ _('Loading maps...') }}</li>
             </ul>
         </section>
 
         <hr>
 
         <section id="define-areas-section" style="display:none;"> <!-- Hidden initially -->
-            <h2>Define Areas on Selected Map</h2>
+            <h2>{{ _('Define Areas on Selected Map') }}</h2>
             <div id="define-areas-status"></div> <!-- For general messages in this section -->
             <h3 id="selected-map-name"></h3>
             <div id="map-image-wrapper" style="position: relative; width: fit-content; height: fit-content; border: 1px solid #ccc; margin-bottom: 10px;">
-                <img id="selected-map-image" src="#" alt="Selected Map" style="display: block; max-width: 800px; max-height: 600px;">
+                <img id="selected-map-image" src="#" alt="{{ _('Selected Map') }}" style="display: block; max-width: 800px; max-height: 600px;">
                 <canvas id="drawing-canvas" style="position: absolute; top: 0; left: 0;"></canvas>
             </div>
             <form id="define-area-form">
-                <h3>Assign Area to Resource</h3>
+                <h3>{{ _('Assign Area to Resource') }}</h3>
                 <div>
-                    <label for="resource-to-map">Select Resource:</label>
+                    <label for="resource-to-map">{{ _('Select Resource:') }}</label>
                     <select id="resource-to-map" name="resource_id" required>
                         <!-- Resources will be populated here by JavaScript -->
                     </select>
                 </div>
                 <div>
-                    <label for="booking-permission">Booking Permission:</label>
+                    <label for="booking-permission">{{ _('Booking Permission:') }}</label>
                     <select id="booking-permission" name="booking_restriction">
-                        <option value="">Default (Requires Login, No Admin Restriction)</option>
-                        <option value="admin_only">Admin Only</option>
+                        <option value="">{{ _('Default (Requires Login, No Admin Restriction)') }}</option>
+                        <option value="admin_only">{{ _('Admin Only') }}</option>
                     </select>
                 </div>
 
                 <div>
-                    <label>Authorized Specific Users (Optional):</label>
+                    <label>{{ _('Authorized Specific Users (Optional):') }}</label>
                     <div id="authorized-users-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;">
                         <!-- User checkboxes will be populated here by JavaScript -->
-                        <small>Loading users...</small>
+                        <small>{{ _('Loading users...') }}</small>
                     </div>
                 </div>
 
                 <div>
-                    <label>Authorized Roles (Optional):</label>
+                    <label>{{ _('Authorized Roles (Optional):') }}</label>
                     <div id="define-area-authorized-roles-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;">
-                        <small>Loading roles...</small>
+                        <small>{{ _('Loading roles...') }}</small>
                     </div>
                 </div>
 
                 <div>
-                    <label>Coordinates Type: Rectangle (fixed for now)</label>
+                    <label>{{ _('Coordinates Type: Rectangle (fixed for now)') }}</label>
                     <input type="hidden" id="coordinates-type" name="coordinates_type" value="rect">
                 </div>
                 <div>
-                    <label for="coord-x">X:</label>
+                    <label for="coord-x">{{ _('X:') }}</label>
                     <input type="number" id="coord-x" name="x" required>
                 </div>
                 <div>
-                    <label for="coord-y">Y:</label>
+                    <label for="coord-y">{{ _('Y:') }}</label>
                     <input type="number" id="coord-y" name="y" required>
                 </div>
                 <div>
-                    <label for="coord-width">Width:</label>
+                    <label for="coord-width">{{ _('Width:') }}</label>
                     <input type="number" id="coord-width" name="width" required>
                 </div>
                 <div>
-                    <label for="coord-height">Height:</label>
+                    <label for="coord-height">{{ _('Height:') }}</label>
                     <input type="number" id="coord-height" name="height" required>
                 </div>
                 <input type="hidden" id="selected-floor-map-id" name="floor_map_id">
-                <button type="submit">Save Area for Resource</button>
+                <button type="submit">{{ _('Save Area for Resource') }}</button>
             </form>
             <div id="area-definition-status"></div>
             
             <div id="edit-delete-buttons" style="margin-top: 10px; display:none;">
-                <button id="edit-selected-area-btn" class="button">Edit Selected Area</button>
-                <button id="delete-selected-area-btn" class="button" style="background-color: #dc3545; color:white;">Delete Selected Area Mapping</button>
+                <button id="edit-selected-area-btn" class="button">{{ _('Edit Selected Area') }}</button>
+                <button id="delete-selected-area-btn" class="button" style="background-color: #dc3545; color:white;">{{ _('Delete Selected Area Mapping') }}</button>
             </div>
 
             <div id="resource-actions-container" style="margin-top: 15px; padding: 10px; border: 1px dashed #ccc;">
                 <!-- Publish button or status text will appear here based on selected resource -->
-                <p><em>Select a resource from the dropdown above to see its status or publish actions.</em></p>
-                <button id="delete-resource-btn" class="button danger" style="display: none; margin-left: 10px;">Delete Resource</button>
+                <p><em>{{ _('Select a resource from the dropdown above to see its status or publish actions.') }}</em></p>
+                <button id="delete-resource-btn" class="button danger" style="display: none; margin-left: 10px;">{{ _('Delete Resource') }}</button>
             </div>
         </section>
 
@@ -145,50 +145,50 @@
         <div id="edit-resource-modal" class="modal" style="display: none;">
             <div class="modal-content">
                 <span class="close-modal-btn" data-modal-id="edit-resource-modal">&times;</span>
-                <h3>Edit Resource Details</h3>
+                <h3>{{ _('Edit Resource Details') }}</h3>
                 <form id="edit-resource-form">
                     <input type="hidden" id="edit-resource-id" name="resource_id">
                     
-                    <label for="edit-resource-name">Name:</label>
+                    <label for="edit-resource-name">{{ _('Name:') }}</label>
                     <input type="text" id="edit-resource-name" name="name" required>
                     
-                    <label for="edit-resource-capacity">Capacity:</label>
+                    <label for="edit-resource-capacity">{{ _('Capacity:') }}</label>
                     <input type="number" id="edit-resource-capacity" name="capacity" min="0">
                     
-                    <label for="edit-resource-equipment">Equipment:</label>
-                    <input type="text" id="edit-resource-equipment" name="equipment" placeholder="e.g., Projector, Whiteboard">
+                    <label for="edit-resource-equipment">{{ _('Equipment:') }}</label>
+                    <input type="text" id="edit-resource-equipment" name="equipment" placeholder="{{ _('e.g., Projector, Whiteboard') }}">
                     
-                    <label for="edit-resource-status">Status:</label>
+                    <label for="edit-resource-status">{{ _('Status:') }}</label>
                     <select id="edit-resource-status" name="status">
-                        <option value="draft">Draft</option>
-                        <option value="published">Published</option>
-                        <option value="archived">Archived</option>
+                        <option value="draft">{{ _('Draft') }}</option>
+                        <option value="published">{{ _('Published') }}</option>
+                        <option value="archived">{{ _('Archived') }}</option>
                     </select>
                     
-                    <label for="edit-resource-booking-permission">Booking Permission:</label>
+                    <label for="edit-resource-booking-permission">{{ _('Booking Permission:') }}</label>
                     <select id="edit-resource-booking-permission" name="booking_restriction">
-                        <option value="">Default (All Authenticated Users unless specified below)</option>
-                        <option value="admin_only">Admin Only</option>
+                        <option value="">{{ _('Default (All Authenticated Users unless specified below)') }}</option>
+                        <option value="admin_only">{{ _('Admin Only') }}</option>
                         <!-- More options can be added here if needed -->
                     </select>
 
                     <div class="permission-group">
-                        <h4>Authorized Specific Users (Optional)</h4>
-                        <p class="small-text">If specified, only these users (and admins) can book.</p>
+                        <h4>{{ _('Authorized Specific Users (Optional)') }}</h4>
+                        <p class="small-text">{{ _('If specified, only these users (and admins) can book.') }}</p>
                         <div id="edit-authorized-users-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;">
                             <!-- User checkboxes will be populated here by JS -->
                         </div>
                     </div>
 
                     <div class="permission-group">
-                        <label>Authorized Roles (Optional):</label>
-                        <p class="small-text">If specified, only users with these roles can book. This complements user-specific permissions.</p>
+                        <label>{{ _('Authorized Roles (Optional):') }}</label>
+                        <p class="small-text">{{ _('If specified, only users with these roles can book. This complements user-specific permissions.') }}</p>
                         <div id="edit-resource-authorized-roles-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;">
-                            <small>Loading roles...</small>
+                            <small>{{ _('Loading roles...') }}</small>
                         </div>
                     </div>
                     
-                    <button type="submit" class="button">Save Changes</button>
+                    <button type="submit" class="button">{{ _('Save Changes') }}</button>
                     <div id="edit-resource-status-message" class="status-message" style="margin-top: 10px;"></div>
                 </form>
             </div>
@@ -196,7 +196,7 @@
     </main>
 
     <footer>
-        <p>&copy; 2024 Smart Resource Booking</p>
+        <p>{{ _('&copy; 2024 Smart Resource Booking') }}</p>
     </footer>
     
     <!-- Link to global script.js, or a new admin_maps.js if preferred -->

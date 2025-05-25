@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Resource Booking - Dashboard</title>
+    <title>{{ _('Smart Resource Booking - Dashboard') }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -17,33 +17,47 @@
                     <!-- Username and ▼ icon will be here -->
                 </button>
                 <ul id="user-dropdown-menu" role="menu" style="display:none; position: absolute; top: 100%; left: 0; background-color: #2c3e50; border: 1px solid #555; border-top: none; min-width: 160px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2); z-index: 100; list-style-type: none; padding: 0; margin: 0; border-radius: 0 0 4px 4px;">
-                    <li><a href="{{ url_for('serve_profile_page') }}" role="menuitem" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">View Profile</a></li>
-                    <li><a href="#" id="logout-link-dropdown" role="menuitem" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">Logout</a></li>
+                    <li><a href="{{ url_for('serve_profile_page') }}" role="menuitem" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('View Profile') }}</a></li>
+                    <li><a href="#" id="logout-link-dropdown" role="menuitem" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Logout') }}</a></li>
                 </ul>
             </li>
-            <li><a href="{{ url_for('serve_index') }}">Home</a></li>
-            <li><a href="{{ url_for('serve_new_booking') }}">New Booking</a></li>
-            <li><a href="{{ url_for('serve_resources') }}">View Resources</a></li>
-            <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">Admin Maps</a></li>
+            <li><a href="{{ url_for('serve_index') }}">{{ _('Home') }}</a></li>
+            <li><a href="{{ url_for('serve_new_booking') }}">{{ _('New Booking') }}</a></li>
+            <li><a href="{{ url_for('serve_resources') }}">{{ _('View Resources') }}</a></li>
+            <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">{{ _('Admin Maps') }}</a></li>
             <li id="auth-link-container" style="display:none;"><!-- Login link if not logged in --></li> 
         </ul>
     </nav>
     <main>
-        <h1>Welcome to Smart Resource Booking</h1>
-        <p>Your smart solution for managing and booking resources efficiently.</p>
+        <h1>{{ _('Welcome to Smart Resource Booking') }}</h1>
+        <p>{{ _('Your smart solution for managing and booking resources efficiently.') }}</p>
         <section id="upcoming-bookings">
-            <h2>Available Resources (Now)</h2>
+            <h2>{{ _('Available Resources (Now)') }}</h2>
             <!-- Placeholder for upcoming bookings list -->
             <div id="available-resources-now-list"></div>
         </section>
         <section id="quick-actions">
-            <h2>Quick Actions</h2>
+            <h2>{{ _('Quick Actions') }}</h2>
             <!-- Placeholder for quick actions -->
-            <button>Book a Room</button>
+            <button>{{ _('Book a Room') }}</button>
         </section>
     </main>
     <footer>
-        <p>&copy; 2024 Smart Resource Booking</p>
+        <p>{{ _('&copy; 2024 Smart Resource Booking') }}</p>
+        <div id="accessibility-controls" style="margin-top: 10px; padding: 10px; border-top: 1px solid var(--border-color);">
+            <h3>{{ _('Accessibility') }}</h3>
+            <button id="toggle-high-contrast">{{ _('Toggle High Contrast') }}</button>
+            <button id="increase-font-size">{{ _('Increase Font Size (A+)') }}</button>
+            <button id="decrease-font-size">{{ _('Decrease Font Size (A-)') }}</button>
+            <button id="reset-font-size">{{ _('Reset Font Size') }}</button>
+            <div id="language-selector-container" style="margin-top: 5px;">
+                <label for="language-selector">{{ _('Language:') }}</label>
+                <select id="language-selector">
+                    <option value="en">{{ _('English') }}</option>
+                    <!-- Other languages would be added here as they become available -->
+                </select>
+            </div>
+        </div>
     </footer>
     <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
 </body>

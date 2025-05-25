@@ -16,6 +16,7 @@ import pathlib # For finding the client_secret.json file path
 import logging # Added for logging
 from functools import wraps # For permission_required decorator
 from flask import abort # For permission_required decorator
+from flask_babel import Babel, gettext as _ # For i18n
 
 # Base directory of the app - project root
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -28,8 +29,33 @@ if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
+
+# Initialize Babel for i18n
+babel = Babel(app)
+
+# Configurations
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['SECRET_KEY'] = 'dev_secret_key_123!@#' # CHANGE THIS in production!
+
+# Babel Configuration
+app.config['BABEL_DEFAULT_LOCALE'] = 'en'
+app.config['BABEL_DEFAULT_TIMEZONE'] = 'UTC'
+app.config['LANGUAGES'] = ['en'] # Add other language codes here once translations exist e.g. ['en', 'es']
+
+@babel.localeselector
+def get_locale():
+    # Try to get language from query parameter first
+    lang_query = request.args.get('lang')
+    if lang_query and lang_query in app.config.get('LANGUAGES', ['en']):
+        return lang_query
+    
+    # Attempt to get language from user's session (if stored there)
+    # user_lang = session.get('language') 
+    # if user_lang and user_lang in app.config.get('LANGUAGES', ['en']):
+    #    return user_lang
+
+    # Fallback to Accept-Languages header
+    return request.accept_languages.best_match(app.config.get('LANGUAGES', ['en']))
 
 # Google OAuth Configuration - Recommended to use environment variables
 app.config['GOOGLE_CLIENT_ID'] = os.environ.get('GOOGLE_CLIENT_ID', 'YOUR_GOOGLE_CLIENT_ID_PLACEHOLDER')
@@ -96,7 +122,10 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'serve_login' 
 login_manager.login_message_category = 'info' 
-login_manager.login_message = 'Please log in to access this page.' 
+# Example of wrapping a message that Flask-Login might use.
+# Note: This specific message is often configured directly in Flask-Login,
+# but if it were a custom message, this is how you'd wrap it.
+login_manager.login_message = _('Please log in to access this page.')
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -349,6 +378,7 @@ def login_google_callback():
     if state is None or state != request.args.get('state'):
         app.logger.error("Invalid OAuth state parameter during Google callback. Potential CSRF.")
         # Flash messages are not part of this app's error handling strategy
+        # If flash messages were used, they would be like: flash(_('Invalid OAuth state.'), 'error')
         return redirect(url_for('serve_login'))
 
     flow = get_google_flow()
@@ -356,12 +386,12 @@ def login_google_callback():
         flow.fetch_token(authorization_response=request.url)
     except Exception as e: # Catches errors like MismatchingStateError (already covered by above state check) or others
         app.logger.error(f"Error fetching OAuth token from Google: {e}", exc_info=True)
-        # flash(f"Authentication failed: Could not fetch token. Please try again.", "danger")
+        # flash(_("Authentication failed: Could not fetch token. Please try again."), "danger")
         return redirect(url_for('serve_login')) 
 
     if not flow.credentials:
         app.logger.error("Failed to retrieve credentials from Google after token fetch.")
-        # flash("Failed to retrieve credentials from Google. Please try again.", "danger")
+        # flash(_("Failed to retrieve credentials from Google. Please try again."), "danger")
         return redirect(url_for('serve_login'))
 
     # Extract the ID token from credentials
@@ -379,7 +409,7 @@ def login_google_callback():
 
         if not google_user_id or not google_user_email:
             app.logger.error(f"Google ID token verification successful, but 'sub' or 'email' missing. Email: {google_user_email}, Sub: {google_user_id}")
-            # flash("Could not retrieve Google ID or email. Please ensure your Google account has an email and permissions are granted.", "danger")
+            # flash(_("Could not retrieve Google ID or email. Please ensure your Google account has an email and permissions are granted."), "danger")
             return redirect(url_for('serve_login'))
 
         # Check if user exists by google_id
@@ -389,11 +419,11 @@ def login_google_callback():
             if user.is_admin: # Only allow admin users for this application
                 login_user(user)
                 app.logger.info(f"Admin user {user.username} (Google ID: {google_user_id}) logged in via Google.")
-                # flash(f'Welcome back, {user.username}!', 'success')
+                # flash(_('Welcome back, %(username)s!', username=user.username), 'success')
                 return redirect(url_for('serve_index')) 
             else:
                 app.logger.warning(f"Non-admin user {user.username} (Google ID: {google_user_id}) attempted Google login. Denied.")
-                # flash('Your Google account is linked, but it is not associated with an admin user for this application.', 'danger')
+                # flash(_('Your Google account is linked, but it is not associated with an admin user for this application.'), 'danger')
                 return redirect(url_for('serve_login')) 
 
         # If no user by google_id, check if an existing admin user has this email
@@ -405,7 +435,7 @@ def login_google_callback():
             existing_google_id_user = User.query.filter_by(google_id=google_user_id).first() # This should be the same as `user` if found
             if existing_google_id_user and existing_google_id_user.id != admin_with_email.id:
                 app.logger.error(f"Google ID {google_user_id} (email: {google_user_email}) is already linked to user {existing_google_id_user.username}, but trying to link to {admin_with_email.username}.")
-                # flash('This Google account is already linked to a different user. Please contact support.', 'danger')
+                # flash(_('This Google account is already linked to a different user. Please contact support.'), 'danger')
                 return redirect(url_for('serve_login'))
 
             admin_with_email.google_id = google_user_id
@@ -1812,5 +1842,5 @@ if __name__ == "__main__":
     # To initialize the DB, you can uncomment the next line and run 'python app.py' once.
     # Then comment it out again to prevent re-initialization on every run.
     # init_db() # Call this directly only for the very first setup
-    app.logger.info("Flask app starting...")
+    app.logger.info(_("Flask app starting...")) # Example of wrapping a log message, though not typically necessary for i18n
     app.run(debug=True)
