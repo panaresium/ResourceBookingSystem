@@ -2384,4 +2384,30 @@ Enter a title for your booking (optional):`);
     // The current logic in loadLanguagePreference tries to mitigate this.
     loadLanguagePreference();
 
+    // --- Real-time Updates via Socket.IO ---
+    if (typeof io !== 'undefined') {
+        const socket = io();
+        socket.on('booking_updated', () => {
+            if (calendarTable && roomSelectDropdown && availabilityDateInput) {
+                const selectedOption = roomSelectDropdown.selectedOptions[0];
+                if (selectedOption) {
+                    const resourceDetails = {
+                        id: roomSelectDropdown.value,
+                        booking_restriction: selectedOption.dataset.bookingRestriction,
+                        allowed_user_ids: selectedOption.dataset.allowedUserIds,
+                        allowed_roles: selectedOption.dataset.allowedRoles
+                    };
+                    fetchAndDisplayAvailability(resourceDetails.id, availabilityDateInput.value, resourceDetails);
+                }
+            }
+
+            if (typeof fetchAndRenderMap === 'function' && mapContainer) {
+                const mapId = mapContainer.dataset.mapId;
+                const dateInput = document.getElementById('map-availability-date');
+                const dateStr = dateInput ? dateInput.value : null;
+                fetchAndRenderMap(mapId, dateStr);
+            }
+        });
+    }
+
 });

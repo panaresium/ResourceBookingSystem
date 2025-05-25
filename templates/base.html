@@ -94,6 +94,7 @@
     </footer>
 
     {% block scripts %}
+    <script src="/socket.io/socket.io.js"></script>
     <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
     {% endblock %}
 </body>
