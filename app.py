@@ -42,7 +42,7 @@ app.config['BABEL_DEFAULT_LOCALE'] = 'en'
 app.config['BABEL_DEFAULT_TIMEZONE'] = 'UTC'
 app.config['LANGUAGES'] = ['en'] # Add other language codes here once translations exist e.g. ['en', 'es']
 
-@babel.locale_selector
+@babel.localeselector
 def get_locale():
     # Try to get language from query parameter first
     lang_query = request.args.get('lang')
@@ -75,8 +75,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(mes
 # app.logger.setLevel(logging.INFO) # Example if using Flask's logger predominantly
 
 # Google OAuth Configuration - Placeholders
-app.config['GOOGLE_CLIENT_ID'] = '365817360521-ilj3v7uqhd0f7cu5lfr6mva9fmaepe15.apps.googleusercontent.com'
-app.config['GOOGLE_CLIENT_SECRET'] = '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'
+app.config['GOOGLE_CLIENT_ID'] = ''
+app.config['GOOGLE_CLIENT_SECRET'] = ''
 
 # OAuth 2.0 setup
 # Note: client_secret.json is not used directly by google-auth-oauthlib Flow if client_id and client_secret are set in config.
