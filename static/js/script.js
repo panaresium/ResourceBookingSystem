@@ -575,47 +575,57 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // --- Permission Helper Function ---
 function checkUserPermissionForResource(resource, currentUserId, currentUserIsAdmin) {
-    if (!resource) return false; // Should not happen if resource details are passed
+    if (!resource) return false;
 
-    // 1. Coarse check: 'admin_only'
+    if (currentUserIsAdmin) return true; // Admins can generally book/override
+
     if (resource.booking_restriction === 'admin_only') {
-        return currentUserIsAdmin;
+        return currentUserIsAdmin; // This will be false here since admin case handled above
     }
 
-    // 2. Granular checks (if not 'admin_only')
-    // These apply if booking_restriction is 'all_users', null, or empty.
-    let canBookByUserId = false;
-    if (resource.allowed_user_ids && resource.allowed_user_ids.trim() !== "") {
+    // Check allowed user IDs (assuming resource.allowed_user_ids is a string "id1,id2")
+    let userInAllowedList = false;
+    let hasUserIdRestriction = resource.allowed_user_ids && resource.allowed_user_ids.trim() !== "";
+
+    if (hasUserIdRestriction) {
         const allowedIds = resource.allowed_user_ids.split(',').map(idStr => parseInt(idStr.trim(), 10));
         if (allowedIds.includes(currentUserId)) {
-            canBookByUserId = true;
+            userInAllowedList = true;
+            return true; // User specifically allowed
         }
     }
 
-    let canBookByRole = false;
-    if (resource.allowed_roles && resource.allowed_roles.trim() !== "") {
-        const allowedRolesList = resource.allowed_roles.split(',').map(role => role.trim().toLowerCase());
-        const userRole = currentUserIsAdmin ? 'admin' : 'standard_user';
-        if (allowedRolesList.includes(userRole)) {
-            canBookByRole = true;
-        }
+    // If there are specific roles defined for the resource, and user is not in allowed_user_ids (if any were specified),
+    // we can't confirm client-side without knowing user's roles. For simplicity, allow click.
+    // The backend will make the final decision.
+    // This also covers the case where allowed_user_ids is empty but roles are present.
+    // resource.roles is expected to be an array of objects e.g. [{id: 1, name: 'RoleName'}]
+    let hasRoleRestriction = resource.roles && Array.isArray(resource.roles) && resource.roles.length > 0;
+    
+    if (hasRoleRestriction) {
+        // If user IDs were specified but user didn't match, we still allow click because roles might grant access.
+        // If user IDs were NOT specified, but roles are, allow click.
+        return true; // Allow click, let backend verify role
+    }
+    
+    // If not admin_only, no specific user IDs defined, and no specific roles defined, then it's bookable by any authenticated user.
+    if (!hasUserIdRestriction && !hasRoleRestriction) {
+        return true;
     }
 
-    // Determine final permission based on granular rules
-    const hasUserIdRestriction = resource.allowed_user_ids && resource.allowed_user_ids.trim() !== "";
-    const hasRoleRestriction = resource.allowed_roles && resource.allowed_roles.trim() !== "";
-
-    if (hasUserIdRestriction && hasRoleRestriction) {
-        return canBookByUserId || canBookByRole; // User needs to match EITHER if both are set
-    } else if (hasUserIdRestriction) {
-        return canBookByUserId;
-    } else if (hasRoleRestriction) {
-        return canBookByRole;
-    } else {
-        // No specific granular restrictions, and not 'admin_only', so any authenticated user can book.
-        // (The @login_required on booking API handles the "authenticated" part for the API itself)
-        return true; 
+    // If user IDs were specified, user is NOT in the list, AND no roles are specified for the resource.
+    // In this specific case, the user definitely cannot book.
+    if (hasUserIdRestriction && !userInAllowedList && !hasRoleRestriction) {
+         return false;
     }
+    
+    // Default to allowing the click if logic is ambiguous without user roles info,
+    // or if user IDs were not specified but roles were (covered by hasRoleRestriction returning true above).
+    // This path is mostly for cases where user IDs were specified, user not in list, but roles *were* specified
+    // (which returned true above). If somehow it reaches here with hasUserIdRestriction && !userInAllowedList && hasRoleRestriction,
+    // it means the role check should have returned true.
+    // This acts as a fallback.
+    return true; 
 }
 
 

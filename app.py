@@ -14,6 +14,8 @@ from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 import pathlib # For finding the client_secret.json file path
 import logging # Added for logging
+from functools import wraps # For permission_required decorator
+from flask import abort # For permission_required decorator
 
 # Base directory of the app - project root
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -138,6 +140,18 @@ class User(db.Model, UserMixin):
         """Checks if the provided password matches the stored hash."""
         return check_password_hash(self.password_hash, password)
 
+    def has_permission(self, permission):
+        if self.is_admin: # Super admin (legacy) has all permissions
+            return True
+        # Check for 'all_permissions' in any role
+        if any('all_permissions' in role.permissions.split(',') for role in self.roles if role.permissions):
+            return True
+        # Check for the specific permission string
+        for role in self.roles:
+            if role.permissions and permission in role.permissions.split(','):
+                return True
+        return False
+
 class FloorMap(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
@@ -189,6 +203,56 @@ class Booking(db.Model):
     def __repr__(self):
         return f"<Booking {self.title or self.id} for Resource {self.resource_id} from {self.start_time.strftime('%Y-%m-%d %H:%M')} to {self.end_time.strftime('%Y-%m-%d %H:%M')}>"
 
+class AuditLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True) # User performing action
+    username = db.Column(db.String(80), nullable=True) # Denormalized for easy display
+    action = db.Column(db.String(100), nullable=False) # e.g., "LOGIN", "CREATE_USER"
+    details = db.Column(db.Text, nullable=True) # e.g., "User admin logged in"
+
+    user = db.relationship('User') # Optional, for easier access to user object if needed
+
+    def __repr__(self):
+        return f'<AuditLog {self.timestamp} - {self.username or "System"} - {self.action}>'
+
+# --- Audit Log Helper ---
+def add_audit_log(action: str, details: str, user_id: int = None, username: str = None):
+    """Adds an entry to the audit log."""
+    try:
+        log_user_id = user_id
+        log_username = username
+
+        if current_user and current_user.is_authenticated:
+            if log_user_id is None:
+                log_user_id = current_user.id
+            if log_username is None:
+                log_username = current_user.username
+        
+        # If user_id is provided but username is not, try to fetch username
+        if log_user_id is not None and log_username is None:
+            user = User.query.get(log_user_id)
+            if user:
+                log_username = user.username
+            else: # Fallback if user not found for some reason
+                log_username = f"User ID {log_user_id}"
+        
+        # If no user context at all (e.g. system action, or pre-login)
+        if log_user_id is None and log_username is None:
+            log_username = "System" # Or None, depending on preference
+
+        log_entry = AuditLog(
+            user_id=log_user_id,
+            username=log_username,
+            action=action,
+            details=details
+        )
+        db.session.add(log_entry)
+        db.session.commit()
+    except Exception as e:
+        app.logger.error(f"Error adding audit log: {e}", exc_info=True)
+        db.session.rollback() # Rollback in case of error during audit logging itself
+
 @app.route("/")
 def serve_index():
     return render_template("index.html")
@@ -215,21 +279,47 @@ def serve_profile_page():
                            username=current_user.username, 
                            email=current_user.email)
 
+# --- Permission Decorator ---
+def permission_required(permission):
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not current_user.is_authenticated:
+                # Or redirect to login: return redirect(url_for('serve_login', next=request.url))
+                return abort(401) 
+            if not current_user.has_permission(permission):
+                app.logger.warning(f"User {current_user.username} lacks permission '{permission}' for {f.__name__}")
+                return abort(403) # Forbidden
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
 @app.route('/admin/users_manage')
 @login_required
+@permission_required('manage_users')
 def serve_user_management_page():
-    if not current_user.is_admin:
-        app.logger.warning(f"Non-admin user {current_user.username} attempted to access User Management page.")
-        return redirect(url_for('serve_index'))
+    # if not current_user.is_admin: # Replaced by decorator
+    #     app.logger.warning(f"Non-admin user {current_user.username} attempted to access User Management page.")
+    #     return redirect(url_for('serve_index'))
     app.logger.info(f"Admin user {current_user.username} accessed User Management page.")
     return render_template("user_management.html")
 
+@app.route('/admin/logs')
+@login_required
+@permission_required('view_audit_logs')
+def serve_audit_log_page():
+    # if not current_user.is_admin: # Replaced by decorator
+    #     app.logger.warning(f"Non-admin user {current_user.username} attempted to access Audit Log page.")
+    #     return redirect(url_for('serve_index'))
+    app.logger.info(f"Admin user {current_user.username} accessed Audit Log page.")
+    return render_template("log_view.html")
+
 @app.route('/admin/maps')
-@login_required # Ensures user is logged in
+@login_required 
+@permission_required('manage_floor_maps') # Or 'manage_resources' depending on primary function
 def serve_admin_maps():
-    if not current_user.is_admin:
-        # flash("You do not have permission to access this page.", "danger") # If using flash messages
-        return redirect(url_for('serve_index')) # Or some other non-admin page, or a 403 page
+    # if not current_user.is_admin: # Replaced by decorator
+    #     return redirect(url_for('serve_index')) 
     return render_template("admin_maps.html")
 
 @app.route('/map_view/<int:map_id>')
@@ -350,7 +440,11 @@ def init_db():
         app.logger.info("Database tables creation/verification step completed.")
         
         app.logger.info("Attempting to delete existing data in corrected order...")
-        # Corrected Deletion Order: Booking -> resource_roles_table -> Resource -> FloorMap -> user_roles_table -> User -> Role
+        # Corrected Deletion Order: AuditLog -> Booking -> resource_roles_table -> Resource -> FloorMap -> user_roles_table -> User -> Role
+        app.logger.info("Deleting existing AuditLog entries...")
+        num_audit_logs_deleted = db.session.query(AuditLog).delete()
+        app.logger.info(f"Deleted {num_audit_logs_deleted} AuditLog entries.")
+        
         app.logger.info("Deleting existing Bookings...")
         num_bookings_deleted = db.session.query(Booking).delete()
         app.logger.info(f"Deleted {num_bookings_deleted} Bookings.")
@@ -405,7 +499,7 @@ def init_db():
         
         app.logger.info("Adding default roles...")
         try:
-            admin_role = Role(name="Administrator", description="Full system access", permissions="all")
+            admin_role = Role(name="Administrator", description="Full system access", permissions="all_permissions")
             standard_role = Role(name="StandardUser", description="Can make bookings and view resources", permissions="make_bookings,view_resources")
             db.session.add_all([admin_role, standard_role])
             db.session.commit()
@@ -602,9 +696,9 @@ def allowed_file(filename):
 @app.route('/api/admin/maps', methods=['POST'])
 @login_required
 def upload_floor_map():
-    if not current_user.is_admin:
-        app.logger.warning(f"Non-admin user {current_user.username} attempted to upload map.")
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_floor_maps'):
+        add_audit_log(action="UPLOAD_MAP_DENIED", details=f"User {current_user.username} lacks permission 'manage_floor_maps'.")
+        return jsonify({'error': 'Permission denied to manage floor maps.'}), 403
 
     if 'map_image' not in request.files:
         app.logger.warning("Map image missing in upload request.")
@@ -656,6 +750,8 @@ def upload_floor_map():
                  os.remove(file_path)
                  app.logger.info(f"Cleaned up partially uploaded file: {file_path}")
             app.logger.exception(f"Error uploading floor map '{map_name}':")
+            # Audit log for failed map upload attempt
+            add_audit_log(action="CREATE_MAP_FAILED", details=f"Failed to upload floor map '{map_name}'. Error: {str(e)}", username=current_user.username if current_user.is_authenticated else "Unknown")
             return jsonify({'error': f'Failed to upload map due to a server error.'}), 500
     else:
         app.logger.warning(f"File type not allowed for map upload: {file.filename}")
@@ -664,9 +760,8 @@ def upload_floor_map():
 @app.route('/api/admin/maps', methods=['GET'])
 @login_required
 def get_floor_maps():
-    if not current_user.is_admin:
-        app.logger.warning(f"Non-admin user {current_user.username} attempted to get floor maps.")
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_floor_maps'):
+        return jsonify({'error': 'Permission denied to manage floor maps.'}), 403
     try:
         maps = FloorMap.query.all()
         maps_list = []
@@ -686,9 +781,9 @@ def get_floor_maps():
 @app.route('/api/admin/resources/<int:resource_id>/map_info', methods=['PUT'])
 @login_required 
 def update_resource_map_info(resource_id):
-    if not current_user.is_admin:
-        app.logger.warning(f"Non-admin user {current_user.username} attempted to update map info for resource {resource_id}.")
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_resources'):
+        add_audit_log(action="UPDATE_RESOURCE_MAP_INFO_DENIED", details=f"User {current_user.username} lacks permission 'manage_resources'.")
+        return jsonify({'error': 'Permission denied to manage resources.'}), 403
 
     data = request.get_json()
     if not data:
@@ -798,9 +893,9 @@ def update_resource_map_info(resource_id):
 @app.route('/api/admin/resources/<int:resource_id>/publish', methods=['POST'])
 @login_required
 def publish_resource(resource_id):
-    if not current_user.is_admin:
-        app.logger.warning(f"Non-admin user {current_user.username} attempted to publish resource {resource_id}.")
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_resources'):
+        add_audit_log(action="PUBLISH_RESOURCE_DENIED", details=f"User {current_user.username} lacks permission 'manage_resources'.")
+        return jsonify({'error': 'Permission denied to manage resources.'}), 403
 
     resource = Resource.query.get(resource_id)
     if not resource:
@@ -841,9 +936,9 @@ def publish_resource(resource_id):
 @app.route('/api/admin/resources/<int:resource_id>', methods=['PUT'])
 @login_required
 def update_resource_details(resource_id):
-    if not current_user.is_admin:
-        app.logger.warning(f"Non-admin user {current_user.username} attempted to update resource {resource_id}.")
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_resources'):
+        add_audit_log(action="UPDATE_RESOURCE_DETAILS_DENIED", details=f"User {current_user.username} lacks permission 'manage_resources'.")
+        return jsonify({'error': 'Permission denied to manage resources.'}), 403
 
     resource = Resource.query.get(resource_id)
     if not resource:
@@ -950,18 +1045,20 @@ def update_resource_details(resource_id):
             'floor_map_id': resource.floor_map_id,
             'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None
         }
+        add_audit_log(action="UPDATE_RESOURCE", details=f"Resource ID {resource.id} ('{resource.name}') updated.")
         return jsonify(updated_resource_data), 200
     except Exception as e:
         db.session.rollback()
         app.logger.exception(f"Error updating resource {resource_id}:")
+        add_audit_log(action="UPDATE_RESOURCE_FAILED", details=f"Failed to update resource ID {resource_id}. Error: {str(e)}")
         return jsonify({'error': 'Failed to update resource due to a server error.'}), 500
 
 @app.route('/api/admin/resources/<int:resource_id>', methods=['DELETE'])
 @login_required
 def delete_resource(resource_id):
-    if not current_user.is_admin:
-        app.logger.warning(f"Non-admin user {current_user.username} attempted to delete resource {resource_id}.")
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_resources'):
+        add_audit_log(action="DELETE_RESOURCE_DENIED", details=f"User {current_user.username} lacks permission 'manage_resources'.")
+        return jsonify({'error': 'Permission denied to manage resources.'}), 403
 
     resource = Resource.query.get(resource_id)
     if not resource:
@@ -970,21 +1067,23 @@ def delete_resource(resource_id):
 
     try:
         # Bookings associated with this resource will be deleted due to cascade="all, delete-orphan"
+        resource_name_for_log = resource.name # Capture before deletion
         db.session.delete(resource)
         db.session.commit()
-        app.logger.info(f"Resource {resource_id} ('{resource.name}') and its associated bookings deleted successfully by {current_user.username}.")
-        return jsonify({'message': f"Resource '{resource.name}' (ID: {resource_id}) and its bookings deleted successfully."}), 200
+        app.logger.info(f"Resource {resource_id} ('{resource_name_for_log}') and its associated bookings deleted successfully by {current_user.username}.")
+        add_audit_log(action="DELETE_RESOURCE", details=f"Resource ID {resource_id} ('{resource_name_for_log}') deleted.")
+        return jsonify({'message': f"Resource '{resource_name_for_log}' (ID: {resource_id}) and its bookings deleted successfully."}), 200
     except Exception as e:
         db.session.rollback()
         app.logger.exception(f"Error deleting resource {resource_id}:")
+        add_audit_log(action="DELETE_RESOURCE_FAILED", details=f"Failed to delete resource ID {resource_id}. Error: {str(e)}")
         return jsonify({'error': 'Failed to delete resource due to a server error.'}), 500
 
 @app.route('/api/admin/users', methods=['GET'])
 @login_required
 def get_all_users():
-    if not current_user.is_admin:
-        app.logger.warning(f"Non-admin user {current_user.username} attempted to get all users.")
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_users'):
+        return jsonify({'error': 'Permission denied to manage users.'}), 403
 
     try:
         users = User.query.all()
@@ -1005,9 +1104,9 @@ def get_all_users():
 @app.route('/api/admin/users', methods=['POST'])
 @login_required
 def create_user():
-    if not current_user.is_admin:
-        app.logger.warning(f"Non-admin user {current_user.username} attempted to create a user.")
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_users'):
+        add_audit_log(action="CREATE_USER_DENIED", details=f"User {current_user.username} lacks permission 'manage_users'.")
+        return jsonify({'error': 'Permission denied to manage users.'}), 403
 
     data = request.get_json()
     if not data:
@@ -1051,14 +1150,15 @@ def create_user():
     except Exception as e:
         db.session.rollback()
         app.logger.exception(f"Error creating user '{username}':")
+        add_audit_log(action="CREATE_USER_FAILED", details=f"Failed to create user '{username}'. Error: {str(e)}")
         return jsonify({'error': 'Failed to create user due to a server error.'}), 500
 
 @app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
 @login_required
 def update_user(user_id):
-    if not current_user.is_admin:
-        app.logger.warning(f"Non-admin user {current_user.username} attempted to update user {user_id}.")
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_users'):
+        add_audit_log(action="UPDATE_USER_DENIED", details=f"User {current_user.username} lacks permission 'manage_users' for user ID {user_id}.")
+        return jsonify({'error': 'Permission denied to manage users.'}), 403
 
     user_to_update = User.query.get(user_id)
     if not user_to_update:
@@ -1156,9 +1256,9 @@ def update_user(user_id):
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
 @login_required
 def delete_user(user_id):
-    if not current_user.is_admin:
-        app.logger.warning(f"Non-admin user {current_user.username} attempted to delete user {user_id}.")
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_users'):
+        add_audit_log(action="DELETE_USER_DENIED", details=f"User {current_user.username} lacks permission 'manage_users' for user ID {user_id}.")
+        return jsonify({'error': 'Permission denied to manage users.'}), 403
 
     user_to_delete = User.query.get(user_id)
     if not user_to_delete:
@@ -1180,21 +1280,24 @@ def delete_user(user_id):
         # Note: Bookings are not directly linked via foreign key from User, but by user_name string.
         # If there's a need to anonymize or reassign bookings, that would be a separate, more complex operation.
         # For now, deleting the user does not affect booking records directly other than orphaning the user_name.
+        username_for_log = user_to_delete.username # Capture before deletion
         db.session.delete(user_to_delete)
         db.session.commit()
-        app.logger.info(f"User ID {user_id} ('{user_to_delete.username}') deleted successfully by {current_user.username}.")
-        return jsonify({'message': f"User '{user_to_delete.username}' (ID: {user_id}) deleted successfully."}), 200
+        app.logger.info(f"User ID {user_id} ('{username_for_log}') deleted successfully by {current_user.username}.")
+        add_audit_log(action="DELETE_USER", details=f"User '{username_for_log}' (ID: {user_id}) deleted by '{current_user.username}'.")
+        return jsonify({'message': f"User '{username_for_log}' (ID: {user_id}) deleted successfully."}), 200
     except Exception as e:
         db.session.rollback()
         app.logger.exception(f"Error deleting user {user_id}:")
+        add_audit_log(action="DELETE_USER_FAILED", details=f"Failed to delete user ID {user_id}. Error: {str(e)}")
         return jsonify({'error': 'Failed to delete user due to a server error.'}), 500
 
 @app.route('/api/admin/users/<int:user_id>/assign_google_auth', methods=['POST'])
 @login_required
 def assign_google_auth(user_id):
-    if not current_user.is_admin:
-        app.logger.warning(f"Non-admin user {current_user.username} attempted to assign Google ID to user {user_id}.")
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_users'):
+        add_audit_log(action="ASSIGN_GOOGLE_AUTH_DENIED", details=f"User {current_user.username} lacks permission 'manage_users' for user ID {user_id}.")
+        return jsonify({'error': 'Permission denied to manage users.'}), 403
 
     user_to_update = User.query.get(user_id)
     if not user_to_update:
@@ -1236,11 +1339,75 @@ def assign_google_auth(user_id):
         return jsonify({'error': 'Failed to assign Google ID due to a server error.'}), 500
 
 # --- Role Management APIs ---
+
+# --- Audit Log API ---
+@app.route('/api/admin/logs', methods=['GET'])
+@login_required
+def get_audit_logs():
+    if not current_user.has_permission('view_audit_logs'):
+        return jsonify({'error': 'Permission denied to view audit logs.'}), 403
+
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 30, type=int)
+        
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
+        username_filter = request.args.get('username_filter')
+        action_filter = request.args.get('action_filter')
+
+        query = AuditLog.query
+
+        if start_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                query = query.filter(AuditLog.timestamp >= datetime.combine(start_date, time.min))
+            except ValueError:
+                return jsonify({'error': 'Invalid start_date format. Use YYYY-MM-DD.'}), 400
+        
+        if end_date_str:
+            try:
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                # Add one day to make the end_date inclusive for the whole day
+                query = query.filter(AuditLog.timestamp < datetime.combine(end_date + timedelta(days=1), time.min))
+            except ValueError:
+                return jsonify({'error': 'Invalid end_date format. Use YYYY-MM-DD.'}), 400
+
+        if username_filter:
+            query = query.filter(AuditLog.username.ilike(f"%{username_filter}%"))
+        
+        if action_filter:
+            query = query.filter(AuditLog.action.ilike(f"%{action_filter}%"))
+
+        pagination = query.order_by(AuditLog.timestamp.desc()).paginate(page=page, per_page=per_page, error_out=False)
+        
+        logs_list = [{
+            'id': log.id,
+            'timestamp': log.timestamp.isoformat(), # Use ISO format for consistency
+            'user_id': log.user_id,
+            'username': log.username,
+            'action': log.action,
+            'details': log.details
+        } for log in pagination.items]
+
+        return jsonify({
+            'logs': logs_list,
+            'total_logs': pagination.total,
+            'current_page': pagination.page,
+            'total_pages': pagination.pages,
+            'per_page': pagination.per_page
+        }), 200
+
+    except Exception as e:
+        app.logger.exception("Error fetching audit logs:")
+        return jsonify({'error': 'Failed to fetch audit logs due to a server error.'}), 500
+
+
 @app.route('/api/admin/roles', methods=['GET'])
 @login_required
 def get_roles():
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_roles'):
+        return jsonify({'error': 'Permission denied to manage roles.'}), 403
     
     roles = Role.query.all()
     roles_list = [{
@@ -1254,8 +1421,9 @@ def get_roles():
 @app.route('/api/admin/roles', methods=['POST'])
 @login_required
 def create_role():
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_roles'):
+        add_audit_log(action="CREATE_ROLE_DENIED", details=f"User {current_user.username} lacks permission 'manage_roles'.")
+        return jsonify({'error': 'Permission denied to manage roles.'}), 403
 
     data = request.get_json()
     if not data:
@@ -1296,8 +1464,9 @@ def create_role():
 @app.route('/api/admin/roles/<int:role_id>', methods=['PUT'])
 @login_required
 def update_role(role_id):
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_roles'):
+        add_audit_log(action="UPDATE_ROLE_DENIED", details=f"User {current_user.username} lacks permission 'manage_roles' for role ID {role_id}.")
+        return jsonify({'error': 'Permission denied to manage roles.'}), 403
 
     role_to_update = Role.query.get(role_id)
     if not role_to_update:
@@ -1348,8 +1517,9 @@ def update_role(role_id):
 @app.route('/api/admin/roles/<int:role_id>', methods=['DELETE'])
 @login_required
 def delete_role(role_id):
-    if not current_user.is_admin:
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_roles'):
+        add_audit_log(action="DELETE_ROLE_DENIED", details=f"User {current_user.username} lacks permission 'manage_roles' for role ID {role_id}.")
+        return jsonify({'error': 'Permission denied to manage roles.'}), 403
 
     role_to_delete = Role.query.get(role_id)
     if not role_to_delete:
@@ -1377,9 +1547,9 @@ def delete_role(role_id):
 @app.route('/api/admin/resources/<int:resource_id>/map_info', methods=['DELETE'])
 @login_required
 def delete_resource_map_info(resource_id):
-    if not current_user.is_admin:
-        app.logger.warning(f"Non-admin user {current_user.username} attempted to delete map info for resource {resource_id}.")
-        return jsonify({'error': 'Admin access required.'}), 403
+    if not current_user.has_permission('manage_resources'):
+        add_audit_log(action="DELETE_RESOURCE_MAP_INFO_DENIED", details=f"User {current_user.username} lacks permission 'manage_resources'.")
+        return jsonify({'error': 'Permission denied to manage resources.'}), 403
 
     resource = Resource.query.get(resource_id)
     if not resource:
@@ -1486,9 +1656,11 @@ def api_login():
         login_user(user)
         user_data = {'id': user.id, 'username': user.username, 'email': user.email, 'is_admin': user.is_admin}
         app.logger.info(f"User '{username}' logged in successfully.")
+        add_audit_log(action="LOGIN_SUCCESS", details=f"User '{username}' logged in successfully.", user_id=user.id, username=user.username)
         return jsonify({'success': True, 'message': 'Login successful.', 'user': user_data}), 200
     else:
         app.logger.warning(f"Invalid login attempt for username: {username}")
+        add_audit_log(action="LOGIN_FAILED", details=f"Failed login attempt for username: '{username}'.")
         return jsonify({'error': 'Invalid username or password.'}), 401
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -1549,46 +1721,48 @@ def create_booking():
         return jsonify({'error': 'Resource not found.'}), 404
 
     # Permission Enforcement Logic
-    can_book = False # Initialize to False
-    app.logger.debug(f"Checking booking permissions for user '{current_user.username}' on resource ID {resource_id} ('{resource.name}'). Resource booking_restriction: '{resource.booking_restriction}'.")
-    
-    if resource.booking_restriction == 'admin_only':
-        if current_user.is_admin:
-            app.logger.debug(f"Booking permitted: Admin user '{current_user.username}' on admin-only resource {resource_id}.")
-            can_book = True
-        else:
-            app.logger.warning(f"Booking denied: Non-admin user '{current_user.username}' attempted to book admin-only resource {resource_id}.")
-            return jsonify({'error': 'Admin access required to book this resource.'}), 403
-    else: # Not 'admin_only', or restriction is None/'all_users' (effectively)
-        current_user_role = 'admin' if current_user.is_admin else 'standard_user'
-        has_user_id_restriction = resource.allowed_user_ids and resource.allowed_user_ids.strip()
-        has_role_restriction = resource.allowed_roles and resource.allowed_roles.strip()
+    can_book = False
+    app.logger.info(f"Checking booking permissions for user '{current_user.username}' (ID: {current_user.id}, IsAdmin: {current_user.is_admin}) on resource ID {resource_id} ('{resource.name}').")
+    app.logger.debug(f"Resource booking_restriction: '{resource.booking_restriction}', Allowed User IDs: '{resource.allowed_user_ids}', Resource Roles: {[role.name for role in resource.roles]}")
 
-        if not has_user_id_restriction and not has_role_restriction:
-            # If booking_restriction is 'all_users' or None (meaning generally available to authenticated users)
-            app.logger.debug(f"Booking permitted: Resource {resource_id} has no specific user/role list restrictions. User '{current_user.username}' can book.")
-            can_book = True # Authenticated users can book if no other restrictions
-        else:
-            # Granular checks if lists are present
-            if has_user_id_restriction:
-                allowed_ids_list = {int(uid.strip()) for uid in resource.allowed_user_ids.split(',') if uid.strip()}
-                if current_user.id in allowed_ids_list:
-                    app.logger.debug(f"Booking permitted: User '{current_user.username}' (ID: {current_user.id}) is in allowed_user_ids for resource {resource_id}.")
-                    can_book = True
-            
-            if not can_book and has_role_restriction: # Only check roles if not already permitted by user ID
-                allowed_roles_list = {role.strip().lower() for role in resource.allowed_roles.split(',') if role.strip()}
-                if current_user_role in allowed_roles_list:
-                    app.logger.debug(f"Booking permitted: User '{current_user.username}' (Role: {current_user_role}) is in allowed_roles for resource {resource_id}.")
-                    can_book = True
-            
-            if not can_book: 
-                app.logger.warning(f"Booking denied: User '{current_user.username}' does not meet specific user/role restrictions for resource {resource_id}. Allowed User IDs: '{resource.allowed_user_ids}', Allowed Roles: '{resource.allowed_roles}'.")
-                return jsonify({'error': 'You are not authorized to book this specific resource based on its user/role restrictions.'}), 403
-    
-    if not can_book: # This should ideally not be reached if logic above is exhaustive
-         app.logger.error(f"Booking permission logic fallthrough: User '{current_user.username}', Resource ID {resource_id}. Denying booking as a safeguard.")
-         return jsonify({'error': 'Booking permission denied due to an unexpected authorization state.'}), 403
+    if current_user.is_admin:
+        app.logger.info(f"Booking permitted for admin user '{current_user.username}' on resource {resource_id}.")
+        can_book = True
+    elif resource.booking_restriction == 'admin_only':
+        # This case is technically covered if current_user.is_admin is false, but explicit for clarity
+        app.logger.warning(f"Booking denied: Non-admin user '{current_user.username}' attempted to book admin-only resource {resource_id}.")
+        # No need to return here, can_book remains False and will be handled at the end.
+    else:
+        # 1. Check allowed user IDs
+        if resource.allowed_user_ids:
+            allowed_ids_list = {int(uid.strip()) for uid in resource.allowed_user_ids.split(',') if uid.strip()}
+            if current_user.id in allowed_ids_list:
+                app.logger.info(f"Booking permitted: User '{current_user.username}' (ID: {current_user.id}) is in allowed_user_ids for resource {resource_id}.")
+                can_book = True
+        
+        # 2. If not allowed by ID, check roles (resource.roles is now a list of Role objects)
+        if not can_book and resource.roles: 
+            user_role_ids = {role.id for role in current_user.roles}
+            resource_allowed_role_ids = {role.id for role in resource.roles}
+            app.logger.debug(f"User role IDs: {user_role_ids}, Resource allowed role IDs: {resource_allowed_role_ids}")
+            if not user_role_ids.isdisjoint(resource_allowed_role_ids): # Check for any common role ID
+                app.logger.info(f"Booking permitted: User '{current_user.username}' has a matching role for resource {resource_id}.")
+                can_book = True
+        
+        # 3. If no specific user IDs or roles are defined for the resource, and it's not admin_only
+        # This implies it's open to all authenticated users.
+        # The old `booking_restriction == 'all_users'` can be mapped to this condition.
+        if not can_book and \
+           not (resource.allowed_user_ids and resource.allowed_user_ids.strip()) and \
+           not resource.roles and \
+           resource.booking_restriction != 'admin_only':
+            app.logger.info(f"Booking permitted: Resource {resource_id} is open to all authenticated users (no specific user/role restrictions).")
+            can_book = True
+
+    if not can_book:
+        app.logger.warning(f"Booking denied for user '{current_user.username}' on resource {resource_id} based on evaluated permissions.")
+        # Construct a more informative error message if needed, but for now, a generic one.
+        return jsonify({'error': 'You are not authorized to book this resource based on its permission settings.'}), 403
 
     try:
         booking_date = datetime.strptime(date_str, '%Y-%m-%d').date()
@@ -1625,11 +1799,13 @@ def create_booking():
             'start_time': new_booking.start_time.strftime('%Y-%m-%d %H:%M:%S'),
             'end_time': new_booking.end_time.strftime('%Y-%m-%d %H:%M:%S')
         }
+        add_audit_log(action="CREATE_BOOKING", details=f"Booking ID {new_booking.id} for resource ID {resource_id} ('{resource.name}') created by user '{user_name_for_record}'. Title: '{title}'.")
         return jsonify(created_booking_data), 201
         
     except Exception as e:
         db.session.rollback()
         app.logger.exception(f"Error creating booking for resource {resource_id} by {current_user.username}:")
+        add_audit_log(action="CREATE_BOOKING_FAILED", details=f"Failed to create booking for resource ID {resource_id} by user '{current_user.username}'. Error: {str(e)}")
         return jsonify({'error': 'Failed to create booking due to a server error.'}), 500
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@
                 <li><a href="{{ url_for('serve_resources') }}">View Resources</a></li>
                 <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">Admin Maps</a></li>
                 <li id="user-management-nav-link" style="display:none;"><a href="{{ url_for('serve_user_management_page') }}">User Management</a></li>
+                <li id="log-nav-link" style="display:none;"><a href="{{ url_for('serve_audit_log_page') }}">Audit Logs</a></li>
                 <!-- Active Admin Link was here, ensure admin-maps-nav-link is used by script.js -->
             </ul>
         </nav>
@@ -97,8 +98,10 @@
                 </div>
 
                 <div>
-                    <label for="authorized-roles">Authorized Roles (Optional, comma-separated):</label>
-                    <input type="text" id="authorized-roles" name="authorized_roles" placeholder="e.g., admin,standard_user">
+                    <label>Authorized Roles (Optional):</label>
+                    <div id="define-area-authorized-roles-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;">
+                        <small>Loading roles...</small>
+                    </div>
                 </div>
 
                 <div>
@@ -178,9 +181,11 @@
                     </div>
 
                     <div class="permission-group">
-                        <label for="edit-authorized-roles">Authorized Roles (Optional, comma-separated):</label>
-                        <p class="small-text">If specified, only users with these roles can book (e.g., admin, standard_user). Overrides global booking permission if more restrictive.</p>
-                        <input type="text" id="edit-authorized-roles" name="allowed_roles" placeholder="e.g., admin,standard_user">
+                        <label>Authorized Roles (Optional):</label>
+                        <p class="small-text">If specified, only users with these roles can book. This complements user-specific permissions.</p>
+                        <div id="edit-resource-authorized-roles-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;">
+                            <small>Loading roles...</small>
+                        </div>
                     </div>
                     
                     <button type="submit" class="button">Save Changes</button>
@@ -197,6 +202,7 @@
     <!-- Link to global script.js, or a new admin_maps.js if preferred -->
     <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/admin_resource_edit.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/admin_resource_roles.js') }}" defer></script>
     <!-- If creating admin_maps.js, link it here instead or in addition -->
 </body>
 </html>

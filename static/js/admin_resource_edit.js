@@ -114,10 +114,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('edit-resource-equipment').value = resourceData.equipment || selectedOption.dataset.equipment || '';
                 document.getElementById('edit-resource-status').value = resourceData.status || selectedOption.dataset.resourceStatus || 'draft';
                 document.getElementById('edit-resource-booking-permission').value = resourceData.booking_restriction || selectedOption.dataset.bookingRestriction || "";
-                document.getElementById('edit-authorized-roles').value = resourceData.allowed_roles || selectedOption.dataset.allowedRoles || "";
+                // document.getElementById('edit-authorized-roles').value = resourceData.allowed_roles || selectedOption.dataset.allowedRoles || ""; // Old text field
 
                 await populateUsersCheckboxes(editAuthorizedUsersCheckboxContainer, resourceData.allowed_user_ids || selectedOption.dataset.allowedUserIds);
 
+                // Populate roles checkboxes
+                const assignedRoleIds = resourceData.roles && Array.isArray(resourceData.roles) ? resourceData.roles.map(r => r.id) : [];
+                if (typeof window.populateRolesCheckboxesForResource === 'function') {
+                    await window.populateRolesCheckboxesForResource('edit-resource-authorized-roles-checkbox-container', assignedRoleIds, editResourceStatusMessage);
+                } else {
+                    console.error("populateRolesCheckboxesForResource is not defined globally for edit modal.");
+                    if(editResourceStatusMessage) showError(editResourceStatusMessage, "Role loading function not found.");
+                }
+                
                 editResourceModal.style.display = 'block';
 
             } catch (error) {
@@ -149,7 +158,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const equipment = document.getElementById('edit-resource-equipment').value;
             const status = document.getElementById('edit-resource-status').value;
             const booking_restriction = document.getElementById('edit-resource-booking-permission').value;
-            const allowed_roles = document.getElementById('edit-authorized-roles').value;
+            // const allowed_roles = document.getElementById('edit-authorized-roles').value; // Old text field
 
             let capacity = null;
             if (capacityStr.trim() !== '') {
@@ -167,6 +176,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
             const allowed_user_ids = selectedUserIds.join(',');
+
+            const selectedRoleIds = typeof window.getSelectedRoleIdsForResource === 'function'
+                                    ? window.getSelectedRoleIdsForResource('edit-resource-authorized-roles-checkbox-container')
+                                    : [];
 
             const payload = {
                 name,
