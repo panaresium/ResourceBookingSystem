@@ -75,6 +75,11 @@ def get_locale():
 # Initialize Babel for i18n
 babel = Babel(app, locale_selector=get_locale) # Pass the function here
 
+# Make languages available in templates
+@app.context_processor
+def inject_languages():
+    return {'available_languages': app.config.get('LANGUAGES', ['en'])}
+
 # Configurations
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev_secret_key_123!@#') # Ensure SECRET_KEY is set from env or default
@@ -85,7 +90,7 @@ csrf = CSRFProtect(app)
 # Babel Configuration
 app.config['BABEL_DEFAULT_LOCALE'] = 'en'
 app.config['BABEL_DEFAULT_TIMEZONE'] = 'UTC'
-app.config['LANGUAGES'] = ['en'] # Add other language codes here once translations exist e.g. ['en', 'es']
+app.config['LANGUAGES'] = ['en', 'es']
 
 # Google OAuth Configuration - Recommended to use environment variables
 app.config['GOOGLE_CLIENT_ID'] = os.environ.get('GOOGLE_CLIENT_ID', 'YOUR_GOOGLE_CLIENT_ID_PLACEHOLDER')
