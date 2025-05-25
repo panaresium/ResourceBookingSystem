@@ -1,7 +1,9 @@
 import unittest
 import json
+
 from datetime import datetime, time, date
 from app import app, db, User, Resource, Booking, WaitlistEntry, email_log
+
 # from flask_login import current_user # Not directly used for assertions here
 
 class AppTests(unittest.TestCase):
@@ -27,6 +29,31 @@ class AppTests(unittest.TestCase):
             user.set_password('password') # Standard password for test user
             db.session.add(user)
             db.session.commit()
+
+        # Create a floor map and some resources for testing
+        floor_map = FloorMap(name='Test Map', image_filename='map.png')
+        db.session.add(floor_map)
+        db.session.commit()
+
+        res1 = Resource(
+            name='Room A',
+            floor_map_id=floor_map.id,
+            map_coordinates=json.dumps({'type': 'rect', 'x': 10, 'y': 20, 'w': 30, 'h': 30}),
+            status='published'
+        )
+        res2 = Resource(
+            name='Room B',
+            floor_map_id=floor_map.id,
+            map_coordinates=json.dumps({'type': 'rect', 'x': 50, 'y': 20, 'w': 30, 'h': 30}),
+            status='published'
+        )
+        db.session.add_all([res1, res2])
+        db.session.commit()
+
+        # Store for use in tests
+        self.floor_map = floor_map
+        self.resource1 = res1
+        self.resource2 = res2
         
         self.client = app.test_client() # Use this single client instance for all requests
 
@@ -183,6 +210,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(WaitlistEntry.query.count(), 0)
         self.assertEqual(len(email_log), 1)
         self.assertEqual(email_log[0]['to'], other.email)
+
 
 if __name__ == '__main__':
     unittest.main()
