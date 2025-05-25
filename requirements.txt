@@ -8,3 +8,4 @@ Flask-WTF
 google-auth==2.23.3
 google-auth-oauthlib==1.1.0
 Authlib>=1.0.0
+Flask-Mail>=0.9

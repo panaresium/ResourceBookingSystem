@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Analytics') }}{% endblock %}
+
+{% block content %}
+<h1>{{ _('Resource Usage Analytics') }}</h1>
+<canvas id="usageChart" width="400" height="200"></canvas>
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+    fetch("{{ url_for('analytics.analytics_bookings_data') }}")
+        .then(resp => resp.json())
+        .then(function(data){
+            const ctx = document.getElementById('usageChart');
+            const labelsSet = new Set();
+            Object.values(data).forEach(arr => arr.forEach(pt => labelsSet.add(pt.date)));
+            const labels = Array.from(labelsSet).sort();
+            const datasets = Object.keys(data).map(function(resource){
+                const counts = labels.map(function(l){
+                    const item = data[resource].find(d => d.date === l);
+                    return item ? item.count : 0;
+                });
+                return {label: resource, data: counts, fill:false};
+            });
+            new Chart(ctx, {type:'line', data:{labels:labels, datasets:datasets}, options:{responsive:true, scales:{y:{beginAtZero:true}}}});
+        });
+    </script>
+{% endblock %}

@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template, request, url_for, redirect, session # Added redirect and session
+from flask import Flask, jsonify, render_template, request, url_for, redirect, session, Blueprint # Added Blueprint
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func # Add this
 from datetime import datetime, date, timedelta, time # Ensure all are here
@@ -18,6 +18,30 @@ from functools import wraps # For permission_required decorator
 from flask import abort # For permission_required decorator
 from flask_babel import Babel, gettext as _ # For i18n
 from flask_wtf.csrf import CSRFProtect # For CSRF protection
+
+# Attempt to import Flask-Mail; provide a fallback if unavailable
+try:
+    from flask_mail import Mail, Message
+    mail_available = True
+except ImportError:  # pragma: no cover - fallback for environments without Flask-Mail
+    mail_available = False
+
+    class Mail:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def init_app(self, app):
+            pass
+
+        def send(self, message):
+            # No-op if Flask-Mail isn't installed
+            pass
+
+    class Message:
+        def __init__(self, subject='', recipients=None, body=''):
+            self.subject = subject
+            self.recipients = recipients or []
+            self.body = body
 
 # Base directory of the app - project root
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -79,6 +103,15 @@ if not os.path.exists(app.config['UPLOAD_FOLDER']):
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(DATA_DIR, 'site.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # silence the warning
 
+# Flask-Mail configuration (defaults can be overridden with environment variables)
+app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'localhost')
+app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 25))
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', '')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', '')
+app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'false').lower() in ['true', '1', 'yes']
+app.config['MAIL_USE_SSL'] = os.environ.get('MAIL_USE_SSL', 'false').lower() in ['true', '1', 'yes']
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', app.config['MAIL_USERNAME'] or 'noreply@example.com')
+
 # Basic Logging Configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]')
 # For Flask's built-in logger, you might configure it further if needed,
@@ -111,6 +144,11 @@ def get_google_flow():
     )
 
 db = SQLAlchemy(app)
+
+
+# Blueprint for analytics routes
+analytics_bp = Blueprint('analytics', __name__, url_prefix='/admin/analytics')
+
 
 # Authlib OAuth 2.0 Client Setup
 oauth = OAuth(app)
@@ -239,6 +277,18 @@ class Booking(db.Model):
     def __repr__(self):
         return f"<Booking {self.title or self.id} for Resource {self.resource_id} from {self.start_time.strftime('%Y-%m-%d %H:%M')} to {self.end_time.strftime('%Y-%m-%d %H:%M')}>"
 
+class WaitlistEntry(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    resource_id = db.Column(db.Integer, db.ForeignKey('resource.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    resource = db.relationship('Resource')
+    user = db.relationship('User')
+
+    def __repr__(self):
+        return f"<WaitlistEntry resource={self.resource_id} user={self.user_id}>"
+
 class AuditLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
@@ -288,6 +338,20 @@ def add_audit_log(action: str, details: str, user_id: int = None, username: str 
     except Exception as e:
         app.logger.error(f"Error adding audit log: {e}", exc_info=True)
         db.session.rollback() # Rollback in case of error during audit logging itself
+
+# --- Simple Email Notification System ---
+email_log = []
+
+def send_email(to_address: str, subject: str, body: str):
+    """Log an outgoing email (placeholder for real email delivery)."""
+    email_entry = {
+        'to': to_address,
+        'subject': subject,
+        'body': body,
+        'timestamp': datetime.utcnow().isoformat(),
+    }
+    email_log.append(email_entry)
+    app.logger.info(f"Email queued to {to_address}: {subject}")
 
 @app.route("/")
 @login_required
@@ -364,8 +428,36 @@ def serve_audit_log_page():
 @permission_required('manage_floor_maps') # Or 'manage_resources' depending on primary function
 def serve_admin_maps():
     # if not current_user.is_admin: # Replaced by decorator
-    #     return redirect(url_for('serve_index')) 
+    #     return redirect(url_for('serve_index'))
     return render_template("admin_maps.html")
+
+# --- Analytics Routes ---
+@analytics_bp.route('/')
+@login_required
+@permission_required('view_analytics')
+def analytics_dashboard():
+    app.logger.info(f"User {current_user.username} accessed analytics dashboard.")
+    return render_template('analytics.html')
+
+
+@analytics_bp.route('/data/bookings')
+@login_required
+@permission_required('view_analytics')
+def analytics_bookings_data():
+    last_30_days = datetime.utcnow() - timedelta(days=30)
+    results = (
+        db.session.query(Resource.name, func.date(Booking.start_time), func.count(Booking.id))
+        .join(Resource)
+        .filter(Booking.start_time >= last_30_days)
+        .group_by(Resource.name, func.date(Booking.start_time))
+        .all()
+    )
+
+    data = {}
+    for resource_name, day, count in results:
+        day_str = day.isoformat()
+        data.setdefault(resource_name, []).append({'date': day_str, 'count': count})
+    return jsonify(data)
 
 @app.route('/map_view/<int:map_id>')
 def serve_map_view(map_id):
@@ -545,7 +637,7 @@ def init_db():
         
         app.logger.info("Adding default roles...")
         try:
-            admin_role = Role(name="Administrator", description="Full system access", permissions="all_permissions")
+            admin_role = Role(name="Administrator", description="Full system access", permissions="all_permissions,view_analytics")
             standard_role = Role(name="StandardUser", description="Can make bookings and view resources", permissions="make_bookings,view_resources")
             db.session.add_all([admin_role, standard_role])
             db.session.commit()
@@ -1392,6 +1484,43 @@ def assign_google_auth(user_id):
         app.logger.exception(f"Error assigning Google ID to user {user_id}:")
         return jsonify({'error': 'Failed to assign Google ID due to a server error.'}), 500
 
+# --- Waitlist Management APIs ---
+@app.route('/api/admin/waitlist', methods=['GET'])
+@login_required
+def get_waitlist_entries():
+    if not current_user.has_permission('manage_resources'):
+        return jsonify({'error': 'Permission denied to manage waitlist.'}), 403
+
+    entries = WaitlistEntry.query.order_by(WaitlistEntry.timestamp.asc()).all()
+    response_list = []
+    for entry in entries:
+        user = User.query.get(entry.user_id)
+        resource = Resource.query.get(entry.resource_id)
+        response_list.append({
+            'id': entry.id,
+            'resource_id': entry.resource_id,
+            'resource_name': resource.name if resource else None,
+            'user_id': entry.user_id,
+            'username': user.username if user else None,
+            'timestamp': entry.timestamp.isoformat(),
+        })
+    return jsonify(response_list), 200
+
+
+@app.route('/api/admin/waitlist/<int:entry_id>', methods=['DELETE'])
+@login_required
+def delete_waitlist_entry_admin(entry_id):
+    if not current_user.has_permission('manage_resources'):
+        return jsonify({'error': 'Permission denied to manage waitlist.'}), 403
+
+    entry = WaitlistEntry.query.get(entry_id)
+    if not entry:
+        return jsonify({'error': 'Waitlist entry not found.'}), 404
+
+    db.session.delete(entry)
+    db.session.commit()
+    return jsonify({'message': 'Waitlist entry deleted.'}), 200
+
 # --- Role Management APIs ---
 
 # --- Audit Log API ---
@@ -1869,8 +1998,28 @@ def create_booking():
     ).first()
 
     if conflicting_booking:
-        app.logger.info(f"Booking conflict for user {current_user.username}, resource {resource_id} at {new_booking_start_time}-{new_booking_end_time}.")
-        return jsonify({'error': 'This time slot is no longer available. Please try another slot.'}), 409 # Conflict
+        app.logger.info(
+            f"Booking conflict for user {current_user.username}, resource {resource_id} at {new_booking_start_time}-{new_booking_end_time}."
+        )
+
+        # Add to waitlist if fewer than two entries exist for this resource
+        existing_waitlist_count = WaitlistEntry.query.filter_by(resource_id=resource_id).count()
+        if existing_waitlist_count < 2:
+            waitlist_entry = WaitlistEntry(resource_id=resource_id, user_id=current_user.id)
+            db.session.add(waitlist_entry)
+            db.session.commit()
+            app.logger.info(
+                f"User {current_user.username} added to waitlist for resource {resource_id}."
+            )
+            return (
+                jsonify({'error': 'This time slot is no longer available. You have been added to the waitlist.'}),
+                409,
+            )
+
+        return (
+            jsonify({'error': 'This time slot is no longer available. Please try another slot.'}),
+            409,
+        )
 
     try:
         new_booking = Booking(resource_id=resource_id, start_time=new_booking_start_time,
@@ -1878,9 +2027,24 @@ def create_booking():
         db.session.add(new_booking)
         db.session.commit()
         app.logger.info(f"Booking ID {new_booking.id} created for resource {resource_id} by user {current_user.username} (record user: {user_name_for_record}).")
+
+        # Send confirmation email
+        if mail_available and current_user.email:
+            try:
+                msg = Message(
+                    subject="Booking Confirmation",
+                    recipients=[current_user.email],
+                    body=f"Your booking for {resource.name} on {new_booking.start_time.strftime('%Y-%m-%d')} from {new_booking.start_time.strftime('%H:%M')} to {new_booking.end_time.strftime('%H:%M')} has been created."
+                )
+                mail.send(msg)
+            except Exception:
+                app.logger.exception(f"Failed to send booking confirmation email to {current_user.email}:")
+
         created_booking_data = {
-            'id': new_booking.id, 'resource_id': new_booking.resource_id, 'title': new_booking.title,
-            'user_name': new_booking.user_name, 
+            'id': new_booking.id,
+            'resource_id': new_booking.resource_id,
+            'title': new_booking.title,
+            'user_name': new_booking.user_name,
             'start_time': new_booking.start_time.strftime('%Y-%m-%d %H:%M:%S'),
             'end_time': new_booking.end_time.strftime('%Y-%m-%d %H:%M:%S')
         }
@@ -1949,19 +2113,40 @@ def delete_booking_by_user(booking_id):
         if booking.resource_booked: # Check if backref is populated
             resource_name = booking.resource_booked.name
         
+        booking_start = booking.start_time
+        booking_end = booking.end_time
         booking_details_for_log = (
             f"Booking ID: {booking.id}, "
             f"Resource: {resource_name} (ID: {booking.resource_id}), "
             f"Title: '{booking.title}', "
             f"Original User: '{booking.user_name}', "
-            f"Time: {booking.start_time.isoformat()} to {booking.end_time.isoformat()}"
+            f"Time: {booking_start.isoformat()} to {booking_end.isoformat()}"
         )
 
         db.session.delete(booking)
         db.session.commit()
 
+
+        # Notify next user on waitlist, if any
+        next_entry = (
+            WaitlistEntry.query.filter_by(resource_id=booking.resource_id)
+            .order_by(WaitlistEntry.timestamp.asc())
+            .first()
+        )
+        if next_entry:
+            user_to_notify = User.query.get(next_entry.user_id)
+            db.session.delete(next_entry)
+            db.session.commit()
+            if user_to_notify:
+                send_email(
+                    user_to_notify.email,
+                    f"Slot available for {resource_name}",
+                    f"The slot you requested for {resource_name} is now available.",
+                )
+
+
         add_audit_log(
-            action="CANCEL_BOOKING_USER", 
+            action="CANCEL_BOOKING_USER",
             details=f"User '{current_user.username}' cancelled their booking. {booking_details_for_log}"
         )
         app.logger.info(f"User '{current_user.username}' successfully deleted booking ID: {booking_id}. Details: {booking_details_for_log}")
@@ -2014,13 +2199,27 @@ def update_booking_by_user(booking_id):
                 'end_time': booking.end_time.isoformat(), 'title': booking.title
             }), 200
 
+
         booking.title = new_title
         db.session.commit()
 
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
+
+        # Send update email
+        if mail_available and current_user.email:
+            try:
+                msg = Message(
+                    subject="Booking Updated",
+                    recipients=[current_user.email],
+                    body=f"Your booking for {resource_name} on {booking.start_time.strftime('%Y-%m-%d')} has been updated. New title: {booking.title}."
+                )
+                mail.send(msg)
+            except Exception:
+                app.logger.exception(f"Failed to send booking update email to {current_user.email}:")
+
         add_audit_log(
-            action="UPDATE_BOOKING_USER", 
-            details=f"User '{current_user.username}' updated booking ID: {booking.id} for resource '{resource_name}'. Title changed from '{old_title}' to '{new_title}'."
+            action="UPDATE_BOOKING_USER",
+            details=f"User '{current_user.username}' updated booking ID: {booking.id} for resource '{resource_name}'. Title changed from '{old_title}' to '{new_title}'.",
         )
         app.logger.info(f"User '{current_user.username}' successfully updated title for booking ID: {booking.id} from '{old_title}' to '{new_title}'.")
         
@@ -2039,6 +2238,9 @@ def update_booking_by_user(booking_id):
         app.logger.exception(f"Error updating booking ID {booking_id} for user '{current_user.username}':")
         add_audit_log(action="UPDATE_BOOKING_USER_FAILED", details=f"User '{current_user.username}' failed to update booking ID: {booking_id}. Error: {str(e)}")
         return jsonify({'error': 'Failed to update booking due to a server error.'}), 500
+
+# Register blueprint after routes are defined
+app.register_blueprint(analytics_bp)
 
 if __name__ == "__main__":
     # To initialize the DB, you can uncomment the next line and run 'python app.py' once.

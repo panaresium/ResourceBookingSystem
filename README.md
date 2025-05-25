@@ -84,7 +84,21 @@ The application uses an SQLite database to store resource information. If you ha
    ```
    This will create a `site.db` file in the `data/` directory and set up the tables.
    You should see messages indicating success.
-   **Important:** You only need to run `init_db()` once. Running it again will not harm anything by default with `db.create_all()`, but it's not necessary.
+**Important:** You only need to run `init_db()` once. Running it again will not harm anything by default with `db.create_all()`, but it's not necessary.
+
+### Email Configuration
+
+Flask-Mail is used to send email notifications when bookings are created, updated or cancelled. Configure your SMTP credentials through environment variables before running the application:
+
+* `MAIL_SERVER` – SMTP server address
+* `MAIL_PORT` – SMTP port number
+* `MAIL_USERNAME` – SMTP username
+* `MAIL_PASSWORD` – SMTP password
+* `MAIL_USE_TLS` – set to `true` to enable TLS
+* `MAIL_USE_SSL` – set to `true` to enable SSL
+* `MAIL_DEFAULT_SENDER` – address used as the default sender
+
+If these variables are not provided, placeholder values from `app.py` will be used.
 
 ### Running Tests
 
