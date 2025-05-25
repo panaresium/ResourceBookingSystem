@@ -1,54 +1,25 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ _('Login - Smart Resource Booking') }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-    <nav>
-        <ul>
-            <li><a href="{{ url_for('serve_index') }}">{{ _('Home') }}</a></li>
-            <li><a href="{{ url_for('serve_new_booking') }}">{{ _('New Booking') }}</a></li>
-            <li><a href="{{ url_for('serve_resources') }}">{{ _('View Resources') }}</a></li>
-            <li id="my-bookings-nav-link" style="display:none;"><a href="{{ url_for('serve_my_bookings_page') }}">{{ _('My Bookings') }}</a></li>
-            <li id="auth-link-container"><a href="{{ url_for('serve_login') }}">{{ _('Login') }}</a></li>
-            <li id="admin-maps-nav-link" style="display:none;"><a href="{{ url_for('serve_admin_maps') }}">{{ _('Admin Maps') }}</a></li>
-        </ul>
-    </nav>
-    <main>
-        <h2>{{ _('Login') }}</h2>
-        <form id="login-form">
-            <div>
-                <label for="username">{{ _('Username:') }}</label>
-                <input type="text" id="username" name="username">
-            </div>
-            <div>
-                <label for="password">{{ _('Password:') }}</label>
-                <input type="password" id="password" name="password">
-            </div>
-            <button type="submit">{{ _('Login') }}</button>
-        </form>
-        <div style="margin-top: 20px; text-align: center;">
+{% extends "base.html" %}
 
-            <p>{{ _('OR') }}</p>
-            <button id="google-login-btn" class="button google-signin-button">
-                {# Assuming you have a way to include an SVG or an <img> tag for the logo here if desired.
-                   For simplicity, just text, or you can add an <img> tag like in the example.
-                   Example with a placeholder for a logo image:
-                   <img src="{{ url_for('static', filename='images/google_logo.png') }}" alt="Google logo" style="height: 1em; margin-right: 0.5em;">
-                #}
-                {{ _('Sign in with Google') }}
-            </button>
+{% block title %}{{ _('Login - Smart Resource Booking') }}{% endblock %}
 
+{% block content %}
+    <h2>{{ _('Login') }}</h2>
+    <form id="login-form">
+        <div>
+            <label for="username">{{ _('Username:') }}</label>
+            <input type="text" id="username" name="username">
         </div>
-        <div id="login-message" aria-live="polite"></div>
-    </main>
-    <footer>
-        <p>{{ _('&copy; 2024 Smart Resource Booking') }}</p>
-    </footer>
-    <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
-</body>
-</html>
+        <div>
+            <label for="password">{{ _('Password:') }}</label>
+            <input type="password" id="password" name="password">
+        </div>
+        <button type="submit">{{ _('Login') }}</button>
+    </form>
+    <div style="margin-top: 20px; text-align: center;">
+        <p>{{ _('OR') }}</p>
+        <button id="google-login-btn" class="button google-signin-button">
+            {{ _('Sign in with Google') }}
+        </button>
+    </div>
+    <div id="login-message" aria-live="polite"></div>
+{% endblock %}
