@@ -68,12 +68,10 @@ function hideMessage(element) {
 async function apiCall(url, options = {}, messageElement = null) {
     if (messageElement) showLoading(messageElement, 'Processing...');
 
-    // Always include cookies for same-origin requests. This ensures CSRF-protected
-    // endpoints like logout receive the user's session cookie even when fetch
-    // options omit the credentials field.
-    if (!options.credentials) {
-        options.credentials = 'same-origin';
-    }
+    // Always include cookies for same-origin requests unless explicitly overridden.
+    // This ensures CSRF-protected endpoints like logout receive the user's session
+    // cookie even when the fetch options omit the credentials field.
+    options.credentials = options.credentials || 'same-origin';
 
     // CSRF Token Handling
     const protectedMethods = ['POST', 'PUT', 'DELETE', 'PATCH'];
@@ -1037,7 +1035,11 @@ Enter a title for your booking (optional):`);
                 const formData = new FormData(uploadMapForm);
                 try {
                     // Direct fetch for FormData, manual error/success handling for this specific case.
-                    const response = await fetch('/api/admin/maps', { method: 'POST', body: formData });
+                    const response = await fetch('/api/admin/maps', {
+                        method: 'POST',
+                        body: formData,
+                        credentials: 'same-origin'
+                    });
                     const responseData = await response.json();
                     if (response.ok) { 
                         showSuccess(uploadStatusDiv, `Map '${responseData.name}' uploaded successfully! (ID: ${responseData.id})`);
