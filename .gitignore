@@ -3,6 +3,5 @@
 /__pycache__
 /__pycache__/*
 data/site.db
-data/site.db
-data/site.db
+/tests/*
 *.db
