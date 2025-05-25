@@ -102,6 +102,9 @@
                 <input type="number" id="edit-resource-capacity" name="capacity" min="0">
                 <label for="edit-resource-equipment">{{ _('Equipment:') }}</label>
                 <input type="text" id="edit-resource-equipment" name="equipment" placeholder="{{ _('e.g., Projector, Whiteboard') }}">
+                <label for="edit-resource-image-file">{{ _('Image:') }}</label>
+                <input type="file" id="edit-resource-image-file" name="resource_image" accept="image/png, image/jpeg">
+                <img id="edit-resource-image-preview" src="#" alt="{{ _('Resource image preview') }}" style="max-width: 100%; display:none; margin-top:5px;">
                 <label for="edit-resource-status">{{ _('Status:') }}</label>
                 <select id="edit-resource-status" name="status">
                     <option value="draft">{{ _('Draft') }}</option>

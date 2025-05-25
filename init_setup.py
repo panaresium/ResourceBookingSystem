@@ -9,6 +9,7 @@ MIN_PYTHON_VERSION = (3, 7)
 DATA_DIR_NAME = "data"
 STATIC_DIR_NAME = "static"
 FLOOR_MAP_UPLOADS_DIR_NAME = os.path.join(STATIC_DIR_NAME, "floor_map_uploads")
+RESOURCE_UPLOADS_DIR_NAME = os.path.join(STATIC_DIR_NAME, "resource_uploads")
 
 def check_python_version():
     """Checks if the current Python version meets the minimum requirement."""
@@ -63,6 +64,17 @@ def create_required_directories():
             # sys.exit(1) 
     else:
         print(f"'{floor_map_uploads_dir}' directory already exists.")
+
+    resource_uploads_dir = pathlib.Path(__file__).resolve().parent / RESOURCE_UPLOADS_DIR_NAME
+    print(f"Checking for '{RESOURCE_UPLOADS_DIR_NAME}' directory...")
+    if not resource_uploads_dir.exists():
+        try:
+            resource_uploads_dir.mkdir(parents=True, exist_ok=True)
+            print(f"Created '{resource_uploads_dir}' directory.")
+        except OSError as e:
+            print(f"Error: Could not create '{resource_uploads_dir}' directory: {e}")
+    else:
+        print(f"'{resource_uploads_dir}' directory already exists.")
     return True
 
 def main():
