@@ -42,7 +42,7 @@ app.config['BABEL_DEFAULT_LOCALE'] = 'en'
 app.config['BABEL_DEFAULT_TIMEZONE'] = 'UTC'
 app.config['LANGUAGES'] = ['en'] # Add other language codes here once translations exist e.g. ['en', 'es']
 
-@babel.localeselector
+@babel.locale_selector
 def get_locale():
     # Try to get language from query parameter first
     lang_query = request.args.get('lang')
