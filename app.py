@@ -455,7 +455,7 @@ def analytics_bookings_data():
 
     data = {}
     for resource_name, day, count in results:
-        day_str = day.isoformat()
+        day_str = day.isoformat() if hasattr(day, 'isoformat') else str(day)
         data.setdefault(resource_name, []).append({'date': day_str, 'count': count})
     return jsonify(data)
 
