@@ -33,9 +33,14 @@
         <div style="margin-top: 20px; text-align: center;">
 
             <p>{{ _('OR') }}</p>
-            <a href="{{ url_for('login_google') }}" class="button google-signin-button">
+            <button id="google-login-btn" class="button google-signin-button">
+                {# Assuming you have a way to include an SVG or an <img> tag for the logo here if desired.
+                   For simplicity, just text, or you can add an <img> tag like in the example.
+                   Example with a placeholder for a logo image:
+                   <img src="{{ url_for('static', filename='images/google_logo.png') }}" alt="Google logo" style="height: 1em; margin-right: 0.5em;">
+                #}
                 {{ _('Sign in with Google') }}
-            </a>
+            </button>
 
         </div>
         <div id="login-message" aria-live="polite"></div>
