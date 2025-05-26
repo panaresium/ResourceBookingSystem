@@ -42,7 +42,7 @@ After activating your virtual environment, run the initialization script:
 python init_setup.py
 ```
 
-This script checks your Python version and creates a `data/` directory for potentially storing application data in the future. It's recommended to run this once after cloning the repository and setting up your virtual environment.
+This script checks your Python version, creates the required directories, initializes the database and ensures the `resource.tags` column exists. It's recommended to run this once after cloning the repository and setting up your virtual environment.
 
 ### Installing Dependencies
 
@@ -94,7 +94,8 @@ The application uses an SQLite database to store resource information. If you ha
 
 If you upgrade from an earlier version and encounter a database error such as
 `no such column: resource.tags`, your `site.db` file is missing a recent field.
-Run the helper script to add the column without losing data:
+`init_setup.py` runs the helper script automatically, but you can also run it
+manually to add the column without losing data:
 
 ```bash
 python add_resource_tags_column.py

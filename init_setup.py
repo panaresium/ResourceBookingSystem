@@ -4,6 +4,7 @@ import sys
 import os
 import pathlib
 from app import app, init_db
+from add_resource_tags_column import add_tags_column
 
 MIN_PYTHON_VERSION = (3, 7)
 DATA_DIR_NAME = "data"
@@ -87,12 +88,17 @@ def main():
     print("-" * 30) 
     print("Initializing database (calling app.init_db)...")
     try:
-        init_db() # This function is imported from app.py
+        init_db()  # This function is imported from app.py
         print("Database initialization process (app.init_db) completed.")
+        # Ensure older databases get the 'tags' column
+        try:
+            add_tags_column()
+        except Exception as e:
+            print(f"Warning: could not ensure 'tags' column exists: {e}")
     except Exception as e:
         print(f"An error occurred during database initialization (app.init_db): {e}")
         print("Please check the output from app.init_db for more details, or run app.py with init_db() uncommented if issues persist.")
-        sys.exit(1) # Exit if DB initialization fails
+        sys.exit(1)  # Exit if DB initialization fails
     print("-" * 30)
     print("Project initialization script completed successfully.")
     print("Remember to activate your virtual environment if you haven't already.")
