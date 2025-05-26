@@ -130,6 +130,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     const recLim = resourceData.max_recurrence_count || selectedOption.dataset.maxRecurrenceCount || "";
                     editResourceRecurrenceLimit.value = recLim;
                 }
+
+                // Populate scheduled status fields
+                document.getElementById('edit-resource-scheduled-status').value = resourceData.scheduled_status || "";
+                const scheduledAtInput = document.getElementById('edit-resource-scheduled-at');
+                if (resourceData.scheduled_status_at) {
+                    // Format to YYYY-MM-DDTHH:MM, assuming resourceData.scheduled_status_at is a full ISO string
+                    scheduledAtInput.value = resourceData.scheduled_status_at.slice(0, 16);
+                } else {
+                    scheduledAtInput.value = "";
+                }
+
                 // document.getElementById('edit-authorized-roles').value = resourceData.allowed_roles || selectedOption.dataset.allowedRoles || ""; // Old text field
 
                 await populateUsersCheckboxes(editAuthorizedUsersCheckboxContainer, resourceData.allowed_user_ids || selectedOption.dataset.allowedUserIds);
@@ -213,11 +224,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 status,
                 booking_restriction: booking_restriction === "" ? null : booking_restriction,
                 allowed_user_ids: allowed_user_ids === "" ? null : allowed_user_ids,
-                allowed_roles: allowed_roles.trim() === "" ? null : allowed_roles.trim(),
+                // allowed_roles: allowed_roles.trim() === "" ? null : allowed_roles.trim(), // Ensure this line is removed or updated if roles are fully checkbox based
+                role_ids: selectedRoleIds, // Use selectedRoleIds from checkbox logic
                 is_under_maintenance: editResourceMaintenanceCheckbox ? editResourceMaintenanceCheckbox.checked : false,
-                maintenance_until: editResourceMaintenanceUntil ? editResourceMaintenanceUntil.value : null,
-                max_recurrence_count: editResourceRecurrenceLimit && editResourceRecurrenceLimit.value !== '' ? parseInt(editResourceRecurrenceLimit.value, 10) : null
+                maintenance_until: editResourceMaintenanceUntil && editResourceMaintenanceUntil.value ? editResourceMaintenanceUntil.value : null,
+                max_recurrence_count: editResourceRecurrenceLimit && editResourceRecurrenceLimit.value !== '' ? parseInt(editResourceRecurrenceLimit.value, 10) : null,
+                scheduled_status: document.getElementById('edit-resource-scheduled-status').value,
+                scheduled_status_at: document.getElementById('edit-resource-scheduled-at').value || null // Send null if empty
             };
+            // Remove allowed_roles if it's definitely replaced by role_ids
+            if (payload.hasOwnProperty('allowed_roles')) { // Check if the old field is still there and remove
+                delete payload.allowed_roles;
+            }
+
 
             try {
                 const responseData = await apiCall(`/api/admin/resources/${resourceId}`, {
@@ -258,6 +277,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         optionToUpdate.dataset.isUnderMaintenance = responseData.is_under_maintenance ? "true" : "false";
                         optionToUpdate.dataset.maintenanceUntil = responseData.maintenance_until || "";
                         optionToUpdate.dataset.maxRecurrenceCount = responseData.max_recurrence_count || "";
+                        optionToUpdate.dataset.scheduledStatus = responseData.scheduled_status || "";
+                        optionToUpdate.dataset.scheduledStatusAt = responseData.scheduled_status_at || "";
                         if (imgResponse && imgResponse.image_url) {
                             optionToUpdate.dataset.imageUrl = imgResponse.image_url;
                         }

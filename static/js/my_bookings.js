@@ -46,14 +46,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 const bookingItemDiv = bookingItemClone.querySelector('.booking-item');
 
                 bookingItemDiv.dataset.bookingId = booking.id; // Store booking ID on the item div
+                bookingItemDiv.dataset.startTime = booking.start_time; // Store full start time
+                bookingItemDiv.dataset.endTime = booking.end_time; // Store full end time
 
                 bookingItemClone.querySelector('.resource-name').textContent = booking.resource_name;
                 const titleSpan = bookingItemClone.querySelector('.booking-title');
                 titleSpan.textContent = booking.title || 'N/A';
                 titleSpan.dataset.originalTitle = booking.title || ''; // Store original title
 
-                bookingItemClone.querySelector('.start-time').textContent = new Date(booking.start_time).toLocaleString();
-                bookingItemClone.querySelector('.end-time').textContent = new Date(booking.end_time).toLocaleString();
+                const startTimeSpan = bookingItemClone.querySelector('.start-time');
+                startTimeSpan.textContent = new Date(booking.start_time).toLocaleString();
+                startTimeSpan.dataset.originalStartTime = booking.start_time;
+
+                const endTimeSpan = bookingItemClone.querySelector('.end-time');
+                endTimeSpan.textContent = new Date(booking.end_time).toLocaleString();
+                endTimeSpan.dataset.originalEndTime = booking.end_time;
+                
                 bookingItemClone.querySelector('.recurrence-rule').textContent = booking.recurrence_rule || '';
                 
                 const updateBtn = bookingItemClone.querySelector('.update-booking-btn');
@@ -113,11 +121,23 @@ document.addEventListener('DOMContentLoaded', () => {
             const bookingId = target.dataset.bookingId;
             const bookingItemDiv = target.closest('.booking-item');
             const currentTitle = bookingItemDiv.querySelector('.booking-title').dataset.originalTitle;
+            const currentStartTimeISO = bookingItemDiv.dataset.startTime;
+            const currentEndTimeISO = bookingItemDiv.dataset.endTime;
             const resourceName = bookingItemDiv.querySelector('.resource-name').textContent;
 
             modalBookingIdInput.value = bookingId;
             newBookingTitleInput.value = currentTitle;
-            updateBookingModalLabel.textContent = `Update Booking Title for: ${resourceName}`;
+
+            // Populate date and time fields
+            const startDate = new Date(currentStartTimeISO);
+            document.getElementById('new-booking-start-date').value = startDate.toISOString().split('T')[0];
+            document.getElementById('new-booking-start-time').value = startDate.toTimeString().slice(0,5);
+
+            const endDate = new Date(currentEndTimeISO);
+            document.getElementById('new-booking-end-date').value = endDate.toISOString().split('T')[0];
+            document.getElementById('new-booking-end-time').value = endDate.toTimeString().slice(0,5);
+            
+            updateBookingModalLabel.textContent = `Update Booking for: ${resourceName}`;
             hideStatusMessage(updateModalStatusDiv);
             updateModal.show();
         }
@@ -152,37 +172,98 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Handle modal form submission for updating title
+    // Handle modal form submission for updating booking
     saveBookingTitleBtn.addEventListener('click', async () => {
         const bookingId = modalBookingIdInput.value;
         const newTitle = newBookingTitleInput.value.trim();
+
+        const newStartDate = document.getElementById('new-booking-start-date').value;
+        const newStartTime = document.getElementById('new-booking-start-time').value;
+        const newEndDate = document.getElementById('new-booking-end-date').value;
+        const newEndTime = document.getElementById('new-booking-end-time').value;
 
         if (!newTitle) {
             showStatusMessage(updateModalStatusDiv, 'Title cannot be empty.', 'danger');
             return;
         }
+
+        const payload = { title: newTitle };
+        let timesProvided = false;
+        let timesComplete = false;
+
+        if (newStartDate && newStartTime && newEndDate && newEndTime) {
+            timesProvided = true;
+            timesComplete = true;
+            payload.start_time = `${newStartDate}T${newStartTime}:00`; // Add seconds
+            payload.end_time = `${newEndDate}T${newEndTime}:00`;     // Add seconds
+        } else if (newStartDate || newStartTime || newEndDate || newEndTime) {
+            // Some time fields are filled but not all, which is an incomplete input for time update
+            timesProvided = true;
+            timesComplete = false;
+        }
+
+        if (timesProvided && !timesComplete) {
+            showStatusMessage(updateModalStatusDiv, 'Please provide both date and time for start and end if you wish to update the booking time.', 'danger');
+            return;
+        }
+        
+        // Check if any actual change was made
+        const bookingItemDiv = bookingsListDiv.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
+        const originalTitle = bookingItemDiv.querySelector('.booking-title').dataset.originalTitle;
+        const originalStartTimeISO = bookingItemDiv.dataset.startTime;
+        const originalEndTimeISO = bookingItemDiv.dataset.endTime;
+
+        let noChangesMade = true;
+        if (newTitle !== originalTitle) {
+            noChangesMade = false;
+        }
+        if (timesComplete) {
+            // Compare with original times, needs careful ISO string comparison or Date object comparison
+            // For simplicity, we'll assume if times are provided and valid, it's a change.
+            // A more robust check would convert payload.start_time and originalStartTimeISO to Date objects and compare.
+            if (payload.start_time !== originalStartTimeISO || payload.end_time !== originalEndTimeISO) {
+                 noChangesMade = false;
+            }
+        }
+        
+        if (noChangesMade && !timesComplete) { // No title change and no complete time change attempted
+             showStatusMessage(updateModalStatusDiv, 'No changes detected.', 'info');
+             return;
+        }
+
+
         showLoading(updateModalStatusDiv, 'Saving changes...');
 
         try {
             const updatedBooking = await apiCall(`/api/bookings/${bookingId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title: newTitle })
+                body: JSON.stringify(payload)
             });
             
             // Update the UI
-            const bookingItemDiv = bookingsListDiv.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
             if (bookingItemDiv) {
                 const titleSpan = bookingItemDiv.querySelector('.booking-title');
                 titleSpan.textContent = updatedBooking.title;
                 titleSpan.dataset.originalTitle = updatedBooking.title;
+
+                const startTimeSpan = bookingItemDiv.querySelector('.start-time');
+                startTimeSpan.textContent = new Date(updatedBooking.start_time).toLocaleString();
+                bookingItemDiv.dataset.startTime = updatedBooking.start_time; // Update stored full start time
+
+                const endTimeSpan = bookingItemDiv.querySelector('.end-time');
+                endTimeSpan.textContent = new Date(updatedBooking.end_time).toLocaleString();
+                bookingItemDiv.dataset.endTime = updatedBooking.end_time; // Update stored full end time
             }
             
-            showSuccess(statusDiv, `Booking ${bookingId} title updated successfully.`);
+            showSuccess(statusDiv, `Booking ${bookingId} updated successfully.`);
             updateModal.hide();
+            // Consider re-fetching or more granular UI update for check-in/out button visibility
+            // For now, only title and times are updated. A full refresh might be simpler:
+            // fetchAndDisplayBookings(); 
         } catch (error) {
-            console.error('Error updating booking title:', error);
-            showError(updateModalStatusDiv, error.message || 'Failed to update title.');
+            console.error('Error updating booking:', error);
+            showError(updateModalStatusDiv, error.message || 'Failed to update booking.');
         }
     });
     

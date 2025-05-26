@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const resourceNameInput = document.getElementById('resource-name');
     const resourceCapacityInput = document.getElementById('resource-capacity');
     const resourceEquipmentInput = document.getElementById('resource-equipment');
+    const resourceStatusModalInput = document.getElementById('resource-status-modal'); // Added
 
     async function fetchAndDisplayResources() {
         showLoading(statusDiv, 'Fetching resources...');
@@ -43,6 +44,7 @@ document.addEventListener('DOMContentLoaded', function() {
     addBtn.addEventListener('click', function() {
         resourceForm.reset();
         resourceIdInput.value = '';
+        resourceStatusModalInput.value = 'draft'; // Default for new resource
         resourceFormModalTitle.textContent = 'Add New Resource';
         hideMessage(resourceFormStatus);
         resourceFormModal.style.display = 'block';
@@ -61,6 +63,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 resourceNameInput.value = data.name || '';
                 resourceCapacityInput.value = data.capacity !== null && data.capacity !== undefined ? data.capacity : '';
                 resourceEquipmentInput.value = data.equipment || '';
+                resourceStatusModalInput.value = data.status || 'draft'; // Populate status for editing
                 resourceFormModalTitle.textContent = 'Edit Resource';
                 hideMessage(resourceFormStatus);
                 resourceFormModal.style.display = 'block';
@@ -85,7 +88,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const payload = {
             name: resourceNameInput.value,
             capacity: resourceCapacityInput.value !== '' ? parseInt(resourceCapacityInput.value, 10) : null,
-            equipment: resourceEquipmentInput.value
+            equipment: resourceEquipmentInput.value,
+            status: resourceStatusModalInput.value // Add status to payload
         };
         const id = resourceIdInput.value;
         try {
