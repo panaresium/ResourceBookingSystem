@@ -90,6 +90,19 @@ The application uses an SQLite database to store resource information. If you ha
    ```
 **Important:** You only need to run `init_db()` once in a fresh environment. Omitting `force=True` will keep existing records intact.
 
+### Updating Existing Databases
+
+If you upgrade from an earlier version and encounter a database error such as
+`no such column: resource.tags`, your `site.db` file is missing a recent field.
+Run the helper script to add the column without losing data:
+
+```bash
+python add_resource_tags_column.py
+```
+
+If you do not need to keep your current data, you can instead recreate the
+database with `init_db(force=True)`.
+
 ### Email Configuration
 
 Flask-Mail is used to send email notifications when bookings are created, updated or cancelled. Configure your SMTP credentials through environment variables before running the application:
