@@ -58,6 +58,17 @@ function hideMessage(element) {
 }
 
 /**
+ * Parses a comma-separated list of role IDs from a data attribute.
+ * Returns an array of objects with numeric id properties.
+ * @param {string} roleIdsStr - Comma separated role IDs.
+ * @returns {Array<{id:number}>}
+ */
+function parseRolesFromDataset(roleIdsStr) {
+    if (!roleIdsStr) return [];
+    return roleIdsStr.split(',').filter(id => id.trim() !== '').map(id => ({ id: parseInt(id, 10) })).filter(r => !isNaN(r.id));
+}
+
+/**
  * Standardized API call helper function.
  * @param {string} url - The URL to fetch.
  * @param {object} options - Fetch options (method, headers, body, etc.).
@@ -824,12 +835,12 @@ Enter a title for your booking (optional):`);
                 
                 if (roomSelectDropdown.value && availabilityDateInput.value) {
                      const selectedOption = roomSelectDropdown.selectedOptions[0];
-                     const currentResourceDetails = { 
-                        id: roomSelectDropdown.value, 
+                    const currentResourceDetails = {
+                        id: roomSelectDropdown.value,
                         name: selectedOption.dataset.resourceName || selectedOption.textContent.split(' (ID:')[0],
                         booking_restriction: selectedOption.dataset.bookingRestriction,
                         allowed_user_ids: selectedOption.dataset.allowedUserIds,
-                        allowed_roles: selectedOption.dataset.allowedRoles
+                        roles: parseRolesFromDataset(selectedOption.dataset.roleIds)
                      };
                     fetchAndDisplayAvailability(
                         roomSelectDropdown.value,
@@ -932,7 +943,7 @@ Enter a title for your booking (optional):`);
                 id: roomSelectDropdown.value,
                 booking_restriction: selectedOption.dataset.bookingRestriction,
                 allowed_user_ids: selectedOption.dataset.allowedUserIds,
-                allowed_roles: selectedOption.dataset.allowedRoles
+                roles: parseRolesFromDataset(selectedOption.dataset.roleIds)
             };
             fetchAndDisplayAvailability(currentResourceDetails.id, availabilityDateInput.value, currentResourceDetails);
         });
@@ -940,11 +951,11 @@ Enter a title for your booking (optional):`);
         availabilityDateInput.addEventListener('change', () => {
             const selectedOption = roomSelectDropdown.selectedOptions[0];
             if (!selectedOption) return; // Should not happen if list is populated
-            const currentResourceDetails = { 
-                id: roomSelectDropdown.value, 
+            const currentResourceDetails = {
+                id: roomSelectDropdown.value,
                 booking_restriction: selectedOption.dataset.bookingRestriction,
                 allowed_user_ids: selectedOption.dataset.allowedUserIds,
-                allowed_roles: selectedOption.dataset.allowedRoles
+                roles: parseRolesFromDataset(selectedOption.dataset.roleIds)
             };
             fetchAndDisplayAvailability(currentResourceDetails.id, availabilityDateInput.value, currentResourceDetails);
         });
@@ -965,7 +976,7 @@ Enter a title for your booking (optional):`);
                         const option = new Option(resource.name, resource.id);
                         option.dataset.bookingRestriction = resource.booking_restriction || "";
                         option.dataset.allowedUserIds = resource.allowed_user_ids || "";
-                        option.dataset.allowedRoles = resource.allowed_roles || "";
+                        option.dataset.roleIds = (resource.roles || []).map(r => r.id).join(',');
                         option.dataset.imageUrl = resource.image_url || "";
                         option.dataset.resourceName = resource.name;
                         roomSelectDropdown.add(option);
@@ -988,7 +999,7 @@ Enter a title for your booking (optional):`);
                             name: selectedOption.dataset.resourceName,
                             booking_restriction: selectedOption.dataset.bookingRestriction,
                             allowed_user_ids: selectedOption.dataset.allowedUserIds,
-                            allowed_roles: selectedOption.dataset.allowedRoles
+                            roles: parseRolesFromDataset(selectedOption.dataset.roleIds)
                         };
                         fetchAndDisplayAvailability(initialResourceDetails.id, availabilityDateInput.value, initialResourceDetails);
                     } else {
@@ -1182,8 +1193,8 @@ Enter a title for your booking (optional):`);
                                 id: resource.id, resource_id: resource.id, name: resource.name,
                                 map_coordinates: resource.map_coordinates,
                                 booking_restriction: resource.booking_restriction,
-                                allowed_user_ids: resource.allowed_user_ids, 
-                                allowed_roles: resource.allowed_roles,
+                                allowed_user_ids: resource.allowed_user_ids,
+                                roles: resource.roles,
                                 status: resource.status, floor_map_id: resource.floor_map_id 
                             });
                         }
@@ -1320,7 +1331,7 @@ Enter a title for your booking (optional):`);
                             Object.assign(opt.dataset, { // Assign all relevant data
                                 resourceId: r.id, resourceName: r.name, resourceStatus: r.status || 'draft',
                                 bookingRestriction: r.booking_restriction || "",
-                                allowedUserIds: r.allowed_user_ids || "", allowedRoles: r.allowed_roles || "",
+                                allowedUserIds: r.allowed_user_ids || "", roleIds: (r.roles || []).map(role => role.id).join(','),
                                 imageUrl: r.image_url || "",
                                 isUnderMaintenance: r.is_under_maintenance ? "true" : "false",
                                 maintenanceUntil: r.maintenance_until || "",
@@ -1483,7 +1494,7 @@ Enter a title for your booking (optional):`);
                                                     cb.checked = allowedUserIds.includes(cb.value);
                                                 });
                                             }
-                                            if(authorizedRolesInput) authorizedRolesInput.value = area.allowed_roles || "";
+                                            if(authorizedRolesInput) authorizedRolesInput.value = (area.roles || []).map(r => r.id).join(',');
                                             resourceToMapSelect.dispatchEvent(new Event('change')); // Trigger change for resource actions
                                             break; 
                                         }
@@ -1669,9 +1680,9 @@ Enter a title for your booking (optional):`);
                 
                 // Payload includes coordinates and potentially other resource-specific settings if form is extended
                 const payload = { floor_map_id: floorMapId, coordinates: coordinates };
-                // Add other properties like booking_restriction from form if they are part of this update
-                // payload.booking_restriction = bookingPermissionDropdown.value; 
-                // payload.allowed_user_ids = ... ; payload.allowed_roles = ...;
+                // Add other properties like booking_restriction or role_ids from form if needed
+                // payload.booking_restriction = bookingPermissionDropdown.value;
+                // payload.allowed_user_ids = ... ; payload.role_ids = ...;
 
                 try {
                     const responseData = await apiCall(
@@ -2555,7 +2566,7 @@ Enter a title for your booking (optional):`);
                         id: roomSelectDropdown.value,
                         booking_restriction: selectedOption.dataset.bookingRestriction,
                         allowed_user_ids: selectedOption.dataset.allowedUserIds,
-                        allowed_roles: selectedOption.dataset.allowedRoles
+                        roles: parseRolesFromDataset(selectedOption.dataset.roleIds)
                     };
                     fetchAndDisplayAvailability(resourceDetails.id, availabilityDateInput.value, resourceDetails);
                 }

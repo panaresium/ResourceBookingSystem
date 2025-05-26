@@ -1151,8 +1151,7 @@ def update_resource_map_info(resource_id):
             return jsonify({'error': 'allowed_user_ids must be a string or null.'}), 400
 
 
-    # Process allowed_roles
-    # Process allowed_roles (now role_ids)
+    # Process role_ids for RBAC
     if 'role_ids' in data:
         role_ids = data.get('role_ids')
         if role_ids is None: # Explicitly setting to no roles
@@ -1284,8 +1283,8 @@ def update_resource_details(resource_id):
         app.logger.warning(f"Update attempt for resource {resource_id} with no JSON data.")
         return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
 
-    # Fields that can be updated via this endpoint (excluding 'allowed_roles' string field)
-    allowed_fields = ['name', 'capacity', 'equipment', 'status', 'booking_restriction', 'allowed_user_ids', 'is_under_maintenance', 'maintenance_until', 'max_recurrence_count'] # role_ids handled separately
+    # Fields that can be updated via this endpoint
+    allowed_fields = ['name', 'capacity', 'equipment', 'status', 'booking_restriction', 'allowed_user_ids', 'is_under_maintenance', 'maintenance_until', 'max_recurrence_count']  # role_ids handled separately
     
     # Validate status if provided
     if 'status' in data:
@@ -1354,12 +1353,6 @@ def update_resource_details(resource_id):
                         return jsonify({'error': 'max_recurrence_count must be an integer or null.'}), 400
                 else:
                     resource.max_recurrence_count = None
-            elif field == 'allowed_roles':
-                roles_str = data.get('allowed_roles')
-                if roles_str is None or roles_str.strip() == "":
-                    resource.allowed_roles = None
-                # This was the old 'allowed_roles' string field logic, now replaced by 'role_ids'
-                pass 
             else: # For 'name', 'equipment'
                 setattr(resource, field, data[field])
 
