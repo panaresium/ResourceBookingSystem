@@ -300,12 +300,17 @@ async function displayAvailableResourcesNow() {
         const currentDateYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         const currentHour = now.getHours();
 
-        // Fetch all published resources using apiCall
-        // The API /api/resources should ideally only return published resources.
-        // The subtask mentions: "In displayAvailableResourcesNow, the check resource.status !== 'published' is redundant 
-        // if the API /api/resources already filters by published status. Verify API behavior and remove client-side check if appropriate."
-        // Assuming API filters, so no client-side status check here for now.
-        const resources = await apiCall('/api/resources', {}, availableResourcesListDiv);
+        const params = new URLSearchParams();
+        const capVal = document.getElementById('filter-capacity');
+        const equipVal = document.getElementById('filter-equipment');
+        const tagVal = document.getElementById('filter-tags');
+        if (capVal && capVal.value) params.append('capacity', capVal.value);
+        if (equipVal && equipVal.value) params.append('equipment', equipVal.value);
+        if (tagVal && tagVal.value) params.append('tags', tagVal.value);
+
+        const queryString = params.toString() ? `?${params.toString()}` : '';
+
+        const resources = await apiCall(`/api/resources${queryString}`, {}, availableResourcesListDiv);
 
         if (!resources || resources.length === 0) {
             showSuccess(availableResourcesListDiv, 'No resources found.'); // Use showSuccess for neutral info
@@ -994,31 +999,61 @@ Enter a title for your booking (optional):`);
         
         // Logic for displaying floor map links on resources.html
         const floorMapsListUl = document.getElementById('floor-maps-list');
-        const floorMapsLoadingStatusDiv = document.getElementById('floor-maps-loading-status'); 
-        if (floorMapsListUl && floorMapsLoadingStatusDiv) { 
+        const floorMapsLoadingStatusDiv = document.getElementById('floor-maps-loading-status');
+        const locationFilter = document.getElementById('location-filter');
+        const floorFilter = document.getElementById('floor-filter');
+        if (floorMapsListUl && floorMapsLoadingStatusDiv) {
+            let allMaps = [];
+
+            function renderMapLinks() {
+                floorMapsListUl.innerHTML = '';
+                const loc = locationFilter ? locationFilter.value : '';
+                const fl = floorFilter ? floorFilter.value : '';
+                const filtered = allMaps.filter(m => (!loc || m.location === loc) && (!fl || m.floor === fl));
+                if (filtered.length === 0) {
+                    floorMapsListUl.innerHTML = '<li>No floor maps match selection.</li>';
+                    return;
+                }
+                filtered.forEach(map => {
+                    const li = document.createElement('li');
+                    const link = document.createElement('a');
+                    link.href = `/map_view/${map.id}`;
+                    link.textContent = map.name;
+                    li.appendChild(link);
+                    floorMapsListUl.appendChild(li);
+                });
+            }
+
+            function updateFloorOptions() {
+                if (!floorFilter) return;
+                const loc = locationFilter ? locationFilter.value : '';
+                const floors = [...new Set(allMaps.filter(m => !loc || m.location === loc).map(m => m.floor).filter(f => f))];
+                floorFilter.innerHTML = '<option value="">All</option>';
+                floors.forEach(f => {
+                    const opt = new Option(f, f);
+                    floorFilter.add(opt);
+                });
+            }
+
             async function fetchAndDisplayFloorMapLinks() {
                 try {
-                    const maps = await apiCall('/api/admin/maps', {}, floorMapsLoadingStatusDiv); 
-                    floorMapsListUl.innerHTML = ''; 
-                    if (!maps || maps.length === 0) {
-                        showSuccess(floorMapsLoadingStatusDiv, 'No floor maps available.');
-                        return;
+                    const maps = await apiCall('/api/admin/maps', {}, floorMapsLoadingStatusDiv);
+                    allMaps = maps || [];
+                    if (locationFilter) {
+                        const locations = [...new Set(allMaps.map(m => m.location).filter(l => l))];
+                        locationFilter.innerHTML = '<option value="">All</option>';
+                        locations.forEach(loc => locationFilter.add(new Option(loc, loc)));
                     }
-                    maps.forEach(map => {
-                        const listItem = document.createElement('li');
-                        const link = document.createElement('a');
-                        link.href = `/map_view/${map.id}`; 
-                        link.textContent = map.name;
-                        listItem.appendChild(link);
-                        floorMapsListUl.appendChild(listItem);
-                    });
-                     // apiCall success default behavior is to hide messageElement if no specific success message from API.
-                     // If a message was shown, and it wasn't an error, it's fine for it to be hidden.
+                    updateFloorOptions();
+                    renderMapLinks();
                 } catch (error) {
-                    // apiCall already showed error in floorMapsLoadingStatusDiv
-                    if (floorMapsListUl) floorMapsListUl.innerHTML = '<li>Error loading floor maps.</li>'; // Fallback
+                    if (floorMapsListUl) floorMapsListUl.innerHTML = '<li>Error loading floor maps.</li>';
                 }
             }
+
+            if (locationFilter) locationFilter.addEventListener('change', () => { updateFloorOptions(); renderMapLinks(); });
+            if (floorFilter) floorFilter.addEventListener('change', renderMapLinks);
+
             fetchAndDisplayFloorMapLinks();
         }
     } // End of `if (availabilityDateInput && roomSelectDropdown && calendarTable)`
@@ -1045,6 +1080,8 @@ Enter a title for your booking (optional):`);
                     const listItem = document.createElement('li');
                     listItem.innerHTML = `
                         <strong>${map.name}</strong> (ID: ${map.id})<br>
+                        ${map.location ? 'Location: ' + map.location + '<br>' : ''}
+                        ${map.floor ? 'Floor: ' + map.floor + '<br>' : ''}
                         Filename: ${map.image_filename}<br>
                         <img src="${map.image_url}" alt="${map.name}" style="max-width: 200px; max-height: 150px; border: 1px solid #eee;">
                         <br>
@@ -1279,6 +1316,8 @@ Enter a title for your booking (optional):`);
                                 bookingRestriction: r.booking_restriction || "",
                                 allowedUserIds: r.allowed_user_ids || "", allowedRoles: r.allowed_roles || "",
                                 imageUrl: r.image_url || "",
+                                isUnderMaintenance: r.is_under_maintenance ? "true" : "false",
+                                maintenanceUntil: r.maintenance_until || "",
                                 isMappedToCurrent: (r.floor_map_id === parseInt(currentMapId) && r.map_coordinates) ? "true" : "false"
                             });
                             if (opt.dataset.isMappedToCurrent === "true") opt.textContent += ` (On this map)`;
@@ -1888,6 +1927,9 @@ Enter a title for your booking (optional):`);
         const mapLoadingStatusDiv = document.getElementById('map-loading-status');
         const mapViewTitleH1 = document.getElementById('map-view-title');
         const mapAvailabilityDateInput = document.getElementById('map-availability-date');
+        const mapLocationSelect = document.getElementById('map-location-select');
+        const mapFloorSelect = document.getElementById('map-floor-select');
+        let allMapInfo = [];
 
         // Function to get today's date in YYYY-MM-DD for API calls
         function getTodayDateStringForMap() {
@@ -1901,6 +1943,52 @@ Enter a title for your booking (optional):`);
         if(mapAvailabilityDateInput) { // Initialize date picker
             mapAvailabilityDateInput.value = getTodayDateStringForMap();
         }
+
+        function updateFloorSelectOptions() {
+            if (!mapFloorSelect) return;
+            const loc = mapLocationSelect ? mapLocationSelect.value : '';
+            const floors = [...new Set(allMapInfo.filter(m => !loc || m.location === loc).map(m => m.floor).filter(f => f))];
+            mapFloorSelect.innerHTML = '<option value="">All</option>';
+            floors.forEach(fl => mapFloorSelect.add(new Option(fl, fl)));
+        }
+
+        function setSelectorsFromCurrentMap() {
+            const current = allMapInfo.find(m => m.id == mapId);
+            if (!current) return;
+            if (mapLocationSelect) mapLocationSelect.value = current.location || '';
+            updateFloorSelectOptions();
+            if (mapFloorSelect) mapFloorSelect.value = current.floor || '';
+        }
+
+        function handleSelectorChange() {
+            const loc = mapLocationSelect ? mapLocationSelect.value : '';
+            const fl = mapFloorSelect ? mapFloorSelect.value : '';
+            const found = allMapInfo.find(m => (!loc || m.location === loc) && (!fl || m.floor === fl));
+            if (found && found.id != mapId) {
+                window.location.href = `/map_view/${found.id}`;
+            }
+        }
+
+        async function loadMapSelectors() {
+            try {
+                const maps = await apiCall('/api/admin/maps', {}, mapLoadingStatusDiv);
+                allMapInfo = maps || [];
+                if (mapLocationSelect) {
+                    const locations = [...new Set(allMapInfo.map(m => m.location).filter(l => l))];
+                    mapLocationSelect.innerHTML = '<option value="">All</option>';
+                    locations.forEach(loc => mapLocationSelect.add(new Option(loc, loc)));
+                }
+                updateFloorSelectOptions();
+                setSelectorsFromCurrentMap();
+            } catch (e) {
+                console.error('Error loading map selector data', e);
+            }
+        }
+
+        if (mapLocationSelect) mapLocationSelect.addEventListener('change', () => { updateFloorSelectOptions(); handleSelectorChange(); });
+        if (mapFloorSelect) mapFloorSelect.addEventListener('change', handleSelectorChange);
+
+        loadMapSelectors();
 
         async function fetchAndRenderMap(currentMapId, dateString) {
             mapLoadingStatusDiv.textContent = 'Loading map details...';
@@ -2258,6 +2346,16 @@ Enter a title for your booking (optional):`);
     // --- Home Page Specific Logic ---
     const availableResourcesListDiv = document.getElementById('available-resources-now-list');
     if (availableResourcesListDiv) {
+        const filterContainer = document.createElement('div');
+        filterContainer.id = 'resource-filter-controls';
+        filterContainer.innerHTML = `
+            <label>Min Capacity: <input type="number" id="filter-capacity" min="1"></label>
+            <label>Equipment: <input type="text" id="filter-equipment" placeholder="Projector"></label>
+            <label>Tags: <input type="text" id="filter-tags" placeholder="tag1,tag2"></label>
+            <button id="apply-resource-filters">Apply Filters</button>
+        `;
+        availableResourcesListDiv.parentElement.insertBefore(filterContainer, availableResourcesListDiv);
+        document.getElementById('apply-resource-filters').addEventListener('click', displayAvailableResourcesNow);
         displayAvailableResourcesNow();
     }
 
