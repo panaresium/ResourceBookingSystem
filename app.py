@@ -159,7 +159,7 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev_secret_key_123!@#')
 csrf = CSRFProtect(app)
 
 # Localization configuration
-app.config['LANGUAGES'] = ['en', 'es']
+app.config['LANGUAGES'] = ['en', 'es', 'th']
 
 # Google OAuth Configuration - Recommended to use environment variables
 app.config['GOOGLE_CLIENT_ID'] = os.environ.get('GOOGLE_CLIENT_ID', 'YOUR_GOOGLE_CLIENT_ID_PLACEHOLDER')
