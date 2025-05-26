@@ -295,6 +295,8 @@ class Resource(db.Model):
 
     image_filename = db.Column(db.String(255), nullable=True)  # <-- Add this line
 
+    requires_approval = db.Column(db.Boolean, nullable=False, default=False)
+
 
     floor_map_id = db.Column(db.Integer, db.ForeignKey('floor_map.id'), nullable=True)
     map_coordinates = db.Column(db.Text, nullable=True) # To store JSON like {'type':'rect', 'x':10, 'y':20, 'w':50, 'h':30}
@@ -319,6 +321,7 @@ class Booking(db.Model):
     title = db.Column(db.String(100), nullable=True)
     checked_in_at = db.Column(db.DateTime, nullable=True)
     checked_out_at = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(20), nullable=False, default='approved')
 
     def __repr__(self):
         return f"<Booking {self.title or self.id} for Resource {self.resource_id} from {self.start_time.strftime('%Y-%m-%d %H:%M')} to {self.end_time.strftime('%Y-%m-%d %H:%M')}>"
@@ -387,6 +390,7 @@ def add_audit_log(action: str, details: str, user_id: int = None, username: str 
 
 # --- Simple Email Notification System ---
 email_log = []
+slack_log = []
 
 def send_email(to_address: str, subject: str, body: str):
     """Log an outgoing email (placeholder for real email delivery)."""
@@ -398,6 +402,15 @@ def send_email(to_address: str, subject: str, body: str):
     }
     email_log.append(email_entry)
     app.logger.info(f"Email queued to {to_address}: {subject}")
+
+def send_slack_notification(message: str):
+    """Log a Slack notification (placeholder for real integration)."""
+    slack_entry = {
+        'message': message,
+        'timestamp': datetime.utcnow().isoformat(),
+    }
+    slack_log.append(slack_entry)
+    app.logger.info(f"Slack notification queued: {message}")
 
 @app.route("/")
 @login_required
@@ -2197,23 +2210,35 @@ def create_booking():
         )
 
     try:
-        new_booking = Booking(resource_id=resource_id, start_time=new_booking_start_time,
-                              end_time=new_booking_end_time, title=title, user_name=user_name_for_record)
+        new_booking = Booking(
+            resource_id=resource_id,
+            start_time=new_booking_start_time,
+            end_time=new_booking_end_time,
+            title=title,
+            user_name=user_name_for_record,
+        )
+        if resource.requires_approval:
+            new_booking.status = 'pending'
         db.session.add(new_booking)
         db.session.commit()
-        app.logger.info(f"Booking ID {new_booking.id} created for resource {resource_id} by user {current_user.username} (record user: {user_name_for_record}).")
+        app.logger.info(
+            f"Booking ID {new_booking.id} created for resource {resource_id} by user {current_user.username} (record user: {user_name_for_record})."
+        )
 
-        # Send confirmation email
-        if mail_available and current_user.email:
+        if not resource.requires_approval and mail_available and current_user.email:
             try:
                 msg = Message(
                     subject="Booking Confirmation",
                     recipients=[current_user.email],
-                    body=f"Your booking for {resource.name} on {new_booking.start_time.strftime('%Y-%m-%d')} from {new_booking.start_time.strftime('%H:%M')} to {new_booking.end_time.strftime('%H:%M')} has been created."
+                    body=(
+                        f"Your booking for {resource.name} on {new_booking.start_time.strftime('%Y-%m-%d')} from {new_booking.start_time.strftime('%H:%M')} to {new_booking.end_time.strftime('%H:%M')} has been created."
+                    ),
                 )
                 mail.send(msg)
             except Exception:
-                app.logger.exception(f"Failed to send booking confirmation email to {current_user.email}:")
+                app.logger.exception(
+                    f"Failed to send booking confirmation email to {current_user.email}:"
+                )
 
         created_booking_data = {
             'id': new_booking.id,
@@ -2221,9 +2246,11 @@ def create_booking():
             'title': new_booking.title,
             'user_name': new_booking.user_name,
             'start_time': new_booking.start_time.strftime('%Y-%m-%d %H:%M:%S'),
-            'end_time': new_booking.end_time.strftime('%Y-%m-%d %H:%M:%S')
+            'end_time': new_booking.end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            'status': new_booking.status,
         }
-        add_audit_log(action="CREATE_BOOKING", details=f"Booking ID {new_booking.id} for resource ID {resource_id} ('{resource.name}') created by user '{user_name_for_record}'. Title: '{title}'.")
+        status_note = 'pending approval' if new_booking.status == 'pending' else 'created'
+        add_audit_log(action="CREATE_BOOKING", details=f"Booking ID {new_booking.id} for resource ID {resource_id} ('{resource.name}') {status_note} by user '{user_name_for_record}'. Title: '{title}'.")
         socketio.emit('booking_updated', {'action': 'created', 'booking_id': new_booking.id, 'resource_id': resource_id})
         return jsonify(created_booking_data), 201
         
@@ -2507,6 +2534,62 @@ def check_out_booking(booking_id):
     db.session.commit()
     return jsonify({'message': 'Checked out successfully.', 'checked_out_at': booking.checked_out_at.isoformat()}), 200
 
+
+@app.route('/admin/bookings/pending', methods=['GET'])
+@login_required
+def list_pending_bookings():
+    if not current_user.is_admin:
+        return abort(403)
+    pending = Booking.query.filter_by(status='pending').all()
+    result = []
+    for b in pending:
+        result.append({
+            'id': b.id,
+            'resource_id': b.resource_id,
+            'resource_name': b.resource_booked.name if b.resource_booked else None,
+            'user_name': b.user_name,
+            'start_time': b.start_time.isoformat(),
+            'end_time': b.end_time.isoformat(),
+            'title': b.title,
+        })
+    return jsonify(result), 200
+
+
+@app.route('/admin/bookings/<int:booking_id>/approve', methods=['POST'])
+@login_required
+def approve_booking_admin(booking_id):
+    if not current_user.is_admin:
+        return abort(403)
+    booking = Booking.query.get_or_404(booking_id)
+    if booking.status != 'pending':
+        return jsonify({'error': 'Booking not pending'}), 400
+    booking.status = 'approved'
+    db.session.commit()
+    user = User.query.filter_by(username=booking.user_name).first()
+    if user:
+        send_email(user.email, 'Booking Approved',
+                   f"Your booking for {booking.resource_booked.name if booking.resource_booked else 'resource'} on {booking.start_time.strftime('%Y-%m-%d %H:%M')} has been approved.")
+    send_slack_notification(f"Booking {booking.id} approved by {current_user.username}")
+    return jsonify({'success': True}), 200
+
+
+@app.route('/admin/bookings/<int:booking_id>/reject', methods=['POST'])
+@login_required
+def reject_booking_admin(booking_id):
+    if not current_user.is_admin:
+        return abort(403)
+    booking = Booking.query.get_or_404(booking_id)
+    if booking.status != 'pending':
+        return jsonify({'error': 'Booking not pending'}), 400
+    booking.status = 'rejected'
+    db.session.commit()
+    user = User.query.filter_by(username=booking.user_name).first()
+    if user:
+        send_email(user.email, 'Booking Rejected',
+                   f"Your booking for {booking.resource_booked.name if booking.resource_booked else 'resource'} on {booking.start_time.strftime('%Y-%m-%d %H:%M')} has been rejected.")
+    send_slack_notification(f"Booking {booking.id} rejected by {current_user.username}")
+    return jsonify({'success': True}), 200
+
 # Register blueprint after routes are defined
 app.register_blueprint(analytics_bp)
 
@@ -2542,6 +2625,7 @@ __all__ = [
     "WaitlistEntry",
     "FloorMap",
     "email_log",
+    "slack_log",
     "scheduler",
 
 ]
