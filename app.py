@@ -563,6 +563,29 @@ def serve_resources():
 def serve_login():
     return render_template("login.html")
 
+# Simple route to log out via a browser request and redirect to the public
+# resources page. This complements the JSON API logout endpoint and provides
+# a straightforward way to clear the session when JavaScript-based navigation
+# fails to redirect properly.
+@app.route('/logout')
+def logout_and_redirect():
+    user_identifier = current_user.username if current_user.is_authenticated else "Anonymous"
+    user_id_for_log = current_user.id if current_user.is_authenticated else None
+    try:
+        logout_user()
+        app.logger.info(f"User '{user_identifier}' logged out via /logout.")
+        add_audit_log(action="LOGOUT_SUCCESS",
+                     details=f"User '{user_identifier}' logged out.",
+                     user_id=user_id_for_log,
+                     username=user_identifier)
+    except Exception as e:
+        app.logger.exception(f"Error during logout for user {user_identifier}:")
+        add_audit_log(action="LOGOUT_FAILED",
+                     details=f"Logout attempt failed for user '{user_identifier}'. Error: {str(e)}",
+                     user_id=user_id_for_log,
+                     username=user_identifier)
+    return redirect(url_for('serve_resources'))
+
 @app.route("/profile")
 @login_required
 def serve_profile_page():
