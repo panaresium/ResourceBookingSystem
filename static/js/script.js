@@ -223,8 +223,9 @@ async function updateAuthLink() {
 
             if (userDropdownContainer) userDropdownContainer.style.display = 'list-item';
             if (userDropdownButton) {
-                userDropdownButton.innerHTML = `${data.user.username} &#9662;`;
+                userDropdownButton.innerHTML = `<span class="user-icon">&#x1F464;</span> &#9662;`;
                 userDropdownButton.setAttribute('aria-expanded', 'false');
+                userDropdownButton.title = data.user.username;
             }
             if (userDropdownMenu) userDropdownMenu.style.display = 'none'; 
             if (authLinkContainer) authLinkContainer.style.display = 'none';

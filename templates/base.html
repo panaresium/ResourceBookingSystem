@@ -19,7 +19,7 @@
             {# General links visible to all - JavaScript will manage the display of login/logout and user info #}
 
             {# Container for the 'Login' link - shown by JS when logged out #}
-            <li id="auth-link-container" style="display: none;">
+            <li id="auth-link-container" style="display: none; margin-left:auto;">
                 <a href="{{ url_for('serve_login') }}">{{ _('Login') }}</a>
             </li>
 
@@ -54,9 +54,9 @@
             <li id="welcome-message-container" style="display: none; margin-right: 10px; color: white; align-self: center;"></li>
 
             {# Container for user dropdown (Profile, Logout) - shown by JS when logged in #}
-            <li id="user-dropdown-container" style="display: none; position: relative;">
-                <button id="user-dropdown-button" aria-haspopup="true" aria-expanded="false" style="background: none; border: none; color: white; font-size: 1em; cursor: pointer; padding: 10px 15px; font-weight: bold;">
-                    {{ _('User Menu') }} {# Placeholder, JS will update with username #}
+            <li id="user-dropdown-container" style="display: none; position: relative; margin-left:auto;">
+                <button id="user-dropdown-button" aria-haspopup="true" aria-expanded="false" style="background: none; border: none; color: white; font-size: 1em; cursor: pointer; padding: 10px; font-weight: bold; display:flex; align-items:center;">
+                    <span class="user-icon" style="font-size:1.2em;">&#x1F464;</span> &#9662;
                 </button>
                 <div class="dropdown-menu" id="user-dropdown-menu" style="display: none; position: absolute; top: 100%; left: 0; background-color: #333; border: 1px solid #555; min-width: 160px; z-index: 1000; list-style-type: none; padding: 0; margin: 0; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
                     <a class="dropdown-item" href="{{ url_for('serve_profile_page') }}" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Profile') }}</a>
