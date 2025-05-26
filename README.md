@@ -44,6 +44,11 @@ python init_setup.py
 
 This script checks your Python version, creates the required directories, and initializes the database **only if one does not already exist**.  When an existing `site.db` file is present it is left untouched, but the script will ensure new fields such as the `resource.tags` column are added when upgrading from older versions.  Run this once after cloning the repository or when updating to a newer release.
 
+The application itself will also perform a quick check for the `resource.tags`
+column whenever it starts, so you can simply run `python app.py` or `flask run`
+after upgrading. However, running `init_setup.py` remains the safest approach
+when setting up a new environment.
+
 
 ### Installing Dependencies
 
@@ -102,6 +107,9 @@ Running `python init_setup.py` will now add this column automatically. If you pr
 ```bash
 python add_resource_tags_column.py
 ```
+
+Recent versions of `app.py` also attempt to add this column on startup,
+but running `init_setup.py` is recommended if you see schema errors.
 
 If you do not need to keep your current data, you can instead recreate the
 database with `init_db(force=True)`.
