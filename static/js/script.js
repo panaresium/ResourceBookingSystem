@@ -281,16 +281,14 @@ async function handleLogout(event) {
         await updateAuthLink(); // Refresh navigation and UI
 
         const loginUrl = document.body.dataset.loginUrl || '/login';
-        const currentPath = window.location.pathname;
-
-        if (currentPath.startsWith('/admin') || currentPath.startsWith('/profile') || currentPath.startsWith('/my_bookings')) {
-            window.location.href = loginUrl;
-        } else if (currentPath !== loginUrl && currentPath !== '/') {
-            window.location.href = loginUrl;
-        } else if (currentPath === '/' && loginUrl !== '/') { // Home page, not the login page itself
+        // Always navigate to the login screen after logout. If already on the
+        // login page (where ``loginUrl`` may be "#"), simply reload so that the
+        // page reflects the logged-out state.
+        if (loginUrl === '#') {
             window.location.reload();
+        } else {
+            window.location.href = loginUrl;
         }
-        // If already on login page, updateAuthLink handles UI, no redirect needed.
 
     } catch (error) {
         sessionStorage.removeItem('userPerformedLoginAction'); // Also clear on failed logout attempt
