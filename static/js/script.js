@@ -1279,6 +1279,8 @@ Enter a title for your booking (optional):`);
                                 bookingRestriction: r.booking_restriction || "",
                                 allowedUserIds: r.allowed_user_ids || "", allowedRoles: r.allowed_roles || "",
                                 imageUrl: r.image_url || "",
+                                isUnderMaintenance: r.is_under_maintenance ? "true" : "false",
+                                maintenanceUntil: r.maintenance_until || "",
                                 isMappedToCurrent: (r.floor_map_id === parseInt(currentMapId) && r.map_coordinates) ? "true" : "false"
                             });
                             if (opt.dataset.isMappedToCurrent === "true") opt.textContent += ` (On this map)`;
