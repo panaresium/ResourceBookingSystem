@@ -2777,5 +2777,6 @@ if __name__ == "__main__":
         scheduler.start()
     except Exception:
         app.logger.exception("Failed to start background scheduler")
-    app.logger.info(_("Flask app starting...")) # Example of wrapping a log message, though not typically necessary for i18n
+    # Avoid using _() here because no request context exists at startup
+    app.logger.info(translator.gettext("Flask app starting...", translator.default_locale))
     socketio.run(app, debug=True)
