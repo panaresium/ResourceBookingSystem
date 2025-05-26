@@ -480,7 +480,11 @@ def parse_simple_rrule(rule_str: str):
             k, v = part.split('=', 1)
             parts[k.upper()] = v
     freq = parts.get('FREQ', '').upper()
-    count = int(parts.get('COUNT', '1')) if parts.get('COUNT') else 1
+    try:
+        count = int(parts.get('COUNT', '1')) if parts.get('COUNT') else 1
+    except (ValueError, TypeError):
+        app.logger.warning(f"Invalid COUNT value in RRULE '{rule_str}'")
+        return None, 1
     if freq not in {'DAILY', 'WEEKLY'}:
         return None, 1
     return freq, max(1, count)
@@ -2296,6 +2300,8 @@ def create_booking():
         return jsonify({'error': f'Resource under maintenance until {until_str}.'}), 403
 
     freq, count = parse_simple_rrule(recurrence_rule_str)
+    if recurrence_rule_str and freq is None:
+        return jsonify({'error': 'Invalid recurrence rule.'}), 400
     if resource.max_recurrence_count is not None and count > resource.max_recurrence_count:
         return jsonify({'error': 'Recurrence exceeds allowed limit for this resource.'}), 400
 
