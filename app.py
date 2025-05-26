@@ -21,8 +21,6 @@ from flask import g  # For storing current locale
 from flask_wtf.csrf import CSRFProtect # For CSRF protection
 from flask_socketio import SocketIO
 
-# Helper to add new DB fields when older databases are used
-from add_resource_tags_column import add_tags_column
 
 
 # Attempt to import APScheduler; provide a basic fallback if unavailable
@@ -119,16 +117,6 @@ class SimpleTranslator:
         return self.translations.get(lang, {}).get(text, text)
 
 translator = SimpleTranslator()
-
-# --- Database Schema Helpers ---
-def ensure_tags_column_on_startup():
-    """Add the 'tags' column to the resource table if it is missing."""
-    try:
-        add_tags_column()
-    except Exception as exc:  # pragma: no cover - defensive
-        app.logger.warning(f"Could not verify 'tags' column: {exc}")
-
-ensure_tags_column_on_startup()
 
 def _(text):
     lang = get_locale() if has_request_context() else translator.default_locale

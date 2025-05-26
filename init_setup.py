@@ -165,6 +165,44 @@ def ensure_floor_map_columns():
         if 'conn' in locals():
             conn.close()
 
+def ensure_scheduled_status_columns():
+    """Ensure the 'scheduled_status' and 'scheduled_status_at' columns exist in the resource table."""
+    if not os.path.exists(DB_PATH):
+        print("Database file not found, skipping scheduled status column checks.")
+        return
+
+    import sqlite3
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(resource)")
+        columns = [info[1] for info in cursor.fetchall()]
+        to_commit = False
+
+        if 'scheduled_status' not in columns:
+            print("Adding 'scheduled_status' column to 'resource' table...")
+            cursor.execute("ALTER TABLE resource ADD COLUMN scheduled_status VARCHAR(50)")
+            to_commit = True
+        else:
+            print("'scheduled_status' column already exists. No action taken for this column.")
+
+        if 'scheduled_status_at' not in columns:
+            print("Adding 'scheduled_status_at' column to 'resource' table...")
+            cursor.execute("ALTER TABLE resource ADD COLUMN scheduled_status_at DATETIME")
+            to_commit = True
+        else:
+            print("'scheduled_status_at' column already exists. No action taken for this column.")
+
+        if to_commit:
+            conn.commit()
+            print("Scheduled status column additions committed.")
+    except Exception as exc:
+        print(f"Failed to ensure scheduled status columns exist: {exc}")
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+
 
 # Moved from app.py
 def init_db(force=False):
@@ -460,6 +498,7 @@ def main():
         ensure_tags_column()
         ensure_resource_image_column()
         ensure_floor_map_columns()
+        ensure_scheduled_status_columns()
     else:
         print("Initializing database...")
         try:

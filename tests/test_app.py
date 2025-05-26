@@ -1,11 +1,11 @@
 import unittest
+import unittest.mock
 import json
 from sqlalchemy import text
 
 from datetime import datetime, time, date, timedelta
 
-from app import app, db, User, Resource, Booking, WaitlistEntry, FloorMap, email_log, teams_log, slack_log
-
+from app import app, db, User, Resource, Booking, WaitlistEntry, FloorMap, AuditLog, email_log, teams_log, slack_log
 
 # from flask_login import current_user # Not directly used for assertions here
 
@@ -531,6 +531,8 @@ class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusi
         mock_datetime.utcnow.return_value = datetime.utcnow() # This 'now' is after past_schedule_time
 
         apply_scheduled_resource_status_changes() # Call the job function
+        db.session.expire_all()  # Refresh session state after job commits
+
 
         updated_res1 = Resource.query.get(resource_id_1)
         self.assertEqual(updated_res1.status, "published")
@@ -564,6 +566,7 @@ class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusi
         mock_datetime.utcnow.return_value = datetime.utcnow() # Mock 'now' again
 
         apply_scheduled_resource_status_changes()
+        db.session.expire_all()  # Refresh after second job
 
         updated_res2 = Resource.query.get(resource_id_2)
         self.assertEqual(updated_res2.status, "archived")
