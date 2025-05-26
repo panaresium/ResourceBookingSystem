@@ -464,6 +464,25 @@ def add_audit_log(action: str, details: str, user_id: int = None, username: str 
         app.logger.error(f"Error adding audit log: {e}", exc_info=True)
         db.session.rollback() # Rollback in case of error during audit logging itself
 
+# --- Resource Helper ---
+def resource_to_dict(resource: Resource) -> dict:
+    return {
+        'id': resource.id,
+        'name': resource.name,
+        'capacity': resource.capacity,
+        'equipment': resource.equipment,
+        'status': resource.status,
+        'booking_restriction': resource.booking_restriction,
+        'image_url': url_for('static', filename=f'resource_uploads/{resource.image_filename}') if resource.image_filename else None,
+        'published_at': resource.published_at.isoformat() if resource.published_at else None,
+        'allowed_user_ids': resource.allowed_user_ids,
+        'roles': [{'id': r.id, 'name': r.name} for r in resource.roles],
+        'floor_map_id': resource.floor_map_id,
+        'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
+        'is_under_maintenance': resource.is_under_maintenance,
+        'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
+        'max_recurrence_count': resource.max_recurrence_count
+    }
 # --- Simple Email Notification System ---
 email_log = []
 slack_log = []
@@ -606,12 +625,19 @@ def serve_audit_log_page():
     return render_template("log_view.html")
 
 @app.route('/admin/maps')
-@login_required 
+@login_required
 @permission_required('manage_floor_maps') # Or 'manage_resources' depending on primary function
 def serve_admin_maps():
     # if not current_user.is_admin: # Replaced by decorator
     #     return redirect(url_for('serve_index'))
     return render_template("admin_maps.html")
+
+@app.route('/admin/resources_manage')
+@login_required
+@permission_required('manage_resources')
+def serve_resource_management_page():
+    app.logger.info(f"Admin user {current_user.username} accessed Resource Management page.")
+    return render_template("resource_management.html")
 
 # --- Analytics Routes ---
 @analytics_bp.route('/')
@@ -1525,6 +1551,61 @@ def delete_resource(resource_id):
         app.logger.exception(f"Error deleting resource {resource_id}:")
         add_audit_log(action="DELETE_RESOURCE_FAILED", details=f"Failed to delete resource ID {resource_id} ('{resource_name_for_log}'). Error: {str(e)}")
         return jsonify({'error': 'Failed to delete resource due to a server error.'}), 500
+
+@app.route('/api/admin/resources', methods=['GET'])
+@login_required
+@permission_required('manage_resources')
+def get_all_resources():
+    try:
+        resources = Resource.query.all()
+        resources_list = [resource_to_dict(r) for r in resources]
+        return jsonify(resources_list), 200
+    except Exception as e:
+        app.logger.exception("Error fetching all resources:")
+        return jsonify({'error': 'Failed to fetch resources due to a server error.'}), 500
+
+@app.route('/api/admin/resources', methods=['POST'])
+@login_required
+@permission_required('manage_resources')
+def create_resource():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+    name = data.get('name')
+    if not name or not name.strip():
+        return jsonify({'error': 'Name is required.'}), 400
+    existing = Resource.query.filter(func.lower(Resource.name) == func.lower(name.strip())).first()
+    if existing:
+        return jsonify({'error': f"Resource with name '{name}' already exists."}), 409
+
+    capacity = data.get('capacity')
+    try:
+        if capacity is not None:
+            capacity = int(capacity)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Capacity must be an integer or null.'}), 400
+
+    equipment = data.get('equipment')
+
+    new_resource = Resource(name=name.strip(), capacity=capacity, equipment=equipment)
+    try:
+        db.session.add(new_resource)
+        db.session.commit()
+        return jsonify(resource_to_dict(new_resource)), 201
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception("Error creating resource:")
+        return jsonify({'error': 'Failed to create resource due to a server error.'}), 500
+
+@app.route('/api/admin/resources/<int:resource_id>', methods=['GET'])
+@login_required
+@permission_required('manage_resources')
+def get_resource_details(resource_id):
+    resource = Resource.query.get(resource_id)
+    if not resource:
+        return jsonify({'error': 'Resource not found.'}), 404
+    return jsonify(resource_to_dict(resource)), 200
 
 @app.route('/api/admin/users', methods=['GET'])
 @login_required
