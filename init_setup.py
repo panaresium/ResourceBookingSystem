@@ -103,6 +103,68 @@ def ensure_tags_column():
     except Exception as exc:
         print(f"Failed to ensure 'tags' column exists: {exc}")
 
+def ensure_resource_image_column():
+    """Ensure the 'image_filename' column exists in the resource table."""
+    if not os.path.exists(DB_PATH):
+        print("Database file not found, skipping 'image_filename' column check.")
+        return
+
+    import sqlite3
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(resource)")
+        columns = [info[1] for info in cursor.fetchall()]
+        if 'image_filename' not in columns:
+            print("Adding 'image_filename' column to 'resource' table...")
+            cursor.execute("ALTER TABLE resource ADD COLUMN image_filename VARCHAR(255)")
+            conn.commit()
+            print("'image_filename' column added.")
+        else:
+            print("'image_filename' column already exists. No action taken.")
+    except Exception as exc:
+        print(f"Failed to ensure 'image_filename' column exists: {exc}")
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+def ensure_floor_map_columns():
+    """Ensure the 'location' and 'floor' columns exist in the floor_map table."""
+    if not os.path.exists(DB_PATH):
+        print("Database file not found, skipping floor_map column checks.")
+        return
+
+    import sqlite3
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(floor_map)")
+        columns = [info[1] for info in cursor.fetchall()]
+        to_commit = False
+
+        if 'location' not in columns:
+            print("Adding 'location' column to 'floor_map' table...")
+            cursor.execute("ALTER TABLE floor_map ADD COLUMN location VARCHAR(100)")
+            to_commit = True
+        else:
+            print("'location' column already exists. No action taken for this column.")
+
+        if 'floor' not in columns:
+            print("Adding 'floor' column to 'floor_map' table...")
+            cursor.execute("ALTER TABLE floor_map ADD COLUMN floor VARCHAR(50)")
+            to_commit = True
+        else:
+            print("'floor' column already exists. No action taken for this column.")
+
+        if to_commit:
+            conn.commit()
+            print("Floor map column additions committed.")
+    except Exception as exc:
+        print(f"Failed to ensure floor_map columns exist: {exc}")
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
 
 # Moved from app.py
 def init_db(force=False):
@@ -396,6 +458,8 @@ def main():
     if os.path.exists(DB_PATH):
         print(f"Existing database found at {DB_PATH}. Skipping init_db to preserve data.")
         ensure_tags_column()
+        ensure_resource_image_column()
+        ensure_floor_map_columns()
     else:
         print("Initializing database...")
         try:
