@@ -67,6 +67,12 @@
     <hr>
     <section id="floor-maps-selection-section">
         <h2>{{ _('View by Floor Map') }}</h2>
+        <div>
+            <label for="location-filter">{{ _('Location:') }}</label>
+            <select id="location-filter"></select>
+            <label for="floor-filter">{{ _('Floor:') }}</label>
+            <select id="floor-filter"></select>
+        </div>
         <div id="floor-maps-loading-status" aria-live="polite" style="margin-bottom: 10px;"></div>
         <ul id="floor-maps-list">
             <li>{{ _('Loading floor maps...') }}</li>
