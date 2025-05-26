@@ -77,10 +77,10 @@ The application uses an SQLite database to store resource information. If you ha
    ```bash
    flask shell
    ```
-   (Alternatively, you can use `python` and then `from app import app, db, init_db` if you are using the plain python interpreter)
+   (Alternatively, you can use `python` and then `from init_setup import init_db` if you are using the plain python interpreter)
 3. In the Flask shell, import the `init_db` function and run it:
    ```python
-   >>> from app import init_db
+   >>> from init_setup import init_db
    >>> init_db()  # Creates tables and adds sample data if the database is empty
    ```
    This will create a `site.db` file in the `data/` directory and set up the tables.

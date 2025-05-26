@@ -403,7 +403,7 @@ class AppTests(unittest.TestCase):
 
     def test_init_db_does_not_wipe_without_force(self):
         """init_db should preserve data unless force=True."""
-        from app import init_db
+        from init_setup import init_db
 
         user = User(username='keepme', email='keep@example.com', is_admin=False)
         user.set_password('pass')

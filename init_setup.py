@@ -3,7 +3,20 @@
 import sys
 import os
 import pathlib
-from app import app, init_db
+from app import (
+    app,
+    db,
+    User,
+    Resource,
+    Booking,
+    Role,
+    AuditLog,
+    FloorMap,
+    resource_roles_table,
+    user_roles_table,
+)
+from werkzeug.security import generate_password_hash
+from datetime import datetime, date, timedelta, time
 from add_resource_tags_column import add_tags_column
 
 MIN_PYTHON_VERSION = (3, 7)
@@ -90,6 +103,287 @@ def ensure_tags_column():
     except Exception as exc:
         print(f"Failed to ensure 'tags' column exists: {exc}")
 
+
+# Moved from app.py
+def init_db(force=False):
+    with app.app_context():
+        app.logger.info("Starting database initialization...")
+
+        app.logger.info("Creating database tables (if they don't exist)...")
+        db.create_all()
+        app.logger.info("Database tables creation/verification step completed.")
+
+        if not force:
+            existing = any([
+                db.session.query(User.id).first(),
+                db.session.query(Resource.id).first(),
+                db.session.query(Role.id).first(),
+                db.session.query(Booking.id).first(),
+            ])
+            if existing:
+                app.logger.warning(
+                    "init_db aborted: existing data detected. "
+                    "Pass force=True to reset database."
+                )
+                return
+
+        app.logger.info("Attempting to delete existing data in corrected order...")
+        # Corrected Deletion Order: AuditLog -> Booking -> resource_roles_table -> Resource -> FloorMap -> user_roles_table -> User -> Role
+        app.logger.info("Deleting existing AuditLog entries...")
+        num_audit_logs_deleted = db.session.query(AuditLog).delete()
+        app.logger.info(f"Deleted {num_audit_logs_deleted} AuditLog entries.")
+
+        app.logger.info("Deleting existing Bookings...")
+        num_bookings_deleted = db.session.query(Booking).delete()
+        app.logger.info(f"Deleted {num_bookings_deleted} Bookings.")
+
+        app.logger.info("Deleting existing Resource-Role associations...")
+        db.session.execute(resource_roles_table.delete())  # Clear association table
+        app.logger.info("Resource-Role associations deleted.")
+
+        app.logger.info("Deleting existing Resources...")
+        num_resources_deleted = db.session.query(Resource).delete()
+        app.logger.info(f"Deleted {num_resources_deleted} Resources.")
+
+        app.logger.info("Deleting existing FloorMaps...")
+        num_floormaps_deleted = db.session.query(FloorMap).delete()
+        app.logger.info(f"Deleted {num_floormaps_deleted} FloorMaps.")
+
+        app.logger.info("Deleting existing User-Role associations...")
+        db.session.execute(user_roles_table.delete())  # Clear association table
+        app.logger.info("User-Role associations deleted.")
+
+        app.logger.info("Deleting existing Users...")
+        num_users_deleted = db.session.query(User).delete()
+        app.logger.info(f"Deleted {num_users_deleted} Users.")
+
+        app.logger.info("Deleting existing Roles...")
+        num_roles_deleted = db.session.query(Role).delete()
+        app.logger.info(f"Deleted {num_roles_deleted} Roles.")
+
+        try:
+            db.session.commit()
+            app.logger.info("Successfully committed deletions of existing data.")
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception("Error committing deletions during DB initialization:")
+
+        app.logger.info("Adding default users (admin/admin, user/userpass)...")
+        try:
+            default_users = [
+                User(
+                    username='admin',
+                    email='admin@example.com',
+                    password_hash=generate_password_hash('admin', method='pbkdf2:sha256'),
+                    is_admin=True,
+                ),
+                User(
+                    username='user',
+                    email='user@example.com',
+                    password_hash=generate_password_hash('userpass', method='pbkdf2:sha256'),
+                    is_admin=False,
+                ),
+            ]
+            db.session.bulk_save_objects(default_users)
+            db.session.commit()
+            app.logger.info(f"Successfully added {len(default_users)} default users.")
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception("Error adding default users during DB initialization:")
+
+        app.logger.info("Adding default roles...")
+        try:
+            admin_role = Role(
+                name="Administrator",
+                description="Full system access",
+                permissions="all_permissions,view_analytics",
+            )
+            standard_role = Role(
+                name="StandardUser",
+                description="Can make bookings and view resources",
+                permissions="make_bookings,view_resources",
+            )
+            db.session.add_all([admin_role, standard_role])
+            db.session.commit()
+            app.logger.info("Successfully added default roles.")
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception("Error adding default roles during DB initialization:")
+            # Ensure admin_role and standard_role are None if creation failed, to prevent errors below
+            admin_role = None
+            standard_role = None
+
+        app.logger.info("Assigning roles to default users...")
+        admin_user = User.query.filter_by(username='admin').first()
+        standard_user = User.query.filter_by(username='user').first()
+
+        # Fetch roles again in case of session issues or if they were not committed properly
+        if not admin_role:
+            admin_role = Role.query.filter_by(name="Administrator").first()
+        if not standard_role:
+            standard_role = Role.query.filter_by(name="StandardUser").first()
+
+        if admin_user and admin_role:
+            admin_user.roles.append(admin_role)
+        if standard_user and standard_role:
+            standard_user.roles.append(standard_role)
+
+        try:
+            db.session.commit()
+            app.logger.info("Successfully assigned roles to default users.")
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception("Error assigning roles to default users:")
+
+        admin_user_for_perms = User.query.filter_by(username='admin').first()
+        standard_user_for_perms = User.query.filter_by(username='user').first()
+
+        admin_user_id_str = str(admin_user_for_perms.id) if admin_user_for_perms else "1"
+        standard_user_id_str = str(standard_user_for_perms.id) if standard_user_for_perms else "2"
+
+        # Fetch roles for sample data assignment
+        admin_role_for_resource = Role.query.filter_by(name="Administrator").first()
+        standard_role_for_resource = Role.query.filter_by(name="StandardUser").first()
+
+        app.logger.info("Adding sample resources...")
+        try:
+            res_alpha = Resource(
+                name="Conference Room Alpha",
+                capacity=10,
+                equipment="Projector,Whiteboard,Teleconference",
+                tags="large,video",
+                booking_restriction=None,
+                status='published',
+                published_at=datetime.utcnow(),
+                allowed_user_ids=None,
+            )  # No specific user IDs, open to roles
+            if standard_role_for_resource:
+                res_alpha.roles.append(standard_role_for_resource)
+            if admin_role_for_resource:  # Admins can also book
+                res_alpha.roles.append(admin_role_for_resource)
+
+            res_beta = Resource(
+                name="Meeting Room Beta",
+                capacity=6,
+                equipment="Teleconference,Whiteboard",
+                tags="medium",
+                booking_restriction='all_users',
+                status='published',
+                published_at=datetime.utcnow(),  # 'all_users' might be redundant now
+                allowed_user_ids=f"{standard_user_id_str},{admin_user_id_str}",
+            )  # Can keep user_ids for specific overrides
+            # No specific roles assigned to Beta, relies on allowed_user_ids or booking_restriction logic
+
+            res_gamma = Resource(
+                name="Focus Room Gamma",
+                capacity=2,
+                equipment="Whiteboard",
+                tags="quiet",
+                booking_restriction='admin_only',
+                status='draft',
+                published_at=None,  # admin_only might be redundant
+                allowed_user_ids=None,
+            )
+            if admin_role_for_resource:
+                res_gamma.roles.append(admin_role_for_resource)
+
+            res_delta = Resource(
+                name="Quiet Pod Delta",
+                capacity=1,
+                equipment=None,
+                tags="quiet,small",
+                booking_restriction=None,
+                status='draft',
+                published_at=None,
+                allowed_user_ids=None,
+            )
+            if standard_role_for_resource:
+                res_delta.roles.append(standard_role_for_resource)
+            # If admin should also have access by default to standard_user resources, add admin_role too.
+            # Or rely on a global admin override in permission checking logic.
+
+            res_omega = Resource(
+                name="Archived Room Omega",
+                capacity=5,
+                equipment="Old Projector",
+                tags="archived",
+                booking_restriction=None,
+                status='archived',
+                published_at=datetime.utcnow() - timedelta(days=30),
+                allowed_user_ids=None,
+            )
+            # Typically archived resources don't need role assignments unless there's a use case.
+
+            sample_resources_list = [res_alpha, res_beta, res_gamma, res_delta, res_omega]
+            db.session.add_all(sample_resources_list)
+            db.session.commit()
+            app.logger.info(
+                f"Successfully added {len(sample_resources_list)} sample resources with roles."
+            )
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception("Error adding sample resources during DB initialization:")
+
+        app.logger.info("Adding sample bookings...")
+        resource_alpha = Resource.query.filter_by(name="Conference Room Alpha").first()
+        resource_beta = Resource.query.filter_by(name="Meeting Room Beta").first()
+
+        if resource_alpha and resource_beta:
+            try:
+                sample_bookings = [
+                    Booking(
+                        resource_id=resource_alpha.id,
+                        user_name="user1",
+                        title="Team Sync Alpha",
+                        start_time=datetime.combine(date.today(), time(9, 0)),
+                        end_time=datetime.combine(date.today(), time(10, 0)),
+                    ),
+                    Booking(
+                        resource_id=resource_alpha.id,
+                        user_name="user2",
+                        title="Client Meeting",
+                        start_time=datetime.combine(date.today(), time(11, 0)),
+                        end_time=datetime.combine(date.today(), time(12, 30)),
+                    ),
+                    Booking(
+                        resource_id=resource_alpha.id,
+                        user_name="user1",
+                        title="Project Update Alpha",
+                        start_time=datetime.combine(date.today() + timedelta(days=1), time(14, 0)),
+                        end_time=datetime.combine(date.today() + timedelta(days=1), time(15, 0)),
+                    ),
+                    Booking(
+                        resource_id=resource_beta.id,
+                        user_name="user3",
+                        title="Quick Chat Beta",
+                        start_time=datetime.combine(date.today(), time(10, 0)),
+                        end_time=datetime.combine(date.today(), time(10, 30)),
+                    ),
+                    Booking(
+                        resource_id=resource_beta.id,
+                        user_name="user1",
+                        title="Planning Session Beta",
+                        start_time=datetime.combine(date.today(), time(14, 0)),
+                        end_time=datetime.combine(date.today(), time(16, 0)),
+                    ),
+                ]
+                db.session.bulk_save_objects(sample_bookings)
+                db.session.commit()
+                app.logger.info(
+                    f"Successfully added {len(sample_bookings)} sample bookings."
+                )
+            except Exception as e:
+                db.session.rollback()
+                app.logger.exception(
+                    "Error adding sample bookings during DB initialization:"
+                )
+        else:
+            app.logger.warning(
+                "Could not find sample resources 'Conference Room Alpha' or 'Meeting Room Beta' to create bookings for. Skipping sample booking addition."
+            )
+
+        app.logger.info("Database initialization script completed.")
+
 def main():
     """Main function to run setup checks and tasks."""
     print("Starting project initialization...")
@@ -103,13 +397,13 @@ def main():
         print(f"Existing database found at {DB_PATH}. Skipping init_db to preserve data.")
         ensure_tags_column()
     else:
-        print("Initializing database (calling app.init_db)...")
+        print("Initializing database...")
         try:
             init_db()
-            print("Database initialization process (app.init_db) completed.")
+            print("Database initialization process completed.")
         except Exception as e:
-            print(f"An error occurred during database initialization (app.init_db): {e}")
-            print("Please check the output from app.init_db for more details, or run app.py with init_db() uncommented if issues persist.")
+            print(f"An error occurred during database initialization: {e}")
+            print("Please check the output from init_db for more details, or run this script again if issues persist.")
             sys.exit(1)  # Exit if DB initialization fails
 
     print("-" * 30)
