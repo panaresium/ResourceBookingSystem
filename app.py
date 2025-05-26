@@ -2242,8 +2242,8 @@ def api_login():
         add_audit_log(action="LOGIN_FAILED", details=f"Failed login attempt for username: '{username}'.")
         return jsonify({'error': 'Invalid username or password.'}), 401
 
+@csrf.exempt
 @app.route('/api/auth/logout', methods=['POST'])
-
 def api_logout():
     """Log out the current user if authenticated.
 
