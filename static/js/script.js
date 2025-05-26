@@ -281,13 +281,15 @@ async function handleLogout(event) {
         await updateAuthLink(); // Refresh navigation and UI
 
         const loginUrl = document.body.dataset.loginUrl || '/login';
-        // Always navigate to the login screen after logout. If already on the
-        // login page (where ``loginUrl`` may be "#"), simply reload so that the
-        // page reflects the logged-out state.
+        const homeUrl = '/';
+
+        // Navigate to the home page after logout. If already on the login page
+        // (where ``loginUrl`` may be "#"), a reload is sufficient to reflect the
+        // logged-out state.
         if (loginUrl === '#') {
             window.location.reload();
         } else {
-            window.location.href = loginUrl;
+            window.location.href = homeUrl;
         }
 
     } catch (error) {
