@@ -286,6 +286,7 @@ class Resource(db.Model):
     name = db.Column(db.String(100), unique=True, nullable=False)
     capacity = db.Column(db.Integer, nullable=True)
     equipment = db.Column(db.String(200), nullable=True)
+    tags = db.Column(db.String(200), nullable=True)
     booking_restriction = db.Column(db.String(50), nullable=True)
     status = db.Column(db.String(50), nullable=False, default='draft')
     published_at = db.Column(db.DateTime, nullable=True)
@@ -756,7 +757,8 @@ def init_db():
 
         app.logger.info("Adding sample resources...")
         try: 
-            res_alpha = Resource(name="Conference Room Alpha", capacity=10, equipment="Projector,Whiteboard,Teleconference", 
+            res_alpha = Resource(name="Conference Room Alpha", capacity=10, equipment="Projector,Whiteboard,Teleconference",
+                                 tags="large,video",
                                  booking_restriction=None, status='published', published_at=datetime.utcnow(),
                                  allowed_user_ids=None) # No specific user IDs, open to roles
             if standard_role_for_resource:
@@ -764,18 +766,21 @@ def init_db():
             if admin_role_for_resource: # Admins can also book
                 res_alpha.roles.append(admin_role_for_resource)
 
-            res_beta = Resource(name="Meeting Room Beta", capacity=6, equipment="Teleconference,Whiteboard", 
+            res_beta = Resource(name="Meeting Room Beta", capacity=6, equipment="Teleconference,Whiteboard",
+                                tags="medium",
                                 booking_restriction='all_users', status='published', published_at=datetime.utcnow(), # 'all_users' might be redundant now
                                 allowed_user_ids=f"{standard_user_id_str},{admin_user_id_str}") # Can keep user_ids for specific overrides
             # No specific roles assigned to Beta, relies on allowed_user_ids or booking_restriction logic
 
-            res_gamma = Resource(name="Focus Room Gamma", capacity=2, equipment="Whiteboard", 
+            res_gamma = Resource(name="Focus Room Gamma", capacity=2, equipment="Whiteboard",
+                                 tags="quiet",
                                  booking_restriction='admin_only', status='draft', published_at=None, # admin_only might be redundant
                                  allowed_user_ids=None)
             if admin_role_for_resource:
                 res_gamma.roles.append(admin_role_for_resource)
 
-            res_delta = Resource(name="Quiet Pod Delta", capacity=1, equipment=None, 
+            res_delta = Resource(name="Quiet Pod Delta", capacity=1, equipment=None,
+                                 tags="quiet,small",
                                  booking_restriction=None, status='draft', published_at=None,
                                  allowed_user_ids=None)
             if standard_role_for_resource:
@@ -784,6 +789,7 @@ def init_db():
             # Or rely on a global admin override in permission checking logic.
 
             res_omega = Resource(name="Archived Room Omega", capacity=5, equipment="Old Projector",
+                                 tags="archived",
                                  booking_restriction=None, status='archived', published_at=datetime.utcnow() - timedelta(days=30),
                                  allowed_user_ids=None)
             # Typically archived resources don't need role assignments unless there's a use case.
@@ -833,8 +839,23 @@ def init_db():
 @app.route("/api/resources", methods=['GET'])
 def get_resources():
     try:
-        # Filter resources by status
-        resources_query = Resource.query.filter_by(status='published').all() # MODIFIED HERE
+        query = Resource.query.filter_by(status='published')
+
+        capacity = request.args.get('capacity', type=int)
+        if capacity is not None:
+            query = query.filter(Resource.capacity >= capacity)
+
+        equipment = request.args.get('equipment')
+        if equipment:
+            for item in [e.strip().lower() for e in equipment.split(',') if e.strip()]:
+                query = query.filter(Resource.equipment.ilike(f'%{item}%'))
+
+        tags = request.args.get('tags')
+        if tags:
+            for tag in [t.strip().lower() for t in tags.split(',') if t.strip()]:
+                query = query.filter(Resource.tags.ilike(f'%{tag}%'))
+
+        resources_query = query.all()
             
         resources_list = []
         for resource in resources_query:
@@ -843,6 +864,7 @@ def get_resources():
                 'name': resource.name,
                 'capacity': resource.capacity,
                 'equipment': resource.equipment,
+                'tags': resource.tags,
                 'image_url': url_for('static', filename=f'resource_uploads/{resource.image_filename}') if resource.image_filename else None,
                 'floor_map_id': resource.floor_map_id,
                 'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,

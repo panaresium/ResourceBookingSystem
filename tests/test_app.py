@@ -40,12 +40,18 @@ class AppTests(unittest.TestCase):
 
         res1 = Resource(
             name='Room A',
+            capacity=10,
+            equipment='Projector,Whiteboard',
+            tags='large',
             floor_map_id=floor_map.id,
             map_coordinates=json.dumps({'type': 'rect', 'x': 10, 'y': 20, 'w': 30, 'h': 30}),
             status='published'
         )
         res2 = Resource(
             name='Room B',
+            capacity=4,
+            equipment='Whiteboard',
+            tags='small',
             floor_map_id=floor_map.id,
             map_coordinates=json.dumps({'type': 'rect', 'x': 50, 'y': 20, 'w': 30, 'h': 30}),
             status='published'
@@ -346,9 +352,6 @@ class AppTests(unittest.TestCase):
         self.assertEqual(len(email_log), 1)
         self.assertEqual(email_log[0]['to'], 'test@example.com')
         self.assertEqual(len(slack_log), 1)
-
-
-
 
 if __name__ == '__main__':
     unittest.main()
