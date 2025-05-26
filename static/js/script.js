@@ -300,12 +300,17 @@ async function displayAvailableResourcesNow() {
         const currentDateYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         const currentHour = now.getHours();
 
-        // Fetch all published resources using apiCall
-        // The API /api/resources should ideally only return published resources.
-        // The subtask mentions: "In displayAvailableResourcesNow, the check resource.status !== 'published' is redundant 
-        // if the API /api/resources already filters by published status. Verify API behavior and remove client-side check if appropriate."
-        // Assuming API filters, so no client-side status check here for now.
-        const resources = await apiCall('/api/resources', {}, availableResourcesListDiv);
+        const params = new URLSearchParams();
+        const capVal = document.getElementById('filter-capacity');
+        const equipVal = document.getElementById('filter-equipment');
+        const tagVal = document.getElementById('filter-tags');
+        if (capVal && capVal.value) params.append('capacity', capVal.value);
+        if (equipVal && equipVal.value) params.append('equipment', equipVal.value);
+        if (tagVal && tagVal.value) params.append('tags', tagVal.value);
+
+        const queryString = params.toString() ? `?${params.toString()}` : '';
+
+        const resources = await apiCall(`/api/resources${queryString}`, {}, availableResourcesListDiv);
 
         if (!resources || resources.length === 0) {
             showSuccess(availableResourcesListDiv, 'No resources found.'); // Use showSuccess for neutral info
@@ -2339,6 +2344,16 @@ Enter a title for your booking (optional):`);
     // --- Home Page Specific Logic ---
     const availableResourcesListDiv = document.getElementById('available-resources-now-list');
     if (availableResourcesListDiv) {
+        const filterContainer = document.createElement('div');
+        filterContainer.id = 'resource-filter-controls';
+        filterContainer.innerHTML = `
+            <label>Min Capacity: <input type="number" id="filter-capacity" min="1"></label>
+            <label>Equipment: <input type="text" id="filter-equipment" placeholder="Projector"></label>
+            <label>Tags: <input type="text" id="filter-tags" placeholder="tag1,tag2"></label>
+            <button id="apply-resource-filters">Apply Filters</button>
+        `;
+        availableResourcesListDiv.parentElement.insertBefore(filterContainer, availableResourcesListDiv);
+        document.getElementById('apply-resource-filters').addEventListener('click', displayAvailableResourcesNow);
         displayAvailableResourcesNow();
     }
 

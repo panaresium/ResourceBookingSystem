@@ -137,3 +137,14 @@ The project uses **Flask-Babel** for translations. Available languages are confi
    ```
 
 After compiling, restart the app and use the language selector in the page footer to switch between English (`en`) and Spanish (`es`).
+
+### Filtering Resources
+
+The `/api/resources` endpoint supports optional query parameters to narrow down
+results:
+
+- `capacity` – minimum capacity required (e.g. `?capacity=5`)
+- `equipment` – comma-separated equipment keywords (e.g. `?equipment=projector,whiteboard`)
+- `tags` – comma-separated tags assigned to a resource (e.g. `?tags=quiet`)
+
+These filters can be combined. Only resources with `status='published'` are returned.
