@@ -50,7 +50,7 @@ class AppTests(unittest.TestCase):
             equipment='Projector,Whiteboard',
             tags='large',
             floor_map_id=floor_map.id,
-            map_coordinates=json.dumps({'type': 'rect', 'x': 10, 'y': 20, 'w': 30, 'h': 30}),
+            map_coordinates=json.dumps({'type': 'rect', 'x': 10, 'y': 20, 'width': 30, 'height': 30}),
             status='published'
         )
         res2 = Resource(
@@ -59,7 +59,7 @@ class AppTests(unittest.TestCase):
             equipment='Whiteboard',
             tags='small',
             floor_map_id=floor_map.id,
-            map_coordinates=json.dumps({'type': 'rect', 'x': 50, 'y': 20, 'w': 30, 'h': 30}),
+            map_coordinates=json.dumps({'type': 'rect', 'x': 50, 'y': 20, 'width': 30, 'height': 30}),
             status='published'
         )
         db.session.add_all([res1, res2])

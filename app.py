@@ -342,7 +342,7 @@ class Resource(db.Model):
 
 
     floor_map_id = db.Column(db.Integer, db.ForeignKey('floor_map.id'), nullable=True)
-    map_coordinates = db.Column(db.Text, nullable=True) # To store JSON like {'type':'rect', 'x':10, 'y':20, 'w':50, 'h':30}
+    map_coordinates = db.Column(db.Text, nullable=True) # To store JSON like {'type':'rect', 'x':10, 'y':20, 'width':50, 'height':30}
     
     # Relationships
     bookings = db.relationship('Booking', backref='resource_booked', lazy=True, cascade="all, delete-orphan")
