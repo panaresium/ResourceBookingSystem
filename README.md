@@ -129,24 +129,17 @@ To run the test suite:
 
 ### Enabling Multiple Languages
 
-The project uses **Flask-Babel** for translations. Available languages are configured in `app.py` under `app.config['LANGUAGES']`. To add or update locales:
+Translations are stored in simple JSON files under `locales/`. Each file is named after its language code, such as `en.json` or `es.json`. To add a new language:
 
-1. Ensure the desired language code is listed in `app.config['LANGUAGES']`.
-2. Generate a new translation catalog:
-   ```bash
-   pybabel init -i messages.pot -d translations -l <lang>
+1. Ensure the desired language code is listed in `app.config['LANGUAGES']` in `app.py`.
+2. Create a `locales/<lang>.json` file mapping English phrases to their translations. Example structure:
+   ```json
+   {
+       "Home": "Inicio",
+       "Login": "Iniciar sesión"
+   }
    ```
-   For existing languages run:
-   ```bash
-   pybabel update -i messages.pot -d translations
-   ```
-3. Edit `translations/<lang>/LC_MESSAGES/messages.po` and provide translations for each string.
-4. Compile the catalogs so Flask can load them:
-   ```bash
-   pybabel compile -d translations
-   ```
-
-After compiling, restart the app and use the language selector in the page footer to switch between English (`en`) and Spanish (`es`).
+3. Restart the application. The language selector in the footer will load strings from the JSON files without any compilation step.
 
 ### Filtering Resources
 
