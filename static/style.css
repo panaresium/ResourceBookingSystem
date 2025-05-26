@@ -628,3 +628,19 @@ body.high-contrast input[type="submit"]:hover,
 body.high-contrast input[type="button"]:hover {
     color: #ffff00 !important; /* Yellow text on hover for buttons */
 }
+
+/* Responsive adjustments for smaller screens */
+@media (max-width: 600px) {
+    nav ul {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    nav ul li {
+        margin: 10px 0;
+    }
+    main {
+        width: 95%;
+        margin: 20px auto;
+        padding: 15px;
+    }
+}

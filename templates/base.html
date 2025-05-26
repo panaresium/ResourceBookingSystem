@@ -63,7 +63,7 @@
                 </button>
                 <div class="dropdown-menu" id="user-dropdown-menu" style="display: none; position: absolute; top: 100%; left: 0; background-color: #333; border: 1px solid #555; min-width: 160px; z-index: 1000; list-style-type: none; padding: 0; margin: 0; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
                     <a class="dropdown-item" href="{{ url_for('serve_profile_page') }}" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Profile') }}</a>
-                    <a class="dropdown-item" href="#" id="logout-link-dropdown" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Logout') }}</a>
+                    <a class="dropdown-item" href="{{ url_for('logout_and_redirect') }}" id="logout-link-dropdown" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Logout') }}</a>
                 </div>
             </li>
             {# Links for admin users or specific roles could be added here with appropriate checks #}
