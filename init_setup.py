@@ -98,6 +98,7 @@ def main():
     print("-" * 30)
     create_required_directories()
     print("-" * 30) 
+
     if os.path.exists(DB_PATH):
         print(f"Existing database found at {DB_PATH}. Skipping init_db to preserve data.")
         ensure_tags_column()
@@ -110,6 +111,7 @@ def main():
             print(f"An error occurred during database initialization (app.init_db): {e}")
             print("Please check the output from app.init_db for more details, or run app.py with init_db() uncommented if issues persist.")
             sys.exit(1)  # Exit if DB initialization fails
+
     print("-" * 30)
     print("Project initialization script completed successfully.")
     print("Remember to activate your virtual environment if you haven't already.")

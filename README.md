@@ -44,6 +44,7 @@ python init_setup.py
 
 This script checks your Python version, creates the required directories, and initializes the database **only if one does not already exist**.  When an existing `site.db` file is present it is left untouched, but the script will ensure new fields such as the `resource.tags` column are added when upgrading from older versions.  Run this once after cloning the repository or when updating to a newer release.
 
+
 ### Installing Dependencies
 
 Install the necessary Python packages by running:
@@ -94,7 +95,9 @@ The application uses an SQLite database to store resource information. If you ha
 
 If you upgrade from an earlier version and encounter a database error such as
 `no such column: resource.tags`, your `site.db` file is missing a recent field.
+
 Running `python init_setup.py` will now add this column automatically. If you prefer you can also run the helper script directly:
+
 
 ```bash
 python add_resource_tags_column.py
