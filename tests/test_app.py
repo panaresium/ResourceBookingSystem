@@ -3,7 +3,7 @@ import json
 
 from datetime import datetime, time, date, timedelta
 
-from app import app, db, User, Resource, Booking, WaitlistEntry, FloorMap, email_log
+from app import app, db, User, Resource, Booking, WaitlistEntry, FloorMap, email_log, teams_log
 
 # from flask_login import current_user # Not directly used for assertions here
 
@@ -19,9 +19,11 @@ class AppTests(unittest.TestCase):
         self.app_context = app.app_context()
         self.app_context.push() # Push app context for db operations
         
+        db.drop_all()
         db.create_all()
-        
+
         email_log.clear()
+        teams_log.clear()
 
         # Create a test user
         user = User.query.filter_by(username='testuser').first()
@@ -211,6 +213,8 @@ class AppTests(unittest.TestCase):
         self.assertEqual(WaitlistEntry.query.count(), 0)
         self.assertEqual(len(email_log), 1)
         self.assertEqual(email_log[0]['to'], other.email)
+        self.assertEqual(len(teams_log), 2)
+        self.assertTrue(any(entry['to'] == other.email for entry in teams_log))
 
     def test_analytics_dashboard_permissions(self):
         """Ensure analytics dashboard permissions are enforced."""
