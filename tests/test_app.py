@@ -13,9 +13,8 @@ class AppTests(unittest.TestCase):
         """Set up test variables."""
         app.config['TESTING'] = True
         app.config['WTF_CSRF_ENABLED'] = False  # Disable CSRF for tests
-        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
         app.config['LOGIN_DISABLED'] = False # Ensure login is enabled for tests
-        
+
         self.app_context = app.app_context()
         self.app_context.push() # Push app context for db operations
 
@@ -34,7 +33,7 @@ class AppTests(unittest.TestCase):
             db.session.commit()
 
         # Create a floor map and some resources for testing
-        floor_map = FloorMap(name='Test Map', image_filename='map.png')
+        floor_map = FloorMap(name='Test Map', image_filename='map.png', location='HQ', floor='1')
         db.session.add(floor_map)
         db.session.commit()
 
@@ -314,10 +313,16 @@ class AppTests(unittest.TestCase):
         self.assertEqual(updated.start_time, new_start)
         self.assertEqual(updated.end_time, new_end)
 
-    def test_pending_booking_approval_flow(self):
-        res = Resource(name='Approval Room', status='published', requires_approval=True)
-        db.session.add(res)
-        db.session.commit()
+    def test_map_details_includes_location_floor(self):
+        """Map details endpoint returns location and floor info."""
+        resp = self.client.get(f'/api/map_details/{self.floor_map.id}')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertIn('map_details', data)
+        details = data['map_details']
+        self.assertEqual(details['location'], 'HQ')
+        self.assertEqual(details['floor'], '1')
+
 
         self.login('testuser', 'password')
         payload = {

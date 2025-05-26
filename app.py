@@ -271,9 +271,12 @@ class FloorMap(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     image_filename = db.Column(db.String(255), nullable=False, unique=True) # Store unique filename
+    location = db.Column(db.String(100), nullable=True)
+    floor = db.Column(db.String(50), nullable=True)
 
     def __repr__(self):
-        return f"<FloorMap {self.name} ({self.image_filename})>"
+        loc_floor = f"{self.location or 'N/A'} - Floor {self.floor}" if self.location or self.floor else ""
+        return f"<FloorMap {self.name} ({loc_floor})>"
 
 # Association table for Resource and Role (Many-to-Many for resource-specific role permissions)
 resource_roles_table = db.Table('resource_roles',
@@ -949,6 +952,8 @@ def upload_floor_map():
     
     file = request.files['map_image']
     map_name = request.form.get('map_name')
+    location = request.form.get('location')
+    floor = request.form.get('floor')
 
     if not map_name:
         app.logger.warning("Map name missing in upload request.")
@@ -977,7 +982,8 @@ def upload_floor_map():
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(file_path)
 
-            new_map = FloorMap(name=map_name, image_filename=filename)
+            new_map = FloorMap(name=map_name, image_filename=filename,
+                               location=location, floor=floor)
             db.session.add(new_map)
             db.session.commit()
             app.logger.info(f"Floor map '{map_name}' uploaded successfully by {current_user.username}.")
@@ -986,6 +992,8 @@ def upload_floor_map():
                 'id': new_map.id,
                 'name': new_map.name,
                 'image_filename': new_map.image_filename,
+                'location': new_map.location,
+                'floor': new_map.floor,
                 'image_url': url_for('static', filename=f'floor_map_uploads/{new_map.image_filename}')
             }), 201
         except Exception as e:
@@ -1014,6 +1022,8 @@ def get_floor_maps():
                 'id': m.id,
                 'name': m.name,
                 'image_filename': m.image_filename,
+                'location': m.location,
+                'floor': m.floor,
                 'image_url': url_for('static', filename=f'floor_map_uploads/{m.image_filename}')
             })
         app.logger.info("Successfully fetched all floor maps for admin.")
@@ -1937,7 +1947,9 @@ def get_map_details(map_id):
         map_details_response = {
             'id': floor_map.id,
             'name': floor_map.name,
-            'image_url': url_for('static', filename=f'floor_map_uploads/{floor_map.image_filename}')
+            'image_url': url_for('static', filename=f'floor_map_uploads/{floor_map.image_filename}'),
+            'location': floor_map.location,
+            'floor': floor_map.floor
         }
         
         # Ensure only published resources are shown on the public map view

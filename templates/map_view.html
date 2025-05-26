@@ -117,6 +117,12 @@
         <label for="map-availability-date">{{ _('View Availability for Date:') }}</label>
         <input type="date" id="map-availability-date" name="map-availability-date">
     </div>
+    <div>
+        <label for="map-location-select">{{ _('Location:') }}</label>
+        <select id="map-location-select"></select>
+        <label for="map-floor-select">{{ _('Floor:') }}</label>
+        <select id="map-floor-select"></select>
+    </div>
     <div id="map-container" data-map-id="{{ map_id_from_flask }}"></div>
     <div id="map-loading-status">{{ _('Loading map and resources...') }}</div>
     <div id="time-slot-modal" class="modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="modal-title">
