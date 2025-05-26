@@ -3,7 +3,7 @@ import json
 
 from datetime import datetime, time, date, timedelta
 
-from app import app, db, User, Resource, Booking, WaitlistEntry, FloorMap, email_log
+from app import app, db, User, Resource, Booking, WaitlistEntry, FloorMap, email_log, slack_log
 
 # from flask_login import current_user # Not directly used for assertions here
 
@@ -18,10 +18,12 @@ class AppTests(unittest.TestCase):
         
         self.app_context = app.app_context()
         self.app_context.push() # Push app context for db operations
-        
+
+        db.drop_all()
         db.create_all()
-        
+
         email_log.clear()
+        slack_log.clear()
 
         # Create a test user
         user = User.query.filter_by(username='testuser').first()
@@ -305,6 +307,45 @@ class AppTests(unittest.TestCase):
         updated = Booking.query.get(booking.id)
         self.assertEqual(updated.start_time, new_start)
         self.assertEqual(updated.end_time, new_end)
+
+    def test_pending_booking_approval_flow(self):
+        res = Resource(name='Approval Room', status='published', requires_approval=True)
+        db.session.add(res)
+        db.session.commit()
+
+        self.login('testuser', 'password')
+        payload = {
+            'resource_id': res.id,
+            'date_str': date.today().strftime('%Y-%m-%d'),
+            'start_time_str': '10:00',
+            'end_time_str': '11:00',
+            'title': 'Needs Approval',
+            'user_name': 'testuser'
+        }
+        resp_create = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
+        self.assertEqual(resp_create.status_code, 201)
+        booking_id = resp_create.get_json()['id']
+        booking = Booking.query.get(booking_id)
+        self.assertEqual(booking.status, 'pending')
+        self.logout()
+
+        admin = User(username='adminapprove', email='adminapprove@example.com', is_admin=True)
+        admin.set_password('password')
+        db.session.add(admin)
+        db.session.commit()
+        self.login('adminapprove', 'password')
+
+        resp_pending = self.client.get('/admin/bookings/pending')
+        self.assertEqual(resp_pending.status_code, 200)
+        self.assertEqual(len(resp_pending.get_json()), 1)
+
+        resp_approve = self.client.post(f'/admin/bookings/{booking_id}/approve')
+        self.assertEqual(resp_approve.status_code, 200)
+        booking = Booking.query.get(booking_id)
+        self.assertEqual(booking.status, 'approved')
+        self.assertEqual(len(email_log), 1)
+        self.assertEqual(email_log[0]['to'], 'test@example.com')
+        self.assertEqual(len(slack_log), 1)
 
 
 
