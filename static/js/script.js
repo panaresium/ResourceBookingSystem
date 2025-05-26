@@ -264,7 +264,7 @@ async function updateAuthLink() {
 }
 
 async function handleLogout(event) {
-    if (event) event.preventDefault();
+    // Allow default navigation to provide a server-side fallback
     
     // No specific message element for logout link, errors will be alerted or handled in catch.
     try {
@@ -280,8 +280,8 @@ async function handleLogout(event) {
         
         await updateAuthLink(); // Refresh navigation and UI
 
-        // Redirect to the public resources page after successful logout
-        window.location.href = '/resources';
+        // Redirect via server route to ensure session is cleared
+        window.location.href = '/logout';
 
     } catch (error) {
         sessionStorage.removeItem('userPerformedLoginAction'); // Also clear on failed logout attempt
@@ -290,6 +290,8 @@ async function handleLogout(event) {
         console.error('Logout error:', error);
         // Ensure UI is in a logged-out state even if API call had issues
         await updateAuthLink(); // This will execute setStateLoggedOut due to the flag
+        // Fallback redirect
+        window.location.href = '/logout';
     }
 }
 
