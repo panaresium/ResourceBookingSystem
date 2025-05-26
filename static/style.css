@@ -38,7 +38,7 @@ nav {
     background-color: var(--background-color-dark);
     color: var(--text-color-light);
     padding: 1em 0;
-    text-align: center;
+    text-align: left;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
 }
 
@@ -46,11 +46,12 @@ nav ul {
     list-style-type: none;
     padding: 0;
     margin: 0;
+    display: flex;
+    align-items: center;
 }
 
 nav ul li {
-    display: inline;
-    margin: 0 15px; /* Adjusted margin */
+    margin: 0 15px;
 }
 
 nav ul li a {
@@ -64,6 +65,24 @@ nav ul li a:hover,
 nav ul li a:focus {
     text-decoration: underline;
     color: var(--text-color-light); /* Ensure hover color is light on dark background */
+}
+
+/* Align login link and user menu to the right */
+#auth-link-container,
+#user-dropdown-container {
+    margin-left: auto;
+}
+
+/* Style for the small user icon used in the dropdown button */
+.user-icon {
+    font-size: 1.2em;
+    margin-right: 2px;
+}
+
+/* Keep icon and arrow vertically centered */
+#user-dropdown-button {
+    display: flex;
+    align-items: center;
 }
 
 main {
@@ -378,6 +397,7 @@ body.high-contrast nav {
     background-color: #000000 !important;
     color: #ffffff !important;
     box-shadow: 0 2px 5px rgba(255,255,255,0.2) !important; /* Light shadow on dark bg */
+    text-align: left !important;
 }
 
 body.high-contrast nav ul li a {
@@ -569,6 +589,7 @@ body.high-contrast input[type="button"]:focus {
 }
 body.high-contrast nav {
     box-shadow: 0 2px 5px rgba(255,255,255,0.2) !important;
+    text-align: left !important;
 }
 body.high-contrast footer {
     box-shadow: 0 -2px 5px rgba(255,255,255,0.2) !important;
