@@ -277,6 +277,18 @@ class TestAuthAPI(AppTests): # Inherit from AppTests for setup/teardown
         self.assertIsNotNone(logout_log)
         self.assertIn("User 'testuser' logged out", logout_log.details)
 
+    def test_logout_route_redirects(self):
+        """Ensure /logout logs out the user and redirects to the resources page."""
+        login_resp = self.login('testuser', 'password')
+        self.assertEqual(login_resp.status_code, 200)
+
+        response = self.client.get('/logout', follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/resources', response.location)
+
+        auth_status = self.client.get('/api/auth/status').get_json()
+        self.assertFalse(auth_status.get('logged_in'))
+
 
 class TestBookingUserActions(AppTests):
     def _create_booking(self, user_name, resource_id, start_offset_hours, duration_hours=1, title="Test Booking"):
