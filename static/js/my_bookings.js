@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchAndDisplayBookings() {
         showLoading(statusDiv, 'Loading your bookings...');
         try {
-            const bookings = await apiCall('/api/bookings/my_bookings', 'GET');
+            const bookings = await apiCall('/api/bookings/my_bookings');
             bookingsListDiv.innerHTML = ''; // Clear loading message or previous bookings
 
             if (bookings.length === 0) {
@@ -83,7 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (confirm(`Are you sure you want to cancel booking ID ${bookingId}?`)) {
                 showLoading(statusDiv, `Cancelling booking ${bookingId}...`);
                 try {
-                    await apiCall(`/api/bookings/${bookingId}`, 'DELETE');
+                    await apiCall(`/api/bookings/${bookingId}`, { method: 'DELETE' });
                     showSuccess(statusDiv, `Booking ${bookingId} cancelled successfully.`);
                     // Remove the booking item from the UI
                     target.closest('.booking-item').remove();
@@ -114,7 +114,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const bookingId = target.dataset.bookingId;
             showLoading(statusDiv, 'Checking in...');
             try {
-                await apiCall(`/api/bookings/${bookingId}/check_in`, 'POST');
+                await apiCall(`/api/bookings/${bookingId}/check_in`, { method: 'POST' });
                 target.style.display = 'none';
                 const bookingItemDiv = target.closest('.booking-item');
                 const checkOutBtn = bookingItemDiv.querySelector('.check-out-btn');
@@ -130,7 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const bookingId = target.dataset.bookingId;
             showLoading(statusDiv, 'Checking out...');
             try {
-                await apiCall(`/api/bookings/${bookingId}/check_out`, 'POST');
+                await apiCall(`/api/bookings/${bookingId}/check_out`, { method: 'POST' });
                 target.style.display = 'none';
                 showSuccess(statusDiv, 'Checked out successfully.');
             } catch (error) {
@@ -152,7 +152,11 @@ document.addEventListener('DOMContentLoaded', () => {
         showLoading(updateModalStatusDiv, 'Saving changes...');
 
         try {
-            const updatedBooking = await apiCall(`/api/bookings/${bookingId}`, 'PUT', { title: newTitle });
+            const updatedBooking = await apiCall(`/api/bookings/${bookingId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: newTitle })
+            });
             
             // Update the UI
             const bookingItemDiv = bookingsListDiv.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
