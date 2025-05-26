@@ -628,3 +628,16 @@ body.high-contrast input[type="submit"]:hover,
 body.high-contrast input[type="button"]:hover {
     color: #ffff00 !important; /* Yellow text on hover for buttons */
 }
+
+/* Styles for past bookings on My Bookings page */
+.past-booking {
+    opacity: 0.65; /* Make it slightly faded */
+    background-color: #f8f9fa; /* A light grey background */
+    border-left: 5px solid #6c757d; /* A darker grey left border */
+}
+
+.past-booking .btn {
+    /* Optionally, style buttons in past bookings, e.g., disable update/check-in */
+    /* For now, just ensuring they also get slightly faded if not specifically targeted */
+    opacity: 0.8;
+}

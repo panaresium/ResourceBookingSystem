@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const updateBookingModalLabel = document.getElementById('updateBookingModalLabel');
     const modalBookingIdInput = document.getElementById('modal-booking-id');
     const newBookingTitleInput = document.getElementById('new-booking-title');
-    const saveBookingTitleBtn = document.getElementById('save-booking-title-btn');
+    const saveBookingChangesBtn = document.getElementById('save-booking-changes-btn'); // Renamed variable
     const updateModalStatusDiv = document.getElementById('update-modal-status');
 
     // Helper to display status messages (could be moved to script.js if used globally)
@@ -55,14 +55,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 titleSpan.dataset.originalTitle = booking.title || ''; // Store original title
 
                 const startTimeSpan = bookingItemClone.querySelector('.start-time');
-                startTimeSpan.textContent = new Date(booking.start_time).toLocaleString();
+                const startDate = new Date(booking.start_time);
+                startTimeSpan.textContent = `${startDate.toLocaleDateString('en-CA')} ${startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
                 startTimeSpan.dataset.originalStartTime = booking.start_time;
 
                 const endTimeSpan = bookingItemClone.querySelector('.end-time');
-                endTimeSpan.textContent = new Date(booking.end_time).toLocaleString();
+                const endDate = new Date(booking.end_time);
+                endTimeSpan.textContent = `${endDate.toLocaleDateString('en-CA')} ${endDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
                 endTimeSpan.dataset.originalEndTime = booking.end_time;
                 
                 bookingItemClone.querySelector('.recurrence-rule').textContent = booking.recurrence_rule || '';
+
+                // Visually distinguish past bookings
+                const now = new Date();
+                if (endDate < now) {
+                    bookingItemDiv.classList.add('past-booking');
+                }
                 
                 const updateBtn = bookingItemClone.querySelector('.update-booking-btn');
                 updateBtn.dataset.bookingId = booking.id;
@@ -173,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Handle modal form submission for updating booking
-    saveBookingTitleBtn.addEventListener('click', async () => {
+    saveBookingChangesBtn.addEventListener('click', async () => { // Use renamed variable
         const bookingId = modalBookingIdInput.value;
         const newTitle = newBookingTitleInput.value.trim();
 
