@@ -202,13 +202,12 @@ async function updateAuthLink() {
         const data = await apiCall('/api/auth/status'); 
 
         if (data.logged_in && data.user) {
-            // Auto-logout if session is found on startup without explicit login action in this tab
-            if (userPerformedLoginActionBeforeApiCall !== 'true' && 
-                sessionStorage.getItem('autoLoggedOutDueToStartupSession') !== 'true') {
-                console.warn('User authenticated on page load without prior login action in this tab. Performing auto-logout.');
-                sessionStorage.setItem('autoLoggedOutDueToStartupSession', 'true');
-                await handleLogout(); // This will set explicitlyLoggedOut and clear userPerformedLoginAction
-                return; 
+            // If a session exists but no login action was recorded in this tab
+            // (e.g. the user opened a new tab while already logged in), mark
+            // the tab as having performed a login so the UI remains in sync
+            // without triggering a logout.
+            if (userPerformedLoginActionBeforeApiCall !== 'true') {
+                sessionStorage.setItem('userPerformedLoginAction', 'true');
             }
 
             sessionStorage.setItem('loggedInUserUsername', data.user.username);
