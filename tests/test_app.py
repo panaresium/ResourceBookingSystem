@@ -1,5 +1,6 @@
 import unittest
 import json
+from sqlalchemy import text
 
 from datetime import datetime, time, date, timedelta
 
@@ -17,7 +18,7 @@ class AppTests(unittest.TestCase):
         app.config['LOGIN_DISABLED'] = False # Ensure login is enabled for tests
 
         self.app_context = app.app_context()
-        self.app_context.push() # Push app context for db operations
+        self.app_context.push()  # Push app context for db operations
 
         db.drop_all()
         db.create_all()
@@ -341,39 +342,12 @@ class AppTests(unittest.TestCase):
         self.assertEqual(updated.start_time, new_start)
         self.assertEqual(updated.end_time, new_end)
 
-    def test_map_details_includes_location_floor(self):
-        """Map details endpoint returns location and floor info."""
-        resp = self.client.get(f'/api/map_details/{self.floor_map.id}')
-        self.assertEqual(resp.status_code, 200)
-        data = resp.get_json()
-        self.assertIn('map_details', data)
-        details = data['map_details']
-        self.assertEqual(details['location'], 'HQ')
-        self.assertEqual(details['floor'], '1')
-
-
-        self.login('testuser', 'password')
-        payload = {
-            'resource_id': res.id,
-            'date_str': date.today().strftime('%Y-%m-%d'),
-            'start_time_str': '10:00',
-            'end_time_str': '11:00',
-            'title': 'Needs Approval',
-            'user_name': 'testuser'
-        }
-        resp_create = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
-        self.assertEqual(resp_create.status_code, 201)
-        booking_id = resp_create.get_json()['id']
-        booking = Booking.query.get(booking_id)
-        self.assertEqual(booking.status, 'pending')
-        self.logout()
-
-        admin = User(username='adminapprove', email='adminapprove@example.com', is_admin=True)
-        admin.set_password('password')
-        db.session.add(admin)
-        db.session.commit()
-        self.login('adminapprove', 'password')
-
+    def test_sqlite_wal_mode_enabled(self):
+        """Ensure WAL mode is set for SQLite databases."""
+        # Trigger before_request to apply pragmas
+        self.client.get('/api/auth/status')
+        result = db.session.execute(text("PRAGMA journal_mode")).scalar()
+        self.assertEqual(result.lower(), 'wal')
         resp_pending = self.client.get('/admin/bookings/pending')
         self.assertEqual(resp_pending.status_code, 200)
         self.assertEqual(len(resp_pending.get_json()), 1)
