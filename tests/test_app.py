@@ -19,6 +19,7 @@ class AppTests(unittest.TestCase):
         self.app_context = app.app_context()
         self.app_context.push() # Push app context for db operations
         
+        db.drop_all()
         db.create_all()
         
         email_log.clear()
@@ -38,12 +39,18 @@ class AppTests(unittest.TestCase):
 
         res1 = Resource(
             name='Room A',
+            capacity=10,
+            equipment='Projector,Whiteboard',
+            tags='large',
             floor_map_id=floor_map.id,
             map_coordinates=json.dumps({'type': 'rect', 'x': 10, 'y': 20, 'w': 30, 'h': 30}),
             status='published'
         )
         res2 = Resource(
             name='Room B',
+            capacity=4,
+            equipment='Whiteboard',
+            tags='small',
             floor_map_id=floor_map.id,
             map_coordinates=json.dumps({'type': 'rect', 'x': 50, 'y': 20, 'w': 30, 'h': 30}),
             status='published'
@@ -305,6 +312,24 @@ class AppTests(unittest.TestCase):
         updated = Booking.query.get(booking.id)
         self.assertEqual(updated.start_time, new_start)
         self.assertEqual(updated.end_time, new_end)
+
+    def test_resource_filters(self):
+        """/api/resources respects capacity, equipment and tags filters."""
+        resp = self.client.get('/api/resources?capacity=5')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['name'], 'Room A')
+
+        resp = self.client.get('/api/resources?equipment=projector')
+        data = resp.get_json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['name'], 'Room A')
+
+        resp = self.client.get('/api/resources?tags=small')
+        data = resp.get_json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['name'], 'Room B')
 
 
 
