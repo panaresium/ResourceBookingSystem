@@ -3,8 +3,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const bookingItemTemplate = document.getElementById('booking-item-template');
     const statusDiv = document.getElementById('my-bookings-status');
 
-    const updateModal = new bootstrap.Modal(document.getElementById('update-booking-modal'));
     const updateModalElement = document.getElementById('update-booking-modal');
+    let updateModal;
+    if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+        updateModal = new bootstrap.Modal(updateModalElement);
+    } else {
+        updateModal = {
+            show: () => { if (updateModalElement) updateModalElement.style.display = 'block'; },
+            hide: () => { if (updateModalElement) updateModalElement.style.display = 'none'; }
+        };
+    }
     const updateBookingModalLabel = document.getElementById('updateBookingModalLabel');
     const modalBookingIdInput = document.getElementById('modal-booking-id');
     const newBookingTitleInput = document.getElementById('new-booking-title');
