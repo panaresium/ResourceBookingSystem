@@ -40,6 +40,14 @@
                     <label for="resource-equipment">{{ _('Equipment:') }}</label>
                     <input type="text" id="resource-equipment" name="equipment">
                 </div>
+                <div>
+                    <label for="resource-status-modal">{{ _('Status:') }}</label>
+                    <select id="resource-status-modal" name="status" class="form-control">
+                        <option value="draft">{{ _('Draft') }}</option>
+                        <option value="published">{{ _('Published') }}</option>
+                        <option value="archived">{{ _('Archived') }}</option>
+                    </select>
+                </div>
                 <button type="submit" class="button" style="margin-top: 10px;">{{ _('Save Resource') }}</button>
                 <div id="resource-form-modal-status" class="status-message" style="margin-top: 10px;"></div>
             </form>

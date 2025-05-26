@@ -280,17 +280,8 @@ async function handleLogout(event) {
         
         await updateAuthLink(); // Refresh navigation and UI
 
-        const loginUrl = document.body.dataset.loginUrl || '/login';
-        const homeUrl = '/';
-
-        // Navigate to the home page after logout. If already on the login page
-        // (where ``loginUrl`` may be "#"), a reload is sufficient to reflect the
-        // logged-out state.
-        if (loginUrl === '#') {
-            window.location.reload();
-        } else {
-            window.location.href = homeUrl;
-        }
+        // Always redirect to /login after successful logout
+        window.location.href = '/login';
 
     } catch (error) {
         sessionStorage.removeItem('userPerformedLoginAction'); // Also clear on failed logout attempt

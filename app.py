@@ -384,7 +384,9 @@ class Resource(db.Model):
     # Maximum number of occurrences allowed when creating recurring bookings.
     max_recurrence_count = db.Column(db.Integer, nullable=True)
 
-
+    # Scheduled status change fields
+    scheduled_status = db.Column(db.String(50), nullable=True)
+    scheduled_status_at = db.Column(db.DateTime, nullable=True)
 
     floor_map_id = db.Column(db.Integer, db.ForeignKey('floor_map.id'), nullable=True)
     map_coordinates = db.Column(db.Text, nullable=True) # To store JSON like {'type':'rect', 'x':10, 'y':20, 'width':50, 'height':30}
@@ -494,7 +496,9 @@ def resource_to_dict(resource: Resource) -> dict:
         'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
         'is_under_maintenance': resource.is_under_maintenance,
         'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
-        'max_recurrence_count': resource.max_recurrence_count
+        'max_recurrence_count': resource.max_recurrence_count,
+        'scheduled_status': resource.scheduled_status,
+        'scheduled_status_at': resource.scheduled_status_at.isoformat() if resource.scheduled_status_at else None
     }
 # --- Simple Email Notification System ---
 email_log = []
@@ -1165,7 +1169,12 @@ def update_resource_details(resource_id):
         return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
 
     # Fields that can be updated via this endpoint
-    allowed_fields = ['name', 'capacity', 'equipment', 'status', 'booking_restriction', 'allowed_user_ids', 'is_under_maintenance', 'maintenance_until', 'max_recurrence_count']  # role_ids handled separately
+    allowed_fields = [
+        'name', 'capacity', 'equipment', 'status', 
+        'booking_restriction', 'allowed_user_ids', 
+        'is_under_maintenance', 'maintenance_until', 
+        'max_recurrence_count', 'scheduled_status', 'scheduled_status_at'
+    ]
     
     # Validate status if provided
     if 'status' in data:
@@ -1234,6 +1243,27 @@ def update_resource_details(resource_id):
                         return jsonify({'error': 'max_recurrence_count must be an integer or null.'}), 400
                 else:
                     resource.max_recurrence_count = None
+            elif field == 'scheduled_status':
+                value = data.get('scheduled_status')
+                # Allowed: 'draft', 'published', 'archived', or None (empty string from form becomes None)
+                valid_scheduled_statuses = ['draft', 'published', 'archived']
+                if value is None or value == "":
+                    resource.scheduled_status = None
+                elif value not in valid_scheduled_statuses:
+                    return jsonify({'error': f"Invalid scheduled_status value '{value}'. Allowed: {valid_scheduled_statuses} or empty/null."}), 400
+                else:
+                    resource.scheduled_status = value
+            elif field == 'scheduled_status_at':
+                value = data.get('scheduled_status_at')
+                if value is None or value == "":
+                    resource.scheduled_status_at = None
+                else:
+                    try:
+                        if not isinstance(value, str): # Basic type check
+                             raise ValueError("Input must be a string for datetime conversion")
+                        resource.scheduled_status_at = datetime.fromisoformat(value)
+                    except ValueError:
+                        return jsonify({'error': 'Invalid scheduled_status_at format. Use ISO datetime string (YYYY-MM-DDTHH:MM:SS) or empty/null.'}), 400
             else: # For 'name', 'equipment'
                 setattr(resource, field, data[field])
 
@@ -1274,7 +1304,9 @@ def update_resource_details(resource_id):
             'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
             'is_under_maintenance': resource.is_under_maintenance,
             'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
-            'max_recurrence_count': resource.max_recurrence_count
+            'max_recurrence_count': resource.max_recurrence_count,
+            'scheduled_status': resource.scheduled_status,
+            'scheduled_status_at': resource.scheduled_status_at.isoformat() if resource.scheduled_status_at else None
         }
         add_audit_log(action="UPDATE_RESOURCE_DETAILS_SUCCESS", details=f"Resource ID {resource.id} ('{resource.name}') details updated. Data: {str(data)}")
         return jsonify(updated_resource_data), 200
@@ -2437,7 +2469,8 @@ def delete_booking_by_user(booking_id):
 @login_required
 def update_booking_by_user(booking_id):
     """
-    Allows an authenticated user to update the title of their own booking.
+    Allows an authenticated user to update the title, start_time, or end_time of their own booking.
+    Expects start_time and end_time as ISO 8601 formatted datetime strings.
     """
     try:
         booking = Booking.query.get(booking_id)
@@ -2450,82 +2483,138 @@ def update_booking_by_user(booking_id):
             app.logger.warning(f"User '{current_user.username}' unauthorized attempt to update booking ID: {booking_id} owned by '{booking.user_name}'.")
             return jsonify({'error': 'You are not authorized to update this booking.'}), 403
 
-        old_title = booking.title
-        old_start_time = booking.start_time
-        old_end_time = booking.end_time
-
         data = request.get_json()
         if not data:
             app.logger.warning(f"User '{current_user.username}' attempt to update booking ID: {booking_id} with no JSON data.")
             return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
 
-        updated = False
+        old_title = booking.title
+        old_start_time = booking.start_time
+        old_end_time = booking.end_time
+        
+        changes_made = False
+        change_details_list = []
 
+        # Handle title update
         if 'title' in data:
             new_title = str(data.get('title', '')).strip()
             if not new_title:
+                app.logger.warning(f"User '{current_user.username}' provided empty title for booking {booking_id}.")
                 return jsonify({'error': 'Title cannot be empty.'}), 400
-            old_title = booking.title
             if new_title != old_title:
                 booking.title = new_title
-                updated = True
+                changes_made = True
+                change_details_list.append(f"title from '{old_title}' to '{new_title}'")
 
-        if 'start_time' in data or 'end_time' in data:
-            new_start_str = data.get('start_time')
-            new_end_str = data.get('end_time')
-            if not new_start_str or not new_end_str:
-                return jsonify({'error': 'start_time and end_time are required.'}), 400
+        # Handle start_time and end_time updates
+        new_start_iso = data.get('start_time')
+        new_end_iso = data.get('end_time')
+
+        # Determine if time update is intended
+        time_update_intended = new_start_iso is not None or new_end_iso is not None
+        
+        parsed_new_start_time = None
+        parsed_new_end_time = None
+
+        if time_update_intended:
+            if not new_start_iso or not new_end_iso:
+                app.logger.warning(f"User '{current_user.username}' provided incomplete time for booking {booking_id}. Start: {new_start_iso}, End: {new_end_iso}")
+                return jsonify({'error': 'Both start_time and end_time are required if one is provided.'}), 400
             try:
-                new_start = datetime.fromisoformat(new_start_str)
-                new_end = datetime.fromisoformat(new_end_str)
+                parsed_new_start_time = datetime.fromisoformat(new_start_iso)
+                parsed_new_end_time = datetime.fromisoformat(new_end_iso)
             except ValueError:
-                return jsonify({'error': 'Invalid datetime format.'}), 400
-            booking.start_time = new_start
-            booking.end_time = new_end
-            updated = True
+                app.logger.warning(f"User '{current_user.username}' provided invalid ISO format for booking {booking_id}. Start: {new_start_iso}, End: {new_end_iso}")
+                return jsonify({'error': 'Invalid datetime format. Use ISO 8601.'}), 400
 
-        if not updated:
+            if parsed_new_start_time >= parsed_new_end_time:
+                app.logger.warning(f"User '{current_user.username}' provided start_time not before end_time for booking {booking_id}.")
+                return jsonify({'error': 'Start time must be before end time.'}), 400
+
+            resource = Resource.query.get(booking.resource_id)
+            if not resource: # Should not happen if booking exists, but good practice
+                app.logger.error(f"Resource ID {booking.resource_id} for booking {booking_id} not found during update.")
+                return jsonify({'error': 'Associated resource not found.'}), 500
+            
+            # Check for maintenance conflict ONLY IF the new time range is different from old,
+            # to allow title changes for bookings already in maintenance.
+            time_changed = parsed_new_start_time != old_start_time or parsed_new_end_time != old_end_time
+            if time_changed and resource.is_under_maintenance:
+                # Check if the new booking period overlaps with the maintenance period
+                maintenance_active = False
+                if resource.maintenance_until is None: # Indefinite maintenance
+                    maintenance_active = True
+                else: # Maintenance with an end date
+                    if parsed_new_start_time < resource.maintenance_until or parsed_new_end_time <= resource.maintenance_until:
+                        maintenance_active = True
+                
+                if maintenance_active:
+                    # Further check: if the *original* booking was already entirely within this maintenance, allow time changes within it.
+                    # This is complex. For now, a simpler check: if new times fall into active maintenance, reject.
+                    # A more nuanced check might be needed if bookings *during* maintenance are allowed to be shifted.
+                    # Current logic: if resource is under maintenance and new times are proposed, check them.
+                    maint_until_str = resource.maintenance_until.isoformat() if resource.maintenance_until else "indefinitely"
+                    app.logger.warning(f"Booking update for {booking_id} conflicts with resource maintenance (until {maint_until_str}).")
+                    return jsonify({'error': f'Resource is under maintenance until {maint_until_str} and the new time slot falls within this period.'}), 403
+
+            # Conflict checking with other bookings
+            if time_changed:
+                conflicting_booking = Booking.query.filter(
+                    Booking.resource_id == booking.resource_id,
+                    Booking.id != booking_id,  # Exclude the current booking
+                    Booking.start_time < parsed_new_end_time,
+                    Booking.end_time > parsed_new_start_time
+                ).first()
+
+                if conflicting_booking:
+                    app.logger.warning(f"Update for booking {booking_id} conflicts with existing booking {conflicting_booking.id} for resource {booking.resource_id}.")
+                    return jsonify({'error': 'The updated time slot conflicts with an existing booking.'}), 409
+            
+            if time_changed:
+                booking.start_time = parsed_new_start_time
+                booking.end_time = parsed_new_end_time
+                changes_made = True
+                change_details_list.append(f"time from {old_start_time.isoformat()} to {parsed_new_start_time.isoformat()}-{parsed_new_end_time.isoformat()}")
+
+        if not changes_made:
+            app.logger.info(f"User '{current_user.username}' submitted update for booking {booking_id} with no actual changes.")
             return jsonify({'error': 'No changes supplied.'}), 400
 
         db.session.commit()
-
-        changes = []
-        if 'title' in data and booking.title != old_title:
-            changes.append(f"title from '{old_title}' to '{booking.title}'")
-        if ('start_time' in data or 'end_time' in data) and (booking.start_time != old_start_time or booking.end_time != old_end_time):
-            changes.append(
-                f"time from {old_start_time.isoformat()}-{old_end_time.isoformat()} to {booking.start_time.isoformat()}-{booking.end_time.isoformat()}"
-            )
-
+        
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
 
-        # Send update email
-        if mail_available and current_user.email:
+        # Send update email if times changed
+        if mail_available and current_user.email and any("time from" in change for change in change_details_list):
             try:
                 msg = Message(
                     subject="Booking Updated",
                     recipients=[current_user.email],
                     body=(
-                        f"Your booking for {resource_name} has been updated. "
-                        f"New time: {booking.start_time.strftime('%Y-%m-%d %H:%M')} - {booking.end_time.strftime('%Y-%m-%d %H:%M')}. "
-                        f"Title: {booking.title}."
+                        f"Your booking for {resource_name} has been updated.\n"
+                        f"New Title: {booking.title}\n"
+                        f"New Start Time: {booking.start_time.strftime('%Y-%m-%d %H:%M')}\n"
+                        f"New End Time: {booking.end_time.strftime('%Y-%m-%d %H:%M')}\n"
                     )
                 )
                 mail.send(msg)
-            except Exception:
-                app.logger.exception(f"Failed to send booking update email to {current_user.email}:")
-
-        change_text = '; '.join(changes) if changes else 'no changes'
+            except Exception as e:
+                app.logger.exception(f"Failed to send booking update email to {current_user.email} for booking {booking_id}: {e}")
+        
+        change_summary_text = '; '.join(change_details_list)
         add_audit_log(
             action="UPDATE_BOOKING_USER",
-            details=f"User '{current_user.username}' updated booking ID: {booking.id} for resource '{resource_name}'. Changes: {change_text}.",
+            details=(
+                f"User '{current_user.username}' updated booking ID: {booking.id} "
+                f"for resource '{resource_name}'. Changes: {change_summary_text}."
+            )
         )
-        app.logger.info(f"User '{current_user.username}' updated booking ID: {booking.id}. Changes: {change_text}.")
+        app.logger.info(f"User '{current_user.username}' successfully updated booking ID: {booking.id}. Changes: {change_summary_text}.")
         
         return jsonify({
             'id': booking.id,
             'resource_id': booking.resource_id,
-            'resource_name': resource_name,
+            'resource_name': resource_name, # Fetch or ensure it's available
             'user_name': booking.user_name,
             'start_time': booking.start_time.isoformat(),
             'end_time': booking.end_time.isoformat(),
@@ -2534,7 +2623,7 @@ def update_booking_by_user(booking_id):
 
     except Exception as e:
         db.session.rollback()
-        app.logger.exception(f"Error updating booking ID {booking_id} for user '{current_user.username}':")
+        app.logger.exception(f"Error updating booking ID {booking_id} for user '{current_user.username}': {e}")
         add_audit_log(action="UPDATE_BOOKING_USER_FAILED", details=f"User '{current_user.username}' failed to update booking ID: {booking_id}. Error: {str(e)}")
         return jsonify({'error': 'Failed to update booking due to a server error.'}), 500
 
@@ -2654,6 +2743,70 @@ scheduler.add_job(
     'interval',
     minutes=app.config.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', 5)
 )
+
+# --- Scheduled Resource Status Change Job ---
+def apply_scheduled_resource_status_changes():
+    with app.app_context(): # Required for database operations outside of Flask request context
+        now = datetime.utcnow()
+        # Query for resources that have a scheduled_status_at in the past or present,
+        # and have a non-null, non-empty scheduled_status.
+        resources_to_update = Resource.query.filter(
+            Resource.scheduled_status_at.isnot(None),
+            Resource.scheduled_status_at <= now,
+            Resource.scheduled_status.isnot(None),
+            Resource.scheduled_status != ""  # Explicitly exclude empty string as a target status
+        ).all()
+
+        if not resources_to_update:
+            # app.logger.info("No resource status changes to apply at this time.") # Optional: for debugging
+            return
+
+        for resource in resources_to_update:
+            old_status = resource.status
+            new_status = resource.scheduled_status # This is now guaranteed not to be None or ""
+            
+            app.logger.info(
+                f"Applying scheduled status change for resource {resource.id} ('{resource.name}') "
+                f"from '{old_status}' to '{new_status}' scheduled for {resource.scheduled_status_at.isoformat()}"
+            )
+            
+            resource.status = new_status
+            
+            # Handle published_at logic if status changes to 'published'
+            if new_status == 'published' and old_status != 'published':
+                # Set/update published_at when transitioning to 'published'
+                # This aligns with how publish_resource endpoint behaves (sets it unconditionally)
+                # and how update_resource_details behaves (sets if it was None and changing to published).
+                # Using `resource.scheduled_status_at` for precision, or `now` if that's preferred.
+                resource.published_at = resource.scheduled_status_at 
+            
+            add_audit_log(
+                action="SYSTEM_APPLY_SCHEDULED_STATUS",
+                details=(
+                    f"Resource {resource.id} ('{resource.name}') status automatically changed "
+                    f"from '{old_status}' to '{new_status}' as scheduled for {resource.scheduled_status_at.isoformat()}."
+                ),
+                username="System" # Explicitly mark as a system action
+            )
+            
+            # Clear the scheduled fields after applying the change
+            resource.scheduled_status = None
+            resource.scheduled_status_at = None
+        
+        try:
+            db.session.commit()
+            app.logger.info(f"Successfully applied scheduled status changes for {len(resources_to_update)} resources.")
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"Error committing scheduled status changes: {e}", exc_info=True)
+
+# Add the new job to the scheduler
+scheduler.add_job(
+    apply_scheduled_resource_status_changes,
+    'interval',
+    minutes=1 # Check every minute, or a longer interval like 5 minutes
+)
+
 
 # Exported names for easier importing in tests and other modules
 __all__ = [
