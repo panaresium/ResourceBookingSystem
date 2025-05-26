@@ -357,6 +357,21 @@ class AppTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(Booking.query.filter_by(user_name='testuser').count(), 3)
 
+    def test_malformed_rrule_returns_400(self):
+        self.login('testuser', 'password')
+        payload = {
+            'resource_id': self.resource1.id,
+            'date_str': date.today().strftime('%Y-%m-%d'),
+            'start_time_str': '09:00',
+            'end_time_str': '10:00',
+            'title': 'Bad Recurrence',
+            'user_name': 'testuser',
+            'recurrence_rule': 'FREQ=DAILY;COUNT=abc'
+        }
+        resp = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(Booking.query.count(), 0)
+
     def test_sqlite_wal_mode_enabled(self):
         """Ensure WAL mode is set for SQLite databases."""
         admin = User(username='waladmin', email='wal@example.com', is_admin=True)
