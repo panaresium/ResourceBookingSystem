@@ -441,6 +441,18 @@ document.addEventListener('DOMContentLoaded', function() {
         const manualTimeInputsDiv = document.getElementById('manual-time-inputs');
         const startTimeInput = document.getElementById('start-time');
         const endTimeInput = document.getElementById('end-time');
+        const recurrenceToggle = document.getElementById('enable-recurrence');
+        const recurrenceSelect = document.getElementById('recurrence-rule');
+
+        if (recurrenceToggle && recurrenceSelect) {
+            recurrenceSelect.disabled = !recurrenceToggle.checked;
+            recurrenceToggle.addEventListener('change', function() {
+                recurrenceSelect.disabled = !this.checked;
+                if (!this.checked) {
+                    recurrenceSelect.value = '';
+                }
+            });
+        }
 
         quickTimeOptions.forEach(radio => {
             radio.addEventListener('change', function() {
@@ -596,14 +608,19 @@ document.addEventListener('DOMContentLoaded', function() {
                     bookingResultsDiv.className = 'success'; // Apply class for styling
                     bookingResultsDiv.style.display = 'block'; // Make sure it's visible
                 }
-                
+
                 bookingForm.reset(); // Reset form fields
                 // Reset quick time options to manual and ensure UI updates
                 const manualRadio = document.querySelector('input[name="quick_time_option"][value="manual"]');
                 if(manualRadio) {
                     manualRadio.checked = true;
                     // Trigger change to ensure manual time inputs are shown if hidden
-                    manualRadio.dispatchEvent(new Event('change')); 
+                    manualRadio.dispatchEvent(new Event('change'));
+                }
+                if (recurrenceToggle && recurrenceSelect) {
+                    recurrenceToggle.checked = false;
+                    recurrenceSelect.disabled = true;
+                    recurrenceSelect.value = '';
                 }
             } catch (error) {
                 // apiCall already displayed the error in bookingResultsDiv.

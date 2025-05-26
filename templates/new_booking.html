@@ -17,8 +17,13 @@
             <input type="date" id="booking-date" name="booking_date">
         </div>
         <div>
-            <label for="recurrence-rule">{{ _('Recurrence Rule:') }}</label>
-            <input type="text" id="recurrence-rule" name="recurrence_rule" placeholder="FREQ=DAILY;COUNT=3">
+            <input type="checkbox" id="enable-recurrence">
+            <label for="enable-recurrence">{{ _('Repeat Booking') }}</label>
+            <select id="recurrence-rule" name="recurrence_rule" disabled>
+                <option value="">{{ _('Select recurrence') }}</option>
+                <option value="FREQ=DAILY;COUNT=3">{{ _('Daily for 3 days') }}</option>
+                <option value="FREQ=WEEKLY;COUNT=3">{{ _('Weekly for 3 weeks') }}</option>
+            </select>
         </div>
         <div>
             <fieldset>
