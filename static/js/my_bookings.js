@@ -70,7 +70,11 @@ document.addEventListener('DOMContentLoaded', () => {
             hideStatusMessage(statusDiv);
         } catch (error) {
             console.error('Error fetching bookings:', error);
-            showError(statusDiv, error.message || 'Failed to load bookings. Please try again.');
+            if (error.message && error.message.includes('401')) {
+                showError(statusDiv, 'Please log in to view your bookings.');
+            } else {
+                showError(statusDiv, error.message || 'Failed to load bookings. Please try again.');
+            }
         }
     }
 

@@ -296,8 +296,7 @@ async function handleLogout(event) {
         sessionStorage.removeItem('userPerformedLoginAction'); // Also clear on failed logout attempt
         sessionStorage.removeItem('autoLoggedOutDueToStartupSession');
         sessionStorage.setItem('explicitlyLoggedOut', 'true');
-        // apiCall helper would have logged the error. Alert a generic message.
-        alert("Logout failed. Please try again or check the console for details.");
+        console.error('Logout error:', error);
         // Ensure UI is in a logged-out state even if API call had issues
         await updateAuthLink(); // This will execute setStateLoggedOut due to the flag
     }
