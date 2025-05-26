@@ -80,11 +80,15 @@ The application uses an SQLite database to store resource information. If you ha
 3. In the Flask shell, import the `init_db` function and run it:
    ```python
    >>> from app import init_db
-   >>> init_db() # This will also add sample resources
+   >>> init_db()  # Creates tables and adds sample data if the database is empty
    ```
    This will create a `site.db` file in the `data/` directory and set up the tables.
    You should see messages indicating success.
-**Important:** You only need to run `init_db()` once. Running it again will not harm anything by default with `db.create_all()`, but it's not necessary.
+   Pass `force=True` if you want to **reset and wipe** existing data:
+   ```python
+   >>> init_db(force=True)
+   ```
+**Important:** You only need to run `init_db()` once in a fresh environment. Omitting `force=True` will keep existing records intact.
 
 ### Email Configuration
 

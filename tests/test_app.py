@@ -401,5 +401,18 @@ class AppTests(unittest.TestCase):
         self.assertEqual(len(email_log), 1)
         self.assertEqual(len(slack_log), 1)
 
+    def test_init_db_does_not_wipe_without_force(self):
+        """init_db should preserve data unless force=True."""
+        from app import init_db
+
+        user = User(username='keepme', email='keep@example.com', is_admin=False)
+        user.set_password('pass')
+        db.session.add(user)
+        db.session.commit()
+
+        init_db()
+
+        self.assertIsNotNone(User.query.filter_by(username='keepme').first())
+
 if __name__ == '__main__':
     unittest.main()
