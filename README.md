@@ -99,9 +99,10 @@ The application uses an SQLite database to store resource information. If you ha
 ### Updating Existing Databases
 
 If you upgrade from an earlier version and encounter a database error such as
-`no such column: resource.tags`, `no such column: resource.image_filename`, or
-`no such column: floor_map.location`, your `site.db` file is missing recently
-added fields.
+`no such column: resource.tags`, `no such column: resource.image_filename`,
+`no such column: floor_map.location`, or
+`no such column: resource.scheduled_status`, your `site.db` file is missing
+recently added fields.
 
 Running `python init_setup.py` will now add these columns automatically. If you prefer you can also run the helper script directly:
 

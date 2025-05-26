@@ -534,6 +534,8 @@ class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusi
         db.session.expire_all()  # Refresh session state after job commits
 
 
+        db.session.expire_all()  # Refresh session state after job commits
+
         updated_res1 = Resource.query.get(resource_id_1)
         self.assertEqual(updated_res1.status, "published")
         self.assertIsNotNone(updated_res1.published_at)
@@ -566,6 +568,8 @@ class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusi
         mock_datetime.utcnow.return_value = datetime.utcnow() # Mock 'now' again
 
         apply_scheduled_resource_status_changes()
+        db.session.expire_all()  # Refresh after second job
+
         db.session.expire_all()  # Refresh after second job
 
         updated_res2 = Resource.query.get(resource_id_2)

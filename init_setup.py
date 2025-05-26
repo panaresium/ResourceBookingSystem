@@ -203,7 +203,6 @@ def ensure_scheduled_status_columns():
             conn.close()
 
 
-
 # Moved from app.py
 def init_db(force=False):
     with app.app_context():
