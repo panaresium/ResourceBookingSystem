@@ -12,6 +12,7 @@ from authlib.integrations.flask_client import OAuth # Added for Google Sign-In
 from google_auth_oauthlib.flow import Flow
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+import requests
 import pathlib # For finding the client_secret.json file path
 import logging # Added for logging
 from functools import wraps # For permission_required decorator
@@ -397,6 +398,8 @@ def add_audit_log(action: str, details: str, user_id: int = None, username: str 
 email_log = []
 slack_log = []
 
+teams_log = []
+
 def send_email(to_address: str, subject: str, body: str):
     """Log an outgoing email (placeholder for real email delivery)."""
     email_entry = {
@@ -408,14 +411,22 @@ def send_email(to_address: str, subject: str, body: str):
     email_log.append(email_entry)
     app.logger.info(f"Email queued to {to_address}: {subject}")
 
-def send_slack_notification(message: str):
-    """Log a Slack notification (placeholder for real integration)."""
-    slack_entry = {
-        'message': message,
+def send_teams_notification(to_email: str, title: str, text: str):
+    """Send a simple Teams notification via webhook if configured."""
+    log_entry = {
+        'to': to_email,
+        'title': title,
+        'text': text,
         'timestamp': datetime.utcnow().isoformat(),
     }
-    slack_log.append(slack_entry)
-    app.logger.info(f"Slack notification queued: {message}")
+    teams_log.append(log_entry)
+    webhook = os.environ.get('TEAMS_WEBHOOK_URL')
+    if webhook and to_email:
+        try:
+            payload = {'title': title, 'text': f"{to_email}: {text}"}
+            requests.post(webhook, json=payload, timeout=5)
+        except Exception:
+            app.logger.exception(f"Failed to send Teams notification to {to_email}")
 
 @app.route("/")
 @login_required
@@ -2277,6 +2288,13 @@ def create_booking():
                     f"Failed to send booking confirmation email to {current_user.email}:"
                 )
 
+        if current_user.email:
+            send_teams_notification(
+                current_user.email,
+                "Booking Created",
+                f"Your booking for {resource.name} on {new_booking.start_time.strftime('%Y-%m-%d %H:%M')} to {new_booking.end_time.strftime('%H:%M')} is confirmed."
+            )
+
         created_booking_data = {
             'id': new_booking.id,
             'resource_id': new_booking.resource_id,
@@ -2396,6 +2414,13 @@ def delete_booking_by_user(booking_id):
         db.session.delete(booking)
         db.session.commit()
 
+        if current_user.email:
+            send_teams_notification(
+                current_user.email,
+                "Booking Cancelled",
+                f"Your booking for {resource_name} starting at {booking_start.strftime('%Y-%m-%d %H:%M')} has been cancelled."
+            )
+
 
         # Notify next user on waitlist, if any
         next_entry = (
@@ -2413,6 +2438,12 @@ def delete_booking_by_user(booking_id):
                     f"Slot available for {resource_name}",
                     f"The slot you requested for {resource_name} is now available.",
                 )
+                if user_to_notify.email:
+                    send_teams_notification(
+                        user_to_notify.email,
+                        "Waitlist Slot Released",
+                        f"A slot for {resource_name} is now available to book."
+                    )
 
 
         add_audit_log(
@@ -2662,7 +2693,7 @@ __all__ = [
     "WaitlistEntry",
     "FloorMap",
     "email_log",
-    "slack_log",
+    "teams_log",
     "scheduler",
 
 ]

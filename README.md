@@ -100,6 +100,16 @@ Flask-Mail is used to send email notifications when bookings are created, update
 
 If these variables are not provided, placeholder values from `app.py` will be used.
 
+### Teams Notifications
+
+To enable Microsoft Teams notifications, create an incoming webhook URL in your Teams channel and set it in the environment variable `TEAMS_WEBHOOK_URL` before running the application:
+
+```
+export TEAMS_WEBHOOK_URL="https://outlook.office.com/webhook/your-webhook-url"
+```
+
+Users must have an email address set in their profile to receive Teams alerts for booking creation, cancellation and waitlist releases.
+
 ### Running Tests
 
 To run the test suite:
