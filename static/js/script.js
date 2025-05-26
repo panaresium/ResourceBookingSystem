@@ -280,8 +280,8 @@ async function handleLogout(event) {
         
         await updateAuthLink(); // Refresh navigation and UI
 
-        // Always redirect to /login after successful logout
-        window.location.href = '/login';
+        // Redirect to home page after successful logout
+        window.location.href = '/';
 
     } catch (error) {
         sessionStorage.removeItem('userPerformedLoginAction'); // Also clear on failed logout attempt
