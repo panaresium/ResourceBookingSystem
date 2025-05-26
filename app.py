@@ -17,7 +17,7 @@ import pathlib # For finding the client_secret.json file path
 import logging # Added for logging
 from functools import wraps # For permission_required decorator
 from flask import abort # For permission_required decorator
-from flask_babel import Babel, gettext as _ # For i18n
+from flask import g  # For storing current locale
 from flask_wtf.csrf import CSRFProtect # For CSRF protection
 from flask_socketio import SocketIO
 
@@ -90,6 +90,38 @@ if not os.path.exists(DATA_DIR):
 app = Flask(__name__, template_folder='templates', static_folder='static')
 socketio = SocketIO(app)
 
+# --- Simple JSON-based translation system ---
+class SimpleTranslator:
+    def __init__(self, translations_dir='locales', default_locale='en'):
+        self.translations_dir = os.path.join(basedir, translations_dir)
+        self.default_locale = default_locale
+        self.translations = {}
+        self._load_translations()
+
+    def _load_translations(self):
+        if not os.path.isdir(self.translations_dir):
+            return
+        for fname in os.listdir(self.translations_dir):
+            if fname.endswith('.json'):
+                code = fname.rsplit('.', 1)[0]
+                path = os.path.join(self.translations_dir, fname)
+                with open(path, 'r', encoding='utf-8') as f:
+                    try:
+                        self.translations[code] = json.load(f)
+                    except Exception:
+                        self.translations[code] = {}
+
+    def gettext(self, text, lang=None):
+        lang = lang or self.default_locale
+        return self.translations.get(lang, {}).get(text, text)
+
+translator = SimpleTranslator()
+
+def _(text):
+    return translator.gettext(text, get_locale())
+
+app.jinja_env.globals['_'] = _
+
 # Define locale selector function first
 def get_locale():
     # Try to get language from query parameter first
@@ -107,10 +139,11 @@ def get_locale():
     # For now, assume 'app' is in scope as it was in the original.
     return request.accept_languages.best_match(app.config.get('LANGUAGES', ['en']))
 
-# Initialize Babel for i18n
-babel = Babel(app, locale_selector=get_locale) # Pass the function here
+# Set locale on `g` and provide languages to templates
+@app.before_request
+def set_locale():
+    g.locale = get_locale()
 
-# Make languages available in templates
 @app.context_processor
 def inject_languages():
     return {'available_languages': app.config.get('LANGUAGES', ['en'])}
@@ -123,9 +156,7 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev_secret_key_123!@#')
 # Initialize CSRF Protection - AFTER app.config['SECRET_KEY'] is set
 csrf = CSRFProtect(app)
 
-# Babel Configuration
-app.config['BABEL_DEFAULT_LOCALE'] = 'en'
-app.config['BABEL_DEFAULT_TIMEZONE'] = 'UTC'
+# Localization configuration
 app.config['LANGUAGES'] = ['en', 'es']
 
 # Google OAuth Configuration - Recommended to use environment variables
@@ -246,7 +277,7 @@ login_manager.login_message_category = 'info'
 # Example of wrapping a message that Flask-Login might use.
 # Note: This specific message is often configured directly in Flask-Login,
 # but if it were a custom message, this is how you'd wrap it.
-login_manager.login_message = _('Please log in to access this page.')
+login_manager.login_message = 'Please log in to access this page.'
 
 @login_manager.user_loader
 def load_user(user_id):
