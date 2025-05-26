@@ -33,7 +33,11 @@ class AppTests(unittest.TestCase):
             db.session.commit()
 
         # Create a floor map and some resources for testing
-        floor_map = FloorMap(name='Test Map', image_filename='map.png', location='HQ', floor='1')
+        import uuid
+        unique_name = f"Test Map {uuid.uuid4()}"
+        unique_file = f"{uuid.uuid4()}.png"
+        floor_map = FloorMap(name=unique_name, image_filename=unique_file)
+
         db.session.add(floor_map)
         db.session.commit()
 
@@ -191,6 +195,26 @@ class AppTests(unittest.TestCase):
         entries = WaitlistEntry.query.filter_by(resource_id=resource.id).all()
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0].user_id, other.id)
+
+    def test_booking_blocked_when_resource_under_maintenance(self):
+        resource = Resource(name='MaintRoom', status='published', is_under_maintenance=True,
+                            maintenance_until=datetime.utcnow() + timedelta(days=1))
+        db.session.add(resource)
+        db.session.commit()
+
+        self.login('testuser', 'password')
+        payload = {
+            'resource_id': resource.id,
+            'date_str': date.today().strftime('%Y-%m-%d'),
+            'start_time_str': '09:00',
+            'end_time_str': '10:00',
+            'title': 'test',
+            'user_name': 'testuser'
+        }
+        resp = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn('maintenance', resp.get_json().get('error', '').lower())
+        self.assertEqual(Booking.query.count(), 0)
 
     def test_cancellation_notifies_waitlisted_user(self):
         resource = Resource(name='Room1', status='published')

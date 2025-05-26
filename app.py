@@ -298,7 +298,9 @@ class Resource(db.Model):
 
     image_filename = db.Column(db.String(255), nullable=True)  # <-- Add this line
 
-    requires_approval = db.Column(db.Boolean, nullable=False, default=False)
+    is_under_maintenance = db.Column(db.Boolean, nullable=False, default=False)
+    maintenance_until = db.Column(db.DateTime, nullable=True)
+
 
 
     floor_map_id = db.Column(db.Integer, db.ForeignKey('floor_map.id'), nullable=True)
@@ -872,10 +874,12 @@ def get_resources():
                 'floor_map_id': resource.floor_map_id,
                 'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
                 'booking_restriction': resource.booking_restriction,
-                'status': resource.status, 
+                'status': resource.status,
                 'published_at': resource.published_at.isoformat() if resource.published_at else None,
                 'allowed_user_ids': resource.allowed_user_ids,
-                'roles': [{'id': role.id, 'name': role.name} for role in resource.roles]
+                'roles': [{'id': role.id, 'name': role.name} for role in resource.roles],
+                'is_under_maintenance': resource.is_under_maintenance,
+                'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None
             })
         app.logger.info("Successfully fetched published resources.")
         return jsonify(resources_list), 200
@@ -903,6 +907,10 @@ def get_resource_availability(resource_id):
         if not resource:
             app.logger.warning(f"Resource availability check for non-existent resource ID: {resource_id}")
             return jsonify({'error': 'Resource not found.'}), 404
+
+        if resource.is_under_maintenance and (resource.maintenance_until is None or target_date_obj <= resource.maintenance_until.date()):
+            until_str = resource.maintenance_until.isoformat() if resource.maintenance_until else 'until further notice'
+            return jsonify({'error': f'Resource under maintenance until {until_str}.'}), 403
 
         bookings_on_date = Booking.query.filter(
             Booking.resource_id == resource_id,
@@ -1209,7 +1217,7 @@ def update_resource_details(resource_id):
         return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
 
     # Fields that can be updated via this endpoint (excluding 'allowed_roles' string field)
-    allowed_fields = ['name', 'capacity', 'equipment', 'status', 'booking_restriction', 'allowed_user_ids'] # role_ids handled separately
+    allowed_fields = ['name', 'capacity', 'equipment', 'status', 'booking_restriction', 'allowed_user_ids', 'is_under_maintenance', 'maintenance_until'] # role_ids handled separately
     
     # Validate status if provided
     if 'status' in data:
@@ -1258,6 +1266,17 @@ def update_resource_details(resource_id):
                 else:
                     app.logger.warning(f"Incorrect type for allowed_user_ids for resource {resource_id}: {type(user_ids_str_list)}")
                     return jsonify({'error': 'allowed_user_ids must be a string or null.'}), 400
+            elif field == 'is_under_maintenance':
+                resource.is_under_maintenance = bool(data.get('is_under_maintenance'))
+            elif field == 'maintenance_until':
+                maint_val = data.get('maintenance_until')
+                if maint_val:
+                    try:
+                        resource.maintenance_until = datetime.fromisoformat(maint_val)
+                    except ValueError:
+                        return jsonify({'error': 'Invalid maintenance_until format. Use ISO datetime.'}), 400
+                else:
+                    resource.maintenance_until = None
             elif field == 'allowed_roles':
                 roles_str = data.get('allowed_roles')
                 if roles_str is None or roles_str.strip() == "":
@@ -1301,7 +1320,9 @@ def update_resource_details(resource_id):
             'roles': [{'id': role.id, 'name': role.name} for role in resource.roles], # Return new roles list
             # Map-related fields are not updated here, but returned for consistency
             'floor_map_id': resource.floor_map_id,
-            'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None
+            'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
+            'is_under_maintenance': resource.is_under_maintenance,
+            'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None
         }
         add_audit_log(action="UPDATE_RESOURCE_DETAILS_SUCCESS", details=f"Resource ID {resource.id} ('{resource.name}') details updated. Data: {str(data)}")
         return jsonify(updated_resource_data), 200
@@ -2190,6 +2211,10 @@ def create_booking():
     except ValueError:
         app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} with invalid date/time format: {date_str} {start_time_str}-{end_time_str}")
         return jsonify({'error': 'Invalid date or time format.'}), 400
+
+    if resource.is_under_maintenance and (resource.maintenance_until is None or new_booking_start_time < resource.maintenance_until):
+        until_str = resource.maintenance_until.isoformat() if resource.maintenance_until else 'until further notice'
+        return jsonify({'error': f'Resource under maintenance until {until_str}.'}), 403
     
     conflicting_booking = Booking.query.filter(
         Booking.resource_id == resource_id,

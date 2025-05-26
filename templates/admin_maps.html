@@ -124,6 +124,10 @@
                     <option value="">{{ _('Default (All Authenticated Users unless specified below)') }}</option>
                     <option value="admin_only">{{ _('Admin Only') }}</option>
                 </select>
+                <label for="edit-resource-maintenance">{{ _('Under Maintenance:') }}</label>
+                <input type="checkbox" id="edit-resource-maintenance" name="is_under_maintenance">
+                <label for="edit-resource-maintenance-until">{{ _('Maintenance Until:') }}</label>
+                <input type="datetime-local" id="edit-resource-maintenance-until" name="maintenance_until">
                 <div class="permission-group">
                     <h4>{{ _('Authorized Specific Users (Optional)') }}</h4>
                     <p class="small-text">{{ _('If specified, only these users (and admins) can book.') }}</p>
