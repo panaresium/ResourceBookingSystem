@@ -14,5 +14,21 @@
   "Profile": "Perfil",
   "Logout": "Cerrar sesión",
   "Language:": "Idioma:",
-  "Please log in to access this page.": "Por favor inicie sesión para acceder a esta página."
+  "Please log in to access this page.": "Por favor inicie sesión para acceder a esta página.",
+  "Update Booking": "Actualizar Reserva",
+  "Cancel Booking": "Cancelar Reserva",
+  "Check In": "Registrar Entrada",
+  "Check Out": "Registrar Salida",
+  "Close": "Cerrar",
+  "Save Changes": "Guardar Cambios",
+  "Update Booking Title": "Actualizar Título de Reserva",
+  "New Title": "Nuevo Título",
+  "New Start Date": "Nueva Fecha de Inicio",
+  "New Start Time": "Nueva Hora de Inicio",
+  "New End Date": "Nueva Fecha de Fin",
+  "New End Time": "Nueva Hora de Fin",
+  "Recurrence": "Recurrencia",
+  "Title": "Título",
+  "Starts": "Comienza",
+  "Ends": "Termina"
 }
