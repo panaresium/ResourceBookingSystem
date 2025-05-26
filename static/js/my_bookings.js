@@ -46,6 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 bookingItemClone.querySelector('.start-time').textContent = new Date(booking.start_time).toLocaleString();
                 bookingItemClone.querySelector('.end-time').textContent = new Date(booking.end_time).toLocaleString();
+                bookingItemClone.querySelector('.recurrence-rule').textContent = booking.recurrence_rule || '';
                 
                 const updateBtn = bookingItemClone.querySelector('.update-booking-btn');
                 updateBtn.dataset.bookingId = booking.id;

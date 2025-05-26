@@ -128,6 +128,8 @@
                 <input type="checkbox" id="edit-resource-maintenance" name="is_under_maintenance">
                 <label for="edit-resource-maintenance-until">{{ _('Maintenance Until:') }}</label>
                 <input type="datetime-local" id="edit-resource-maintenance-until" name="maintenance_until">
+                <label for="edit-resource-recurrence-limit">{{ _('Max Recurrence Count:') }}</label>
+                <input type="number" id="edit-resource-recurrence-limit" name="max_recurrence_count" min="1">
                 <div class="permission-group">
                     <h4>{{ _('Authorized Specific Users (Optional)') }}</h4>
                     <p class="small-text">{{ _('If specified, only these users (and admins) can book.') }}</p>

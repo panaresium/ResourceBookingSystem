@@ -518,6 +518,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const dateValue = dateInput ? dateInput.value : '';
             const startTimeValue = startTimeInput ? startTimeInput.value : '';
             const endTimeValue = endTimeInput ? endTimeInput.value : '';
+            const recurrenceInput = document.getElementById('recurrence-rule');
+            const recurrenceValue = recurrenceInput ? recurrenceInput.value : '';
             
             let titleValue = 'User Booking'; // Default title
             if (resourceSelectBooking && resourceSelectBooking.selectedIndex >= 0 && resourceSelectBooking.value) {
@@ -541,8 +543,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 date_str: dateValue,
                 start_time_str: startTimeValue,
                 end_time_str: endTimeValue,
-                title: titleValue, 
-                user_name: loggedInUsername // Already fetched and checked
+                title: titleValue,
+                user_name: loggedInUsername, // Already fetched and checked
+                recurrence_rule: recurrenceValue
             };
 
             try {
@@ -553,17 +556,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 }, bookingResultsDiv); // Pass bookingResultsDiv for messages
 
                 // apiCall throws on error, so if we're here, it's a success
+                const created = responseData.bookings || [responseData];
                 let resourceName = 'N/A';
                 if (resourceSelectBooking && resourceSelectBooking.selectedIndex !== -1) {
                     const selectedOption = resourceSelectBooking.options[resourceSelectBooking.selectedIndex];
                     resourceName = selectedOption.dataset.resourceName || selectedOption.text.split(' (Capacity:')[0];
                 }
 
-                const displayDate = responseData.start_time ? responseData.start_time.split(' ')[0] : 'N/A';
-                const displayStartTime = responseData.start_time ? responseData.start_time.split(' ')[1].substring(0,5) : 'N/A';
-                const displayEndTime = responseData.end_time ? responseData.end_time.split(' ')[1].substring(0,5) : 'N/A';
-                const displayTitle = responseData.title || 'N/A';
-                const displayBookingId = responseData.id || 'N/A';
+                const first = created[0];
+                const displayDate = first.start_time ? first.start_time.split(' ')[0] : 'N/A';
+                const displayStartTime = first.start_time ? first.start_time.split(' ')[1].substring(0,5) : 'N/A';
+                const displayEndTime = first.end_time ? first.end_time.split(' ')[1].substring(0,5) : 'N/A';
+                const displayTitle = first.title || 'N/A';
+                const displayBookingId = first.id || 'N/A';
 
                 // Construct HTML string for success message
                 const successHtml = `
@@ -572,7 +577,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     Date: ${displayDate}<br>
                     Time: ${displayStartTime} - ${displayEndTime}<br>
                     Title: ${displayTitle}<br>
-                    Booking ID: ${displayBookingId}</p>
+                    Booking ID: ${displayBookingId}<br>
+                    Created: ${created.length} booking(s)</p>
                 `;
                 // Use showSuccess with HTML content
                 if (bookingResultsDiv) { // Ensure div exists
