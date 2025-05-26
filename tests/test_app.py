@@ -1,5 +1,6 @@
 import unittest
 import json
+from sqlalchemy import text
 
 from datetime import datetime, time, date, timedelta
 
@@ -17,8 +18,9 @@ class AppTests(unittest.TestCase):
         app.config['LOGIN_DISABLED'] = False # Ensure login is enabled for tests
         
         self.app_context = app.app_context()
-        self.app_context.push() # Push app context for db operations
-        
+        self.app_context.push()  # Push app context for db operations
+
+        db.drop_all()
         db.create_all()
         
         email_log.clear()
@@ -305,6 +307,13 @@ class AppTests(unittest.TestCase):
         updated = Booking.query.get(booking.id)
         self.assertEqual(updated.start_time, new_start)
         self.assertEqual(updated.end_time, new_end)
+
+    def test_sqlite_wal_mode_enabled(self):
+        """Ensure WAL mode is set for SQLite databases."""
+        # Trigger before_request to apply pragmas
+        self.client.get('/api/auth/status')
+        result = db.session.execute(text("PRAGMA journal_mode")).scalar()
+        self.assertEqual(result.lower(), 'wal')
 
 
 

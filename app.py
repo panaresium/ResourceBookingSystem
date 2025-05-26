@@ -1,6 +1,6 @@
 from flask import Flask, jsonify, render_template, request, url_for, redirect, session, Blueprint # Added Blueprint
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func # Add this
+from sqlalchemy import func, text  # Add this and for WAL pragma setup
 from datetime import datetime, date, timedelta, time # Ensure all are here
 import os
 import json # For serializing coordinates
@@ -185,6 +185,40 @@ def get_google_flow():
     )
 
 db = SQLAlchemy(app)
+
+
+# Configure SQLite pragmas (e.g., WAL mode) on the first request
+_sqlite_configured = False
+
+
+def configure_sqlite_pragmas():
+    """Apply WAL-related pragmas for SQLite databases once."""
+    global _sqlite_configured
+    if _sqlite_configured:
+        return
+    _sqlite_configured = True
+    if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite'):
+        try:
+            engine = db.engine
+            if hasattr(engine, "execute"):
+                engine.execute(text("PRAGMA journal_mode=WAL"))
+                engine.execute(text("PRAGMA synchronous=NORMAL"))
+                engine.execute(text("PRAGMA busy_timeout=30000"))
+            else:
+                with engine.connect() as conn:
+                    conn.execute(text("PRAGMA journal_mode=WAL"))
+                    conn.execute(text("PRAGMA synchronous=NORMAL"))
+                    conn.execute(text("PRAGMA busy_timeout=30000"))
+            app.logger.info(
+                "SQLite database configured for WAL mode and related settings"
+            )
+        except Exception:
+            app.logger.exception("Failed to configure SQLite pragmas")
+
+
+@app.before_request
+def _ensure_sqlite_configured():
+    configure_sqlite_pragmas()
 
 
 # Blueprint for analytics routes
