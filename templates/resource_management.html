@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Resource Management - Smart Resource Booking') }}{% endblock %}
+
+{% block content %}
+    <h1>{{ _('Resource Management') }}</h1>
+    <button id="add-new-resource-btn" class="button">{{ _('Add New Resource') }}</button>
+    <div id="resource-management-status" class="status-message" style="margin-top: 15px;"></div>
+
+    <table id="resources-table" class="styled-table" style="margin-top: 15px;">
+        <thead>
+            <tr>
+                <th>{{ _('ID') }}</th>
+                <th>{{ _('Name') }}</th>
+                <th>{{ _('Status') }}</th>
+                <th>{{ _('Capacity') }}</th>
+                <th>{{ _('Actions') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Resource rows will be populated by JavaScript -->
+        </tbody>
+    </table>
+
+    <div id="resource-form-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close-modal-btn" data-modal-id="resource-form-modal">&times;</span>
+            <h3 id="resource-form-modal-title">{{ _('Add New Resource') }}</h3>
+            <form id="resource-form">
+                <input type="hidden" id="resource-id" name="resource_id">
+                <div>
+                    <label for="resource-name">{{ _('Name:') }}</label>
+                    <input type="text" id="resource-name" name="name" required>
+                </div>
+                <div>
+                    <label for="resource-capacity">{{ _('Capacity:') }}</label>
+                    <input type="number" id="resource-capacity" name="capacity" min="0">
+                </div>
+                <div>
+                    <label for="resource-equipment">{{ _('Equipment:') }}</label>
+                    <input type="text" id="resource-equipment" name="equipment">
+                </div>
+                <button type="submit" class="button" style="margin-top: 10px;">{{ _('Save Resource') }}</button>
+                <div id="resource-form-modal-status" class="status-message" style="margin-top: 10px;"></div>
+            </form>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
+    <script src="{{ url_for('static', filename='js/resource_management.js') }}" defer></script>
+{% endblock %}
