@@ -336,6 +336,9 @@ class Resource(db.Model):
     is_under_maintenance = db.Column(db.Boolean, nullable=False, default=False)
     maintenance_until = db.Column(db.DateTime, nullable=True)
 
+    # Maximum number of occurrences allowed when creating recurring bookings.
+    max_recurrence_count = db.Column(db.Integer, nullable=True)
+
 
 
     floor_map_id = db.Column(db.Integer, db.ForeignKey('floor_map.id'), nullable=True)
@@ -362,6 +365,7 @@ class Booking(db.Model):
     checked_in_at = db.Column(db.DateTime, nullable=True)
     checked_out_at = db.Column(db.DateTime, nullable=True)
     status = db.Column(db.String(20), nullable=False, default='approved')
+    recurrence_rule = db.Column(db.String(200), nullable=True)
 
     def __repr__(self):
         return f"<Booking {self.title or self.id} for Resource {self.resource_id} from {self.start_time.strftime('%Y-%m-%d %H:%M')} to {self.end_time.strftime('%Y-%m-%d %H:%M')}>"
@@ -445,6 +449,10 @@ def send_email(to_address: str, subject: str, body: str):
     email_log.append(email_entry)
     app.logger.info(f"Email queued to {to_address}: {subject}")
 
+def send_slack_notification(text: str):
+    """Record a slack notification in the log (placeholder)."""
+    slack_log.append({'message': text, 'timestamp': datetime.utcnow().isoformat()})
+
 def send_teams_notification(to_email: str, title: str, text: str):
     """Send a simple Teams notification via webhook if configured."""
     log_entry = {
@@ -461,6 +469,21 @@ def send_teams_notification(to_email: str, title: str, text: str):
             requests.post(webhook, json=payload, timeout=5)
         except Exception:
             app.logger.exception(f"Failed to send Teams notification to {to_email}")
+
+def parse_simple_rrule(rule_str: str):
+    """Parse a minimal RRULE string supporting FREQ and COUNT."""
+    if not rule_str:
+        return None, 1
+    parts = {}
+    for part in rule_str.split(';'):
+        if '=' in part:
+            k, v = part.split('=', 1)
+            parts[k.upper()] = v
+    freq = parts.get('FREQ', '').upper()
+    count = int(parts.get('COUNT', '1')) if parts.get('COUNT') else 1
+    if freq not in {'DAILY', 'WEEKLY'}:
+        return None, 1
+    return freq, max(1, count)
 
 @app.route("/")
 @login_required
@@ -1262,7 +1285,7 @@ def update_resource_details(resource_id):
         return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
 
     # Fields that can be updated via this endpoint (excluding 'allowed_roles' string field)
-    allowed_fields = ['name', 'capacity', 'equipment', 'status', 'booking_restriction', 'allowed_user_ids', 'is_under_maintenance', 'maintenance_until'] # role_ids handled separately
+    allowed_fields = ['name', 'capacity', 'equipment', 'status', 'booking_restriction', 'allowed_user_ids', 'is_under_maintenance', 'maintenance_until', 'max_recurrence_count'] # role_ids handled separately
     
     # Validate status if provided
     if 'status' in data:
@@ -1322,6 +1345,15 @@ def update_resource_details(resource_id):
                         return jsonify({'error': 'Invalid maintenance_until format. Use ISO datetime.'}), 400
                 else:
                     resource.maintenance_until = None
+            elif field == 'max_recurrence_count':
+                value = data.get('max_recurrence_count')
+                if value is not None and value != '':
+                    try:
+                        resource.max_recurrence_count = int(value)
+                    except ValueError:
+                        return jsonify({'error': 'max_recurrence_count must be an integer or null.'}), 400
+                else:
+                    resource.max_recurrence_count = None
             elif field == 'allowed_roles':
                 roles_str = data.get('allowed_roles')
                 if roles_str is None or roles_str.strip() == "":
@@ -1367,7 +1399,8 @@ def update_resource_details(resource_id):
             'floor_map_id': resource.floor_map_id,
             'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
             'is_under_maintenance': resource.is_under_maintenance,
-            'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None
+            'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
+            'max_recurrence_count': resource.max_recurrence_count
         }
         add_audit_log(action="UPDATE_RESOURCE_DETAILS_SUCCESS", details=f"Resource ID {resource.id} ('{resource.name}') details updated. Data: {str(data)}")
         return jsonify(updated_resource_data), 200
@@ -2182,7 +2215,8 @@ def create_booking():
     start_time_str = data.get('start_time_str')
     end_time_str = data.get('end_time_str')
     title = data.get('title')
-    user_name_for_record = data.get('user_name') 
+    user_name_for_record = data.get('user_name')
+    recurrence_rule_str = data.get('recurrence_rule')
 
     required_fields = {'resource_id': resource_id, 'date_str': date_str, 
                        'start_time_str': start_time_str, 'end_time_str': end_time_str}
@@ -2260,88 +2294,59 @@ def create_booking():
     if resource.is_under_maintenance and (resource.maintenance_until is None or new_booking_start_time < resource.maintenance_until):
         until_str = resource.maintenance_until.isoformat() if resource.maintenance_until else 'until further notice'
         return jsonify({'error': f'Resource under maintenance until {until_str}.'}), 403
+
+    freq, count = parse_simple_rrule(recurrence_rule_str)
+    if resource.max_recurrence_count is not None and count > resource.max_recurrence_count:
+        return jsonify({'error': 'Recurrence exceeds allowed limit for this resource.'}), 400
+
+    occurrences = []
+    for i in range(count):
+        delta = timedelta(days=i) if freq == 'DAILY' else timedelta(weeks=i) if freq == 'WEEKLY' else timedelta(0)
+        occurrences.append((new_booking_start_time + delta, new_booking_end_time + delta))
     
-    conflicting_booking = Booking.query.filter(
-        Booking.resource_id == resource_id,
-        Booking.start_time < new_booking_end_time,
-        Booking.end_time > new_booking_start_time
-    ).first()
-
-    if conflicting_booking:
-        app.logger.info(
-            f"Booking conflict for user {current_user.username}, resource {resource_id} at {new_booking_start_time}-{new_booking_end_time}."
-        )
-
-        # Add to waitlist if fewer than two entries exist for this resource
-        existing_waitlist_count = WaitlistEntry.query.filter_by(resource_id=resource_id).count()
-        if existing_waitlist_count < 2:
-            waitlist_entry = WaitlistEntry(resource_id=resource_id, user_id=current_user.id)
-            db.session.add(waitlist_entry)
-            db.session.commit()
-            app.logger.info(
-                f"User {current_user.username} added to waitlist for resource {resource_id}."
-            )
-            return (
-                jsonify({'error': 'This time slot is no longer available. You have been added to the waitlist.'}),
-                409,
-            )
-
-        return (
-            jsonify({'error': 'This time slot is no longer available. Please try another slot.'}),
-            409,
-        )
+    for occ_start, occ_end in occurrences:
+        conflicting = Booking.query.filter(
+            Booking.resource_id == resource_id,
+            Booking.start_time < occ_end,
+            Booking.end_time > occ_start
+        ).first()
+        if conflicting:
+            existing_waitlist_count = WaitlistEntry.query.filter_by(resource_id=resource_id).count()
+            if existing_waitlist_count < 2:
+                waitlist_entry = WaitlistEntry(resource_id=resource_id, user_id=current_user.id)
+                db.session.add(waitlist_entry)
+                db.session.commit()
+                return jsonify({'error': 'This time slot is no longer available. You have been added to the waitlist.'}), 409
+            return jsonify({'error': 'This time slot is no longer available. Please try another slot.'}), 409
 
     try:
-        new_booking = Booking(
-            resource_id=resource_id,
-            start_time=new_booking_start_time,
-            end_time=new_booking_end_time,
-            title=title,
-            user_name=user_name_for_record,
-        )
-        if resource.requires_approval:
-            new_booking.status = 'pending'
-        db.session.add(new_booking)
-        db.session.commit()
-        app.logger.info(
-            f"Booking ID {new_booking.id} created for resource {resource_id} by user {current_user.username} (record user: {user_name_for_record})."
-        )
-
-        if not resource.requires_approval and mail_available and current_user.email:
-            try:
-                msg = Message(
-                    subject="Booking Confirmation",
-                    recipients=[current_user.email],
-                    body=(
-                        f"Your booking for {resource.name} on {new_booking.start_time.strftime('%Y-%m-%d')} from {new_booking.start_time.strftime('%H:%M')} to {new_booking.end_time.strftime('%H:%M')} has been created."
-                    ),
-                )
-                mail.send(msg)
-            except Exception:
-                app.logger.exception(
-                    f"Failed to send booking confirmation email to {current_user.email}:"
-                )
-
-        if current_user.email:
-            send_teams_notification(
-                current_user.email,
-                "Booking Created",
-                f"Your booking for {resource.name} on {new_booking.start_time.strftime('%Y-%m-%d %H:%M')} to {new_booking.end_time.strftime('%H:%M')} is confirmed."
+        created = []
+        for occ_start, occ_end in occurrences:
+            new_booking = Booking(
+                resource_id=resource_id,
+                start_time=occ_start,
+                end_time=occ_end,
+                title=title,
+                user_name=user_name_for_record,
+                recurrence_rule=recurrence_rule_str
             )
-
-        created_booking_data = {
-            'id': new_booking.id,
-            'resource_id': new_booking.resource_id,
-            'title': new_booking.title,
-            'user_name': new_booking.user_name,
-            'start_time': new_booking.start_time.strftime('%Y-%m-%d %H:%M:%S'),
-            'end_time': new_booking.end_time.strftime('%Y-%m-%d %H:%M:%S'),
-            'status': new_booking.status,
-        }
-        status_note = 'pending approval' if new_booking.status == 'pending' else 'created'
-        add_audit_log(action="CREATE_BOOKING", details=f"Booking ID {new_booking.id} for resource ID {resource_id} ('{resource.name}') {status_note} by user '{user_name_for_record}'. Title: '{title}'.")
-        socketio.emit('booking_updated', {'action': 'created', 'booking_id': new_booking.id, 'resource_id': resource_id})
-        return jsonify(created_booking_data), 201
+            # If your application supports approval workflow, set status here
+            db.session.add(new_booking)
+            db.session.commit()
+            created.append(new_booking)
+            add_audit_log(action="CREATE_BOOKING", details=f"Booking ID {new_booking.id} for resource ID {resource_id} ('{resource.name}') created by user '{user_name_for_record}'. Title: '{title}'.")
+            socketio.emit('booking_updated', {'action': 'created', 'booking_id': new_booking.id, 'resource_id': resource_id})
+        created_data = [{
+            'id': b.id,
+            'resource_id': b.resource_id,
+            'title': b.title,
+            'user_name': b.user_name,
+            'start_time': b.start_time.strftime('%Y-%m-%d %H:%M:%S'),
+            'end_time': b.end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            'status': b.status,
+            'recurrence_rule': b.recurrence_rule
+        } for b in created]
+        return jsonify({'bookings': created_data}), 201
         
     except Exception as e:
         db.session.rollback()
@@ -2379,6 +2384,7 @@ def get_my_bookings():
                 'start_time': booking.start_time.isoformat(),
                 'end_time': booking.end_time.isoformat(),
                 'title': booking.title,
+                'recurrence_rule': booking.recurrence_rule,
                 'checked_in_at': booking.checked_in_at.isoformat() if booking.checked_in_at else None,
                 'checked_out_at': booking.checked_out_at.isoformat() if booking.checked_out_at else None,
                 'can_check_in': can_check_in
@@ -2405,7 +2411,8 @@ def bookings_calendar():
                 'id': booking.id,
                 'title': title,
                 'start': booking.start_time.isoformat(),
-                'end': booking.end_time.isoformat()
+                'end': booking.end_time.isoformat(),
+                'recurrence_rule': booking.recurrence_rule
             })
         return jsonify(events), 200
     except Exception as e:

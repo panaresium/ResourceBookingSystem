@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const editAuthorizedUsersCheckboxContainer = document.getElementById('edit-authorized-users-checkbox-container'); // Modal form
     const editResourceMaintenanceCheckbox = document.getElementById('edit-resource-maintenance');
     const editResourceMaintenanceUntil = document.getElementById('edit-resource-maintenance-until');
+    const editResourceRecurrenceLimit = document.getElementById('edit-resource-recurrence-limit');
     
     let allUsersCache = null; // Cache for user list
 
@@ -125,6 +126,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     const maintUntil = resourceData.maintenance_until || selectedOption.dataset.maintenanceUntil || "";
                     editResourceMaintenanceUntil.value = maintUntil ? maintUntil.slice(0,16) : "";
                 }
+                if (editResourceRecurrenceLimit) {
+                    const recLim = resourceData.max_recurrence_count || selectedOption.dataset.maxRecurrenceCount || "";
+                    editResourceRecurrenceLimit.value = recLim;
+                }
                 // document.getElementById('edit-authorized-roles').value = resourceData.allowed_roles || selectedOption.dataset.allowedRoles || ""; // Old text field
 
                 await populateUsersCheckboxes(editAuthorizedUsersCheckboxContainer, resourceData.allowed_user_ids || selectedOption.dataset.allowedUserIds);
@@ -210,7 +215,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 allowed_user_ids: allowed_user_ids === "" ? null : allowed_user_ids,
                 allowed_roles: allowed_roles.trim() === "" ? null : allowed_roles.trim(),
                 is_under_maintenance: editResourceMaintenanceCheckbox ? editResourceMaintenanceCheckbox.checked : false,
-                maintenance_until: editResourceMaintenanceUntil ? editResourceMaintenanceUntil.value : null
+                maintenance_until: editResourceMaintenanceUntil ? editResourceMaintenanceUntil.value : null,
+                max_recurrence_count: editResourceRecurrenceLimit && editResourceRecurrenceLimit.value !== '' ? parseInt(editResourceRecurrenceLimit.value, 10) : null
             };
 
             try {
@@ -251,6 +257,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         optionToUpdate.dataset.allowedRoles = responseData.allowed_roles || "";
                         optionToUpdate.dataset.isUnderMaintenance = responseData.is_under_maintenance ? "true" : "false";
                         optionToUpdate.dataset.maintenanceUntil = responseData.maintenance_until || "";
+                        optionToUpdate.dataset.maxRecurrenceCount = responseData.max_recurrence_count || "";
                         if (imgResponse && imgResponse.image_url) {
                             optionToUpdate.dataset.imageUrl = imgResponse.image_url;
                         }
