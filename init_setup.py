@@ -11,6 +11,7 @@ DATA_DIR_NAME = "data"
 STATIC_DIR_NAME = "static"
 FLOOR_MAP_UPLOADS_DIR_NAME = os.path.join(STATIC_DIR_NAME, "floor_map_uploads")
 RESOURCE_UPLOADS_DIR_NAME = os.path.join(STATIC_DIR_NAME, "resource_uploads")
+DB_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)), DATA_DIR_NAME, 'site.db')
 
 def check_python_version():
     """Checks if the current Python version meets the minimum requirement."""
@@ -78,6 +79,17 @@ def create_required_directories():
         print(f"'{resource_uploads_dir}' directory already exists.")
     return True
 
+def ensure_tags_column():
+    """Ensure the 'tags' column exists in the resource table."""
+    if not os.path.exists(DB_PATH):
+        print("Database file not found, skipping 'tags' column check.")
+        return
+
+    try:
+        add_tags_column()
+    except Exception as exc:
+        print(f"Failed to ensure 'tags' column exists: {exc}")
+
 def main():
     """Main function to run setup checks and tasks."""
     print("Starting project initialization...")
@@ -86,19 +98,20 @@ def main():
     print("-" * 30)
     create_required_directories()
     print("-" * 30) 
-    print("Initializing database (calling app.init_db)...")
-    try:
-        init_db()  # This function is imported from app.py
-        print("Database initialization process (app.init_db) completed.")
-        # Ensure older databases get the 'tags' column
+
+    if os.path.exists(DB_PATH):
+        print(f"Existing database found at {DB_PATH}. Skipping init_db to preserve data.")
+        ensure_tags_column()
+    else:
+        print("Initializing database (calling app.init_db)...")
         try:
-            add_tags_column()
+            init_db()
+            print("Database initialization process (app.init_db) completed.")
         except Exception as e:
-            print(f"Warning: could not ensure 'tags' column exists: {e}")
-    except Exception as e:
-        print(f"An error occurred during database initialization (app.init_db): {e}")
-        print("Please check the output from app.init_db for more details, or run app.py with init_db() uncommented if issues persist.")
-        sys.exit(1)  # Exit if DB initialization fails
+            print(f"An error occurred during database initialization (app.init_db): {e}")
+            print("Please check the output from app.init_db for more details, or run app.py with init_db() uncommented if issues persist.")
+            sys.exit(1)  # Exit if DB initialization fails
+
     print("-" * 30)
     print("Project initialization script completed successfully.")
     print("Remember to activate your virtual environment if you haven't already.")
