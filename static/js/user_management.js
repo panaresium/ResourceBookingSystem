@@ -337,7 +337,43 @@ document.addEventListener('DOMContentLoaded', function() {
     const roleIdInput = document.getElementById('role-id');
     const roleNameInput = document.getElementById('role-name');
     const roleDescriptionInput = document.getElementById('role-description');
-    const rolePermissionsInput = document.getElementById('role-permissions');
+    const rolePermissionsContainer = document.getElementById('role-permissions-container');
+
+    const AVAILABLE_PERMISSIONS = [
+        { id: 'make_bookings', label: 'Make Bookings' },
+        { id: 'view_resources', label: 'View Resources' },
+        { id: 'manage_users', label: 'Manage Users' },
+        { id: 'manage_floor_maps', label: 'Manage Floor Maps' },
+        { id: 'manage_resources', label: 'Manage Resources' },
+        { id: 'manage_roles', label: 'Manage Roles' },
+        { id: 'view_audit_logs', label: 'View Audit Logs' },
+        { id: 'view_analytics', label: 'View Analytics' },
+        { id: 'all_permissions', label: 'All Permissions' }
+    ];
+
+    function populatePermissionCheckboxes(selected = []) {
+        if (!rolePermissionsContainer) return;
+        rolePermissionsContainer.innerHTML = '';
+        AVAILABLE_PERMISSIONS.forEach(perm => {
+            const div = document.createElement('div');
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `perm-${perm.id}`;
+            checkbox.value = perm.id;
+            if (selected.includes(perm.id)) checkbox.checked = true;
+            const label = document.createElement('label');
+            label.htmlFor = `perm-${perm.id}`;
+            label.textContent = perm.label;
+            div.appendChild(checkbox);
+            div.appendChild(label);
+            rolePermissionsContainer.appendChild(div);
+        });
+    }
+
+    function getSelectedPermissions() {
+        if (!rolePermissionsContainer) return [];
+        return Array.from(rolePermissionsContainer.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
+    }
 
     let localRolesCache = []; // To store fetched roles
 
@@ -345,6 +381,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (roleForm) roleForm.reset();
         if (roleIdInput) roleIdInput.value = '';
         if (roleFormModalStatusDiv) hideMessage(roleFormModalStatusDiv);
+        populatePermissionCheckboxes([]);
     }
 
     async function fetchAndDisplayRoles() {
@@ -418,7 +455,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (roleIdInput) roleIdInput.value = role.id;
                     if (roleNameInput) roleNameInput.value = role.name;
                     if (roleDescriptionInput) roleDescriptionInput.value = role.description || '';
-                    if (rolePermissionsInput) rolePermissionsInput.value = role.permissions || '';
+                    const selectedPerms = role.permissions ? role.permissions.split(',').map(p => p.trim()).filter(p => p) : [];
+                    populatePermissionCheckboxes(selectedPerms);
                     
                     if (roleFormModal) roleFormModal.style.display = 'block';
                 } else {
@@ -454,7 +492,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const id = roleIdInput.value;
             const name = roleNameInput.value.trim();
             const description = roleDescriptionInput.value.trim();
-            const permissions = rolePermissionsInput.value.trim();
+            const permissions = getSelectedPermissions().join(',');
 
             if (!name) {
                 showError(roleFormModalStatusDiv, 'Role Name is required.');

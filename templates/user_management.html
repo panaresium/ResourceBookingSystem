@@ -108,8 +108,8 @@
                     <textarea id="role-description" name="role_description" rows="3"></textarea>
                 </div>
                 <div>
-                    <label for="role-permissions">{{ _('Permissions:') }}</label>
-                    <textarea id="role-permissions" name="role_permissions" rows="3" placeholder="{{ _('Comma-separated permissions, e.g., edit_resource,view_logs') }}"></textarea>
+                    <label>{{ _('Permissions:') }}</label>
+                    <div id="role-permissions-container" class="checkbox-container" style="max-height: 120px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;"></div>
                 </div>
 
                 <button type="submit" class="button">{{ _('Save Role') }}</button>
