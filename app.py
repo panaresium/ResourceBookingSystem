@@ -751,13 +751,27 @@ def login_google_callback():
         return redirect(url_for('serve_login')) 
 
 # Function to initialize the database
-def init_db():
+def init_db(force=False):
     with app.app_context():
         app.logger.info("Starting database initialization...")
 
         app.logger.info("Creating database tables (if they don't exist)...")
         db.create_all()
         app.logger.info("Database tables creation/verification step completed.")
+
+        if not force:
+            existing = any([
+                db.session.query(User.id).first(),
+                db.session.query(Resource.id).first(),
+                db.session.query(Role.id).first(),
+                db.session.query(Booking.id).first(),
+            ])
+            if existing:
+                app.logger.warning(
+                    "init_db aborted: existing data detected. "
+                    "Pass force=True to reset database."
+                )
+                return
         
         app.logger.info("Attempting to delete existing data in corrected order...")
         # Corrected Deletion Order: AuditLog -> Booking -> resource_roles_table -> Resource -> FloorMap -> user_roles_table -> User -> Role
@@ -2767,13 +2781,14 @@ __all__ = [
     "email_log",
     "teams_log",
     "scheduler",
+    "init_db",
 
 ]
 
 if __name__ == "__main__":
     # To initialize the DB, you can uncomment the next line and run 'python app.py' once.
-    # Then comment it out again to prevent re-initialization on every run.
-    # init_db() # Call this directly only for the very first setup
+    # Pass force=True if you really want to wipe existing data.
+    # init_db(force=True)
     try:
         scheduler.start()
     except Exception:
