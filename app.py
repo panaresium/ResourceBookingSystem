@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template, request, url_for, redirect, session, Blueprint # Added Blueprint
+from flask import Flask, jsonify, render_template, request, url_for, redirect, session, Blueprint, has_request_context # Added Blueprint and has_request_context
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func, text  # Add this and for WAL pragma setup
 from datetime import datetime, date, timedelta, time # Ensure all are here
@@ -118,7 +118,8 @@ class SimpleTranslator:
 translator = SimpleTranslator()
 
 def _(text):
-    return translator.gettext(text, get_locale())
+    lang = get_locale() if has_request_context() else translator.default_locale
+    return translator.gettext(text, lang)
 
 app.jinja_env.globals['_'] = _
 
