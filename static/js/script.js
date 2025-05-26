@@ -1118,11 +1118,16 @@ Enter a title for your booking (optional):`);
                 showLoading(uploadStatusDiv, 'Uploading...');
                 const formData = new FormData(uploadMapForm);
                 try {
+                    // Include CSRF token manually since we're not using apiCall
+                    const csrfTokenTag = document.querySelector('meta[name="csrf-token"]');
+                    const csrfToken = csrfTokenTag ? csrfTokenTag.content : null;
+
                     // Direct fetch for FormData, manual error/success handling for this specific case.
                     const response = await fetch('/api/admin/maps', {
                         method: 'POST',
                         body: formData,
-                        credentials: 'same-origin'
+                        credentials: 'same-origin',
+                        headers: csrfToken ? { 'X-CSRFToken': csrfToken } : {}
                     });
                     const responseData = await response.json();
                     if (response.ok) { 
