@@ -12,6 +12,7 @@ from authlib.integrations.flask_client import OAuth # Added for Google Sign-In
 from google_auth_oauthlib.flow import Flow
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+import requests
 import pathlib # For finding the client_secret.json file path
 import logging # Added for logging
 from functools import wraps # For permission_required decorator
@@ -305,9 +306,12 @@ class FloorMap(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     image_filename = db.Column(db.String(255), nullable=False, unique=True) # Store unique filename
+    location = db.Column(db.String(100), nullable=True)
+    floor = db.Column(db.String(50), nullable=True)
 
     def __repr__(self):
-        return f"<FloorMap {self.name} ({self.image_filename})>"
+        loc_floor = f"{self.location or 'N/A'} - Floor {self.floor}" if self.location or self.floor else ""
+        return f"<FloorMap {self.name} ({loc_floor})>"
 
 # Association table for Resource and Role (Many-to-Many for resource-specific role permissions)
 resource_roles_table = db.Table('resource_roles',
@@ -320,6 +324,7 @@ class Resource(db.Model):
     name = db.Column(db.String(100), unique=True, nullable=False)
     capacity = db.Column(db.Integer, nullable=True)
     equipment = db.Column(db.String(200), nullable=True)
+    tags = db.Column(db.String(200), nullable=True)
     booking_restriction = db.Column(db.String(50), nullable=True)
     status = db.Column(db.String(50), nullable=False, default='draft')
     published_at = db.Column(db.DateTime, nullable=True)
@@ -327,6 +332,10 @@ class Resource(db.Model):
     allowed_user_ids = db.Column(db.Text, nullable=True)
 
     image_filename = db.Column(db.String(255), nullable=True)  # <-- Add this line
+
+    is_under_maintenance = db.Column(db.Boolean, nullable=False, default=False)
+    maintenance_until = db.Column(db.DateTime, nullable=True)
+
 
 
     floor_map_id = db.Column(db.Integer, db.ForeignKey('floor_map.id'), nullable=True)
@@ -352,6 +361,7 @@ class Booking(db.Model):
     title = db.Column(db.String(100), nullable=True)
     checked_in_at = db.Column(db.DateTime, nullable=True)
     checked_out_at = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(20), nullable=False, default='approved')
 
     def __repr__(self):
         return f"<Booking {self.title or self.id} for Resource {self.resource_id} from {self.start_time.strftime('%Y-%m-%d %H:%M')} to {self.end_time.strftime('%Y-%m-%d %H:%M')}>"
@@ -420,6 +430,9 @@ def add_audit_log(action: str, details: str, user_id: int = None, username: str 
 
 # --- Simple Email Notification System ---
 email_log = []
+slack_log = []
+
+teams_log = []
 
 def send_email(to_address: str, subject: str, body: str):
     """Log an outgoing email (placeholder for real email delivery)."""
@@ -431,6 +444,23 @@ def send_email(to_address: str, subject: str, body: str):
     }
     email_log.append(email_entry)
     app.logger.info(f"Email queued to {to_address}: {subject}")
+
+def send_teams_notification(to_email: str, title: str, text: str):
+    """Send a simple Teams notification via webhook if configured."""
+    log_entry = {
+        'to': to_email,
+        'title': title,
+        'text': text,
+        'timestamp': datetime.utcnow().isoformat(),
+    }
+    teams_log.append(log_entry)
+    webhook = os.environ.get('TEAMS_WEBHOOK_URL')
+    if webhook and to_email:
+        try:
+            payload = {'title': title, 'text': f"{to_email}: {text}"}
+            requests.post(webhook, json=payload, timeout=5)
+        except Exception:
+            app.logger.exception(f"Failed to send Teams notification to {to_email}")
 
 @app.route("/")
 @login_required
@@ -777,7 +807,8 @@ def init_db():
 
         app.logger.info("Adding sample resources...")
         try: 
-            res_alpha = Resource(name="Conference Room Alpha", capacity=10, equipment="Projector,Whiteboard,Teleconference", 
+            res_alpha = Resource(name="Conference Room Alpha", capacity=10, equipment="Projector,Whiteboard,Teleconference",
+                                 tags="large,video",
                                  booking_restriction=None, status='published', published_at=datetime.utcnow(),
                                  allowed_user_ids=None) # No specific user IDs, open to roles
             if standard_role_for_resource:
@@ -785,18 +816,21 @@ def init_db():
             if admin_role_for_resource: # Admins can also book
                 res_alpha.roles.append(admin_role_for_resource)
 
-            res_beta = Resource(name="Meeting Room Beta", capacity=6, equipment="Teleconference,Whiteboard", 
+            res_beta = Resource(name="Meeting Room Beta", capacity=6, equipment="Teleconference,Whiteboard",
+                                tags="medium",
                                 booking_restriction='all_users', status='published', published_at=datetime.utcnow(), # 'all_users' might be redundant now
                                 allowed_user_ids=f"{standard_user_id_str},{admin_user_id_str}") # Can keep user_ids for specific overrides
             # No specific roles assigned to Beta, relies on allowed_user_ids or booking_restriction logic
 
-            res_gamma = Resource(name="Focus Room Gamma", capacity=2, equipment="Whiteboard", 
+            res_gamma = Resource(name="Focus Room Gamma", capacity=2, equipment="Whiteboard",
+                                 tags="quiet",
                                  booking_restriction='admin_only', status='draft', published_at=None, # admin_only might be redundant
                                  allowed_user_ids=None)
             if admin_role_for_resource:
                 res_gamma.roles.append(admin_role_for_resource)
 
-            res_delta = Resource(name="Quiet Pod Delta", capacity=1, equipment=None, 
+            res_delta = Resource(name="Quiet Pod Delta", capacity=1, equipment=None,
+                                 tags="quiet,small",
                                  booking_restriction=None, status='draft', published_at=None,
                                  allowed_user_ids=None)
             if standard_role_for_resource:
@@ -805,6 +839,7 @@ def init_db():
             # Or rely on a global admin override in permission checking logic.
 
             res_omega = Resource(name="Archived Room Omega", capacity=5, equipment="Old Projector",
+                                 tags="archived",
                                  booking_restriction=None, status='archived', published_at=datetime.utcnow() - timedelta(days=30),
                                  allowed_user_ids=None)
             # Typically archived resources don't need role assignments unless there's a use case.
@@ -854,8 +889,23 @@ def init_db():
 @app.route("/api/resources", methods=['GET'])
 def get_resources():
     try:
-        # Filter resources by status
-        resources_query = Resource.query.filter_by(status='published').all() # MODIFIED HERE
+        query = Resource.query.filter_by(status='published')
+
+        capacity = request.args.get('capacity', type=int)
+        if capacity is not None:
+            query = query.filter(Resource.capacity >= capacity)
+
+        equipment = request.args.get('equipment')
+        if equipment:
+            for item in [e.strip().lower() for e in equipment.split(',') if e.strip()]:
+                query = query.filter(Resource.equipment.ilike(f'%{item}%'))
+
+        tags = request.args.get('tags')
+        if tags:
+            for tag in [t.strip().lower() for t in tags.split(',') if t.strip()]:
+                query = query.filter(Resource.tags.ilike(f'%{tag}%'))
+
+        resources_query = query.all()
             
         resources_list = []
         for resource in resources_query:
@@ -864,14 +914,17 @@ def get_resources():
                 'name': resource.name,
                 'capacity': resource.capacity,
                 'equipment': resource.equipment,
+                'tags': resource.tags,
                 'image_url': url_for('static', filename=f'resource_uploads/{resource.image_filename}') if resource.image_filename else None,
                 'floor_map_id': resource.floor_map_id,
                 'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
                 'booking_restriction': resource.booking_restriction,
-                'status': resource.status, 
+                'status': resource.status,
                 'published_at': resource.published_at.isoformat() if resource.published_at else None,
                 'allowed_user_ids': resource.allowed_user_ids,
-                'roles': [{'id': role.id, 'name': role.name} for role in resource.roles]
+                'roles': [{'id': role.id, 'name': role.name} for role in resource.roles],
+                'is_under_maintenance': resource.is_under_maintenance,
+                'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None
             })
         app.logger.info("Successfully fetched published resources.")
         return jsonify(resources_list), 200
@@ -899,6 +952,10 @@ def get_resource_availability(resource_id):
         if not resource:
             app.logger.warning(f"Resource availability check for non-existent resource ID: {resource_id}")
             return jsonify({'error': 'Resource not found.'}), 404
+
+        if resource.is_under_maintenance and (resource.maintenance_until is None or target_date_obj <= resource.maintenance_until.date()):
+            until_str = resource.maintenance_until.isoformat() if resource.maintenance_until else 'until further notice'
+            return jsonify({'error': f'Resource under maintenance until {until_str}.'}), 403
 
         bookings_on_date = Booking.query.filter(
             Booking.resource_id == resource_id,
@@ -948,6 +1005,8 @@ def upload_floor_map():
     
     file = request.files['map_image']
     map_name = request.form.get('map_name')
+    location = request.form.get('location')
+    floor = request.form.get('floor')
 
     if not map_name:
         app.logger.warning("Map name missing in upload request.")
@@ -976,7 +1035,8 @@ def upload_floor_map():
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(file_path)
 
-            new_map = FloorMap(name=map_name, image_filename=filename)
+            new_map = FloorMap(name=map_name, image_filename=filename,
+                               location=location, floor=floor)
             db.session.add(new_map)
             db.session.commit()
             app.logger.info(f"Floor map '{map_name}' uploaded successfully by {current_user.username}.")
@@ -985,6 +1045,8 @@ def upload_floor_map():
                 'id': new_map.id,
                 'name': new_map.name,
                 'image_filename': new_map.image_filename,
+                'location': new_map.location,
+                'floor': new_map.floor,
                 'image_url': url_for('static', filename=f'floor_map_uploads/{new_map.image_filename}')
             }), 201
         except Exception as e:
@@ -1013,6 +1075,8 @@ def get_floor_maps():
                 'id': m.id,
                 'name': m.name,
                 'image_filename': m.image_filename,
+                'location': m.location,
+                'floor': m.floor,
                 'image_url': url_for('static', filename=f'floor_map_uploads/{m.image_filename}')
             })
         app.logger.info("Successfully fetched all floor maps for admin.")
@@ -1198,7 +1262,7 @@ def update_resource_details(resource_id):
         return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
 
     # Fields that can be updated via this endpoint (excluding 'allowed_roles' string field)
-    allowed_fields = ['name', 'capacity', 'equipment', 'status', 'booking_restriction', 'allowed_user_ids'] # role_ids handled separately
+    allowed_fields = ['name', 'capacity', 'equipment', 'status', 'booking_restriction', 'allowed_user_ids', 'is_under_maintenance', 'maintenance_until'] # role_ids handled separately
     
     # Validate status if provided
     if 'status' in data:
@@ -1247,6 +1311,17 @@ def update_resource_details(resource_id):
                 else:
                     app.logger.warning(f"Incorrect type for allowed_user_ids for resource {resource_id}: {type(user_ids_str_list)}")
                     return jsonify({'error': 'allowed_user_ids must be a string or null.'}), 400
+            elif field == 'is_under_maintenance':
+                resource.is_under_maintenance = bool(data.get('is_under_maintenance'))
+            elif field == 'maintenance_until':
+                maint_val = data.get('maintenance_until')
+                if maint_val:
+                    try:
+                        resource.maintenance_until = datetime.fromisoformat(maint_val)
+                    except ValueError:
+                        return jsonify({'error': 'Invalid maintenance_until format. Use ISO datetime.'}), 400
+                else:
+                    resource.maintenance_until = None
             elif field == 'allowed_roles':
                 roles_str = data.get('allowed_roles')
                 if roles_str is None or roles_str.strip() == "":
@@ -1290,7 +1365,9 @@ def update_resource_details(resource_id):
             'roles': [{'id': role.id, 'name': role.name} for role in resource.roles], # Return new roles list
             # Map-related fields are not updated here, but returned for consistency
             'floor_map_id': resource.floor_map_id,
-            'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None
+            'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
+            'is_under_maintenance': resource.is_under_maintenance,
+            'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None
         }
         add_audit_log(action="UPDATE_RESOURCE_DETAILS_SUCCESS", details=f"Resource ID {resource.id} ('{resource.name}') details updated. Data: {str(data)}")
         return jsonify(updated_resource_data), 200
@@ -1936,7 +2013,9 @@ def get_map_details(map_id):
         map_details_response = {
             'id': floor_map.id,
             'name': floor_map.name,
-            'image_url': url_for('static', filename=f'floor_map_uploads/{floor_map.image_filename}')
+            'image_url': url_for('static', filename=f'floor_map_uploads/{floor_map.image_filename}'),
+            'location': floor_map.location,
+            'floor': floor_map.floor
         }
         
         # Ensure only published resources are shown on the public map view
@@ -2177,6 +2256,10 @@ def create_booking():
     except ValueError:
         app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} with invalid date/time format: {date_str} {start_time_str}-{end_time_str}")
         return jsonify({'error': 'Invalid date or time format.'}), 400
+
+    if resource.is_under_maintenance and (resource.maintenance_until is None or new_booking_start_time < resource.maintenance_until):
+        until_str = resource.maintenance_until.isoformat() if resource.maintenance_until else 'until further notice'
+        return jsonify({'error': f'Resource under maintenance until {until_str}.'}), 403
     
     conflicting_booking = Booking.query.filter(
         Booking.resource_id == resource_id,
@@ -2209,23 +2292,42 @@ def create_booking():
         )
 
     try:
-        new_booking = Booking(resource_id=resource_id, start_time=new_booking_start_time,
-                              end_time=new_booking_end_time, title=title, user_name=user_name_for_record)
+        new_booking = Booking(
+            resource_id=resource_id,
+            start_time=new_booking_start_time,
+            end_time=new_booking_end_time,
+            title=title,
+            user_name=user_name_for_record,
+        )
+        if resource.requires_approval:
+            new_booking.status = 'pending'
         db.session.add(new_booking)
         db.session.commit()
-        app.logger.info(f"Booking ID {new_booking.id} created for resource {resource_id} by user {current_user.username} (record user: {user_name_for_record}).")
+        app.logger.info(
+            f"Booking ID {new_booking.id} created for resource {resource_id} by user {current_user.username} (record user: {user_name_for_record})."
+        )
 
-        # Send confirmation email
-        if mail_available and current_user.email:
+        if not resource.requires_approval and mail_available and current_user.email:
             try:
                 msg = Message(
                     subject="Booking Confirmation",
                     recipients=[current_user.email],
-                    body=f"Your booking for {resource.name} on {new_booking.start_time.strftime('%Y-%m-%d')} from {new_booking.start_time.strftime('%H:%M')} to {new_booking.end_time.strftime('%H:%M')} has been created."
+                    body=(
+                        f"Your booking for {resource.name} on {new_booking.start_time.strftime('%Y-%m-%d')} from {new_booking.start_time.strftime('%H:%M')} to {new_booking.end_time.strftime('%H:%M')} has been created."
+                    ),
                 )
                 mail.send(msg)
             except Exception:
-                app.logger.exception(f"Failed to send booking confirmation email to {current_user.email}:")
+                app.logger.exception(
+                    f"Failed to send booking confirmation email to {current_user.email}:"
+                )
+
+        if current_user.email:
+            send_teams_notification(
+                current_user.email,
+                "Booking Created",
+                f"Your booking for {resource.name} on {new_booking.start_time.strftime('%Y-%m-%d %H:%M')} to {new_booking.end_time.strftime('%H:%M')} is confirmed."
+            )
 
         created_booking_data = {
             'id': new_booking.id,
@@ -2233,9 +2335,11 @@ def create_booking():
             'title': new_booking.title,
             'user_name': new_booking.user_name,
             'start_time': new_booking.start_time.strftime('%Y-%m-%d %H:%M:%S'),
-            'end_time': new_booking.end_time.strftime('%Y-%m-%d %H:%M:%S')
+            'end_time': new_booking.end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            'status': new_booking.status,
         }
-        add_audit_log(action="CREATE_BOOKING", details=f"Booking ID {new_booking.id} for resource ID {resource_id} ('{resource.name}') created by user '{user_name_for_record}'. Title: '{title}'.")
+        status_note = 'pending approval' if new_booking.status == 'pending' else 'created'
+        add_audit_log(action="CREATE_BOOKING", details=f"Booking ID {new_booking.id} for resource ID {resource_id} ('{resource.name}') {status_note} by user '{user_name_for_record}'. Title: '{title}'.")
         socketio.emit('booking_updated', {'action': 'created', 'booking_id': new_booking.id, 'resource_id': resource_id})
         return jsonify(created_booking_data), 201
         
@@ -2344,6 +2448,13 @@ def delete_booking_by_user(booking_id):
         db.session.delete(booking)
         db.session.commit()
 
+        if current_user.email:
+            send_teams_notification(
+                current_user.email,
+                "Booking Cancelled",
+                f"Your booking for {resource_name} starting at {booking_start.strftime('%Y-%m-%d %H:%M')} has been cancelled."
+            )
+
 
         # Notify next user on waitlist, if any
         next_entry = (
@@ -2361,6 +2472,12 @@ def delete_booking_by_user(booking_id):
                     f"Slot available for {resource_name}",
                     f"The slot you requested for {resource_name} is now available.",
                 )
+                if user_to_notify.email:
+                    send_teams_notification(
+                        user_to_notify.email,
+                        "Waitlist Slot Released",
+                        f"A slot for {resource_name} is now available to book."
+                    )
 
 
         add_audit_log(
@@ -2519,6 +2636,62 @@ def check_out_booking(booking_id):
     db.session.commit()
     return jsonify({'message': 'Checked out successfully.', 'checked_out_at': booking.checked_out_at.isoformat()}), 200
 
+
+@app.route('/admin/bookings/pending', methods=['GET'])
+@login_required
+def list_pending_bookings():
+    if not current_user.is_admin:
+        return abort(403)
+    pending = Booking.query.filter_by(status='pending').all()
+    result = []
+    for b in pending:
+        result.append({
+            'id': b.id,
+            'resource_id': b.resource_id,
+            'resource_name': b.resource_booked.name if b.resource_booked else None,
+            'user_name': b.user_name,
+            'start_time': b.start_time.isoformat(),
+            'end_time': b.end_time.isoformat(),
+            'title': b.title,
+        })
+    return jsonify(result), 200
+
+
+@app.route('/admin/bookings/<int:booking_id>/approve', methods=['POST'])
+@login_required
+def approve_booking_admin(booking_id):
+    if not current_user.is_admin:
+        return abort(403)
+    booking = Booking.query.get_or_404(booking_id)
+    if booking.status != 'pending':
+        return jsonify({'error': 'Booking not pending'}), 400
+    booking.status = 'approved'
+    db.session.commit()
+    user = User.query.filter_by(username=booking.user_name).first()
+    if user:
+        send_email(user.email, 'Booking Approved',
+                   f"Your booking for {booking.resource_booked.name if booking.resource_booked else 'resource'} on {booking.start_time.strftime('%Y-%m-%d %H:%M')} has been approved.")
+    send_slack_notification(f"Booking {booking.id} approved by {current_user.username}")
+    return jsonify({'success': True}), 200
+
+
+@app.route('/admin/bookings/<int:booking_id>/reject', methods=['POST'])
+@login_required
+def reject_booking_admin(booking_id):
+    if not current_user.is_admin:
+        return abort(403)
+    booking = Booking.query.get_or_404(booking_id)
+    if booking.status != 'pending':
+        return jsonify({'error': 'Booking not pending'}), 400
+    booking.status = 'rejected'
+    db.session.commit()
+    user = User.query.filter_by(username=booking.user_name).first()
+    if user:
+        send_email(user.email, 'Booking Rejected',
+                   f"Your booking for {booking.resource_booked.name if booking.resource_booked else 'resource'} on {booking.start_time.strftime('%Y-%m-%d %H:%M')} has been rejected.")
+    send_slack_notification(f"Booking {booking.id} rejected by {current_user.username}")
+    return jsonify({'success': True}), 200
+
 # Register blueprint after routes are defined
 app.register_blueprint(analytics_bp)
 
@@ -2554,6 +2727,7 @@ __all__ = [
     "WaitlistEntry",
     "FloorMap",
     "email_log",
+    "teams_log",
     "scheduler",
 
 ]

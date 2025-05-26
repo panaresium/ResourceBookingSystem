@@ -100,6 +100,16 @@ Flask-Mail is used to send email notifications when bookings are created, update
 
 If these variables are not provided, placeholder values from `app.py` will be used.
 
+### Teams Notifications
+
+To enable Microsoft Teams notifications, create an incoming webhook URL in your Teams channel and set it in the environment variable `TEAMS_WEBHOOK_URL` before running the application:
+
+```
+export TEAMS_WEBHOOK_URL="https://outlook.office.com/webhook/your-webhook-url"
+```
+
+Users must have an email address set in their profile to receive Teams alerts for booking creation, cancellation and waitlist releases.
+
 ### Running Tests
 
 To run the test suite:
@@ -137,3 +147,14 @@ The project uses **Flask-Babel** for translations. Available languages are confi
    ```
 
 After compiling, restart the app and use the language selector in the page footer to switch between English (`en`) and Spanish (`es`).
+
+### Filtering Resources
+
+The `/api/resources` endpoint supports optional query parameters to narrow down
+results:
+
+- `capacity` – minimum capacity required (e.g. `?capacity=5`)
+- `equipment` – comma-separated equipment keywords (e.g. `?equipment=projector,whiteboard`)
+- `tags` – comma-separated tags assigned to a resource (e.g. `?tags=quiet`)
+
+These filters can be combined. Only resources with `status='published'` are returned.

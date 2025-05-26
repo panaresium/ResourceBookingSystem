@@ -4,7 +4,8 @@ from sqlalchemy import text
 
 from datetime import datetime, time, date, timedelta
 
-from app import app, db, User, Resource, Booking, WaitlistEntry, FloorMap, email_log
+from app import app, db, User, Resource, Booking, WaitlistEntry, FloorMap, email_log, teams_log
+
 
 # from flask_login import current_user # Not directly used for assertions here
 
@@ -14,16 +15,17 @@ class AppTests(unittest.TestCase):
         """Set up test variables."""
         app.config['TESTING'] = True
         app.config['WTF_CSRF_ENABLED'] = False  # Disable CSRF for tests
-        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
         app.config['LOGIN_DISABLED'] = False # Ensure login is enabled for tests
-        
+
         self.app_context = app.app_context()
         self.app_context.push()  # Push app context for db operations
 
         db.drop_all()
         db.create_all()
-        
+
         email_log.clear()
+        teams_log.clear()
+
 
         # Create a test user
         user = User.query.filter_by(username='testuser').first()
@@ -34,18 +36,28 @@ class AppTests(unittest.TestCase):
             db.session.commit()
 
         # Create a floor map and some resources for testing
-        floor_map = FloorMap(name='Test Map', image_filename='map.png')
+        import uuid
+        unique_name = f"Test Map {uuid.uuid4()}"
+        unique_file = f"{uuid.uuid4()}.png"
+        floor_map = FloorMap(name=unique_name, image_filename=unique_file)
+
         db.session.add(floor_map)
         db.session.commit()
 
         res1 = Resource(
             name='Room A',
+            capacity=10,
+            equipment='Projector,Whiteboard',
+            tags='large',
             floor_map_id=floor_map.id,
             map_coordinates=json.dumps({'type': 'rect', 'x': 10, 'y': 20, 'w': 30, 'h': 30}),
             status='published'
         )
         res2 = Resource(
             name='Room B',
+            capacity=4,
+            equipment='Whiteboard',
+            tags='small',
             floor_map_id=floor_map.id,
             map_coordinates=json.dumps({'type': 'rect', 'x': 50, 'y': 20, 'w': 30, 'h': 30}),
             status='published'
@@ -187,6 +199,26 @@ class AppTests(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0].user_id, other.id)
 
+    def test_booking_blocked_when_resource_under_maintenance(self):
+        resource = Resource(name='MaintRoom', status='published', is_under_maintenance=True,
+                            maintenance_until=datetime.utcnow() + timedelta(days=1))
+        db.session.add(resource)
+        db.session.commit()
+
+        self.login('testuser', 'password')
+        payload = {
+            'resource_id': resource.id,
+            'date_str': date.today().strftime('%Y-%m-%d'),
+            'start_time_str': '09:00',
+            'end_time_str': '10:00',
+            'title': 'test',
+            'user_name': 'testuser'
+        }
+        resp = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn('maintenance', resp.get_json().get('error', '').lower())
+        self.assertEqual(Booking.query.count(), 0)
+
     def test_cancellation_notifies_waitlisted_user(self):
         resource = Resource(name='Room1', status='published')
         db.session.add(resource)
@@ -213,6 +245,8 @@ class AppTests(unittest.TestCase):
         self.assertEqual(WaitlistEntry.query.count(), 0)
         self.assertEqual(len(email_log), 1)
         self.assertEqual(email_log[0]['to'], other.email)
+        self.assertEqual(len(teams_log), 2)
+        self.assertTrue(any(entry['to'] == other.email for entry in teams_log))
 
     def test_analytics_dashboard_permissions(self):
         """Ensure analytics dashboard permissions are enforced."""
@@ -314,9 +348,17 @@ class AppTests(unittest.TestCase):
         self.client.get('/api/auth/status')
         result = db.session.execute(text("PRAGMA journal_mode")).scalar()
         self.assertEqual(result.lower(), 'wal')
+        resp_pending = self.client.get('/admin/bookings/pending')
+        self.assertEqual(resp_pending.status_code, 200)
+        self.assertEqual(len(resp_pending.get_json()), 1)
 
-
-
+        resp_approve = self.client.post(f'/admin/bookings/{booking_id}/approve')
+        self.assertEqual(resp_approve.status_code, 200)
+        booking = Booking.query.get(booking_id)
+        self.assertEqual(booking.status, 'approved')
+        self.assertEqual(len(email_log), 1)
+        self.assertEqual(email_log[0]['to'], 'test@example.com')
+        self.assertEqual(len(slack_log), 1)
 
 if __name__ == '__main__':
     unittest.main()

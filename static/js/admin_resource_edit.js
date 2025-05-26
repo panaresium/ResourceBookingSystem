@@ -13,6 +13,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const resourceToMapSelect = document.getElementById('resource-to-map'); // From main script
     // const authorizedUsersCheckboxContainer = document.getElementById('authorized-users-checkbox-container'); // Main form - Not directly used by this script for population
     const editAuthorizedUsersCheckboxContainer = document.getElementById('edit-authorized-users-checkbox-container'); // Modal form
+    const editResourceMaintenanceCheckbox = document.getElementById('edit-resource-maintenance');
+    const editResourceMaintenanceUntil = document.getElementById('edit-resource-maintenance-until');
     
     let allUsersCache = null; // Cache for user list
 
@@ -116,6 +118,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('edit-resource-equipment').value = resourceData.equipment || selectedOption.dataset.equipment || '';
                 document.getElementById('edit-resource-status').value = resourceData.status || selectedOption.dataset.resourceStatus || 'draft';
                 document.getElementById('edit-resource-booking-permission').value = resourceData.booking_restriction || selectedOption.dataset.bookingRestriction || "";
+                if (editResourceMaintenanceCheckbox) {
+                    editResourceMaintenanceCheckbox.checked = resourceData.is_under_maintenance || selectedOption.dataset.isUnderMaintenance === "true";
+                }
+                if (editResourceMaintenanceUntil) {
+                    const maintUntil = resourceData.maintenance_until || selectedOption.dataset.maintenanceUntil || "";
+                    editResourceMaintenanceUntil.value = maintUntil ? maintUntil.slice(0,16) : "";
+                }
                 // document.getElementById('edit-authorized-roles').value = resourceData.allowed_roles || selectedOption.dataset.allowedRoles || ""; // Old text field
 
                 await populateUsersCheckboxes(editAuthorizedUsersCheckboxContainer, resourceData.allowed_user_ids || selectedOption.dataset.allowedUserIds);
@@ -199,7 +208,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 status,
                 booking_restriction: booking_restriction === "" ? null : booking_restriction,
                 allowed_user_ids: allowed_user_ids === "" ? null : allowed_user_ids,
-                allowed_roles: allowed_roles.trim() === "" ? null : allowed_roles.trim()
+                allowed_roles: allowed_roles.trim() === "" ? null : allowed_roles.trim(),
+                is_under_maintenance: editResourceMaintenanceCheckbox ? editResourceMaintenanceCheckbox.checked : false,
+                maintenance_until: editResourceMaintenanceUntil ? editResourceMaintenanceUntil.value : null
             };
 
             try {
@@ -238,6 +249,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         optionToUpdate.dataset.bookingRestriction = responseData.booking_restriction || "";
                         optionToUpdate.dataset.allowedUserIds = responseData.allowed_user_ids || "";
                         optionToUpdate.dataset.allowedRoles = responseData.allowed_roles || "";
+                        optionToUpdate.dataset.isUnderMaintenance = responseData.is_under_maintenance ? "true" : "false";
+                        optionToUpdate.dataset.maintenanceUntil = responseData.maintenance_until || "";
                         if (imgResponse && imgResponse.image_url) {
                             optionToUpdate.dataset.imageUrl = imgResponse.image_url;
                         }
