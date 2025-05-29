@@ -63,6 +63,13 @@
                 </select>
             </div>
             <div>
+                <label>{{ _('Authorized Roles (Optional):') }}</label>
+                <p class="small-text">{{ _('If specified, only users with these roles (or admin/specifically allowed users) can book this resource via this map area.') }}</p>
+                <div id="define-area-authorized-roles-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;">
+                    <small>{{ _('Loading roles...') }}</small>
+                </div>
+            </div>
+            <div>
                 <label>{{ _('Coordinates Type: Rectangle (fixed for now)') }}</label>
                 <input type="hidden" id="coordinates-type" name="coordinates_type" value="rect">
             </div>

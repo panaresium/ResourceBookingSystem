@@ -523,66 +523,68 @@ document.addEventListener('DOMContentLoaded', function () {
             const bookedSlots = await apiCall(`/api/resources/${resource.id}/availability?date=${dateString}`, {}, modalStatusMessageP);
             hideMessage(modalStatusMessageP); // Hide loading message if successful
 
-            const workDayStartHour = 8;
-            const workDayEndHour = 17; // Ends at 17:00, so last slot is 16:00-17:00
-            const slotDurationHours = 1;
+            const predefinedSlots = [
+                { name: "First Half-Day", label: "Book First Half-Day (09:00-13:00)", startTime: "09:00", endTime: "13:00", id: "first_half" },
+                { name: "Second Half-Day", label: "Book Second Half-Day (14:00-18:00)", startTime: "14:00", endTime: "18:00", id: "second_half" },
+                { name: "Full Day", label: "Book Full Day (09:00-18:00)", startTime: "09:00", endTime: "18:00", id: "full_day" }
+            ];
 
-            for (let hour = workDayStartHour; hour < workDayEndHour; hour += slotDurationHours) {
-                const slotStart = new Date(`${dateString}T${String(hour).padStart(2, '0')}:00:00`);
-                const slotEnd = new Date(slotStart.getTime() + slotDurationHours * 60 * 60 * 1000);
+            // Helper function to check for conflicts
+            function checkConflict(slotStartTimeStr, slotEndTimeStr, existingBookings) {
+                if (!existingBookings || existingBookings.length === 0) return false;
+                const slotStart = new Date(`${dateString}T${slotStartTimeStr}:00`);
+                const slotEnd = new Date(`${dateString}T${slotEndTimeStr}:00`);
 
-                const startTimeStr = `${String(slotStart.getHours()).padStart(2, '0')}:00`;
-                const endTimeStr = `${String(slotEnd.getHours()).padStart(2, '0')}:00`;
-                const slotLabel = `${startTimeStr} - ${endTimeStr}`;
-
-                let isBooked = false;
-                if (bookedSlots && bookedSlots.length > 0) {
-                    for (const booked of bookedSlots) {
-                        // Assuming booked.start_time and booked.end_time are "HH:MM:SS"
-                        const bookedStartTime = new Date(`${dateString}T${booked.start_time}`);
-                        const bookedEndTime = new Date(`${dateString}T${booked.end_time}`);
-                        if (bookedStartTime < slotEnd && bookedEndTime > slotStart) {
-                            isBooked = true;
-                            break;
-                        }
+                for (const booked of existingBookings) {
+                    const bookedStart = new Date(`${dateString}T${booked.start_time}`);
+                    const bookedEnd = new Date(`${dateString}T${booked.end_time}`);
+                    // Check for overlap: (BookedStart < SlotEnd) and (BookedEnd > SlotStart)
+                    if (bookedStart < slotEnd && bookedEnd > slotStart) {
+                        return true; // Conflict found
                     }
                 }
+                return false; // No conflict
+            }
 
-                const slotDiv = document.createElement('div');
-                slotDiv.classList.add('time-slot-item');
-                slotDiv.textContent = slotLabel;
+            predefinedSlots.forEach(slot => {
+                const button = document.createElement('button');
+                button.textContent = slot.label;
+                button.classList.add('time-slot-item', 'button'); // Use 'button' class for styling consistency
+                button.dataset.slotId = slot.id;
 
-                if (isBooked) {
-                    slotDiv.classList.add('time-slot-booked');
-                    slotDiv.textContent += ' (Booked)';
+                const isConflicting = checkConflict(slot.startTime, slot.endTime, bookedSlots);
+
+                if (isConflicting) {
+                    button.classList.add('time-slot-booked'); // Or a new class like 'time-slot-conflicting'
+                    button.disabled = true;
+                    button.title = `${slot.name} is unavailable due to existing bookings.`;
                 } else {
-                    slotDiv.classList.add('time-slot-available');
-                    slotDiv.dataset.startTime = startTimeStr;
-                    slotDiv.dataset.endTime = endTimeStr;
-                    slotDiv.addEventListener('click', function() {
-                        const previouslySelected = modalTimeSlotsListDiv.querySelector('.time-slot-selected');
-                        if (previouslySelected) {
-                            previouslySelected.classList.remove('time-slot-selected');
-                        }
-                        this.classList.add('time-slot-selected');
+                    button.classList.add('time-slot-available');
+                    button.addEventListener('click', function() {
+                        // Remove 'selected' from previously selected button
+                        const allButtons = modalTimeSlotsListDiv.querySelectorAll('button.time-slot-item');
+                        allButtons.forEach(btn => btn.classList.remove('time-slot-selected', 'selected')); // Ensure 'selected' is also removed
+
+                        // Add 'selected' to current button
+                        this.classList.add('time-slot-selected', 'selected');
                         selectedTimeSlotForNewBooking = {
-                            startTimeStr: this.dataset.startTime,
-                            endTimeStr: this.dataset.endTime
+                            startTimeStr: slot.startTime,
+                            endTimeStr: slot.endTime
                         };
                         if (modalStatusMessageP) modalStatusMessageP.textContent = '';
 
-                        // Sync to main form
-                        if (mainFormStartTimeInput) mainFormStartTimeInput.value = selectedTimeSlotForNewBooking.startTimeStr;
-                        if (mainFormEndTimeInput) mainFormEndTimeInput.value = selectedTimeSlotForNewBooking.endTimeStr;
-                        if (mainFormManualTimeRadio) {
-                            mainFormManualTimeRadio.checked = true;
-                            // Trigger change event on manual radio to update UI (e.g., hide quick options)
-                            mainFormManualTimeRadio.dispatchEvent(new Event('change', { bubbles: true }));
-                        }
+                        // Sync to main form's start and end time inputs
+                        if (mainFormStartTimeInput) mainFormStartTimeInput.value = slot.startTime;
+                        if (mainFormEndTimeInput) mainFormEndTimeInput.value = slot.endTime;
+                        
+                        // No need to interact with mainFormManualTimeRadio as it's removed.
+                        // The main form's quick options will naturally be out of sync if user used them,
+                        // but the actual time inputs (start-time, end-time) will be correct.
                     });
                 }
-                modalTimeSlotsListDiv.appendChild(slotDiv);
-            }
+                modalTimeSlotsListDiv.appendChild(button);
+            });
+
         } catch (error) {
             // apiCall should have shown error in modalStatusMessageP
             console.error(`Error fetching time slots for resource ${resource.id}:`, error.message);
