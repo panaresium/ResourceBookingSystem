@@ -1496,6 +1496,21 @@ Enter a title for your booking (optional):`);
                                                 window.populateRolesCheckboxesForResource('define-area-authorized-roles-checkbox-container', area.roles ? area.roles.map(r => r.id) : []);
                                             }
                                             resourceToMapSelect.dispatchEvent(new Event('change')); // Trigger change for resource actions
+                                            
+                                            // Attempt to open the edit resource modal
+                                            // This assumes 'admin_resource_edit.js' sets up a listener on a button (e.g., 'open-edit-resource-modal-btn')
+                                            // that uses 'resourceToMapSelect.value' to populate and show the modal.
+                                            const openEditModalBtn = document.getElementById('open-edit-resource-modal-btn');
+                                            if (openEditModalBtn) {
+                                                console.log('Simulating click on openEditModalBtn for resource ID:', area.id);
+                                                openEditModalBtn.click();
+                                            } else {
+                                                console.warn('open-edit-resource-modal-btn not found. Cannot open edit modal programmatically via this button.');
+                                                // As a fallback, if a global function is exposed by admin_resource_edit.js:
+                                                // if (typeof window.loadAndShowEditModal === 'function') {
+                                                //     window.loadAndShowEditModal(area.id);
+                                                // }
+                                            }
                                             break; 
                                         }
                                     }
@@ -1832,14 +1847,58 @@ Enter a title for your booking (optional):`);
         }
 
         if (resourceToMapSelect && resourceActionsContainer) {
-            resourceToMapSelect.addEventListener('change', function() {
+            resourceToMapSelect.addEventListener('change', function handleResourceToMapChangeForDefineArea() { // Added function name for clarity
                 const selectedOption = this.options[this.selectedIndex];
-                resourceActionsContainer.innerHTML = ''; // Clear previous buttons/text
                 
+                if (this.value === '--CREATE_NEW--') {
+                    const editResourceModal = document.getElementById('edit-resource-modal');
+                    const editResourceForm = document.getElementById('edit-resource-form');
+                    const modalTitle = editResourceModal ? editResourceModal.querySelector('h3') : null;
+                    const resourceIdInput = document.getElementById('edit-resource-id');
+                    const submitButton = editResourceForm ? editResourceForm.querySelector('button[type="submit"]') : null;
+                    const imagePreview = document.getElementById('edit-resource-image-preview');
+
+                    if (editResourceModal && editResourceForm && resourceIdInput && modalTitle && submitButton) {
+                        editResourceForm.reset(); // Clear all form fields
+                        if (modalTitle) modalTitle.textContent = 'Create New Resource';
+                        resourceIdInput.value = ''; // Ensure ID is empty for creation
+                        
+                        // Default status to 'draft'
+                        const statusDropdown = document.getElementById('edit-resource-status');
+                        if (statusDropdown) statusDropdown.value = 'draft';
+
+                        // Clear image preview
+                        if (imagePreview) {
+                            imagePreview.src = '#';
+                            imagePreview.style.display = 'none';
+                        }
+                        
+                        // Clear user and role checkboxes using global functions (if they exist)
+                        const usersContainer = document.getElementById('edit-authorized-users-checkbox-container');
+                        if (usersContainer && typeof window.populateUsersCheckboxes === 'function') {
+                            window.populateUsersCheckboxes(usersContainer.id, []); // Empty selection
+                        }
+                        const rolesContainer = document.getElementById('edit-resource-authorized-roles-checkbox-container');
+                        if (rolesContainer && typeof window.populateRolesCheckboxesForResource === 'function') {
+                             // Assuming populateRolesCheckboxesForResource can handle an empty array for selected roles
+                            window.populateRolesCheckboxesForResource(rolesContainer.id, []);
+                        }
+                        
+                        if (submitButton) submitButton.textContent = 'Create Resource';
+                        
+                        editResourceModal.style.display = 'block';
+                    } else {
+                        console.error("Could not find all necessary elements for 'Create New Resource' modal.");
+                    }
+                    return; // Stop further processing in this listener
+                }
+
+                // Existing logic for when a regular resource is selected
+                resourceActionsContainer.innerHTML = ''; // Clear previous buttons/text
                 let assignedRolesForSelectedResource = [];
                 const editDeleteButtonsDiv = document.getElementById('edit-delete-buttons');
 
-                if (selectedOption && selectedOption.value) {
+                if (selectedOption && selectedOption.value) { // This check is now for non--CREATE_NEW-- options
                     const resourceId = parseInt(selectedOption.dataset.resourceId, 10);
                     const resourceStatus = selectedOption.dataset.resourceStatus; // For publish button logic
                     const currentMapId = hiddenFloorMapIdInput ? parseInt(hiddenFloorMapIdInput.value, 10) : null;

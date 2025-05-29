@@ -53,7 +53,10 @@
             <h3>{{ _('Assign Area to Resource') }}</h3>
             <div>
                 <label for="resource-to-map">{{ _('Select Resource:') }}</label>
-                <select id="resource-to-map" name="resource_id" required></select>
+                <select id="resource-to-map" name="resource_id" required>
+                    <option value="--CREATE_NEW--">{{ _('-- Create New Resource --') }}</option>
+                    <!-- Existing options will be populated by JS -->
+                </select>
             </div>
             <div>
                 <label for="booking-permission">{{ _('Booking Permission:') }}</label>
