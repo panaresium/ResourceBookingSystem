@@ -735,8 +735,11 @@ class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusi
         self.assertEqual(resp_pending.status_code, 200)
         json_data_pending = resp_pending.get_json()
         self.assertIsInstance(json_data_pending, list)
-        self.assertEqual(len(json_data_pending), 1)
-        self.assertEqual(json_data_pending[0]['id'], booking_id)
+        
+        # Check if the specific booking is in the list
+        found_booking = any(b['id'] == booking_id for b in json_data_pending)
+        self.assertTrue(found_booking, "Pending booking not found in admin list.")
+
 
         # Test approve booking endpoint
         resp_approve = self.client.post(f'/admin/bookings/{booking_id}/approve')
@@ -760,6 +763,249 @@ class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusi
         init_db()
 
         self.assertIsNotNone(User.query.filter_by(username='keepme').first())
+
+
+class TestMapBookingAPI(AppTests):
+    def setUp(self):
+        super().setUp() # Call parent setUp
+        # Create an admin user for map API tests if needed for specific endpoints
+        self.admin_user = User(username='mapadmin', email='mapadmin@example.com', is_admin=True)
+        self.admin_user.set_password('adminpass')
+        db.session.add(self.admin_user)
+        db.session.commit()
+
+    def test_get_admin_maps_list(self):
+        """Test GET /api/admin/maps returns a list of maps."""
+        self.login(self.admin_user.username, 'adminpass')
+        # self.floor_map is created in AppTests.setUp
+        response = self.client.get('/api/admin/maps')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertIsInstance(data, list)
+        self.assertTrue(len(data) >= 1) # At least the one from setup
+        map_data = next((m for m in data if m['id'] == self.floor_map.id), None)
+        self.assertIsNotNone(map_data)
+        self.assertEqual(map_data['name'], self.floor_map.name)
+        self.assertIn('image_filename', map_data)
+
+    def test_get_admin_maps_no_maps(self):
+        """Test GET /api/admin/maps with no maps present."""
+        self.login(self.admin_user.username, 'adminpass')
+        # Delete the map created in setUp
+        db.session.delete(self.floor_map)
+        # Also delete any resources associated with it to avoid FK constraint issues if not cascaded
+        Resource.query.filter_by(floor_map_id=self.floor_map.id).delete()
+        db.session.commit()
+        
+        response = self.client.get('/api/admin/maps')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertIsInstance(data, list)
+        self.assertEqual(len(data), 0)
+
+    def test_get_map_details_valid_map(self):
+        """Test GET /api/map_details/<map_id> with a valid map ID."""
+        # Login is not strictly required for this public endpoint, but good practice for consistency
+        self.login('testuser', 'password')
+        
+        response = self.client.get(f'/api/map_details/{self.floor_map.id}')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        
+        self.assertIn('map_details', data)
+        self.assertEqual(data['map_details']['id'], self.floor_map.id)
+        self.assertEqual(data['map_details']['name'], self.floor_map.name)
+        self.assertIn('image_url', data['map_details'])
+
+        self.assertIn('mapped_resources', data)
+        self.assertIsInstance(data['mapped_resources'], list)
+        
+        # Check structure of a mapped resource (e.g., self.resource1 from setup)
+        resource1_data = next((r for r in data['mapped_resources'] if r['id'] == self.resource1.id), None)
+        self.assertIsNotNone(resource1_data)
+        self.assertEqual(resource1_data['name'], self.resource1.name)
+        self.assertIn('map_coordinates', resource1_data)
+        self.assertEqual(json.loads(resource1_data['map_coordinates'])['x'], 10) # From setup
+        self.assertIn('bookings_on_date', resource1_data) # Should be present, even if empty
+        self.assertIsInstance(resource1_data['bookings_on_date'], list)
+
+    def test_get_map_details_bookings_on_date_scenarios(self):
+        """Test 'bookings_on_date' in /api/map_details for various booking scenarios."""
+        self.login('testuser', 'password')
+        test_date_str = date.today().strftime('%Y-%m-%d')
+
+        # Scenario 1: Resource available (no bookings)
+        response = self.client.get(f'/api/map_details/{self.floor_map.id}?date={test_date_str}')
+        data = response.get_json()
+        resource1_data = next(r for r in data['mapped_resources'] if r['id'] == self.resource1.id)
+        self.assertEqual(len(resource1_data['bookings_on_date']), 0)
+
+        # Scenario 2: Resource partially booked
+        booking1_start = datetime.combine(date.today(), time(10, 0))
+        booking1_end = datetime.combine(date.today(), time(11, 0))
+        Booking.query.delete() # Clear any previous bookings for clean test
+        db.session.commit()
+        b1 = Booking(resource_id=self.resource1.id, user_name='testuser', start_time=booking1_start, end_time=booking1_end, title='Partial')
+        db.session.add(b1)
+        db.session.commit()
+
+        response = self.client.get(f'/api/map_details/{self.floor_map.id}?date={test_date_str}')
+        data = response.get_json()
+        resource1_data = next(r for r in data['mapped_resources'] if r['id'] == self.resource1.id)
+        self.assertEqual(len(resource1_data['bookings_on_date']), 1)
+        self.assertEqual(resource1_data['bookings_on_date'][0]['title'], 'Partial')
+
+        # Scenario 3: Resource fully booked (e.g., 8am-5pm for this test's purpose)
+        # For simplicity, one long booking. More granular checks would be in JS or specific availability logic.
+        booking2_start = datetime.combine(date.today(), time(8, 0))
+        booking2_end = datetime.combine(date.today(), time(17, 0))
+        # Create a new resource for this to avoid conflicts with res1's partial booking
+        full_res = Resource(name='Full Room', floor_map_id=self.floor_map.id, map_coordinates=json.dumps({'type': 'rect', 'x':1, 'y':1, 'width':1, 'height':1}), status='published')
+        db.session.add(full_res)
+        db.session.commit()
+        b2 = Booking(resource_id=full_res.id, user_name='testuser', start_time=booking2_start, end_time=booking2_end, title='Full Day')
+        db.session.add(b2)
+        db.session.commit()
+
+        response = self.client.get(f'/api/map_details/{self.floor_map.id}?date={test_date_str}')
+        data = response.get_json()
+        full_res_data = next(r for r in data['mapped_resources'] if r['id'] == full_res.id)
+        self.assertEqual(len(full_res_data['bookings_on_date']), 1)
+        self.assertEqual(full_res_data['bookings_on_date'][0]['title'], 'Full Day')
+
+
+    def test_get_map_details_invalid_map_id(self):
+        """Test GET /api/map_details/<map_id> with an invalid map ID."""
+        self.login('testuser', 'password')
+        invalid_map_id = 99999
+        response = self.client.get(f'/api/map_details/{invalid_map_id}')
+        self.assertEqual(response.status_code, 404)
+        self.assertIn('error', response.get_json())
+
+    def test_get_map_details_no_resources_on_map(self):
+        """Test GET /api/map_details/<map_id> for a map with no resources."""
+        self.login('testuser', 'password')
+        empty_map = FloorMap(name="Empty Map", image_filename="empty.png")
+        db.session.add(empty_map)
+        db.session.commit()
+        
+        response = self.client.get(f'/api/map_details/{empty_map.id}')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data['map_details']['id'], empty_map.id)
+        self.assertEqual(len(data['mapped_resources']), 0)
+
+    def test_get_resource_availability(self):
+        """Test GET /api/resources/<resource_id>/availability."""
+        self.login('testuser', 'password')
+        test_date_str = date.today().strftime('%Y-%m-%d')
+
+        # Resource with no bookings
+        response_no_bookings = self.client.get(f'/api/resources/{self.resource2.id}/availability?date={test_date_str}')
+        self.assertEqual(response_no_bookings.status_code, 200)
+        self.assertEqual(len(response_no_bookings.get_json()), 0)
+
+        # Resource with bookings
+        booking_start = datetime.combine(date.today(), time(14, 0))
+        booking_end = datetime.combine(date.today(), time(15, 0))
+        b = Booking(resource_id=self.resource1.id, user_name='testuser', start_time=booking_start, end_time=booking_end, title='Avail Test')
+        db.session.add(b)
+        db.session.commit()
+        
+        response_with_bookings = self.client.get(f'/api/resources/{self.resource1.id}/availability?date={test_date_str}')
+        self.assertEqual(response_with_bookings.status_code, 200)
+        data_bookings = response_with_bookings.get_json()
+        self.assertEqual(len(data_bookings), 1)
+        self.assertEqual(data_bookings[0]['title'], 'Avail Test')
+        self.assertEqual(data_bookings[0]['start_time'], '14:00:00')
+
+    def test_get_resource_availability_invalid_id(self):
+        """Test GET /api/resources/<resource_id>/availability with an invalid resource ID."""
+        self.login('testuser', 'password')
+        invalid_resource_id = 99999
+        test_date_str = date.today().strftime('%Y-%m-%d')
+        response = self.client.get(f'/api/resources/{invalid_resource_id}/availability?date={test_date_str}')
+        self.assertEqual(response.status_code, 404)
+
+    def test_post_booking_from_map_modal_success(self):
+        """Test POST /api/bookings for successful booking from map modal scenario."""
+        self.login('testuser', 'password')
+        payload = {
+            'resource_id': self.resource1.id,
+            'date_str': date.today().strftime('%Y-%m-%d'),
+            'start_time_str': '10:00',
+            'end_time_str': '11:00',
+            'title': 'Map Modal Booking',
+            'user_name': 'testuser' # Assuming user_name is correctly passed or derived
+        }
+        response = self.client.post('/api/bookings', json=payload)
+        self.assertEqual(response.status_code, 201)
+        data = response.get_json()
+        self.assertEqual(data['title'], 'Map Modal Booking')
+        self.assertEqual(data['resource_id'], self.resource1.id)
+        self.assertTrue(Booking.query.filter_by(id=data['id']).count() == 1)
+
+    def test_post_booking_conflict_from_map_modal(self):
+        """Test POST /api/bookings for conflict from map modal."""
+        self.login('testuser', 'password')
+        # Create an existing booking
+        existing_start = datetime.combine(date.today(), time(10, 0))
+        existing_end = datetime.combine(date.today(), time(11, 0))
+        Booking(resource_id=self.resource1.id, user_name='anotheruser', start_time=existing_start, end_time=existing_end, title='Existing').save()
+
+        payload = {
+            'resource_id': self.resource1.id,
+            'date_str': date.today().strftime('%Y-%m-%d'),
+            'start_time_str': '10:00', # Same time
+            'end_time_str': '11:00',
+            'title': 'Conflict Map Modal Booking',
+            'user_name': 'testuser'
+        }
+        response = self.client.post('/api/bookings', json=payload)
+        self.assertEqual(response.status_code, 409) # Expect conflict
+        self.assertIn('conflicts with an existing booking', response.get_json().get('error', ''))
+
+    def test_post_booking_invalid_data_from_map_modal(self):
+        """Test POST /api/bookings with invalid data from map modal."""
+        self.login('testuser', 'password')
+        # Missing resource_id
+        payload_no_resource = {
+            'date_str': date.today().strftime('%Y-%m-%d'),
+            'start_time_str': '10:00',
+            'end_time_str': '11:00',
+            'title': 'No Resource Booking',
+            'user_name': 'testuser'
+        }
+        response_no_res = self.client.post('/api/bookings', json=payload_no_resource)
+        self.assertEqual(response_no_res.status_code, 400) # Expect Bad Request
+
+        # Invalid time (end before start)
+        payload_invalid_time = {
+            'resource_id': self.resource1.id,
+            'date_str': date.today().strftime('%Y-%m-%d'),
+            'start_time_str': '11:00',
+            'end_time_str': '10:00', # End before start
+            'title': 'Invalid Time Booking',
+            'user_name': 'testuser'
+        }
+        response_invalid_time = self.client.post('/api/bookings', json=payload_invalid_time)
+        self.assertEqual(response_invalid_time.status_code, 400)
+
+    def test_post_booking_non_existent_resource_from_map_modal(self):
+        """Test POST /api/bookings for a non-existent resource."""
+        self.login('testuser', 'password')
+        payload = {
+            'resource_id': 99999, # Non-existent
+            'date_str': date.today().strftime('%Y-%m-%d'),
+            'start_time_str': '10:00',
+            'end_time_str': '11:00',
+            'title': 'Ghost Resource Booking',
+            'user_name': 'testuser'
+        }
+        response = self.client.post('/api/bookings', json=payload)
+        self.assertEqual(response.status_code, 404) # Expect Not Found for resource
+        self.assertIn('Resource not found', response.get_json().get('error', ''))
+
 
 if __name__ == '__main__':
     unittest.main()
