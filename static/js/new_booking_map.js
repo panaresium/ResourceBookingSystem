@@ -47,21 +47,41 @@ document.addEventListener('DOMContentLoaded', function () {
      * Populates the floor select dropdown based on the selected location.
      */
     function updateFloorSelectOptions() {
-        if (!mapFloorSelect || !mapLocationSelect) return;
+        if (!mapFloorSelect || !mapLocationSelect) {
+            console.error("Floor or Location select dropdown not found for updateFloorSelectOptions");
+            return;
+        }
         const selectedLocation = mapLocationSelect.value;
+        console.log(`Updating floor options for location: '${selectedLocation}'`);
+
+        mapFloorSelect.innerHTML = '<option value="">-- Select Floor --</option>'; // Reset floors
+
+        if (!selectedLocation) { // No location selected or "-- Select Location --"
+            mapFloorSelect.disabled = true;
+            console.log("No location selected, floor dropdown disabled.");
+            // Optionally, clear the map if no location is selected
+            // handleFilterChange('map'); // This would call loadMapDetails(null, ...)
+            return;
+        }
+
         const availableFloors = [...new Set(allMapInfo
-            .filter(map => !selectedLocation || map.location === selectedLocation)
+            .filter(map => map.location === selectedLocation && map.floor) // Filter by selected location and ensure floor exists
             .map(map => map.floor)
-            .filter(floor => floor) // Remove null or empty floor values
             .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
         )];
+        
+        console.log("Available floors for selected location:", availableFloors);
 
-        mapFloorSelect.innerHTML = '<option value="">-- Select Floor --</option>';
-        availableFloors.forEach(floor => {
-            const option = new Option(floor, floor);
-            mapFloorSelect.add(option);
-        });
-        mapFloorSelect.disabled = availableFloors.length === 0;
+        if (availableFloors.length > 0) {
+            availableFloors.forEach(floor => {
+                const option = new Option(floor, floor);
+                mapFloorSelect.add(option);
+            });
+            mapFloorSelect.disabled = false;
+        } else {
+            mapFloorSelect.disabled = true;
+            console.log("No floors found for this location, floor dropdown disabled.");
+        }
     }
 
     /**
@@ -213,20 +233,32 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         if (!selectedLocation || !selectedFloor) {
+            console.log("Location or Floor not selected. Clearing map.");
             loadMapDetails(null, selectedDate).finally(() => { isSyncingDate = false; });
-            isSyncingDate = false; // Ensure flag is reset even if loadMapDetails is skipped
+            // isSyncingDate = false; // This was potentially problematic, finally block in loadMapDetails handles it better if async.
+                                     // For now, let's assume loadMapDetails is not always async or handles its own flag.
+                                     // Simpler: just set it at the end of this function.
+            // No, this is fine: if we return early, we must reset.
+            isSyncingDate = false; 
             return;
         }
 
         const mapToLoad = allMapInfo.find(map => map.location === selectedLocation && map.floor === selectedFloor);
+        console.log(`Attempting to find map for Location: '${selectedLocation}', Floor: '${selectedFloor}'. Found:`, mapToLoad);
 
-        if (mapToLoad) {
+        if (mapToLoad && mapToLoad.id) {
+            console.log(`Loading map ID: ${mapToLoad.id} for date: ${selectedDate}`);
             loadMapDetails(mapToLoad.id, selectedDate).finally(() => { isSyncingDate = false; });
         } else {
+            console.log("No specific map ID found for selection. Clearing map.");
             loadMapDetails(null, selectedDate).finally(() => { isSyncingDate = false; });
-            if (mapLoadingStatusDiv) showSuccess(mapLoadingStatusDiv, 'No map found for the selected location and floor.');
+            if (mapLoadingStatusDiv && selectedLocation && selectedFloor) { // Only show if both are selected but no map found
+                 showError(mapLoadingStatusDiv, 'No map found for the selected location and floor combination.');
+            } else if (mapLoadingStatusDiv) {
+                 showSuccess(mapLoadingStatusDiv, 'Please complete location and floor selection.');
+            }
         }
-        // Highlight selected resource after map loads/reloads
+        // Highlight selected resource after map loads/reloads (if any)
         highlightSelectedResourceOnMap();
     }
 
@@ -239,33 +271,49 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
         showLoading(mapLoadingStatusDiv, 'Loading available maps...');
+        console.log("Fetching available maps from /api/admin/maps");
         try {
-            allMapInfo = await apiCall('/api/admin/maps', {}, mapLoadingStatusDiv);
+            const mapsData = await apiCall('/api/admin/maps', {}, mapLoadingStatusDiv);
+            console.log("Raw maps data from API:", mapsData);
+
+            allMapInfo = mapsData; // Store the raw data
 
             if (!allMapInfo || allMapInfo.length === 0) {
                 showError(mapLoadingStatusDiv, 'No maps are currently available.');
-                mapLocationSelect.disabled = true;
-                mapFloorSelect.disabled = true;
+                if (mapLocationSelect) mapLocationSelect.disabled = true;
+                if (mapFloorSelect) mapFloorSelect.disabled = true;
                 return;
             }
 
             // Populate Location Select
-            const locations = [...new Set(allMapInfo.map(map => map.location).filter(loc => loc))];
-            mapLocationSelect.innerHTML = '<option value="">-- Select Location --</option>';
-            locations.forEach(location => {
-                const option = new Option(location, location);
-                mapLocationSelect.add(option);
-            });
-            mapLocationSelect.disabled = locations.length === 0;
+            const locations = [...new Set(allMapInfo.map(map => map.location).filter(loc => loc))].sort();
+            console.log("Unique locations found:", locations);
+            
+            if (mapLocationSelect) {
+                mapLocationSelect.innerHTML = '<option value="">-- Select Location --</option>';
+                locations.forEach(location => {
+                    const option = new Option(location, location);
+                    mapLocationSelect.add(option);
+                });
+                mapLocationSelect.disabled = locations.length === 0;
+            } else {
+                console.error("mapLocationSelect element not found.");
+            }
 
             // Initialize Floor Select (will be updated by location change)
-            mapFloorSelect.innerHTML = '<option value="">-- Select Floor --</option>';
-            mapFloorSelect.disabled = true; // Disabled until a location is chosen
+            if (mapFloorSelect) {
+                mapFloorSelect.innerHTML = '<option value="">-- Select Floor --</option>';
+                mapFloorSelect.disabled = true; // Disabled until a location is chosen
+            } else {
+                 console.error("mapFloorSelect element not found.");
+            }
+
 
             // Add event listeners
             if (mapLocationSelect) {
                 mapLocationSelect.addEventListener('change', () => {
                     updateFloorSelectOptions();
+                    // When location changes, floor is reset, so map should clear until floor is selected.
                     handleFilterChange('map'); 
                 });
             }
