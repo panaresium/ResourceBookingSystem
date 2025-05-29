@@ -27,6 +27,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const modalBookingIdInput = document.getElementById('modal-booking-id');
     const newBookingTitleInput = document.getElementById('new-booking-title');
     const saveBookingTitleBtn = document.getElementById('save-booking-title-btn');
+
+    // Add explicit event listeners for modal close buttons
+    const modalHeaderCloseButton = updateModalElement.querySelector('.modal-header .btn-close');
+    const modalFooterCloseButton = updateModalElement.querySelector('.modal-footer .btn-secondary[data-bs-dismiss="modal"]');
+
+    if (modalHeaderCloseButton) {
+        modalHeaderCloseButton.addEventListener('click', () => {
+            if (updateModal && typeof updateModal.hide === 'function') {
+                updateModal.hide();
+            } else if (updateModalElement) { // Fallback if Bootstrap instance not available
+                updateModalElement.style.display = 'none';
+            }
+        });
+    }
+
+    if (modalFooterCloseButton) {
+        modalFooterCloseButton.addEventListener('click', () => {
+            if (updateModal && typeof updateModal.hide === 'function') {
+                updateModal.hide();
+            } else if (updateModalElement) { // Fallback
+                updateModalElement.style.display = 'none';
+            }
+        });
+    }
+
     const updateModalStatusDiv = document.getElementById('update-modal-status');
 
     // Helper to display status messages (could be moved to script.js if used globally)
