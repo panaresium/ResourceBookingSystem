@@ -457,44 +457,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (this.checked) {
                     switch (this.value) {
                         case 'morning':
-                            if (startTimeInput) startTimeInput.value = '08:00';
-                            if (endTimeInput) endTimeInput.value = '12:00';
-                            if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'none';
+                            if (startTimeInput) startTimeInput.value = '09:00';
+                            if (endTimeInput) endTimeInput.value = '13:00';
                             break;
                         case 'afternoon':
-                            if (startTimeInput) startTimeInput.value = '13:00';
-                            if (endTimeInput) endTimeInput.value = '17:00';
-                            if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'none';
+                            if (startTimeInput) startTimeInput.value = '14:00';
+                            if (endTimeInput) endTimeInput.value = '18:00';
                             break;
                         case 'full_day':
-                            if (startTimeInput) startTimeInput.value = '08:00';
-                            if (endTimeInput) endTimeInput.value = '17:00';
-                            if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'none';
-                            break;
-                        case 'manual':
-                            // Optionally clear times or leave them for user to edit
-                            // if (startTimeInput) startTimeInput.value = '';
-                            // if (endTimeInput) endTimeInput.value = '';
-                            if (manualTimeInputsDiv) manualTimeInputsDiv.style.display = 'block'; // Or 'flex' or '' depending on original
+                            if (startTimeInput) startTimeInput.value = '09:00';
+                            if (endTimeInput) endTimeInput.value = '18:00';
                             break;
                     }
                 }
             });
         });
 
-        // Initial state for manual time (ensure it's visible if manual is checked by default)
-        const manualRadio = document.querySelector('input[name="quick_time_option"][value="manual"]');
-        if (manualRadio && manualRadio.checked && manualTimeInputsDiv) {
-            manualTimeInputsDiv.style.display = 'block'; // Or 'flex' or ''
-        } else if (manualTimeInputsDiv && (!manualRadio || !manualRadio.checked)) {
-            // If manual is not checked by default, and another option is, hide manual inputs
-            // This case should be covered by the radio button's 'checked' attribute in HTML triggering the change listener.
-            // However, as a fallback:
-            const anyCheckedRadio = document.querySelector('input[name="quick_time_option"]:checked');
-            if (anyCheckedRadio && anyCheckedRadio.value !== 'manual' && manualTimeInputsDiv) {
-                 manualTimeInputsDiv.style.display = 'none';
-            }
-        }
     } // This closes the outer if(bookingForm)
 
     // The rest of the file continues from here...
@@ -1513,7 +1491,10 @@ Enter a title for your booking (optional):`);
                                                     cb.checked = allowedUserIds.includes(cb.value);
                                                 });
                                             }
-                                            if(authorizedRolesInput) authorizedRolesInput.value = (area.roles || []).map(r => r.id).join(',');
+                                            // if(authorizedRolesInput) authorizedRolesInput.value = (area.roles || []).map(r => r.id).join(','); // Old input, remove/comment if not used
+                                            if (typeof window.populateRolesCheckboxesForResource === 'function') {
+                                                window.populateRolesCheckboxesForResource('define-area-authorized-roles-checkbox-container', area.roles ? area.roles.map(r => r.id) : []);
+                                            }
                                             resourceToMapSelect.dispatchEvent(new Event('change')); // Trigger change for resource actions
                                             break; 
                                         }
@@ -1541,6 +1522,9 @@ Enter a title for your booking (optional):`);
                                     // Explicitly set dropdowns to default if reset() doesn't guarantee it or for clarity
                                     if (resourceToMapSelect) resourceToMapSelect.value = ''; 
                                     if (bookingPermissionDropdown) bookingPermissionDropdown.value = "";
+                                    if (typeof window.populateRolesCheckboxesForResource === 'function') {
+                                        window.populateRolesCheckboxesForResource('define-area-authorized-roles-checkbox-container', []);
+                                    }
                                 }
                                 redrawCanvas(); 
                             };
@@ -1698,10 +1682,18 @@ Enter a title for your booking (optional):`);
                 }
                 
                 // Payload includes coordinates and potentially other resource-specific settings if form is extended
-                const payload = { floor_map_id: floorMapId, coordinates: coordinates };
-                // Add other properties like booking_restriction or role_ids from form if needed
-                // payload.booking_restriction = bookingPermissionDropdown.value;
-                // payload.allowed_user_ids = ... ; payload.role_ids = ...;
+                let roleIdsToSend = [];
+                if (typeof window.getSelectedRoleIdsForResource === 'function') {
+                    roleIdsToSend = window.getSelectedRoleIdsForResource('define-area-authorized-roles-checkbox-container');
+                }
+                const payload = { 
+                    floor_map_id: floorMapId, 
+                    coordinates: coordinates,
+                    booking_restriction: bookingPermissionDropdown.value, // Also send booking_restriction
+                    role_ids: roleIdsToSend 
+                };
+                // Add other properties like allowed_user_ids from form if needed
+                // payload.allowed_user_ids = ... ;
 
                 try {
                     const responseData = await apiCall(
@@ -1843,25 +1835,36 @@ Enter a title for your booking (optional):`);
             resourceToMapSelect.addEventListener('change', function() {
                 const selectedOption = this.options[this.selectedIndex];
                 resourceActionsContainer.innerHTML = ''; // Clear previous buttons/text
-    
-                if (selectedOption && selectedOption.value) { // If a resource is selected
-                    const resourceId = selectedOption.dataset.resourceId;
-                    const resourceStatus = selectedOption.dataset.resourceStatus;
-    
-                    // Logic to also update selectedAreaForEditing and redraw canvas if a mapped resource is chosen
-                    if (existingMapAreas && typeof redrawCanvas === 'function') { 
-                        const area = existingMapAreas.find(a => a.id === parseInt(resourceId));
-                        // Ensure hiddenFloorMapIdInput is defined and has a value
-                        const currentMapDisplayingId = hiddenFloorMapIdInput ? parseInt(hiddenFloorMapIdInput.value) : null;
-                        
-                        if (area && area.map_coordinates && area.floor_map_id === currentMapDisplayingId) { 
-                            selectedAreaForEditing = area;
-                        } else {
-                            selectedAreaForEditing = null; 
+                
+                let assignedRolesForSelectedResource = [];
+                const editDeleteButtonsDiv = document.getElementById('edit-delete-buttons');
+
+                if (selectedOption && selectedOption.value) {
+                    const resourceId = parseInt(selectedOption.dataset.resourceId, 10);
+                    const resourceStatus = selectedOption.dataset.resourceStatus; // For publish button logic
+                    const currentMapId = hiddenFloorMapIdInput ? parseInt(hiddenFloorMapIdInput.value, 10) : null;
+
+                    const existingAreaOnThisMap = existingMapAreas.find(area =>
+                        area.id === resourceId && area.floor_map_id === currentMapId
+                    );
+
+                    if (existingAreaOnThisMap) {
+                        selectedAreaForEditing = existingAreaOnThisMap;
+                        if (selectedAreaForEditing.map_coordinates) {
+                            updateCoordinateInputs(selectedAreaForEditing.map_coordinates);
                         }
-                        redrawCanvas(); 
+                        assignedRolesForSelectedResource = selectedAreaForEditing.roles ? selectedAreaForEditing.roles.map(r => r.id) : [];
+                        if (editDeleteButtonsDiv) editDeleteButtonsDiv.style.display = 'block';
+                    } else {
+                        // Resource selected is not yet mapped to this specific map, or no current map selected
+                        selectedAreaForEditing = null;
+                        // Optionally clear coordinate inputs if desired, or leave for new drawing
+                        // document.getElementById('coord-x').value = ''; // etc.
+                        if (editDeleteButtonsDiv) editDeleteButtonsDiv.style.display = 'none';
                     }
-    
+                    redrawCanvas(); // Update canvas selection highlight
+
+                    // Publish button logic (existing)
                     if (resourceStatus === 'draft') {
                         const publishBtn = document.createElement('button');
                         publishBtn.id = 'publish-resource-btn';
@@ -1889,6 +1892,11 @@ Enter a title for your booking (optional):`);
                     selectedAreaForEditing = null;
                     if (typeof redrawCanvas === 'function') redrawCanvas();
                     resourceActionsContainer.innerHTML = '<p><em>Select a resource from the dropdown above to see its status or publish actions.</em></p>';
+                }
+
+                // Populate roles checkboxes based on the determined assignedRolesForSelectedResource
+                if (typeof window.populateRolesCheckboxesForResource === 'function') {
+                    window.populateRolesCheckboxesForResource('define-area-authorized-roles-checkbox-container', assignedRolesForSelectedResource);
                 }
             });
         }
