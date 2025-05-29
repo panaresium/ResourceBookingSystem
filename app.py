@@ -2844,3 +2844,69 @@ if __name__ == "__main__":
     # Avoid using _() here because no request context exists at startup
     app.logger.info(translator.gettext("Flask app starting...", translator.default_locale))
     socketio.run(app, debug=True)
+
+@app.route('/api/resources/<int:resource_id>/all_bookings', methods=['GET'])
+@login_required
+def get_all_bookings_for_resource(resource_id):
+    """
+    Fetches all bookings for a specific resource within a given date range,
+    formatted for FullCalendar.
+    """
+    start_str = request.args.get('start')
+    end_str = request.args.get('end')
+
+    if not start_str or not end_str:
+        app.logger.warning(f"Missing start or end query parameters for resource {resource_id} all_bookings.")
+        return jsonify({'error': 'Missing start or end query parameters.'}), 400
+
+    try:
+        # Attempt to parse with or without timezone, then make timezone-naive for DB comparison
+        # This handles both 'YYYY-MM-DD' and full ISO8601 datetime strings from FullCalendar
+        try:
+            start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00')).replace(tzinfo=None)
+            end_dt = datetime.fromisoformat(end_str.replace('Z', '+00:00')).replace(tzinfo=None)
+        except ValueError: # Fallback for simple date strings if fromisoformat fails
+            start_dt = datetime.strptime(start_str, '%Y-%m-%d')
+            end_dt = datetime.strptime(end_str, '%Y-%m-%d')
+            # For date-only strings, set time to cover the whole day range for start and end
+            start_dt = datetime.combine(start_dt.date(), time.min)
+            end_dt = datetime.combine(end_dt.date(), time.max)
+
+
+    except ValueError:
+        app.logger.warning(f"Invalid date format for resource {resource_id} all_bookings. Start: {start_str}, End: {end_str}")
+        return jsonify({'error': 'Invalid date format. Use ISO8601 for start and end parameters.'}), 400
+
+    try:
+        resource = Resource.query.get(resource_id)
+        if not resource:
+            app.logger.warning(f"Resource not found for ID {resource_id} in all_bookings endpoint.")
+            return jsonify({'error': 'Resource not found.'}), 404
+
+        bookings_for_resource = Booking.query.filter(
+            Booking.resource_id == resource_id,
+            Booking.start_time < end_dt,
+            Booking.end_time > start_dt
+        ).all()
+
+        events = []
+        for booking in bookings_for_resource:
+            events.append({
+                'id': booking.id,
+                'title': booking.title or resource.name, # Use resource name as fallback
+                'start': booking.start_time.isoformat(),
+                'end': booking.end_time.isoformat(),
+                'color': 'blue', # Standard color for actual bookings
+                'display': 'block',
+                'extendedProps': { # Optional: include more data if needed by frontend
+                    'user_name': booking.user_name,
+                    'status': booking.status
+                }
+            })
+        
+        app.logger.info(f"Fetched {len(events)} bookings for resource {resource_id} between {start_str} and {end_str}.")
+        return jsonify(events), 200
+
+    except Exception as e:
+        app.logger.exception(f"Error fetching all bookings for resource {resource_id}:")
+        return jsonify({'error': 'Failed to fetch bookings due to a server error.'}), 500
