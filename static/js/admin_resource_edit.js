@@ -163,6 +163,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     if(editResourceStatusMessage) showError(editResourceStatusMessage, "Role loading function not found.");
                 }
                 
+                // Ensure modal title and button text are set for "Edit" mode
+                const modalTitle = editResourceModal.querySelector('h3');
+                const submitButton = editResourceForm.querySelector('button[type="submit"]');
+                if (modalTitle) modalTitle.textContent = 'Edit Resource Details';
+                if (submitButton) submitButton.textContent = 'Save Changes';
+
                 editResourceModal.style.display = 'block';
 
             } catch (error) {
@@ -186,9 +192,13 @@ document.addEventListener('DOMContentLoaded', function() {
     if (editResourceForm) {
         editResourceForm.addEventListener('submit', async function(event) {
             event.preventDefault();
-            showLoading(editResourceStatusMessage, 'Saving resource details...');
-
+            
             const resourceId = document.getElementById('edit-resource-id').value;
+            const isCreatingNew = !resourceId; // If resourceId is empty, we are creating
+            
+            const actionVerb = isCreatingNew ? 'Creating' : 'Saving';
+            showLoading(editResourceStatusMessage, `${actionVerb} resource details...`);
+
             const name = document.getElementById('edit-resource-name').value;
             const capacityStr = document.getElementById('edit-resource-capacity').value;
             const equipment = document.getElementById('edit-resource-equipment').value;
@@ -239,17 +249,23 @@ document.addEventListener('DOMContentLoaded', function() {
 
 
             try {
-                const responseData = await apiCall(`/api/admin/resources/${resourceId}`, {
-                    method: 'PUT',
+                const method = isCreatingNew ? 'POST' : 'PUT';
+                const apiUrl = isCreatingNew ? '/api/admin/resources' : `/api/admin/resources/${resourceId}`;
+
+                const responseData = await apiCall(apiUrl, {
+                    method: method,
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 }, editResourceStatusMessage);
 
                 let imgResponse = null;
+                const newResourceId = isCreatingNew ? responseData.id : resourceId; // Use new ID for image upload if creating
+
                 if (editResourceImageInput && editResourceImageInput.files.length > 0) {
                     const formData = new FormData();
                     formData.append('resource_image', editResourceImageInput.files[0]);
-                    imgResponse = await apiCall(`/api/admin/resources/${resourceId}/image`, {
+                    // Use newResourceId for the image upload URL, important for creation case
+                    imgResponse = await apiCall(`/api/admin/resources/${newResourceId}/image`, {
                         method: 'POST',
                         body: formData
                     }, editResourceStatusMessage);
@@ -259,51 +275,83 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     editResourceImageInput.value = '';
                 }
-
-                showSuccess(editResourceStatusMessage, `Resource '${responseData.name}' updated successfully!`);
                 
-                if (resourceToMapSelect) {
-                    const optionToUpdate = Array.from(resourceToMapSelect.options).find(opt => opt.value === resourceId);
-                    if (optionToUpdate) {
-                        optionToUpdate.textContent = `${responseData.name} (ID: ${resourceId}) - Status: ${responseData.status || 'N/A'}`;
-                        // Update dataset attributes
-                        optionToUpdate.dataset.resourceName = responseData.name;
-                        optionToUpdate.dataset.resourceStatus = responseData.status;
-                        optionToUpdate.dataset.capacity = responseData.capacity === null || responseData.capacity === undefined ? '' : String(responseData.capacity);
-                        optionToUpdate.dataset.equipment = responseData.equipment || '';
-                        optionToUpdate.dataset.bookingRestriction = responseData.booking_restriction || "";
-                        optionToUpdate.dataset.allowedUserIds = responseData.allowed_user_ids || "";
-                        optionToUpdate.dataset.allowedRoles = responseData.allowed_roles || "";
-                        optionToUpdate.dataset.isUnderMaintenance = responseData.is_under_maintenance ? "true" : "false";
-                        optionToUpdate.dataset.maintenanceUntil = responseData.maintenance_until || "";
-                        optionToUpdate.dataset.maxRecurrenceCount = responseData.max_recurrence_count || "";
-                        optionToUpdate.dataset.scheduledStatus = responseData.scheduled_status || "";
-                        optionToUpdate.dataset.scheduledStatusAt = responseData.scheduled_status_at || "";
+                const successMessage = isCreatingNew ? 
+                    `Resource '${responseData.name}' created successfully!` : 
+                    `Resource '${responseData.name}' updated successfully!`;
+                showSuccess(editResourceStatusMessage, successMessage);
+                
+                // Update the resourceToMapSelect dropdown in the main document (admin_maps.html)
+                const mainDocResourceToMapSelect = window.document.getElementById('resource-to-map');
+                if (mainDocResourceToMapSelect) {
+                    if (isCreatingNew) {
+                        const newOption = new Option(
+                            `${responseData.name} (ID: ${responseData.id}) - Status: ${responseData.status || 'N/A'}`,
+                            responseData.id
+                        );
+                        // Populate dataset for the new option
+                        newOption.dataset.resourceId = responseData.id;
+                        newOption.dataset.resourceName = responseData.name;
+                        newOption.dataset.resourceStatus = responseData.status || 'draft';
+                        newOption.dataset.capacity = responseData.capacity === null || responseData.capacity === undefined ? '' : String(responseData.capacity);
+                        newOption.dataset.equipment = responseData.equipment || '';
+                        newOption.dataset.bookingRestriction = responseData.booking_restriction || "";
+                        newOption.dataset.allowedUserIds = responseData.allowed_user_ids || "";
+                        newOption.dataset.roleIds = (responseData.roles || []).map(role => role.id).join(',');
+                        newOption.dataset.isUnderMaintenance = responseData.is_under_maintenance ? "true" : "false";
+                        newOption.dataset.maintenanceUntil = responseData.maintenance_until || "";
+                        newOption.dataset.maxRecurrenceCount = responseData.max_recurrence_count || "";
+                        newOption.dataset.scheduledStatus = responseData.scheduled_status || "";
+                        newOption.dataset.scheduledStatusAt = responseData.scheduled_status_at || "";
                         if (imgResponse && imgResponse.image_url) {
-                            optionToUpdate.dataset.imageUrl = imgResponse.image_url;
+                            newOption.dataset.imageUrl = imgResponse.image_url;
                         }
-                         // Preserve map-specific dataset attributes if they exist
-                        if (optionToUpdate.dataset.isMappedToCurrent === "true") {
-                           optionToUpdate.textContent += ` (On this map)`;
+                        // Add to dropdown and select it
+                        mainDocResourceToMapSelect.add(newOption);
+                        mainDocResourceToMapSelect.value = responseData.id;
+                        // Trigger change to update define-area-form and other UI
+                        mainDocResourceToMapSelect.dispatchEvent(new Event('change')); 
+
+                    } else { // Existing logic for updating an option
+                        const optionToUpdate = Array.from(mainDocResourceToMapSelect.options).find(opt => opt.value === resourceId);
+                        if (optionToUpdate) {
+                            optionToUpdate.textContent = `${responseData.name} (ID: ${resourceId}) - Status: ${responseData.status || 'N/A'}`;
+                            // Update dataset attributes
+                            optionToUpdate.dataset.resourceName = responseData.name;
+                            optionToUpdate.dataset.resourceStatus = responseData.status;
+                            optionToUpdate.dataset.capacity = responseData.capacity === null || responseData.capacity === undefined ? '' : String(responseData.capacity);
+                            optionToUpdate.dataset.equipment = responseData.equipment || '';
+                            optionToUpdate.dataset.bookingRestriction = responseData.booking_restriction || "";
+                            optionToUpdate.dataset.allowedUserIds = responseData.allowed_user_ids || "";
+                            // optionToUpdate.dataset.allowedRoles = responseData.allowed_roles || ""; // Keep if still used, or rely on role_ids
+                            optionToUpdate.dataset.roleIds = (responseData.roles || []).map(role => role.id).join(',');
+                            optionToUpdate.dataset.isUnderMaintenance = responseData.is_under_maintenance ? "true" : "false";
+                            optionToUpdate.dataset.maintenanceUntil = responseData.maintenance_until || "";
+                            optionToUpdate.dataset.maxRecurrenceCount = responseData.max_recurrence_count || "";
+                            optionToUpdate.dataset.scheduledStatus = responseData.scheduled_status || "";
+                            optionToUpdate.dataset.scheduledStatusAt = responseData.scheduled_status_at || "";
+                            if (imgResponse && imgResponse.image_url) {
+                                optionToUpdate.dataset.imageUrl = imgResponse.image_url;
+                            }
+                             // Preserve map-specific dataset attributes if they exist
+                            if (optionToUpdate.dataset.isMappedToCurrent === "true") {
+                               optionToUpdate.textContent += ` (On this map)`;
+                            }
+                             // Dispatch change event after updating existing option
+                            mainDocResourceToMapSelect.dispatchEvent(new Event('change'));
                         }
                     }
                 }
                 
-                if (typeof window.populateResourcesForMapping === 'function' && 
-                    typeof window.fetchAndDrawExistingMapAreas === 'function') {
-                    const currentMapId = document.getElementById('selected-floor-map-id') ? document.getElementById('selected-floor-map-id').value : null;
+                // Refresh map areas on the main page, especially if a resource name changed
+                if (typeof window.fetchAndDrawExistingMapAreas === 'function') {
+                    const currentMapId = window.document.getElementById('selected-floor-map-id') ? window.document.getElementById('selected-floor-map-id').value : null;
                     if (currentMapId) {
-                        // await window.populateResourcesForMapping(currentMapId); // Might reset selection
                         await window.fetchAndDrawExistingMapAreas(currentMapId); 
                     }
                 } else {
                     console.warn("Global map refresh functions not found. Canvas might not reflect all changes immediately.");
                 }
-                 // Dispatch change event to trigger UI updates in main script (e.g., resource actions container)
-                if (resourceToMapSelect) {
-                    resourceToMapSelect.dispatchEvent(new Event('change'));
-                }
-
 
                 setTimeout(() => {
                     if (editResourceModal) editResourceModal.style.display = 'none';
