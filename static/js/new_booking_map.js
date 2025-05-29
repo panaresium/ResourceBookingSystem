@@ -327,7 +327,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 return;
             }
             
-            allMapInfo = maps; // Store the maps
+            // Ensure maps is an array before proceeding
+            if (!Array.isArray(maps)) {
+                console.error('Parsed map data is not an array:', maps);
+                updateMapLoadingStatus('Unexpected map data format received.', true);
+                disableMapSelectors();
+                return; // Exit the function
+            }
+
+            allMapInfo = maps; // Store the maps (now confirmed to be an array)
 
             if (!allMapInfo || allMapInfo.length === 0) {
                 console.log('No maps available from API.');
@@ -343,11 +351,17 @@ document.addEventListener('DOMContentLoaded', function () {
             
             if (mapLocationSelect) {
                 mapLocationSelect.innerHTML = '<option value="">-- Select Location --</option>';
-                locations.forEach(location => {
-                    const option = new Option(location, location);
-                    mapLocationSelect.add(option);
-                });
-                mapLocationSelect.disabled = locations.length === 0;
+                if (locations.length > 0) {
+                    locations.forEach(location => {
+                        const option = new Option(location, location);
+                        mapLocationSelect.add(option);
+                    });
+                    mapLocationSelect.disabled = false; // Enable if locations are available
+                } else {
+                    // No locations found, though maps exist (e.g., maps with no location string)
+                    mapLocationSelect.innerHTML = '<option value="">-- No Locations --</option>';
+                    mapLocationSelect.disabled = true;
+                }
             } else {
                 console.error("mapLocationSelect element not found.");
             }
@@ -355,11 +369,10 @@ document.addEventListener('DOMContentLoaded', function () {
             // Initialize Floor Select (will be updated by location change)
             if (mapFloorSelect) {
                 mapFloorSelect.innerHTML = '<option value="">-- Select Floor --</option>';
-                mapFloorSelect.disabled = true; // Disabled until a location is chosen
+                mapFloorSelect.disabled = true; // Remains disabled until a location is chosen
             } else {
                  console.error("mapFloorSelect element not found.");
             }
-
 
             // Add event listeners
             if (mapLocationSelect) {
