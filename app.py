@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, render_template, request, url_for, redirect, session, Blueprint, has_request_context # Added Blueprint and has_request_context
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func, text  # Add this and for WAL pragma setup
-from datetime import datetime, date, timedelta, time # Ensure all are here
+from datetime import datetime, date, timedelta, time, timezone # Ensure all are here
 import os
 import json # For serializing coordinates
 from werkzeug.utils import secure_filename
@@ -2860,22 +2860,34 @@ def get_all_bookings_for_resource(resource_id):
         return jsonify({'error': 'Missing start or end query parameters.'}), 400
 
     try:
-        # Attempt to parse with or without timezone, then make timezone-naive for DB comparison
-        # This handles both 'YYYY-MM-DD' and full ISO8601 datetime strings from FullCalendar
-        try:
-            start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00')).replace(tzinfo=None)
-            end_dt = datetime.fromisoformat(end_str.replace('Z', '+00:00')).replace(tzinfo=None)
-        except ValueError: # Fallback for simple date strings if fromisoformat fails
-            start_dt = datetime.strptime(start_str, '%Y-%m-%d')
-            end_dt = datetime.strptime(end_str, '%Y-%m-%d')
-            # For date-only strings, set time to cover the whole day range for start and end
-            start_dt = datetime.combine(start_dt.date(), time.min)
-            end_dt = datetime.combine(end_dt.date(), time.max)
+        # Try parsing directly as ISO8601 datetime (handles offsets like +07:00 and Z)
+        start_dt_aware = datetime.fromisoformat(start_str)
+        end_dt_aware = datetime.fromisoformat(end_str)
+        
+        # Convert to UTC then make naive for DB comparison, assuming DB stores naive UTC
+        # If already naive (e.g. fromisoformat didn't find tz info), astimezone(timezone.utc) would error
+        # So, check if tzinfo is present first.
+        if start_dt_aware.tzinfo:
+            start_dt = start_dt_aware.astimezone(timezone.utc).replace(tzinfo=None)
+        else: # Already naive
+            start_dt = start_dt_aware
 
+        if end_dt_aware.tzinfo:
+            end_dt = end_dt_aware.astimezone(timezone.utc).replace(tzinfo=None)
+        else: # Already naive
+            end_dt = end_dt_aware
 
     except ValueError:
-        app.logger.warning(f"Invalid date format for resource {resource_id} all_bookings. Start: {start_str}, End: {end_str}")
-        return jsonify({'error': 'Invalid date format. Use ISO8601 for start and end parameters.'}), 400
+        # If ISO8601 datetime parsing fails, try parsing as YYYY-MM-DD date
+        try:
+            start_dt_date = datetime.strptime(start_str, '%Y-%m-%d').date()
+            end_dt_date = datetime.strptime(end_str, '%Y-%m-%d').date()
+            
+            start_dt = datetime.combine(start_dt_date, time.min) # Start of the day (naive)
+            end_dt = datetime.combine(end_dt_date, time.max)     # End of the day (naive)
+        except ValueError:
+            app.logger.warning(f"Invalid date format for resource {resource_id} all_bookings. Start: {start_str}, End: {end_str}. Neither full ISO8601 datetime nor YYYY-MM-DD.")
+            return jsonify({'error': 'Invalid date format. Use ISO8601 for start and end parameters (e.g., YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DD).'}), 400
 
     try:
         resource = Resource.query.get(resource_id)

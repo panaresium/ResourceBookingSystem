@@ -7,98 +7,45 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
     }
 
-    const MORNING_SLOT = { startHour: 8, endHour: 12, title: 'Morning Available', color: 'green' };
-    const AFTERNOON_SLOT = { startHour: 13, endHour: 17, title: 'Afternoon Available', color: 'green' };
-    // Business hours are implicitly defined by the slots for now.
+    let allUserEvents = []; // Store all user bookings
+
+    // MORNING_SLOT and AFTERNOON_SLOT are not needed if not generating available slots
+    // const MORNING_SLOT = { startHour: 8, endHour: 12, title: 'Morning Available', color: 'green' };
+    // const AFTERNOON_SLOT = { startHour: 13, endHour: 17, title: 'Afternoon Available', color: 'green' };
 
     async function populateResourceSelector() {
         try {
-            // Using apiCall helper if available and configured for GET requests without message element
-            const resources = await apiCall('/api/resources'); 
-            calendarResourceSelect.innerHTML = '<option value="">-- Select a Resource --</option>';
+            const resources = await apiCall('/api/resources');
+            // Keep the "-- All My Booked Resources --" option, clear others
+            const firstOption = calendarResourceSelect.options[0];
+            calendarResourceSelect.innerHTML = '';
+            calendarResourceSelect.add(firstOption);
+
             if (resources && resources.length > 0) {
                 resources.forEach(resource => {
-                    // Only include published resources if the API returns all statuses
-                    if (resource.status === 'published') { 
+                    if (resource.status === 'published') {
                         const option = new Option(`${resource.name} (Capacity: ${resource.capacity || 'N/A'})`, resource.id);
                         calendarResourceSelect.add(option);
                     }
                 });
+                calendarResourceSelect.disabled = false;
             } else {
-                calendarResourceSelect.innerHTML = '<option value="">No resources available</option>';
-                calendarResourceSelect.disabled = true;
+                // If no other resources, it will just have the "All" option
+                // Consider if disabling is desired or if "All" is always sufficient
+                // calendarResourceSelect.disabled = true; // Re-evaluate if needed
             }
         } catch (error) {
             console.error('Error fetching resources for calendar selector:', error);
-            calendarResourceSelect.innerHTML = '<option value="">Error loading resources</option>';
-            calendarResourceSelect.disabled = true;
+            // Keep "All" option, maybe add an error message or disable
+            calendarResourceSelect.options[0].text = '-- Error loading resources --'; // Update existing "All" option text
+            // calendarResourceSelect.disabled = true;
         }
     }
 
-    function generateAvailableSlots(viewStart, viewEnd, actualBookings) {
-        const availableEvents = [];
-        let currentDate = new Date(viewStart.valueOf()); // Clone to avoid modifying original
-
-        while (currentDate < viewEnd) {
-            // Morning Slot
-            const morningStart = new Date(currentDate);
-            morningStart.setHours(MORNING_SLOT.startHour, 0, 0, 0);
-            const morningEnd = new Date(currentDate);
-            morningEnd.setHours(MORNING_SLOT.endHour, 0, 0, 0);
-
-            let morningOverlap = false;
-            for (const booking of actualBookings) {
-                const bookingStart = new Date(booking.start);
-                const bookingEnd = new Date(booking.end);
-                if (bookingStart < morningEnd && bookingEnd > morningStart) {
-                    morningOverlap = true;
-                    break;
-                }
-            }
-            if (!morningOverlap) {
-                availableEvents.push({
-                    title: MORNING_SLOT.title,
-                    start: morningStart.toISOString(),
-                    end: morningEnd.toISOString(),
-                    color: MORNING_SLOT.color,
-                    display: 'background', // Or 'block' if preferred
-                    extendedProps: { isActualBooking: false }
-                });
-            }
-
-            // Afternoon Slot
-            const afternoonStart = new Date(currentDate);
-            afternoonStart.setHours(AFTERNOON_SLOT.startHour, 0, 0, 0);
-            const afternoonEnd = new Date(currentDate);
-            afternoonEnd.setHours(AFTERNOON_SLOT.endHour, 0, 0, 0);
-
-            let afternoonOverlap = false;
-            for (const booking of actualBookings) {
-                const bookingStart = new Date(booking.start);
-                const bookingEnd = new Date(booking.end);
-                if (bookingStart < afternoonEnd && bookingEnd > afternoonStart) {
-                    afternoonOverlap = true;
-                    break;
-                }
-            }
-            if (!afternoonOverlap) {
-                availableEvents.push({
-                    title: AFTERNOON_SLOT.title,
-                    start: afternoonStart.toISOString(),
-                    end: afternoonEnd.toISOString(),
-                    color: AFTERNOON_SLOT.color,
-                    display: 'background', // Or 'block'
-                    extendedProps: { isActualBooking: false }
-                });
-            }
-            currentDate.setDate(currentDate.getDate() + 1); // Move to next day
-        }
-        return availableEvents;
-    }
-
+    // generateAvailableSlots function is removed
 
     const calendar = new FullCalendar.Calendar(calendarEl, {
-        initialView: 'timeGridWeek', // Changed for better slot visibility
+        initialView: 'timeGridWeek',
         headerToolbar: {
             left: 'prev,next today',
             center: 'title',
@@ -111,55 +58,66 @@ document.addEventListener('DOMContentLoaded', () => {
             {
                 id: 'actualBookings',
                 events: function(fetchInfo, successCallback, failureCallback) {
-                    const selectedResourceId = calendarResourceSelect.value;
-                    if (!selectedResourceId) {
-                        successCallback([]);
+                    // Check if data is already fetched and cached
+                    // The 'force' flag can be used if you add a manual refresh button later
+                    if (allUserEvents.length > 0 /* && !fetchInfo.force */) { 
+                        const selectedResourceId = calendarResourceSelect.value;
+                        let eventsToDisplay = [];
+                        if (selectedResourceId === 'all' || !selectedResourceId) {
+                            eventsToDisplay = allUserEvents;
+                        } else {
+                            eventsToDisplay = allUserEvents.filter(event =>
+                                String(event.resource_id) === String(selectedResourceId)
+                            );
+                        }
+                        console.log('Using cached allUserEvents, filtered for:', selectedResourceId, JSON.stringify(eventsToDisplay));
+                        successCallback(eventsToDisplay);
                         return;
                     }
-                    apiCall(`/api/resources/${selectedResourceId}/all_bookings?start=${fetchInfo.startStr}&end=${fetchInfo.endStr}`)
+
+                    // If not cached or forced, fetch from API
+                    apiCall('/api/bookings/calendar') // Fetches current user's bookings
                         .then(bookings => {
-                            console.log('Fetched actualBookings for resource ' + selectedResourceId + ':', JSON.stringify(bookings)); // Log raw response
-                            const mappedBookings = bookings.map(b => ({...b, extendedProps: {...b.extendedProps, isActualBooking: true } }));
-                            console.log('Calling successCallback for actualBookings with:', JSON.stringify(mappedBookings)); // Log data sent to FullCalendar
-                            successCallback(mappedBookings);
+                            allUserEvents = bookings.map(b => {
+                                // Ensure resource_id is consistently available at the top level of the event object
+                                let resourceId = b.resource_id; 
+                                if (resourceId === undefined && b.extendedProps && b.extendedProps.resource_id !== undefined) {
+                                    resourceId = b.extendedProps.resource_id;
+                                } else if (resourceId === undefined && b.resourceId !== undefined){ // Check for resourceId from some FullCalendar versions
+                                    resourceId = b.resourceId;
+                                }
+                                return {
+                                    ...b,
+                                    resource_id: resourceId, // Standardize access to resource_id
+                                    extendedProps: {...b.extendedProps, isActualBooking: true }
+                                };
+                            });
+                            console.log('Fetched and cached allUserEvents:', JSON.stringify(allUserEvents));
+
+                            const selectedResourceId = calendarResourceSelect.value;
+                            let eventsToDisplay = [];
+                            if (selectedResourceId === 'all' || !selectedResourceId) {
+                                eventsToDisplay = allUserEvents;
+                            } else {
+                                eventsToDisplay = allUserEvents.filter(event =>
+                                    String(event.resource_id) === String(selectedResourceId)
+                                );
+                            }
+                            console.log('Displaying events for:', selectedResourceId, JSON.stringify(eventsToDisplay));
+                            successCallback(eventsToDisplay);
                         })
                         .catch(error => {
-                            console.error('Error fetching actual bookings:', error);
-                            failureCallback(error); // Inform FullCalendar about the error
-                        });
-                }
-            },
-            {
-                id: 'availableSlots',
-                events: function(fetchInfo, successCallback, failureCallback) {
-                    const selectedResourceId = calendarResourceSelect.value;
-                    if (!selectedResourceId) {
-                        successCallback([]);
-                        return;
-                    }
-                    apiCall(`/api/resources/${selectedResourceId}/all_bookings?start=${fetchInfo.startStr}&end=${fetchInfo.endStr}`)
-                        .then(actualBookings => {
-                            console.log('Fetched actualBookings for availableSlots calculation (resource ' + selectedResourceId + '):', JSON.stringify(actualBookings)); // Log raw response
-                            // Ensure actualBookings are in a format that Date constructor can parse if they are strings
-                            const parsedBookings = actualBookings.map(b => ({
-                                ...b,
-                                start: new Date(b.start), // Assuming b.start is ISO string
-                                end: new Date(b.end)    // Assuming b.end is ISO string
-                            }));
-                            const availableEvents = generateAvailableSlots(fetchInfo.start, fetchInfo.end, parsedBookings);
-                            successCallback(availableEvents);
-                        })
-                        .catch(error => {
-                            console.error('Error fetching bookings for availability calculation:', error);
+                            console.error('Error fetching user bookings for calendar:', error);
+                            allUserEvents = []; // Clear cache on error
                             failureCallback(error);
                         });
                 }
             }
+            // No 'availableSlots' source anymore
         ],
-        eventOrder: function(a, b) {
-            if (a.extendedProps && a.extendedProps.isActualBooking) return 1; // Actual bookings on top
+        eventOrder: function(a, b) { // This might not be strictly necessary if only actual bookings are shown
+            if (a.extendedProps && a.extendedProps.isActualBooking) return 1;
             if (b.extendedProps && b.extendedProps.isActualBooking) return -1;
-            // Then available slots (which are background events so order might not matter as much visually)
             return 0; 
         }
     });
@@ -204,11 +162,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (calendarResourceSelect) {
         calendarResourceSelect.addEventListener('change', () => {
+            // Just refetch the 'actualBookings' source. It will apply the filter internally.
             const actualBookingsSource = calendar.getEventSourceById('actualBookings');
-            if (actualBookingsSource) actualBookingsSource.refetch();
-            
-            const availableSlotsSource = calendar.getEventSourceById('availableSlots');
-            if (availableSlotsSource) availableSlotsSource.refetch();
+            if (actualBookingsSource) {
+                actualBookingsSource.refetch();
+            }
         });
     }
 
