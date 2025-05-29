@@ -188,6 +188,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // if (calendarResourceSelect) {
+    //     calendarResourceSelect.addEventListener('change', () => {
+    //         const actualBookingsSource = calendar.getEventSourceById('actualBookings');
+    //         if (actualBookingsSource) actualBookingsSource.refetch();
+            
+    //         const availableSlotsSource = calendar.getEventSourceById('availableSlots');
+    //         if (availableSlotsSource) availableSlotsSource.refetch();
+    //     });
+    // }
+
     if (calendarResourceSelect) {
         calendarResourceSelect.addEventListener('change', () => {
             const actualBookingsSource = calendar.getEventSourceById('actualBookings');
