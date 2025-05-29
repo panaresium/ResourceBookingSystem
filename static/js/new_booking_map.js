@@ -25,10 +25,31 @@ document.addEventListener('DOMContentLoaded', function () {
     const mainFormStartTimeInput = document.getElementById('start-time');
     const mainFormEndTimeInput = document.getElementById('end-time');
     const mainFormManualTimeRadio = document.getElementById('time-option-manual');
-    const quickTimeOptionsRadios = document.querySelectorAll('input[name="quick_time_option"]');
-
+    // const quickTimeOptionsRadios = document.querySelectorAll('input[name="quick_time_option"]'); // Not directly used in this script after recent changes
 
     let isSyncingDate = false; // Flag to prevent event loops for date inputs
+
+    // --- Helper UI Functions ---
+    function updateMapLoadingStatus(message, isError = false) {
+        if (!mapLoadingStatusDiv) return;
+        if (isError) {
+            showError(mapLoadingStatusDiv, message);
+        } else {
+            // Using showSuccess for neutral/info messages as well, or create a showInfo if preferred
+            showSuccess(mapLoadingStatusDiv, message); 
+        }
+    }
+
+    function disableMapSelectors() {
+        if (mapLocationSelect) {
+            mapLocationSelect.innerHTML = '<option value="">-- Not Available --</option>';
+            mapLocationSelect.disabled = true;
+        }
+        if (mapFloorSelect) {
+            mapFloorSelect.innerHTML = '<option value="">-- Not Available --</option>';
+            mapFloorSelect.disabled = true;
+        }
+    }
 
     // --- Initialize Date Inputs ---
     const today = getTodayDateString();
@@ -267,24 +288,55 @@ document.addEventListener('DOMContentLoaded', function () {
      */
     async function loadAvailableMaps() {
         if (!mapLocationSelect || !mapFloorSelect || !mapLoadingStatusDiv) {
-            console.error("One or more map control elements are missing from the DOM.");
+            console.error("One or more critical map control elements are missing from the DOM.");
+            updateMapLoadingStatus("Map interface error. Please contact support.", true);
+            disableMapSelectors();
             return;
         }
-        showLoading(mapLoadingStatusDiv, 'Loading available maps...');
-        console.log("Fetching available maps from /api/admin/maps");
+
+        updateMapLoadingStatus("Loading available maps...", false); // Neutral message
+        console.log('Attempting to fetch maps from /api/admin/maps');
+
         try {
-            const mapsData = await apiCall('/api/admin/maps', {}, mapLoadingStatusDiv);
-            console.log("Raw maps data from API:", mapsData);
+            // Directly using fetch to implement detailed logging as per instructions
+            const response = await fetch('/api/admin/maps');
+            console.log('Response status from /api/admin/maps:', response.status);
+            const responseText = await response.text();
+            console.log('Raw response text from /api/admin/maps:', responseText);
 
-            allMapInfo = mapsData; // Store the raw data
-
-            if (!allMapInfo || allMapInfo.length === 0) {
-                showError(mapLoadingStatusDiv, 'No maps are currently available.');
-                if (mapLocationSelect) mapLocationSelect.disabled = true;
-                if (mapFloorSelect) mapFloorSelect.disabled = true;
+            if (!response.ok) {
+                console.error('Failed to fetch maps. Status:', response.status, 'Response:', responseText);
+                let userErrorMessage = `Error fetching map list: ${response.statusText || 'Server error'} (Status: ${response.status})`;
+                if (response.status === 403) {
+                    userErrorMessage += ". Please check if you have permissions to view maps, or try logging in again.";
+                }
+                updateMapLoadingStatus(userErrorMessage, true);
+                disableMapSelectors();
                 return;
             }
 
+            let maps = [];
+            try {
+                maps = JSON.parse(responseText);
+                console.log('Successfully parsed maps:', maps);
+            } catch (jsonError) {
+                console.error('Error parsing JSON response from /api/admin/maps:', jsonError);
+                console.error('JSON parsing error occurred with text:', responseText);
+                updateMapLoadingStatus('Error processing map data. Response was not valid JSON.', true);
+                disableMapSelectors();
+                return;
+            }
+            
+            allMapInfo = maps; // Store the maps
+
+            if (!allMapInfo || allMapInfo.length === 0) {
+                console.log('No maps available from API.');
+                updateMapLoadingStatus('No maps configured in the system.', false); // Neutral message
+                disableMapSelectors();
+                return;
+            }
+            
+            console.log('Populating location dropdown with maps:', allMapInfo);
             // Populate Location Select
             const locations = [...new Set(allMapInfo.map(map => map.location).filter(loc => loc))].sort();
             console.log("Unique locations found:", locations);
@@ -332,20 +384,16 @@ document.addEventListener('DOMContentLoaded', function () {
                 resourceSelectBooking.addEventListener('change', highlightSelectedResourceOnMap);
             }
             
-            // Initial state: no map loaded, message cleared or set by apiCall
+            // Initial state: no map loaded, message cleared or set by previous logic
             if (mapLoadingStatusDiv && !mapLoadingStatusDiv.classList.contains('error') && !mapLoadingStatusDiv.classList.contains('success')) {
-                showSuccess(mapLoadingStatusDiv, 'Please select a location and floor to see the map.');
+                 // Use updateMapLoadingStatus for consistency
+                updateMapLoadingStatus('Please select a location and floor to see the map.', false);
             }
-
 
         } catch (error) {
-            // apiCall should have shown the error in mapLoadingStatusDiv
-            console.error('Failed to load available maps:', error);
-            mapLocationSelect.disabled = true;
-            mapFloorSelect.disabled = true;
-            if (mapLoadingStatusDiv && !mapLoadingStatusDiv.classList.contains('error')) {
-                 showError(mapLoadingStatusDiv, 'Could not load map options.');
-            }
+            console.error('Error in loadAvailableMaps fetch operation:', error);
+            updateMapLoadingStatus('Could not load map options due to a network or server error.', true);
+            disableMapSelectors();
         }
     }
 
