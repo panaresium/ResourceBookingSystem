@@ -457,16 +457,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (this.checked) {
                     switch (this.value) {
                         case 'morning':
-                            if (startTimeInput) startTimeInput.value = '09:00';
-                            if (endTimeInput) endTimeInput.value = '13:00';
+                            if (startTimeInput) startTimeInput.value = '08:00';
+                            if (endTimeInput) endTimeInput.value = '12:00';
                             break;
                         case 'afternoon':
-                            if (startTimeInput) startTimeInput.value = '14:00';
-                            if (endTimeInput) endTimeInput.value = '18:00';
+                            if (startTimeInput) startTimeInput.value = '13:00';
+                            if (endTimeInput) endTimeInput.value = '17:00';
                             break;
                         case 'full_day':
-                            if (startTimeInput) startTimeInput.value = '09:00';
-                            if (endTimeInput) endTimeInput.value = '18:00';
+                            if (startTimeInput) startTimeInput.value = '08:00';
+                            if (endTimeInput) endTimeInput.value = '17:00';
                             break;
                     }
                 }

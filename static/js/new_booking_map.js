@@ -524,9 +524,9 @@ document.addEventListener('DOMContentLoaded', function () {
             hideMessage(modalStatusMessageP); // Hide loading message if successful
 
             const predefinedSlots = [
-                { name: "First Half-Day", label: "Book First Half-Day (09:00-13:00)", startTime: "09:00", endTime: "13:00", id: "first_half" },
-                { name: "Second Half-Day", label: "Book Second Half-Day (14:00-18:00)", startTime: "14:00", endTime: "18:00", id: "second_half" },
-                { name: "Full Day", label: "Book Full Day (09:00-18:00)", startTime: "09:00", endTime: "18:00", id: "full_day" }
+                { name: "First Half-Day", label: "Book First Half-Day (08:00-12:00)", startTime: "08:00", endTime: "12:00", id: "first_half" },
+                { name: "Second Half-Day", label: "Book Second Half-Day (13:00-17:00)", startTime: "13:00", endTime: "17:00", id: "second_half" },
+                { name: "Full Day", label: "Book Full Day (08:00-17:00)", startTime: "08:00", endTime: "17:00", id: "full_day" }
             ];
 
             // Helper function to check for conflicts
