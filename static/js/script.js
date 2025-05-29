@@ -733,285 +733,267 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
 }
 
 
-    // For resources.html page - Populate room selector and handle availability
-    const roomSelectDropdown = document.getElementById('room-select');
-    const availabilityDateInput = document.getElementById('availability-date');
-    const calendarTable = document.getElementById('calendar-table');
-    const resourceImageDisplay = document.getElementById('resource-image-display');
+    // --- Logic for the new resources.html page ---
+    const resourceButtonsContainer = document.getElementById('resource-buttons-container');
+    if (resourceButtonsContainer) { // Check if we are on the new resources.html page
+        const availabilityDateInput = document.getElementById('availability-date');
+        const bookingModal = document.getElementById('resource-page-booking-modal');
+        const closeModalBtn = document.getElementById('rpbm-close-modal-btn');
+        const modalResourceName = document.getElementById('rpbm-resource-name');
+        const modalSelectedDate = document.getElementById('rpbm-selected-date');
+        const modalResourceImage = document.getElementById('rpbm-resource-image');
+        const modalSlotOptionsContainer = document.getElementById('rpbm-slot-options');
+        const modalBookingTitle = document.getElementById('rpbm-booking-title');
+        const modalConfirmBtn = document.getElementById('rpbm-confirm-booking-btn');
+        const modalStatusMsg = document.getElementById('rpbm-status-message');
 
-    function getTodayDateString() {
-        const today = new Date();
-        const yyyy = today.getFullYear();
-        const mm = String(today.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
-        const dd = String(today.getDate()).padStart(2, '0');
-        return `${yyyy}-${mm}-${dd}`;
-    }
+        let allFetchedResources = [];
+        let currentResourceBookingsCache = {}; // Cache for bookings: { resourceId: [bookings] }
+        let selectedSlotDetails = null; // To store {startTime, endTime} for selected slot
 
-    if (availabilityDateInput && roomSelectDropdown && calendarTable) {
-        availabilityDateInput.value = getTodayDateString(); // Set to today by default
+        function getTodayDateString() {
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const dd = String(today.getDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        }
 
-        async function fetchAndDisplayAvailability(resourceId, dateString, currentResourceDetails) {
-            const calendarStatusMessageDiv = document.getElementById('calendar-status-message'); 
-            if (!resourceId) {
-                clearCalendar();
-                if(calendarStatusMessageDiv) hideMessage(calendarStatusMessageDiv);
-                return;
-            }
-            
+        if (availabilityDateInput) {
+            availabilityDateInput.value = getTodayDateString();
+        }
+
+        async function updateButtonColor(button, dateStr) {
+            const resourceId = button.dataset.resourceId;
+            let bookings;
+            // Use cache if available for this resourceId on this date (cache key could be `${resourceId}_${dateStr}`)
+            // For simplicity, this example refetches or assumes cache is managed by date change
             try {
-                const bookedSlots = await apiCall(
-                    `/api/resources/${resourceId}/availability?date=${dateString}`, 
-                    {}, 
-                    calendarStatusMessageDiv // This div will show loading/errors for this call
-                );
-                updateCalendarDisplay(bookedSlots, dateString, currentResourceDetails);
-                // If apiCall was successful and no specific success message was in response, 
-                // it would hide the calendarStatusMessageDiv. This is usually desired.
+                bookings = await apiCall(`/api/resources/${resourceId}/availability?date=${dateStr}`, {}, modalStatusMsg); // Use a relevant status element
+                currentResourceBookingsCache[resourceId] = bookings; // Cache it
             } catch (error) {
-                // apiCall has already shown the error in calendarStatusMessageDiv.
-                // Log for debugging and ensure calendar UI reflects error state.
-                console.error(`Error fetching availability for resource ${resourceId} on ${dateString}:`, error.message);
-                clearCalendar(true); 
-            }
-        }
-
-        function handleAvailableSlotClick(event, resourceId, dateString) {
-            const cell = event.target;
-            const timeSlot = cell.dataset.timeSlot; // e.g., "09:00-10:00"
-
-            if (!timeSlot) {
-                console.error("Clicked cell is missing data-time-slot attribute.");
+                console.error(`Failed to fetch availability for resource ${resourceId}:`, error);
+                button.className = 'button resource-availability-button error'; // Mark error on button
+                button.title = 'Error fetching availability.';
                 return;
             }
 
-            const loggedInUser = sessionStorage.getItem('loggedInUser');
-            if (!loggedInUser) {
-                alert("Please login to book a resource.");
-                // window.location.href = '/login'; // Optionally redirect
-                return;
-            }
+            const slots = [
+                { start: 8, end: 12 },  // First Half
+                { start: 13, end: 17 } // Second Half
+            ];
+            let availableSlotsCount = 0;
 
-            const bookingTitle = prompt(`Book slot ${timeSlot} on ${dateString} for resource ID ${resourceId}?
-Enter a title for your booking (optional):`);
-
-            if (bookingTitle === null) { // User clicked cancel
-                console.log("Booking cancelled by user.");
-                return;
-            }
-
-            const [startTimeStr, endTimeStr] = timeSlot.split('-');
-            const bookingData = {
-                resource_id: parseInt(resourceId, 10),
-                date_str: dateString,
-                start_time_str: startTimeStr,
-                end_time_str: endTimeStr,
-                title: bookingTitle,
-                user_name: loggedInUser
-            };
-
-            console.log("Booking data prepared:", bookingData);
-            // alert(`Booking prepared for ${bookingData.title || 'Untitled Booking'} at ${timeSlot}. API call to be implemented next.`);
-            makeBookingApiCall(bookingData); 
-        }
-
-        async function makeBookingApiCall(bookingData) { // For calendar table's direct booking
-            const calendarStatusMessageDiv = document.getElementById('calendar-status-message');
-            try {
-                const responseData = await apiCall('/api/bookings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(bookingData)
-                }, calendarStatusMessageDiv);
-
-                alert(`Booking successful! Title: ${responseData.title || 'Untitled'} (ID: ${responseData.id})`);
-                
-                if (roomSelectDropdown.value && availabilityDateInput.value) {
-                     const selectedOption = roomSelectDropdown.selectedOptions[0];
-                    const currentResourceDetails = {
-                        id: roomSelectDropdown.value,
-                        name: selectedOption.dataset.resourceName || selectedOption.textContent.split(' (ID:')[0],
-                        booking_restriction: selectedOption.dataset.bookingRestriction,
-                        allowed_user_ids: selectedOption.dataset.allowedUserIds,
-                        roles: parseRolesFromDataset(selectedOption.dataset.roleIds)
-                     };
-                    fetchAndDisplayAvailability(
-                        roomSelectDropdown.value,
-                        availabilityDateInput.value,
-                        currentResourceDetails 
-                    );
-                }
-                if(calendarStatusMessageDiv) showSuccess(calendarStatusMessageDiv, `Booking for '${responseData.title || 'Untitled'}' (ID: ${responseData.id}) confirmed.`);
-
-            } catch (error) {
-                // apiCall showed error in calendarStatusMessageDiv. Alert for additional feedback.
-                alert(`Booking failed: ${error.message}. Check messages above calendar.`);
-                console.error('Calendar table direct booking failed:', error.message);
-            }
-        }
-
-        function updateCalendarDisplay(bookedSlots, dateString, currentResourceDetails) {
-            const calendarCells = calendarTable.querySelectorAll('tbody td[data-time-slot]');
-            const currentUserId = parseInt(sessionStorage.getItem('loggedInUserId'), 10);
-            const currentUserIsAdmin = sessionStorage.getItem('loggedInUserIsAdmin') === 'true';
-
-            calendarCells.forEach(currentCell => {
-                let cell = currentCell;
-                let isBooked = false;
-                let cellIsClickable = true;
-                let cellText = 'Available';
-                let cellClass = 'available';
-
-                const cellTimeSlot = cell.dataset.timeSlot;
-                if (!cellTimeSlot) return;
-
-                const [cellStartTimeStr, cellEndTimeStr] = cellTimeSlot.split('-');
-                const [sH, sM] = cellStartTimeStr.split(':').map(Number);
-                const [eH, eM] = cellEndTimeStr.split(':').map(Number);
-
-                const cellStartDateTime = new Date(`${dateString}T${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}:00`);
-                const cellEndDateTime = new Date(`${dateString}T${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}:00`);
-
-                for (const bookedSlot of bookedSlots) {
-                    const [bSH, bSM, bSS] = bookedSlot.start_time.split(':').map(Number);
-                    const [bEH, bEM, bESS] = bookedSlot.end_time.split(':').map(Number);
-                    const bookedStartDateTime = new Date(`${dateString}T${String(bSH).padStart(2, '0')}:${String(bSM).padStart(2, '0')}:${String(bSS).padStart(2, '0')}`);
-                    const bookedEndDateTime = new Date(`${dateString}T${String(bEH).padStart(2, '0')}:${String(bEM).padStart(2, '0')}:${String(bESS).padStart(2, '0')}`);
-                    if (bookedStartDateTime < cellEndDateTime && bookedEndDateTime > cellStartDateTime) {
-                        isBooked = true;
-                        cellText = `Booked (${bookedSlot.title || 'Event'})`;
-                        cellClass = 'booked';
-                        cellIsClickable = false;
+            for (const slot of slots) {
+                const slotStart = new Date(`${dateStr}T${String(slot.start).padStart(2, '0')}:00:00`);
+                const slotEnd = new Date(`${dateStr}T${String(slot.end).padStart(2, '0')}:00:00`);
+                let isSlotAvailable = true;
+                for (const booking of bookings) {
+                    const bookingStart = new Date(`${dateStr}T${booking.start_time}`);
+                    const bookingEnd = new Date(`${dateStr}T${booking.end_time}`);
+                    if (bookingStart < slotEnd && bookingEnd > slotStart) {
+                        isSlotAvailable = false;
                         break;
                     }
                 }
-
-                // Apply general booking restriction first, then granular if applicable
-                if (!isBooked && currentResourceDetails) {
-                    if (!checkUserPermissionForResource(currentResourceDetails, currentUserId, currentUserIsAdmin)) {
-                        cellClass = 'unavailable-permission'; // New CSS class for permission denied
-                        cellText = 'Restricted'; // More generic term
-                        cellIsClickable = false;
-                    }
+                if (isSlotAvailable) {
+                    availableSlotsCount++;
                 }
-                
-                let new_cell = cell.cloneNode(false); 
-                new_cell.textContent = cellText; 
-                new_cell.className = cellClass;  
-                new_cell.dataset.timeSlot = cellTimeSlot; 
-                cell.parentNode.replaceChild(new_cell, cell);
-                cell = new_cell; 
+            }
 
-                if (cellIsClickable) { 
-                    cell.addEventListener('click', (event) => {
-                        const currentResourceIdFromDropdown = currentResourceDetails ? currentResourceDetails.id : roomSelectDropdown.value;
-                        const currentDateStringFromPicker = availabilityDateInput.value;
-                        handleAvailableSlotClick(event, currentResourceIdFromDropdown, currentDateStringFromPicker);
+            button.classList.remove('available', 'partial', 'unavailable', 'error');
+            if (availableSlotsCount === 2) {
+                button.classList.add('available');
+                button.title = `${button.dataset.resourceName} - Both half-day slots available.`;
+            } else if (availableSlotsCount === 1) {
+                button.classList.add('partial');
+                 button.title = `${button.dataset.resourceName} - One half-day slot available.`;
+            } else {
+                button.classList.add('unavailable');
+                button.title = `${button.dataset.resourceName} - No half-day slots available.`;
+            }
+        }
+
+        async function updateAllButtonColors() {
+            const dateStr = availabilityDateInput.value;
+            currentResourceBookingsCache = {}; // Clear cache for the new date
+            const buttons = resourceButtonsContainer.querySelectorAll('.resource-availability-button');
+            // Show loading state on buttons or container
+            resourceButtonsContainer.classList.add('loading-colors'); 
+            // Use Promise.all to update colors in parallel for better UX
+            await Promise.all(Array.from(buttons).map(button => updateButtonColor(button, dateStr)));
+            resourceButtonsContainer.classList.remove('loading-colors');
+        }
+        
+        async function fetchAndRenderResources() {
+            try {
+                showLoading(resourceButtonsContainer, 'Loading resources...');
+                allFetchedResources = await apiCall('/api/resources', {}, resourceButtonsContainer);
+                resourceButtonsContainer.innerHTML = ''; // Clear "Loading..."
+                
+                if (!allFetchedResources || allFetchedResources.length === 0) {
+                    resourceButtonsContainer.innerHTML = '<p>No resources found.</p>';
+                    return;
+                }
+
+                allFetchedResources.forEach(resource => {
+                    const button = document.createElement('button');
+                    button.textContent = resource.name;
+                    button.dataset.resourceId = resource.id;
+                    button.dataset.resourceName = resource.name;
+                    button.dataset.imageUrl = resource.image_url || '';
+                    button.classList.add('button', 'resource-availability-button');
+                    
+                    button.addEventListener('click', async function() {
+                        const resourceId = this.dataset.resourceId;
+                        const resourceName = this.dataset.resourceName;
+                        const selectedDate = availabilityDateInput.value;
+                        const imageUrl = this.dataset.imageUrl;
+
+                        modalResourceName.textContent = resourceName;
+                        modalSelectedDate.textContent = selectedDate;
+                        if (modalResourceImage && imageUrl) {
+                            modalResourceImage.src = imageUrl;
+                            modalResourceImage.style.display = 'block';
+                        } else if (modalResourceImage) {
+                            modalResourceImage.style.display = 'none';
+                        }
+                        
+                        showLoading(modalStatusMsg, 'Fetching slot availability...');
+                        const bookings = currentResourceBookingsCache[resourceId] || await apiCall(`/api/resources/${resourceId}/availability?date=${selectedDate}`, {}, modalStatusMsg);
+                        if (!currentResourceBookingsCache[resourceId]) currentResourceBookingsCache[resourceId] = bookings; // Cache if fetched now
+                        hideMessage(modalStatusMsg);
+
+                        modalSlotOptionsContainer.querySelectorAll('.time-slot-btn').forEach(slotBtn => {
+                            const slotStartTime = slotBtn.dataset.startTime;
+                            const slotEndTime = slotBtn.dataset.endTime;
+                            const slotStart = new Date(`${selectedDate}T${slotStartTime}:00`);
+                            const slotEnd = new Date(`${selectedDate}T${slotEndTime}:00`);
+                            let isSlotBooked = false;
+                            for (const booking of bookings) {
+                                const bookingStart = new Date(`${selectedDate}T${booking.start_time}`);
+                                const bookingEnd = new Date(`${selectedDate}T${booking.end_time}`);
+                                if (bookingStart < slotEnd && bookingEnd > slotStart) {
+                                    isSlotBooked = true;
+                                    break;
+                                }
+                            }
+                            slotBtn.disabled = isSlotBooked;
+                            slotBtn.classList.remove('selected'); // Clear previous selection
+                            slotBtn.textContent = slotBtn.textContent.split(' (')[0] + (isSlotBooked ? ' (Booked)' : '');
+                        });
+
+                        selectedSlotDetails = null; // Reset selected slot
+                        modalConfirmBtn.dataset.resourceId = resourceId;
+                        modalBookingTitle.value = `Booking for ${resourceName}`;
+                        modalStatusMsg.textContent = '';
+                        bookingModal.style.display = 'block';
                     });
+                    resourceButtonsContainer.appendChild(button);
+                });
+                await updateAllButtonColors(); // Initial color update
+
+            } catch (error) {
+                showError(resourceButtonsContainer, 'Failed to load resources.');
+                console.error('Error in fetchAndRenderResources:', error);
+            }
+        }
+
+        if (availabilityDateInput) {
+            availabilityDateInput.addEventListener('change', updateAllButtonColors);
+        }
+
+        modalSlotOptionsContainer.querySelectorAll('.time-slot-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                // Remove 'selected' from all slot buttons
+                modalSlotOptionsContainer.querySelectorAll('.time-slot-btn').forEach(sbtn => sbtn.classList.remove('selected'));
+                // Add 'selected' to the clicked one
+                this.classList.add('selected');
+                selectedSlotDetails = { startTime: this.dataset.startTime, endTime: this.dataset.endTime };
+            });
+        });
+
+        if (modalConfirmBtn) {
+            modalConfirmBtn.addEventListener('click', async function() {
+                if (!selectedSlotDetails) {
+                    showError(modalStatusMsg, 'Please select a time slot.');
+                    return;
+                }
+                const resourceId = this.dataset.resourceId;
+                const dateStr = modalSelectedDate.textContent;
+                const title = modalBookingTitle.value.trim() || modalResourceName.textContent; // Default title
+                const loggedInUsername = sessionStorage.getItem('loggedInUserUsername');
+
+                if (!loggedInUsername) {
+                    showError(modalStatusMsg, 'Please login to make a booking.');
+                    return;
+                }
+
+                const payload = {
+                    resource_id: parseInt(resourceId, 10),
+                    date_str: dateStr,
+                    start_time_str: selectedSlotDetails.startTime,
+                    end_time_str: selectedSlotDetails.endTime,
+                    title: title,
+                    user_name: loggedInUsername
+                };
+
+                try {
+                    showLoading(modalStatusMsg, 'Confirming booking...');
+                    await apiCall('/api/bookings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }, modalStatusMsg); // apiCall will show success/error
+                    
+                    // If successful (no error thrown by apiCall)
+                    showSuccess(modalStatusMsg, 'Booking confirmed!');
+                    setTimeout(() => { 
+                        bookingModal.style.display = 'none'; 
+                        hideMessage(modalStatusMsg);
+                    }, 1500);
+                    await updateAllButtonColors(); // Refresh button colors on main page
+                } catch (error) {
+                    // Error already shown by apiCall in modalStatusMsg
+                    console.error('Booking confirmation failed:', error);
                 }
             });
         }
 
-        function clearCalendar(isError = false) {
-             const calendarCells = calendarTable.querySelectorAll('tbody td[data-time-slot]');
-             calendarCells.forEach(cell => {
-                cell.textContent = isError ? 'Error' : '-';
-                cell.className = isError ? 'error-slot' : 'unavailable'; 
-             });
+        if (closeModalBtn) {
+            closeModalBtn.addEventListener('click', () => { bookingModal.style.display = 'none'; });
         }
-
-        roomSelectDropdown.addEventListener('change', () => {
-            const selectedOption = roomSelectDropdown.selectedOptions[0];
-            if (!selectedOption) return; // Should not happen if list is populated
-            if (resourceImageDisplay) {
-                const url = selectedOption.dataset.imageUrl;
-                if (url) {
-                    resourceImageDisplay.src = url;
-                    resourceImageDisplay.style.display = 'block';
-                } else {
-                    resourceImageDisplay.style.display = 'none';
-                }
+        window.addEventListener('click', (event) => {
+            if (event.target === bookingModal) {
+                bookingModal.style.display = 'none';
             }
-            const currentResourceDetails = {
-                id: roomSelectDropdown.value,
-                booking_restriction: selectedOption.dataset.bookingRestriction,
-                allowed_user_ids: selectedOption.dataset.allowedUserIds,
-                roles: parseRolesFromDataset(selectedOption.dataset.roleIds)
-            };
-            fetchAndDisplayAvailability(currentResourceDetails.id, availabilityDateInput.value, currentResourceDetails);
         });
 
-        availabilityDateInput.addEventListener('change', () => {
-            const selectedOption = roomSelectDropdown.selectedOptions[0];
-            if (!selectedOption) return; // Should not happen if list is populated
-            const currentResourceDetails = {
-                id: roomSelectDropdown.value,
-                booking_restriction: selectedOption.dataset.bookingRestriction,
-                allowed_user_ids: selectedOption.dataset.allowedUserIds,
-                roles: parseRolesFromDataset(selectedOption.dataset.roleIds)
-            };
-            fetchAndDisplayAvailability(currentResourceDetails.id, availabilityDateInput.value, currentResourceDetails);
-        });
+        fetchAndRenderResources(); // Initial fetch and render
+    }
 
-        // Initial population of room selector for the calendar view on resources.html
-        const calendarStatusMessageDiv = document.getElementById('calendar-status-message');
-        if (roomSelectDropdown && availabilityDateInput && calendarTable && calendarStatusMessageDiv) { // Ensure all elements exist
-            apiCall('/api/resources', {}, calendarStatusMessageDiv)
-                .then(data => {
-                    roomSelectDropdown.innerHTML = ''; 
-                    if (!data || data.length === 0) {
-                        roomSelectDropdown.add(new Option('No rooms available', ''));
-                        clearCalendar();
-                        showSuccess(calendarStatusMessageDiv, 'No resources available to display.');
-                        return;
-                    }
-                    data.forEach(resource => {
-                        const option = new Option(resource.name, resource.id);
-                        option.dataset.bookingRestriction = resource.booking_restriction || "";
-                        option.dataset.allowedUserIds = resource.allowed_user_ids || "";
-                        option.dataset.roleIds = (resource.roles || []).map(r => r.id).join(',');
-                        option.dataset.imageUrl = resource.image_url || "";
-                        option.dataset.resourceName = resource.name;
-                        roomSelectDropdown.add(option);
-                    });
-                    
-                    if (roomSelectDropdown.options.length > 0) {
-                        roomSelectDropdown.value = roomSelectDropdown.options[0].value;
-                        const selectedOption = roomSelectDropdown.options[0];
-                        if (resourceImageDisplay) {
-                            const url = selectedOption.dataset.imageUrl;
-                            if (url) {
-                                resourceImageDisplay.src = url;
-                                resourceImageDisplay.style.display = 'block';
-                            } else {
-                                resourceImageDisplay.style.display = 'none';
-                            }
-                        }
-                        const initialResourceDetails = {
-                            id: selectedOption.value,
-                            name: selectedOption.dataset.resourceName,
-                            booking_restriction: selectedOption.dataset.bookingRestriction,
-                            allowed_user_ids: selectedOption.dataset.allowedUserIds,
-                            roles: parseRolesFromDataset(selectedOption.dataset.roleIds)
-                        };
-                        fetchAndDisplayAvailability(initialResourceDetails.id, availabilityDateInput.value, initialResourceDetails);
-                    } else {
-                         clearCalendar(); 
-                         showSuccess(calendarStatusMessageDiv, 'No resources to display in calendar.');
-                    }
-                })
-                .catch(error => {
-                    roomSelectDropdown.innerHTML = '<option value="">Error loading rooms</option>';
-                    clearCalendar(true);
-                    // Error message already shown by apiCall in calendarStatusMessageDiv
-                });
-        }
-        
-        // Logic for displaying floor map links on resources.html
-        const floorMapsListUl = document.getElementById('floor-maps-list');
+    // --- Old resources.html logic to be removed/commented ---
+    /*
+    const roomSelectDropdown = document.getElementById('room-select');
+    // const availabilityDateInput = document.getElementById('availability-date'); // Already defined above if on new page
+    const calendarTable = document.getElementById('calendar-table');
+    const resourceImageDisplay = document.getElementById('resource-image-display');
+
+    // function getTodayDateString() { ... } // Already defined above if on new page
+
+    if (document.getElementById('availability-date') && roomSelectDropdown && calendarTable) { // Check for old elements
+        // ... entire old block of logic from line 747 to 1018 ...
+    }
+    */
+    // --- End of Old resources.html logic ---
+
+
+    // Logic for displaying floor map links on resources.html (remains unchanged)
+    const floorMapsListUl = document.getElementById('floor-maps-list');
         const floorMapsLoadingStatusDiv = document.getElementById('floor-maps-loading-status');
         const locationFilter = document.getElementById('location-filter');
         const floorFilter = document.getElementById('floor-filter');
-        if (floorMapsListUl && floorMapsLoadingStatusDiv) {
+        if (floorMapsListUl && floorMapsLoadingStatusDiv) { // This logic seems independent of the resource buttons/calendar table
             let allMaps = [];
 
             function renderMapLinks() {
@@ -1065,7 +1047,7 @@ Enter a title for your booking (optional):`);
 
             fetchAndDisplayFloorMapLinks();
         }
-    } // End of `if (availabilityDateInput && roomSelectDropdown && calendarTable)`
+    // } // This was the end of the old "if (availabilityDateInput && roomSelectDropdown && calendarTable)"
 
     // Admin Maps Page Specific Logic
     const adminMapsPageIdentifier = document.getElementById('upload-map-form');
