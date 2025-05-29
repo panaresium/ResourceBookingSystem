@@ -131,6 +131,8 @@ document.addEventListener('DOMContentLoaded', function () {
      * @param {string} dateString - The date for which to check resource availability.
      */
     async function loadMapDetails(mapId, dateString) {
+        const VERTICAL_OFFSET = 5; // Define the vertical offset in pixels
+
         if (!mapId) {
             if (mapContainer) mapContainer.innerHTML = ''; // Clear map
             if (mapContainer) mapContainer.style.backgroundImage = 'none';
@@ -163,11 +165,26 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (resource.map_coordinates && resource.map_coordinates.type === 'rect') {
                         const coords = resource.map_coordinates;
                         const areaDiv = document.createElement('div');
+                        const coords = resource.map_coordinates;
+                        console.log('Processing Resource:', resource.name, 'Raw Coords:', coords);
+
+                        // Directly using coordinate values as pixel values, applying offset to top
+                        let topPosition = coords.y + VERTICAL_OFFSET;
+                        let leftPosition = coords.x;
+                        let widthValue = coords.width;
+                        let heightValue = coords.height;
+
+                        console.log('Applying to CSS: top=', topPosition + 'px', 
+                                    'left=', leftPosition + 'px', 
+                                    'width=', widthValue + 'px', 
+                                    'height=', heightValue + 'px');
+                        
+                        const areaDiv = document.createElement('div');
                         areaDiv.className = 'resource-area'; // Base class
-                        areaDiv.style.left = `${coords.x}px`;
-                        areaDiv.style.top = `${coords.y}px`;
-                        areaDiv.style.width = `${coords.width}px`;
-                        areaDiv.style.height = `${coords.height}px`;
+                        areaDiv.style.left = `${leftPosition}px`;
+                        areaDiv.style.top = `${topPosition}px`;
+                        areaDiv.style.width = `${widthValue}px`;
+                        areaDiv.style.height = `${heightValue}px`;
                         areaDiv.textContent = resource.name;
                         areaDiv.dataset.resourceId = resource.id;
                         areaDiv.title = resource.name;
