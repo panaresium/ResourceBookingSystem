@@ -118,7 +118,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     apiCall(`/api/resources/${selectedResourceId}/all_bookings?start=${fetchInfo.startStr}&end=${fetchInfo.endStr}`)
                         .then(bookings => {
-                            successCallback(bookings.map(b => ({...b, extendedProps: {...b.extendedProps, isActualBooking: true } })));
+                            console.log('Fetched actualBookings for resource ' + selectedResourceId + ':', JSON.stringify(bookings)); // Log raw response
+                            const mappedBookings = bookings.map(b => ({...b, extendedProps: {...b.extendedProps, isActualBooking: true } }));
+                            console.log('Calling successCallback for actualBookings with:', JSON.stringify(mappedBookings)); // Log data sent to FullCalendar
+                            successCallback(mappedBookings);
                         })
                         .catch(error => {
                             console.error('Error fetching actual bookings:', error);
@@ -136,6 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     apiCall(`/api/resources/${selectedResourceId}/all_bookings?start=${fetchInfo.startStr}&end=${fetchInfo.endStr}`)
                         .then(actualBookings => {
+                            console.log('Fetched actualBookings for availableSlots calculation (resource ' + selectedResourceId + '):', JSON.stringify(actualBookings)); // Log raw response
                             // Ensure actualBookings are in a format that Date constructor can parse if they are strings
                             const parsedBookings = actualBookings.map(b => ({
                                 ...b,
