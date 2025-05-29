@@ -51,6 +51,26 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    // --- Function to highlight resource on map based on form selection ---
+    function highlightSelectedResourceOnMap() {
+        // const resourceSelectBooking = document.getElementById('resource-select-booking'); // Already defined globally in this script
+        if (!resourceSelectBooking) {
+            console.warn('#resource-select-booking dropdown not found for highlighting.');
+            return;
+        }
+        const selectedResourceId = resourceSelectBooking.value;
+        // console.log('Highlighting map resource based on form selection. Selected Resource ID:', selectedResourceId);
+
+        const resourceAreas = document.querySelectorAll('#new-booking-map-container .resource-area');
+        resourceAreas.forEach(area => {
+            area.classList.remove('resource-area-form-selected');
+            if (selectedResourceId && area.dataset.resourceId === selectedResourceId) {
+                area.classList.add('resource-area-form-selected');
+                // console.log('Applied highlight to resource area:', area.dataset.resourceId);
+            }
+        });
+    }
+
     // --- Initialize Date Inputs ---
     const today = getTodayDateString();
     if (mapAvailabilityDateInput) {
@@ -280,7 +300,9 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         }
         // Highlight selected resource after map loads/reloads (if any)
-        highlightSelectedResourceOnMap();
+        // This call might be too early if loadMapDetails hasn't populated areas yet,
+        // but it's correctly placed according to the previous plan.
+        // highlightSelectedResourceOnMap(); // Call moved to end of loadMapDetails
     }
 
     /**
@@ -402,6 +424,8 @@ document.addEventListener('DOMContentLoaded', function () {
                  // Use updateMapLoadingStatus for consistency
                 updateMapLoadingStatus('Please select a location and floor to see the map.', false);
             }
+            // Call highlight after initial setup, in case a resource is pre-selected by browser/form state
+            highlightSelectedResourceOnMap(); 
 
         } catch (error) {
             console.error('Error in loadAvailableMaps fetch operation:', error);
