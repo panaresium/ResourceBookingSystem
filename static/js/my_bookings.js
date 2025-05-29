@@ -13,6 +13,16 @@ document.addEventListener('DOMContentLoaded', () => {
             hide: () => { if (updateModalElement) updateModalElement.style.display = 'none'; }
         };
     }
+
+    // Explicitly hide the modal on initialization
+    if (updateModal && typeof updateModal.hide === 'function') {
+        updateModal.hide(); // For Bootstrap modal object
+    } else if (updateModalElement) {
+        // This is the primary fallback if Bootstrap's JS isn't loaded or `new bootstrap.Modal` failed silently.
+        // It also covers the custom fallback object's hide method if it were more complex.
+        updateModalElement.style.display = 'none'; 
+    }
+
     const updateBookingModalLabel = document.getElementById('updateBookingModalLabel');
     const modalBookingIdInput = document.getElementById('modal-booking-id');
     const newBookingTitleInput = document.getElementById('new-booking-title');
