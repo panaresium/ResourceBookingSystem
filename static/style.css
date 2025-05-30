@@ -871,3 +871,32 @@ body.high-contrast input[type="button"]:hover {
 #rpbm-slot-options .time-slot-btn.available:hover {
     background-color: #45a049; /* Slightly darker green on hover */
 }
+
+/* Styling for Floor Map Groupings on Resources Page */
+.map-group-heading {
+    margin-top: 25px;
+    margin-bottom: 15px;
+    font-size: 1.4em; /* Slightly larger than default h3 if needed */
+    color: #333; /* Or match your theme's heading color */
+    border-bottom: 2px solid #eee; /* A light separator */
+    padding-bottom: 5px;
+}
+
+.map-specific-grid {
+    /* If the default .resource-buttons-grid already has good spacing, 
+       you might not need much here. This is a placeholder. */
+    /* Example: add some padding if grids are too close to headings */
+    padding-top: 10px;
+    margin-bottom: 20px; /* Space before the next map group heading */
+}
+
+.unassigned-grid {
+    /* Similar to map-specific-grid, if needed */
+    padding-top: 10px;
+}
+
+/* Ensure the main container still allows for these new elements */
+#resource-buttons-container {
+    /* Existing styles should be fine, but if it was a strict grid itself, 
+       it might need adjustment. Assuming it's a block container. */
+}
