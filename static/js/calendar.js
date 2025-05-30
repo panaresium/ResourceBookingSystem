@@ -76,42 +76,33 @@ document.addEventListener('DOMContentLoaded', () => {
     let handleEventChange;
 
     async function customEventDrop(info) {
-        // --- Added Detailed Logging ---
+        // --- Detailed Logging for resource ID ---
         console.log('customEventDrop - Full event object received:', JSON.parse(JSON.stringify(info.event)));
         if (info.event.extendedProps) {
             console.log('customEventDrop - info.event.extendedProps:', JSON.parse(JSON.stringify(info.event.extendedProps)));
         } else {
             console.log('customEventDrop - info.event.extendedProps: undefined');
         }
-        // getResources() might not exist on all event objects or FC versions, check existence.
         if (typeof info.event.getResources === 'function') {
             console.log('customEventDrop - info.event.getResources():', info.event.getResources().map(r => ({id: r.id, title: r.title})));
         } else {
             console.log('customEventDrop - info.event.getResources(): method does not exist');
         }
         console.log('customEventDrop - info.event.resource_id (top-level):', info.event.resource_id);
-        // --- End of Added Detailed Logging ---
+        // --- End of Detailed Logging ---
 
         const event = info.event;
         const oldEventStart = info.oldEvent.start;
-
-        // Improved resourceId retrieval
         let resourceId = null;
+
         if (event.extendedProps && event.extendedProps.resource_id) {
             resourceId = event.extendedProps.resource_id;
-            console.log('customEventDrop - Resource ID from extendedProps:', resourceId);
-        } else if (event.resource_id) { 
+        } else if (event.resource_id) {
             resourceId = event.resource_id;
-            console.log('customEventDrop - Resource ID from top-level event.resource_id:', resourceId);
-        } else if (typeof event.getResources === 'function') { 
+        } else if (typeof event.getResources === 'function') {
             const resources = event.getResources();
-            if (resources.length > 0) {
-                resourceId = resources[0].id;
-                console.log('customEventDrop - Resource ID from event.getResources():', resourceId);
-            }
+            if (resources.length > 0) resourceId = resources[0].id;
         }
-
-        // This console.log is now more of a summary after specific attempts
         console.log('customEventDrop: final retrieved resourceId after checks:', resourceId);
 
         if (!resourceId) {
@@ -120,66 +111,34 @@ document.addEventListener('DOMContentLoaded', () => {
             info.revert();
             return;
         }
-        
-        // Add temporary log at the beginning of the function (already done above effectively)
-        console.log("customEventDrop triggered for event ID:", event.id, "Attempting to move to resource:", resourceId);
+        console.log("customEventDrop triggered for event ID:", event.id, "Resource ID:", resourceId);
 
-        // Determine the date string for the drop.
-        // event.start already reflects the drop time.
-        const newDateStr = event.start.toISOString().split('T')[0];
-        
-        // Fetch existing bookings for the target date (could be same day or new day)
-        // For same-day drags, this list will include the event being dragged itself.
+        const newDateStr = event.start.toISOString().split('T')[0]; // Date of the drop
         const existingBookingsOnDate = await getResourceAvailabilityClientSide(resourceId, newDateStr);
-        
-        const originalDurationMs = (info.oldEvent.end || oldEventStart) - oldEventStart;
-
-        // oldEventStart is from info.oldEvent.start, so it's the original start date/time
-        const oldDateStr = oldEventStart.toISOString().split('T')[0]; 
-        const oldDateMorningStart = createDateAsUTC(oldDateStr, `${String(MORNING_SLOT_START_HOUR).padStart(2, '0')}:00`);
-        const oldDateMorningEnd = createDateAsUTC(oldDateStr, `${String(MORNING_SLOT_END_HOUR).padStart(2, '0')}:00`);
-        const oldDateAfternoonStart = createDateAsUTC(oldDateStr, `${String(AFTERNOON_SLOT_START_HOUR).padStart(2, '0')}:00`);
-        const oldDateAfternoonEnd = createDateAsUTC(oldDateStr, `${String(AFTERNOON_SLOT_END_HOUR).padStart(2, '0')}:00`);
-
-        let originalEventType = 'custom';
-        const oldEventEnd = info.oldEvent.end || oldEventStart;
-        if (oldEventStart.getTime() === oldDateMorningStart.getTime() && oldEventEnd.getTime() === oldDateMorningEnd.getTime()) {
-            originalEventType = 'morning';
-        } else if (oldEventStart.getTime() === oldDateAfternoonStart.getTime() && oldEventEnd.getTime() === oldDateAfternoonEnd.getTime()) {
-            originalEventType = 'afternoon';
-        } else if (oldEventStart.getTime() === oldDateMorningStart.getTime() && oldEventEnd.getTime() === oldDateAfternoonEnd.getTime()) {
-            originalEventType = 'fullday';
-        }
-        console.log("customEventDrop: Original event type:", originalEventType);
-
-        const newDateMorningStart = createDateAsUTC(newDateStr, `${String(MORNING_SLOT_START_HOUR).padStart(2, '0')}:00`);
-        const newDateMorningEnd = createDateAsUTC(newDateStr, `${String(MORNING_SLOT_END_HOUR).padStart(2, '0')}:00`);
-        const newDateAfternoonStart = createDateAsUTC(newDateStr, `${String(AFTERNOON_SLOT_START_HOUR).padStart(2, '0')}:00`);
-        const newDateAfternoonEnd = createDateAsUTC(newDateStr, `${String(AFTERNOON_SLOT_END_HOUR).padStart(2, '0')}:00`);
-        const newDateFullDayStart = newDateMorningStart;
-        const newDateFullDayEnd = newDateAfternoonEnd;
-
         let targetStart = null;
         let targetEnd = null;
+        let alertMessage = 'The selected time slot is not available or does not align with standard booking slots (Morning, Afternoon, Full Day). Reverting.'; // Default alert
+        let triedAlternative = false; // For new-date drag logging
 
-        // Pass event.id to isSlotCompletelyFree to ignore self-collision in same-day drags
+        const isSameDay = (event.start.toDateString() === oldEventStart.toDateString());
+        console.log("customEventDrop: isSameDay:", isSameDay);
+
         const isSlotCompletelyFree = (slotStart, slotEnd, bookings, eventIdToIgnore) => {
             console.log(`customEventDrop: Checking availability for slot: ${slotStart.toISOString()} - ${slotEnd.toISOString()}, ignoring event ID: ${eventIdToIgnore}`);
             for (const booking of bookings) {
-                // booking.id is from the API, which corresponds to FullCalendar's event.id if mapped correctly
                 if (String(booking.booking_id) === String(eventIdToIgnore)) { 
-                    console.log(`customEventDrop: Skipping self-check for event ID: ${eventIdToIgnore}`);
+                    console.log(`customEventDrop: Skipping self-check for event ID: ${eventIdToIgnore} (booking_id: ${booking.booking_id})`);
                     continue;
                 }
                 if (!booking.start_time || !booking.end_time) {
-                    console.warn("customEventDrop: Skipping booking with invalid time in isSlotCompletelyFree check:", booking);
+                    console.warn("customEventDrop: Skipping booking with invalid time:", booking);
                     continue;
                 }
                 const bookingStart = createDateAsUTC(newDateStr, booking.start_time.substring(0, 5)); 
                 const bookingEnd = createDateAsUTC(newDateStr, booking.end_time.substring(0, 5));   
                 
                 if (slotStart < bookingEnd && slotEnd > bookingStart) {
-                    console.log(`customEventDrop: Slot conflict found with existing booking: ${booking.title} (${bookingStart.toISOString()} - ${bookingEnd.toISOString()})`);
+                    console.log(`customEventDrop: Slot conflict with existing booking: ${booking.title} (${bookingStart.toISOString()} - ${bookingEnd.toISOString()})`);
                     return false; 
                 }
             }
@@ -187,77 +146,123 @@ document.addEventListener('DOMContentLoaded', () => {
             return true;
         };
         
-        let triedAlternative = false;
+        const newDateMorningStart = createDateAsUTC(newDateStr, `${String(MORNING_SLOT_START_HOUR).padStart(2, '0')}:00`);
+        const newDateMorningEnd = createDateAsUTC(newDateStr, `${String(MORNING_SLOT_END_HOUR).padStart(2, '0')}:00`);
+        const newDateAfternoonStart = createDateAsUTC(newDateStr, `${String(AFTERNOON_SLOT_START_HOUR).padStart(2, '0')}:00`);
+        const newDateAfternoonEnd = createDateAsUTC(newDateStr, `${String(AFTERNOON_SLOT_END_HOUR).padStart(2, '0')}:00`);
+        const newDateFullDayStart = newDateMorningStart;
+        const newDateFullDayEnd = newDateAfternoonEnd;
 
-        if (originalEventType === 'morning') {
-            console.log("customEventDrop: Original event is 'morning'. Checking morning slot on new date.");
-            if (isSlotCompletelyFree(newDateMorningStart, newDateMorningEnd, existingBookingsOnDate, event.id)) {
+        if (isSameDay) {
+            console.log("customEventDrop: Handling same-day drag.");
+            const dropHour = info.event.start.getUTCHours(); 
+            let targetSlotType = (dropHour < 12) ? 'morning' : 'afternoon'; 
+            console.log(`customEventDrop: Same-day drop hour (UTC): ${dropHour}, determined target slot type: ${targetSlotType}`);
+
+            if (targetSlotType === 'morning') {
                 targetStart = newDateMorningStart;
                 targetEnd = newDateMorningEnd;
-            } else {
-                triedAlternative = true;
-                console.log("customEventDrop: Morning slot taken. Checking afternoon slot on new date.");
-                if (isSlotCompletelyFree(newDateAfternoonStart, newDateAfternoonEnd, existingBookingsOnDate, event.id)) {
-                    targetStart = newDateAfternoonStart;
-                    targetEnd = newDateAfternoonEnd;
-                }
-            }
-        } else if (originalEventType === 'afternoon') {
-            console.log("customEventDrop: Original event is 'afternoon'. Checking afternoon slot on new date.");
-            if (isSlotCompletelyFree(newDateAfternoonStart, newDateAfternoonEnd, existingBookingsOnDate, event.id)) {
+            } else { // afternoon
                 targetStart = newDateAfternoonStart;
                 targetEnd = newDateAfternoonEnd;
-            } else {
-                triedAlternative = true;
-                console.log("customEventDrop: Afternoon slot taken. Checking morning slot on new date.");
-                if (isSlotCompletelyFree(newDateMorningStart, newDateMorningEnd, existingBookingsOnDate, event.id)) {
-                    targetStart = newDateMorningStart;
-                    targetEnd = newDateMorningEnd;
-                }
             }
-        } else if (originalEventType === 'fullday') {
-            console.log("customEventDrop: Original event is 'fullday'. Checking full day slot on new date.");
-            if (isSlotCompletelyFree(newDateFullDayStart, newDateFullDayEnd, existingBookingsOnDate, event.id)) {
-                 targetStart = newDateFullDayStart;
-                 targetEnd = newDateFullDayEnd;
-            }
-        } else { 
-            const morningSlotDuration = MORNING_SLOT_END_HOUR - MORNING_SLOT_START_HOUR; 
-            const customDurationHours = originalDurationMs / (1000 * 60 * 60);
-            console.log(`customEventDrop: Original event is 'custom' with duration ~${customDurationHours.toFixed(1)}h.`);
 
-            if (customDurationHours <= morningSlotDuration) {
-                console.log("customEventDrop: Custom event duration fits a half-day slot. Checking morning slot.");
+            if (isSlotCompletelyFree(targetStart, targetEnd, existingBookingsOnDate, event.id)) {
+                console.log(`customEventDrop: Same-day drag: Snapping to ${targetSlotType} slot.`);
+                // targetStart and targetEnd are already set
+            } else {
+                console.log(`customEventDrop: Same-day drag: Target ${targetSlotType} slot on ${newDateStr} is not available. Reverting.`);
+                alertMessage = `The target ${targetSlotType} slot on ${newDateStr} is not available. Reverting.`;
+                targetStart = null; targetEnd = null; // Ensure revert
+            }
+        } else { // Logic for new-date drags (existing refined logic from previous successful step)
+            console.log("customEventDrop: Handling new-date drag.");
+            const originalDurationMs = (info.oldEvent.end || oldEventStart) - oldEventStart;
+            const oldDateStr = oldEventStart.toISOString().split('T')[0];
+            const oldDateMorningStart = createDateAsUTC(oldDateStr, `${String(MORNING_SLOT_START_HOUR).padStart(2, '0')}:00`);
+            const oldDateMorningEnd = createDateAsUTC(oldDateStr, `${String(MORNING_SLOT_END_HOUR).padStart(2, '0')}:00`);
+            const oldDateAfternoonStart = createDateAsUTC(oldDateStr, `${String(AFTERNOON_SLOT_START_HOUR).padStart(2, '0')}:00`);
+            const oldDateAfternoonEnd = createDateAsUTC(oldDateStr, `${String(AFTERNOON_SLOT_END_HOUR).padStart(2, '0')}:00`);
+            let originalEventType = 'custom';
+            const oldEventEnd = info.oldEvent.end || oldEventStart;
+
+            if (oldEventStart.getTime() === oldDateMorningStart.getTime() && oldEventEnd.getTime() === oldDateMorningEnd.getTime()) {
+                originalEventType = 'morning';
+            } else if (oldEventStart.getTime() === oldDateAfternoonStart.getTime() && oldEventEnd.getTime() === oldDateAfternoonEnd.getTime()) {
+                originalEventType = 'afternoon';
+            } else if (oldEventStart.getTime() === oldDateMorningStart.getTime() && oldEventEnd.getTime() === oldDateAfternoonEnd.getTime()) {
+                originalEventType = 'fullday';
+            }
+            console.log("customEventDrop (new-date): Original event type:", originalEventType);
+            
+            // Note: event.id is passed to isSlotCompletelyFree. For new-date drags, this eventIdToIgnore won't match any booking_id on the new date, which is correct.
+            if (originalEventType === 'morning') {
+                console.log("customEventDrop (new-date): Original event is 'morning'. Checking morning slot on new date.");
                 if (isSlotCompletelyFree(newDateMorningStart, newDateMorningEnd, existingBookingsOnDate, event.id)) {
-                    targetStart = newDateMorningStart;
-                    targetEnd = newDateMorningEnd; 
+                    targetStart = newDateMorningStart; targetEnd = newDateMorningEnd;
                 } else {
                     triedAlternative = true;
-                    console.log("customEventDrop: Morning slot taken for custom event. Checking afternoon slot.");
+                    console.log("customEventDrop (new-date): Morning slot taken. Checking afternoon slot on new date.");
                     if (isSlotCompletelyFree(newDateAfternoonStart, newDateAfternoonEnd, existingBookingsOnDate, event.id)) {
-                        targetStart = newDateAfternoonStart;
-                        targetEnd = newDateAfternoonEnd; 
+                        targetStart = newDateAfternoonStart; targetEnd = newDateAfternoonEnd;
                     }
                 }
-            }
-            if (!targetStart && customDurationHours <= (AFTERNOON_SLOT_END_HOUR - MORNING_SLOT_START_HOUR)) { 
-                 console.log("customEventDrop: Custom event trying full day slot (either too long for half or half-day failed).");
-                 if (isSlotCompletelyFree(newDateFullDayStart, newDateFullDayEnd, existingBookingsOnDate, event.id)) {
-                    targetStart = newDateFullDayStart;
-                    targetEnd = newDateFullDayEnd; 
-                 }
-            }
-        }
+            } else if (originalEventType === 'afternoon') {
+                console.log("customEventDrop (new-date): Original event is 'afternoon'. Checking afternoon slot on new date.");
+                if (isSlotCompletelyFree(newDateAfternoonStart, newDateAfternoonEnd, existingBookingsOnDate, event.id)) {
+                    targetStart = newDateAfternoonStart; targetEnd = newDateAfternoonEnd;
+                } else {
+                    triedAlternative = true;
+                    console.log("customEventDrop (new-date): Afternoon slot taken. Checking morning slot on new date.");
+                    if (isSlotCompletelyFree(newDateMorningStart, newDateMorningEnd, existingBookingsOnDate, event.id)) {
+                        targetStart = newDateMorningStart; targetEnd = newDateMorningEnd;
+                    }
+                }
+            } else if (originalEventType === 'fullday') {
+                console.log("customEventDrop (new-date): Original event is 'fullday'. Checking full day slot on new date.");
+                if (isSlotCompletelyFree(newDateFullDayStart, newDateFullDayEnd, existingBookingsOnDate, event.id)) {
+                     targetStart = newDateFullDayStart; targetEnd = newDateFullDayEnd;
+                }
+            } else { // 'custom'
+                const morningSlotDuration = MORNING_SLOT_END_HOUR - MORNING_SLOT_START_HOUR;
+                const customDurationHours = originalDurationMs / (1000 * 60 * 60);
+                console.log(`customEventDrop (new-date): Original event is 'custom' with duration ~${customDurationHours.toFixed(1)}h.`);
 
+                if (customDurationHours <= morningSlotDuration) { // Try to fit into a half-day slot by snapping
+                    console.log("customEventDrop (new-date): Custom event duration fits a half-day slot. Checking morning slot.");
+                    if (isSlotCompletelyFree(newDateMorningStart, newDateMorningEnd, existingBookingsOnDate, event.id)) {
+                        targetStart = newDateMorningStart; targetEnd = newDateMorningEnd; 
+                    } else {
+                        triedAlternative = true;
+                        console.log("customEventDrop (new-date): Morning slot taken for custom event. Checking afternoon slot.");
+                        if (isSlotCompletelyFree(newDateAfternoonStart, newDateAfternoonEnd, existingBookingsOnDate, event.id)) {
+                            targetStart = newDateAfternoonStart; targetEnd = newDateAfternoonEnd; 
+                        }
+                    }
+                }
+                // If it didn't fit/take a half-day slot, or if it's longer than a half-day slot, try full-day.
+                if (!targetStart && customDurationHours <= (AFTERNOON_SLOT_END_HOUR - MORNING_SLOT_START_HOUR)) { 
+                     console.log("customEventDrop (new-date): Custom event trying full day slot (either too long for half or half-day failed).");
+                     if (isSlotCompletelyFree(newDateFullDayStart, newDateFullDayEnd, existingBookingsOnDate, event.id)) {
+                        targetStart = newDateFullDayStart; targetEnd = newDateFullDayEnd; 
+                     }
+                }
+            }
+             if (targetStart && triedAlternative) console.log(`customEventDrop (new-date): Original slot was unavailable, successfully moved to alternative slot.`);
+             else if (targetStart) console.log(`customEventDrop (new-date): Successfully moved to target slot.`);
+        }
+        
+        // Common finalization logic
         if (targetStart && targetEnd) {
             info.event.start = targetStart;
             info.event.end = targetEnd;
-            const decisionMsg = triedAlternative ? `Original slot was unavailable, successfully moved to alternative slot.` : `Successfully moved to target slot.`;
+            const decisionMsg = isSameDay ? `Snapped to ${ (info.event.start.getUTCHours() < 12) ? 'morning' : 'afternoon'} slot on same day.` : 
+                                (triedAlternative ? `Original slot was unavailable, successfully moved to alternative slot.` : `Successfully moved to target slot.`); // Note: triedAlternative is only set in new-date path
             console.log(`customEventDrop: Final decision - ALLOW. ${decisionMsg} New times: ${targetStart.toISOString()} - ${targetEnd.toISOString()}`);
             handleEventChange(info);
         } else {
             console.log(`customEventDrop: Final decision - REVERT. No suitable standard slot available on ${newDateStr}.`);
-            alert('The selected time slot is not available or does not align with standard booking slots (Morning, Afternoon, Full Day). Reverting.');
+            alert(alertMessage); // Use potentially customized alert message
             info.revert();
         }
     }
