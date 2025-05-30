@@ -477,16 +477,16 @@ def resource_to_dict(resource: Resource) -> dict:
         'status': resource.status,
         'booking_restriction': resource.booking_restriction,
         'image_url': url_for('static', filename=f'resource_uploads/{resource.image_filename}') if resource.image_filename else None,
-        'published_at': resource.published_at.isoformat() if resource.published_at else None,
+        'published_at': resource.published_at.replace(tzinfo=timezone.utc).isoformat() if resource.published_at else None,
         'allowed_user_ids': resource.allowed_user_ids,
         'roles': [{'id': r.id, 'name': r.name} for r in resource.roles],
         'floor_map_id': resource.floor_map_id,
         'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
         'is_under_maintenance': resource.is_under_maintenance,
-        'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
+        'maintenance_until': resource.maintenance_until.replace(tzinfo=timezone.utc).isoformat() if resource.maintenance_until else None,
         'max_recurrence_count': resource.max_recurrence_count,
         'scheduled_status': resource.scheduled_status,
-        'scheduled_status_at': resource.scheduled_status_at.isoformat() if resource.scheduled_status_at else None
+        'scheduled_status_at': resource.scheduled_status_at.replace(tzinfo=timezone.utc).isoformat() if resource.scheduled_status_at else None
     }
 # --- Simple Email Notification System ---
 email_log = []
@@ -1756,7 +1756,7 @@ def get_waitlist_entries():
             'resource_name': resource.name if resource else None,
             'user_id': entry.user_id,
             'username': user.username if user else None,
-            'timestamp': entry.timestamp.isoformat(),
+            'timestamp': entry.timestamp.replace(tzinfo=timezone.utc).isoformat(),
         })
     return jsonify(response_list), 200
 
@@ -1820,7 +1820,7 @@ def get_audit_logs():
         
         logs_list = [{
             'id': log.id,
-            'timestamp': log.timestamp.isoformat(), # Use ISO format for consistency
+            'timestamp': log.timestamp.replace(tzinfo=timezone.utc).isoformat(), 
             'user_id': log.user_id,
             'username': log.username,
             'action': log.action,
@@ -2336,8 +2336,8 @@ def create_booking():
             'resource_id': b.resource_id,
             'title': b.title,
             'user_name': b.user_name,
-            'start_time': b.start_time.strftime('%Y-%m-%d %H:%M:%S'),
-            'end_time': b.end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            'start_time': b.start_time.replace(tzinfo=timezone.utc).isoformat(),
+            'end_time': b.end_time.replace(tzinfo=timezone.utc).isoformat(),
             'status': b.status,
             'recurrence_rule': b.recurrence_rule
         } for b in created]
@@ -2376,12 +2376,12 @@ def get_my_bookings():
                 'resource_id': booking.resource_id,
                 'resource_name': resource_name,
                 'user_name': booking.user_name,
-                'start_time': booking.start_time.isoformat(),
-                'end_time': booking.end_time.isoformat(),
+                'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
+                'end_time': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
                 'title': booking.title,
                 'recurrence_rule': booking.recurrence_rule,
-                'checked_in_at': booking.checked_in_at.isoformat() if booking.checked_in_at else None,
-                'checked_out_at': booking.checked_out_at.isoformat() if booking.checked_out_at else None,
+                'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else None,
+                'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else None,
                 'can_check_in': can_check_in
             })
         
@@ -2405,10 +2405,10 @@ def bookings_calendar():
             events.append({
                 'id': booking.id,
                 'title': title,
-                'start': booking.start_time.isoformat(),
-                'end': booking.end_time.isoformat(),
+                'start': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
+                'end': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
                 'recurrence_rule': booking.recurrence_rule,
-                'resource_id': booking.resource_id # Added resource_id
+                'resource_id': booking.resource_id
             })
         return jsonify(events), 200
     except Exception as e:
@@ -2540,13 +2540,13 @@ def update_booking_by_user(booking_id):
     Allows an authenticated user to update the title, start_time, or end_time of their own booking.
     Expects start_time and end_time as ISO 8601 formatted datetime strings.
     """
-    app.logger.info(f"[API PUT /api/bookings/{booking_id}] Request received. User: {current_user.username}")
+    app.logger.info(f"[API PUT /api/bookings/{booking_id}] Request received. User: {current_user.username if current_user.is_authenticated else 'Anonymous'}")
     data = request.get_json()
     app.logger.info(f"[API PUT /api/bookings/{booking_id}] Request JSON data: {data}")
 
     if not data:
         app.logger.warning(f"[API PUT /api/bookings/{booking_id}] No JSON data received.")
-        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400 # Existing error return is good
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
 
     try:
         booking = Booking.query.get(booking_id)
@@ -2687,20 +2687,24 @@ def update_booking_by_user(booking_id):
         )
         app.logger.info(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' successfully updated booking. Changes: {change_summary_text}.")
         
-        return jsonify({
+        # Log the successful response being sent
+        response_data = {
             'id': booking.id,
             'resource_id': booking.resource_id,
-            'resource_name': resource_name, # Fetch or ensure it's available
+            'resource_name': resource_name, 
             'user_name': booking.user_name,
-            'start_time': booking.start_time.isoformat(),
-            'end_time': booking.end_time.isoformat(),
+            'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
+            'end_time': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
             'title': booking.title
-        }), 200
+        }
+        app.logger.info(f"[API PUT /api/bookings/{booking_id}] Sending successful response: {response_data}")
+        return jsonify(response_data), 200
 
     except Exception as e:
         db.session.rollback()
-        app.logger.exception(f"[API PUT /api/bookings/{booking_id}] Error updating booking for user '{current_user.username}': {e}")
-        add_audit_log(action="UPDATE_BOOKING_USER_FAILED", details=f"User '{current_user.username}' failed to update booking ID: {booking_id}. Error: {str(e)}")
+        # Enhanced logging for exceptions
+        app.logger.exception(f"[API PUT /api/bookings/{booking_id}] Critical error during booking update for user '{current_user.username if current_user.is_authenticated else 'Anonymous'}'. Error: {str(e)}")
+        add_audit_log(action="UPDATE_BOOKING_USER_FAILED", details=f"User '{current_user.username if current_user.is_authenticated else 'Anonymous'}' failed to update booking ID: {booking_id}. Error: {str(e)}")
         return jsonify({'error': 'Failed to update booking due to a server error.'}), 500
 
 
@@ -2720,7 +2724,7 @@ def check_in_booking(booking_id):
         return jsonify({'error': 'Check-in not allowed at this time.'}), 400
     booking.checked_in_at = now
     db.session.commit()
-    return jsonify({'message': 'Checked in successfully.', 'checked_in_at': booking.checked_in_at.isoformat()}), 200
+    return jsonify({'message': 'Checked in successfully.', 'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat()}), 200
 
 
 @app.route('/api/bookings/<int:booking_id>/check_out', methods=['POST'])
@@ -2737,7 +2741,7 @@ def check_out_booking(booking_id):
         return jsonify({'error': 'Booking already checked out.'}), 400
     booking.checked_out_at = datetime.utcnow()
     db.session.commit()
-    return jsonify({'message': 'Checked out successfully.', 'checked_out_at': booking.checked_out_at.isoformat()}), 200
+    return jsonify({'message': 'Checked out successfully.', 'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat()}), 200
 
 
 @app.route('/admin/bookings/pending', methods=['GET'])
@@ -2753,8 +2757,8 @@ def list_pending_bookings():
             'resource_id': b.resource_id,
             'resource_name': b.resource_booked.name if b.resource_booked else None,
             'user_name': b.user_name,
-            'start_time': b.start_time.isoformat(),
-            'end_time': b.end_time.isoformat(),
+            'start_time': b.start_time.replace(tzinfo=timezone.utc).isoformat(),
+            'end_time': b.end_time.replace(tzinfo=timezone.utc).isoformat(),
             'title': b.title,
         })
     return jsonify(result), 200
@@ -2970,10 +2974,10 @@ def get_all_bookings_for_resource(resource_id):
         for booking in bookings_for_resource:
             events.append({
                 'id': booking.id,
-                'title': booking.title or resource.name, # Use resource name as fallback
-                'start': booking.start_time.isoformat(),
-                'end': booking.end_time.isoformat(),
-                'color': 'blue', # Standard color for actual bookings
+                'title': booking.title or resource.name, 
+                'start': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
+                'end': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
+                'color': 'blue', 
                 'display': 'block',
                 'extendedProps': { # Optional: include more data if needed by frontend
                     'user_name': booking.user_name,
