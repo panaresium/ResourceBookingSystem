@@ -955,7 +955,7 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log("Resource buttons page script initializing...");
 
         // 1. Initial Setup: DOM Elements & Variables
-        const availabilityDateInput = document.getElementById('resource-availability-date'); // Date picker for this view
+        const availabilityDateInput = document.getElementById('availability-date'); // Date picker for this view
         const resourceLoadingStatusDiv = document.getElementById('resource-loading-status');
 
         // Modal elements (rpbm- prefix)
@@ -1274,6 +1274,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 button.classList.add('unavailable');
                 button.title = `${button.dataset.resourceName} - Unavailable`;
                 console.log(`Resource ${resourceId} is unavailable. Class: unavailable`);
+            }
+
+            // Existing class adding logic should be right above this
+            if (button.classList.contains('unavailable') && !button.title.includes('Restricted Access')) {
+                // If the button is 'unavailable' AND it's not due to a permission restriction (title check)
+                button.style.display = 'none';
+                console.log(`Resource ${resourceId} is unavailable and not restricted, hiding button.`);
+            } else {
+                // For 'available', 'partial', or 'unavailable' due to restriction, or 'error' state
+                button.style.display = ''; // Reset to default display (usually 'block' or 'inline-block' based on CSS)
+                console.log(`Resource ${resourceId} is available, partial, restricted, or in error state, showing button. Classes: ${button.className}`);
             }
         }
 
