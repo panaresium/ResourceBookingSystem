@@ -274,12 +274,18 @@ oauth.register(
 # Flask-Login setup
 login_manager = LoginManager()
 login_manager.init_app(app)
-login_manager.login_view = 'serve_login' 
-login_manager.login_message_category = 'info' 
+login_manager.login_view = 'serve_login'
+login_manager.login_message_category = 'info'
 # Example of wrapping a message that Flask-Login might use.
 # Note: This specific message is often configured directly in Flask-Login,
 # but if it were a custom message, this is how you'd wrap it.
 login_manager.login_message = 'Please log in to access this page.'
+
+@login_manager.unauthorized_handler
+def unauthorized_callback():
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Unauthorized'}), 401
+    return redirect(url_for('serve_login', next=request.url))
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -1537,6 +1543,89 @@ def create_resources_bulk():
         db.session.rollback()
         app.logger.exception("Error creating resources in bulk:")
         return jsonify({'error': 'Failed to create resources due to a server error.'}), 500
+
+
+@app.route('/api/admin/resources/bulk', methods=['PUT'])
+@login_required
+@permission_required('manage_resources')
+def update_resources_bulk():
+    data = request.get_json()
+    if not data or 'ids' not in data or not isinstance(data['ids'], list):
+        return jsonify({'error': 'Invalid input. "ids" list required.'}), 400
+
+    ids = data['ids']
+    updates = data.get('fields', {})
+    if not updates:
+        return jsonify({'error': 'No update fields provided.'}), 400
+
+    allowed_fields = ['name', 'capacity', 'equipment', 'status']
+    valid_statuses = ['draft', 'published', 'archived']
+
+    updated = []
+    skipped = []
+
+    for rid in ids:
+        resource = Resource.query.get(rid)
+        if not resource:
+            skipped.append(rid)
+            continue
+        if 'status' in updates:
+            new_status = updates['status']
+            if new_status not in valid_statuses:
+                return jsonify({'error': f"Invalid status value. Allowed values are: {', '.join(valid_statuses)}."}), 400
+            if new_status == 'published' and resource.status != 'published' and resource.published_at is None:
+                resource.published_at = datetime.utcnow()
+            resource.status = new_status
+        for field in allowed_fields:
+            if field in updates and field != 'status':
+                if field == 'capacity':
+                    try:
+                        value = updates[field]
+                        if value is not None:
+                            value = int(value)
+                        setattr(resource, field, value)
+                    except (ValueError, TypeError):
+                        return jsonify({'error': f'Invalid value for capacity. Must be an integer or null.'}), 400
+                else:
+                    setattr(resource, field, updates[field])
+        updated.append(rid)
+
+    try:
+        db.session.commit()
+        return jsonify({'updated': updated, 'skipped': skipped}), 200
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Error updating resources in bulk:")
+        return jsonify({'error': 'Failed to update resources due to a server error.'}), 500
+
+
+@app.route('/api/admin/resources/bulk', methods=['DELETE'])
+@login_required
+@permission_required('manage_resources')
+def delete_resources_bulk():
+    data = request.get_json()
+    if not data or 'ids' not in data or not isinstance(data['ids'], list):
+        return jsonify({'error': 'Invalid input. "ids" list required.'}), 400
+
+    ids = data['ids']
+    deleted = []
+    skipped = []
+
+    for rid in ids:
+        resource = Resource.query.get(rid)
+        if not resource:
+            skipped.append(rid)
+            continue
+        db.session.delete(resource)
+        deleted.append(rid)
+
+    try:
+        db.session.commit()
+        return jsonify({'deleted': deleted, 'skipped': skipped}), 200
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Error deleting resources in bulk:")
+        return jsonify({'error': 'Failed to delete resources due to a server error.'}), 500
 
 @app.route('/api/admin/resources/<int:resource_id>', methods=['GET'])
 @login_required

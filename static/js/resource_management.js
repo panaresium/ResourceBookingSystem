@@ -3,6 +3,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const tableBody = document.querySelector('#resources-table tbody');
     const addBtn = document.getElementById('add-new-resource-btn');
     const addBulkBtn = document.getElementById('add-bulk-resource-btn');
+    const bulkEditBtn = document.getElementById('bulk-edit-btn');
+    const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
+    const selectAllCheckbox = document.getElementById('select-all-resources');
     const resourceFormModal = document.getElementById('resource-form-modal');
     const closeModalBtn = resourceFormModal ? resourceFormModal.querySelector('.close-modal-btn') : null;
     const resourceForm = document.getElementById('resource-form');
@@ -26,6 +29,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const bulkCapacityInput = document.getElementById('bulk-capacity');
     const bulkEquipmentInput = document.getElementById('bulk-equipment');
     const bulkStatusInput = document.getElementById('bulk-status');
+    const bulkEditModal = document.getElementById('bulk-edit-modal');
+    const bulkEditForm = document.getElementById('bulk-edit-form');
+    const bulkEditFormStatus = document.getElementById('bulk-edit-form-status');
+    const bulkEditStatusInput = document.getElementById('bulk-edit-status');
+    const bulkEditCapacityInput = document.getElementById('bulk-edit-capacity');
+    const bulkEditEquipmentInput = document.getElementById('bulk-edit-equipment');
 
     async function fetchAndDisplayResources() {
         showLoading(statusDiv, 'Fetching resources...');
@@ -35,6 +44,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (resources && resources.length > 0) {
                 resources.forEach(r => {
                     const row = tableBody.insertRow();
+                    const selectCell = row.insertCell();
+                    selectCell.innerHTML = `<input type="checkbox" class="select-resource-checkbox" data-id="${r.id}">`;
                     row.insertCell().textContent = r.id;
                     row.insertCell().textContent = r.name;
                     row.insertCell().textContent = r.status || 'draft';
@@ -47,9 +58,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 hideMessage(statusDiv);
             } else {
-                tableBody.innerHTML = '<tr><td colspan="5">No resources found.</td></tr>';
+                tableBody.innerHTML = '<tr><td colspan="6">No resources found.</td></tr>';
                 showSuccess(statusDiv, 'No resources to display.');
             }
+            if (selectAllCheckbox) selectAllCheckbox.checked = false;
         } catch (error) {
             showError(statusDiv, `Error fetching resources: ${error.message}`);
         }
@@ -76,11 +88,54 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', () => {
+            const checked = selectAllCheckbox.checked;
+            document.querySelectorAll('.select-resource-checkbox').forEach(cb => {
+                cb.checked = checked;
+            });
+        });
+    }
+
+    function getSelectedResourceIds() {
+        return Array.from(document.querySelectorAll('.select-resource-checkbox:checked')).map(cb => parseInt(cb.dataset.id, 10));
+    }
+
     closeModalBtn && closeModalBtn.addEventListener('click', () => resourceFormModal.style.display = 'none');
     window.addEventListener('click', e => { if (e.target === resourceFormModal) resourceFormModal.style.display = 'none'; });
 
     bulkCloseBtn && bulkCloseBtn.addEventListener('click', () => bulkModal.style.display = 'none');
     window.addEventListener('click', e => { if (e.target === bulkModal) bulkModal.style.display = 'none'; });
+
+    bulkEditBtn && bulkEditBtn.addEventListener('click', () => {
+        const ids = getSelectedResourceIds();
+        if (ids.length === 0) {
+            alert('Please select at least one resource.');
+            return;
+        }
+        if (bulkEditForm) bulkEditForm.reset();
+        hideMessage(bulkEditFormStatus);
+        if (bulkEditModal) bulkEditModal.style.display = 'block';
+    });
+
+    bulkDeleteBtn && bulkDeleteBtn.addEventListener('click', async () => {
+        const ids = getSelectedResourceIds();
+        if (ids.length === 0) {
+            alert('Please select at least one resource.');
+            return;
+        }
+        if (!confirm(`Delete ${ids.length} selected resources?`)) return;
+        try {
+            await apiCall('/api/admin/resources/bulk', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids })
+            }, statusDiv);
+            fetchAndDisplayResources();
+        } catch (error) {
+            /* handled by apiCall */
+        }
+    });
 
     tableBody.addEventListener('click', async function(event) {
         if (event.target.classList.contains('edit-resource-btn')) {
@@ -168,6 +223,32 @@ document.addEventListener('DOMContentLoaded', function() {
                 setTimeout(() => { bulkModal.style.display = 'none'; }, 500);
             } catch (error) {
                 /* error shown by apiCall */
+            }
+        });
+    }
+
+    if (bulkEditForm) {
+        bulkEditForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const ids = getSelectedResourceIds();
+            if (ids.length === 0) {
+                showError(bulkEditFormStatus, 'No resources selected.');
+                return;
+            }
+            const fields = {};
+            if (bulkEditStatusInput.value) fields.status = bulkEditStatusInput.value;
+            if (bulkEditCapacityInput.value !== '') fields.capacity = parseInt(bulkEditCapacityInput.value, 10);
+            if (bulkEditEquipmentInput.value !== '') fields.equipment = bulkEditEquipmentInput.value;
+            try {
+                await apiCall('/api/admin/resources/bulk', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids, fields })
+                }, bulkEditFormStatus);
+                await fetchAndDisplayResources();
+                setTimeout(() => { bulkEditModal.style.display = 'none'; }, 500);
+            } catch (error) {
+                /* handled by apiCall */
             }
         });
     }
