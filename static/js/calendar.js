@@ -76,27 +76,46 @@ document.addEventListener('DOMContentLoaded', () => {
     let handleEventChange;
 
     async function customEventDrop(info) {
+        // --- Added Detailed Logging ---
+        console.log('customEventDrop - Full event object received:', JSON.parse(JSON.stringify(info.event)));
+        if (info.event.extendedProps) {
+            console.log('customEventDrop - info.event.extendedProps:', JSON.parse(JSON.stringify(info.event.extendedProps)));
+        } else {
+            console.log('customEventDrop - info.event.extendedProps: undefined');
+        }
+        // getResources() might not exist on all event objects or FC versions, check existence.
+        if (typeof info.event.getResources === 'function') {
+            console.log('customEventDrop - info.event.getResources():', info.event.getResources().map(r => ({id: r.id, title: r.title})));
+        } else {
+            console.log('customEventDrop - info.event.getResources(): method does not exist');
+        }
+        console.log('customEventDrop - info.event.resource_id (top-level):', info.event.resource_id);
+        // --- End of Added Detailed Logging ---
+
         const event = info.event;
         const oldEventStart = info.oldEvent.start;
 
-        // Improved resourceId retrieval with logging
+        // Improved resourceId retrieval
         let resourceId = null;
         if (event.extendedProps && event.extendedProps.resource_id) {
             resourceId = event.extendedProps.resource_id;
-        } else if (event.resource_id) { // Check top-level mapped resource_id
+            console.log('customEventDrop - Resource ID from extendedProps:', resourceId);
+        } else if (event.resource_id) { 
             resourceId = event.resource_id;
-        } else if (typeof event.getResources === 'function') { // Fallback to FC's method
+            console.log('customEventDrop - Resource ID from top-level event.resource_id:', resourceId);
+        } else if (typeof event.getResources === 'function') { 
             const resources = event.getResources();
             if (resources.length > 0) {
                 resourceId = resources[0].id;
+                console.log('customEventDrop - Resource ID from event.getResources():', resourceId);
             }
         }
 
-        console.log('customEventDrop: event object:', JSON.parse(JSON.stringify(event))); // Deep copy for logging
-        console.log('customEventDrop: retrieved resourceId:', resourceId);
+        // This console.log is now more of a summary after specific attempts
+        console.log('customEventDrop: final retrieved resourceId after checks:', resourceId);
 
         if (!resourceId) {
-            console.error('customEventDrop: Could not identify resource for event:', JSON.parse(JSON.stringify(event)));
+            console.error('customEventDrop: Could not identify resource for event (final check):', JSON.parse(JSON.stringify(event)));
             alert('Could not identify the resource for this booking. Operation cancelled.');
             info.revert();
             return;
@@ -364,20 +383,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     apiCall('/api/bookings/calendar')
                         .then(bookings => {
                             allUserEvents = bookings.map(b => {
-                                let resourceId = b.resource_id;
-                                if (resourceId === undefined && b.extendedProps && b.extendedProps.resource_id !== undefined) {
-                                    resourceId = b.extendedProps.resource_id;
-                                } else if (resourceId === undefined && b.resourceId !== undefined) {
-                                    resourceId = b.resourceId;
-                                }
-                                // Ensure extendedProps exists
+                                // b.resource_id should now be directly from the API
+                                const apiResourceId = b.resource_id; 
+                                
+                                console.log('Mapping booking to event. Raw booking data:', JSON.parse(JSON.stringify(b)));
+
+                                // Ensure extendedProps exists, initialize if not
                                 const extendedProps = b.extendedProps || {};
-                                return {
-                                    ...b, // Spread booking properties
-                                    resource_id: resourceId, // Standardized top-level access
-                                    // Ensure isActualBooking is set, and preserve other extendedProps
-                                    extendedProps: { ...extendedProps, resource_id: resourceId, isActualBooking: true }
+                                extendedProps.isActualBooking = true; // Mark as an actual booking
+                                extendedProps.resource_id = apiResourceId; // Ensure resource_id is in extendedProps
+
+                                const eventObject = {
+                                    ...b, // Spread booking properties (id, title, start, end, recurrence_rule, and now resource_id)
+                                    resource_id: apiResourceId, // Ensure top-level access for convenience
+                                    extendedProps: extendedProps 
                                 };
+                                
+                                console.log('Created event object. Resource ID:', eventObject.resource_id, 'ExtendedProps Resource ID:', eventObject.extendedProps.resource_id);
+                                return eventObject;
                             });
                             console.log('Fetched and cached allUserEvents:', allUserEvents.length);
                             const selectedResourceId = calendarResourceSelect.value;

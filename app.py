@@ -2407,7 +2407,8 @@ def bookings_calendar():
                 'title': title,
                 'start': booking.start_time.isoformat(),
                 'end': booking.end_time.isoformat(),
-                'recurrence_rule': booking.recurrence_rule
+                'recurrence_rule': booking.recurrence_rule,
+                'resource_id': booking.resource_id # Added resource_id
             })
         return jsonify(events), 200
     except Exception as e:
