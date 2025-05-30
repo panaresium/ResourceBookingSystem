@@ -179,36 +179,18 @@ Pushing to the `main` branch triggers the workflow. The action zips the project 
 Make sure the database is initialized by running `python init_setup.py` locally or as part of your deployment process.
 
 
-## Backing Up Data to Azure Blob Storage
+## Backing Up Data to Azure File Share
 
-Use `azure_backup.py` to upload the SQLite database and uploaded images to Azure Blob Storage. The script reads these environment variables:
+Use `azure_backup.py` to upload the SQLite database and uploaded images to an Azure File Share. The script reads these environment variables:
 
 - `AZURE_STORAGE_CONNECTION_STRING` – connection string to your storage account
-- `AZURE_DB_CONTAINER` – container name for database backups (default `db-backups`)
-- `AZURE_MEDIA_CONTAINER` – container name for uploaded images (default `media`)
+- `AZURE_DB_SHARE` – file share name for database backups (default `db-backups`)
+- `AZURE_MEDIA_SHARE` – file share name for uploaded images (default `media`)
+
 
 Run the script with:
 ```bash
 python azure_backup.py
 ```
 All floor map and resource images from `static/` along with `data/site.db` will be uploaded.
-
-
-## Using Azure Blob Storage as Primary Storage
-
-Set the environment variable `AZURE_PRIMARY_STORAGE` to use Azure Blob Storage for the application's database and uploaded images. When enabled, running `init_setup.py` downloads `site.db` and media files from the configured containers before performing any initialization. After the process completes the data is uploaded back so your changes persist in Azure.
-
-The following environment variables are required (the same ones used by the backup script):
-
-- `AZURE_STORAGE_CONNECTION_STRING`
-- `AZURE_DB_CONTAINER` (default `db-backups`)
-- `AZURE_MEDIA_CONTAINER` (default `media`)
-
-Example usage:
-
-```bash
-AZURE_PRIMARY_STORAGE=1 python init_setup.py
-```
-
-The application continues to use the local files during runtime. You can run `azure_backup.py` periodically to sync updated data back to Azure.
 

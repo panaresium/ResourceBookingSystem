@@ -12,4 +12,5 @@ Flask-Mail>=0.9
 requests>=2.25
 gunicorn
 
-azure-storage-blob
+azure-storage-file-share
+
