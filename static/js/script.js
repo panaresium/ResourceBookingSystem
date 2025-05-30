@@ -1100,12 +1100,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
 
                         // Slot Button Logic
-                        const firstHalfBtn = document.getElementById('rpbm-slot-first-half');
-                        const secondHalfBtn = document.getElementById('rpbm-slot-second-half');
-                        const fullDayBtn = document.getElementById('rpbm-slot-full-day');
+                        const firstHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="first_half"]');
+                        const secondHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]');
+                        const fullDayBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]');
 
                         if (!firstHalfBtn || !secondHalfBtn || !fullDayBtn) {
-                            console.error("One or more slot buttons not found in the modal!");
+                            console.error("One or more slot buttons not found in the modal! Ensure modalSlotOptionsContainer is defined and contains these buttons.", modalSlotOptionsContainer);
                             if (modalStatusMsg) showError(modalStatusMsg, "Modal slot buttons are missing. Cannot proceed.");
                             if (bookingModal) bookingModal.style.display = 'block';
                             return;
@@ -1124,22 +1124,21 @@ document.addEventListener('DOMContentLoaded', function() {
                         let isFirstHalfBooked = false;
                         let isSecondHalfBooked = false;
 
-                        // Slot times are 08:00-12:00 and 13:00-17:00 as per earlier subtasks for this modal
-                        const firstHalfSlot = { start: 8, end: 12 };
-                        const secondHalfSlot = { start: 13, end: 17 };
+                        // Slot times as "HH:MM:SS" strings for direct comparison
+                        const firstHalfSlotStartStr = "08:00:00";
+                        const firstHalfSlotEndStr = "12:00:00";
+                        const secondHalfSlotStartStr = "13:00:00";
+                        const secondHalfSlotEndStr = "17:00:00";
 
                         if (bookings && bookings.length > 0) {
                             for (const booking of bookings) {
-                                const bookingStartTime = parseInt(booking.start_time.split(':')[0], 10);
-                                const bookingEndTime = parseInt(booking.end_time.split(':')[0], 10);
-
                                 // Check for first half conflict
-                                if (bookingStartTime < firstHalfSlot.end && bookingEndTime > firstHalfSlot.start) {
+                                if (booking.start_time < firstHalfSlotEndStr && booking.end_time > firstHalfSlotStartStr) {
                                     isFirstHalfBooked = true;
                                     console.log("Conflict found for first half:", booking);
                                 }
                                 // Check for second half conflict
-                                if (bookingStartTime < secondHalfSlot.end && bookingEndTime > secondHalfSlot.start) {
+                                if (booking.start_time < secondHalfSlotEndStr && booking.end_time > secondHalfSlotStartStr) {
                                     isSecondHalfBooked = true;
                                     console.log("Conflict found for second half:", booking);
                                 }
@@ -1151,19 +1150,25 @@ document.addEventListener('DOMContentLoaded', function() {
                             firstHalfBtn.disabled = true;
                             firstHalfBtn.classList.add('unavailable', 'booked');
                             firstHalfBtn.classList.remove('available');
-                            firstHalfBtn.textContent += " (Booked)";
+                            firstHalfBtn.textContent = firstHalfBtn.textContent.split(" (")[0] + " (Booked)";
                         }
                         if (isSecondHalfBooked) {
                             secondHalfBtn.disabled = true;
                             secondHalfBtn.classList.add('unavailable', 'booked');
                             secondHalfBtn.classList.remove('available');
-                            secondHalfBtn.textContent += " (Booked)";
+                            secondHalfBtn.textContent = secondHalfBtn.textContent.split(" (")[0] + " (Booked)";
                         }
+                        
                         if (isFirstHalfBooked || isSecondHalfBooked) {
                             fullDayBtn.disabled = true;
-                            fullDayBtn.classList.add('unavailable', 'booked'); // Or 'partial' if one half is available but full day isn't an option
+                            fullDayBtn.classList.add('unavailable', 'booked'); 
                             fullDayBtn.classList.remove('available');
-                            fullDayBtn.textContent += " (Unavailable)"; // Or more specific like " (Partially Booked)"
+                            let fullDayBaseText = fullDayBtn.textContent.split(" (")[0];
+                            if (isFirstHalfBooked && isSecondHalfBooked) {
+                                fullDayBtn.textContent = fullDayBaseText + " (Booked)";
+                            } else {
+                                fullDayBtn.textContent = fullDayBaseText + " (Unavailable)"; 
+                            }
                         }
                         
                         if (bookingModal) bookingModal.style.display = 'block';
