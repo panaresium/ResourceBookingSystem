@@ -6,11 +6,14 @@
     <h1>{{ _('Resource Management') }}</h1>
     <button id="add-new-resource-btn" class="button">{{ _('Add New Resource') }}</button>
     <button id="add-bulk-resource-btn" class="button" style="margin-left:5px;">{{ _('Bulk Add Resources') }}</button>
+    <button id="bulk-edit-btn" class="button" style="margin-left:5px;">{{ _('Bulk Edit') }}</button>
+    <button id="bulk-delete-btn" class="button danger" style="margin-left:5px;">{{ _('Bulk Delete') }}</button>
     <div id="resource-management-status" class="status-message" style="margin-top: 15px;"></div>
 
     <table id="resources-table" class="styled-table" style="margin-top: 15px;">
         <thead>
             <tr>
+                <th><input type="checkbox" id="select-all-resources"></th>
                 <th>{{ _('ID') }}</th>
                 <th>{{ _('Name') }}</th>
                 <th>{{ _('Status') }}</th>
@@ -98,6 +101,34 @@
                 </div>
                 <button type="submit" class="button" style="margin-top: 10px;">{{ _('Create Resources') }}</button>
                 <div id="bulk-resource-form-status" class="status-message" style="margin-top: 10px;"></div>
+            </form>
+        </div>
+    </div>
+
+    <div id="bulk-edit-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close-modal-btn" data-modal-id="bulk-edit-modal">&times;</span>
+            <h3>{{ _('Bulk Edit Resources') }}</h3>
+            <form id="bulk-edit-form">
+                <div>
+                    <label for="bulk-edit-status">{{ _('Status:') }}</label>
+                    <select id="bulk-edit-status" name="status" class="form-control">
+                        <option value="">{{ _('-- Unchanged --') }}</option>
+                        <option value="draft">{{ _('Draft') }}</option>
+                        <option value="published">{{ _('Published') }}</option>
+                        <option value="archived">{{ _('Archived') }}</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="bulk-edit-capacity">{{ _('Capacity:') }}</label>
+                    <input type="number" id="bulk-edit-capacity" name="capacity" min="0">
+                </div>
+                <div>
+                    <label for="bulk-edit-equipment">{{ _('Equipment:') }}</label>
+                    <input type="text" id="bulk-edit-equipment" name="equipment">
+                </div>
+                <button type="submit" class="button" style="margin-top: 10px;">{{ _('Apply Changes') }}</button>
+                <div id="bulk-edit-form-status" class="status-message" style="margin-top: 10px;"></div>
             </form>
         </div>
     </div>

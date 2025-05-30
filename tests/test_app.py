@@ -90,6 +90,21 @@ class AppTests(unittest.TestCase):
         """Helper function to log out a user via API."""
         return self.client.post('/api/auth/logout', follow_redirects=True)
 
+    def _create_booking(self, user_name, resource_id, start_offset_hours, duration_hours=1, title="Test Booking"):
+        """Helper to create a booking for tests."""
+        start_time = datetime.utcnow() + timedelta(hours=start_offset_hours)
+        end_time = start_time + timedelta(hours=duration_hours)
+        booking = Booking(
+            user_name=user_name,
+            resource_id=resource_id,
+            start_time=start_time,
+            end_time=end_time,
+            title=title
+        )
+        db.session.add(booking)
+        db.session.commit()
+        return booking
+
     def test_my_bookings_page_rendering(self):
         """Test rendering of the my_bookings page after login."""
         # Log in the test user
@@ -291,20 +306,6 @@ class TestAuthAPI(AppTests): # Inherit from AppTests for setup/teardown
 
 
 class TestBookingUserActions(AppTests):
-    def _create_booking(self, user_name, resource_id, start_offset_hours, duration_hours=1, title="Test Booking"):
-        """Helper to create a booking."""
-        start_time = datetime.utcnow() + timedelta(hours=start_offset_hours)
-        end_time = start_time + timedelta(hours=duration_hours)
-        booking = Booking(
-            user_name=user_name,
-            resource_id=resource_id,
-            start_time=start_time,
-            end_time=end_time,
-            title=title
-        )
-        db.session.add(booking)
-        db.session.commit()
-        return booking
 
     def test_update_booking_success_all_fields(self):
         """Test successfully updating title, start_time, and end_time of a booking."""
@@ -325,8 +326,8 @@ class TestBookingUserActions(AppTests):
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertEqual(data['title'], new_title)
-        self.assertEqual(datetime.fromisoformat(data['start_time']), new_start_time)
-        self.assertEqual(datetime.fromisoformat(data['end_time']), new_end_time)
+        self.assertEqual(datetime.fromisoformat(data['start_time']).replace(tzinfo=None), new_start_time)
+        self.assertEqual(datetime.fromisoformat(data['end_time']).replace(tzinfo=None), new_end_time)
 
         updated_booking_db = Booking.query.get(booking.id)
         self.assertEqual(updated_booking_db.title, new_title)
@@ -1088,6 +1089,44 @@ class TestBulkResourceCreation(AppTests):
         self.assertEqual(names, ['Room-01', 'Room-02', 'Room-03'])
         for name in names:
             self.assertIsNotNone(Resource.query.filter_by(name=name).first())
+
+
+class TestBulkResourceEditDelete(AppTests):
+    def test_bulk_edit_resources(self):
+        admin = User(username='bulkeditadmin', email='bulkedit@example.com', is_admin=True)
+        admin.set_password('adminpass')
+        db.session.add(admin)
+        db.session.commit()
+        self.login('bulkeditadmin', 'adminpass')
+
+        r1 = Resource(name='BulkEdit1', status='draft')
+        r2 = Resource(name='BulkEdit2', status='draft')
+        db.session.add_all([r1, r2])
+        db.session.commit()
+
+        payload = {'ids': [r1.id, r2.id], 'fields': {'status': 'archived'}}
+        resp = self.client.put('/api/admin/resources/bulk', json=payload)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(Resource.query.get(r1.id).status, 'archived')
+        self.assertEqual(Resource.query.get(r2.id).status, 'archived')
+
+    def test_bulk_delete_resources(self):
+        admin = User(username='bulkdeleteadmin', email='bulkdelete@example.com', is_admin=True)
+        admin.set_password('adminpass')
+        db.session.add(admin)
+        db.session.commit()
+        self.login('bulkdeleteadmin', 'adminpass')
+
+        r1 = Resource(name='BulkDel1', status='draft')
+        r2 = Resource(name='BulkDel2', status='draft')
+        db.session.add_all([r1, r2])
+        db.session.commit()
+
+        payload = {'ids': [r1.id, r2.id]}
+        resp = self.client.delete('/api/admin/resources/bulk', json=payload)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(Resource.query.get(r1.id))
+        self.assertIsNone(Resource.query.get(r2.id))
 
 
 if __name__ == '__main__':
