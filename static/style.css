@@ -643,6 +643,10 @@ body.high-contrast input[type="button"]:hover {
         margin: 20px auto;
         padding: 15px;
     }
+    .resource-buttons-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); /* Smaller buttons on mobile */
+        gap: 10px;
+    }
 }
 
 /* Styles copied from map_view.html */
@@ -766,3 +770,72 @@ body.high-contrast input[type="button"]:hover {
     filter: brightness(120%); /* Slightly brighter */
 }
 /* End of styles copied from map_view.html */
+
+/* Styles for the /resources page resource buttons */
+.resource-buttons-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); /* Adjust minmax width as needed */
+    gap: 15px; /* Spacing between buttons */
+    padding: 10px 0; /* Some padding around the grid */
+}
+
+.resource-availability-button {
+    display: block; /* Or inline-block if preferred, but block might be better for grid items */
+    width: 100%; /* Make button take full width of grid cell */
+    padding: 12px 15px;
+    margin: 0; /* Grid gap will handle spacing */
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    background-color: #f0f0f0; /* Default background */
+    color: #333; /* Default text color */
+    text-align: center;
+    cursor: pointer;
+    font-size: 0.9rem;
+    line-height: 1.3;
+    transition: background-color 0.3s ease, transform 0.1s ease; /* Smooth transitions */
+}
+.resource-availability-button:hover {
+    background-color: #e0e0e0; /* Slight hover effect */
+    transform: translateY(-1px); /* Slight lift effect */
+}
+.resource-availability-button:active {
+    transform: translateY(0px);
+}
+
+.resource-availability-button.available {
+    background-color: #4CAF50; /* Green */
+    color: white;
+    border-color: #388E3C;
+}
+.resource-availability-button.available:hover {
+    background-color: #45a049;
+}
+
+.resource-availability-button.partial {
+    background-color: #ffc107; /* Yellow */
+    color: #333; /* Darker text for yellow */
+    border-color: #f59c00;
+}
+.resource-availability-button.partial:hover {
+    background-color: #f5b300;
+}
+
+.resource-availability-button.unavailable {
+    background-color: #f44336; /* Red */
+    color: white;
+    border-color: #d32f2f;
+}
+.resource-availability-button.unavailable:hover {
+    background-color: #e53935;
+}
+
+.resource-availability-button.error {
+    background-color: #757575; /* Grey */
+    color: white;
+    border-color: #616161;
+    cursor: not-allowed;
+}
+.resource-availability-button.error:hover {
+    background-color: #6a6a6a;
+}
+/* End of /resources page button styles */
