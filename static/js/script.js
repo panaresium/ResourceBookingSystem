@@ -968,20 +968,22 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
                         
                         selectedSlotDetails = null; // Reset selected slot
                         modalConfirmBtn.dataset.resourceId = resourceId;
-                        modalBookingTitle.value = `Booking for ${resourceName}`;
+                        modalBookingTitle.value = `Booking for ${resourceName}`; // Default title
                         
                         // Reset modal from any previous confirmation state
-                        if (modalConfirmBtn) modalConfirmBtn.style.display = 'inline-block';
-                        if (modalSlotOptionsContainer) modalSlotOptionsContainer.style.display = 'block';
-                        if (modalBookingTitle && modalBookingTitle.parentElement) modalBookingTitle.parentElement.style.display = 'block';
-                        if (modalAckCloseBtn) modalAckCloseBtn.style.display = 'none';
-                        if (modalStatusMsg) modalStatusMsg.innerHTML = ''; // Clear old messages
-                        if (countdownInterval) {
+                        if (modalConfirmBtn) modalConfirmBtn.style.display = 'inline-block'; // Show confirm button
+                        if (modalSlotOptionsContainer) modalSlotOptionsContainer.style.display = 'block'; // Show slot options
+                        if (modalBookingTitle && modalBookingTitle.parentElement) modalBookingTitle.parentElement.style.display = 'block'; // Show title input
+                        if (modalAckCloseBtn) modalAckCloseBtn.style.display = 'none'; // Hide ack button
+                        if (modalStatusMsg) {
+                            modalStatusMsg.innerHTML = ''; // Clear old messages
+                            modalStatusMsg.className = 'status-message'; // Reset class from any previous success/error
+                        }
+                        if (countdownInterval) { // Clear any lingering interval
                             clearInterval(countdownInterval);
                             countdownInterval = null;
                         }
-
-                        modalStatusMsg.textContent = ''; // Ensure status is clear before showing.
+                        // modalStatusMsg.textContent = ''; // Already cleared by innerHTML = ''
                         bookingModal.style.display = 'block';
                     });
                     resourceButtonsContainer.appendChild(button);
@@ -1046,33 +1048,57 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
                     }, modalStatusMsg); // apiCall will show success/error
                     
                     // If successful (no error thrown by apiCall)
-                    updateAllButtonColors(); // Refresh main page buttons immediately
+                    await updateAllButtonColors(); 
 
                     if (modalConfirmBtn) modalConfirmBtn.style.display = 'none';
                     if (modalSlotOptionsContainer) modalSlotOptionsContainer.style.display = 'none';
                     if (modalBookingTitle && modalBookingTitle.parentElement) modalBookingTitle.parentElement.style.display = 'none';
                     if (modalAckCloseBtn) modalAckCloseBtn.style.display = 'inline-block';
 
-                    let countdown = 5;
-                    // Use showSuccess once to style the message area correctly
-                    showSuccess(modalStatusMsg, `Booking confirmed! Closing in <span id="rpbm-countdown-timer">${countdown}</span>s...`);
-                    
-                    const timerSpan = document.getElementById('rpbm-countdown-timer'); // Get span after innerHTML is set
+                    const resourceNameForMsg = modalResourceName.textContent;
+                    const dateStrForMsg = modalSelectedDate.textContent;
+                    const startTimeForMsg = selectedSlotDetails ? selectedSlotDetails.startTime : 'N/A';
+                    const endTimeForMsg = selectedSlotDetails ? selectedSlotDetails.endTime : 'N/A';
+                    const bookingTitleValue = title; // 'title' is from the payload
 
-                    if (countdownInterval) clearInterval(countdownInterval); // Clear previous, just in case
+                    let countdown = 5;
+                    const detailedMessage = `Booking Confirmed!<br>
+                           Resource: ${resourceNameForMsg}<br>
+                           Date: ${dateStrForMsg}<br>
+                           Time: ${startTimeForMsg} - ${endTimeForMsg}
+                           ${bookingTitleValue ? '<br>Title: ' + bookingTitleValue : ''}
+                           <br><br>Closing in <span id="rpbm-countdown-timer">${countdown}</span>s...`;
+                    
+                    showSuccess(modalStatusMsg, ''); // Apply styling (success class)
+                    modalStatusMsg.innerHTML = detailedMessage; // Set detailed HTML
+                    
+                    const timerSpan = document.getElementById('rpbm-countdown-timer');
+
+                    if (countdownInterval) clearInterval(countdownInterval);
 
                     countdownInterval = setInterval(() => {
                         countdown--;
+                        // Update the timer span directly
                         if (timerSpan) timerSpan.textContent = countdown;
-                        // Update the full message to ensure the span is part of it if it was initially created by showSuccess
-                        if (modalStatusMsg) modalStatusMsg.innerHTML = `Booking confirmed! Closing in <span id="rpbm-countdown-timer">${countdown}</span>s...`;
+                        // No need to reconstruct the whole detailedMessage here if only the number changes
+                        // However, if showSuccess clears innerHTML, then it's needed.
+                        // Let's assume showSuccess does NOT clear innerHTML and only sets textContent and classes.
+                        // The current showSuccess sets textContent, so for HTML we need to set innerHTML after.
+                        // For the countdown, it's safer to reconstruct the part of the message that includes the timer.
+                        if (modalStatusMsg.classList.contains('success')) { // Keep success styling
+                             modalStatusMsg.innerHTML = `Booking Confirmed!<br>
+                               Resource: ${resourceNameForMsg}<br>
+                               Date: ${dateStrForMsg}<br>
+                               Time: ${startTimeForMsg} - ${endTimeForMsg}
+                               ${bookingTitleValue ? '<br>Title: ' + bookingTitleValue : ''}
+                               <br><br>Closing in <span id="rpbm-countdown-timer">${countdown}</span>s...`;
+                        }
 
 
                         if (countdown <= 0) {
                             clearInterval(countdownInterval);
                             countdownInterval = null;
                             if (bookingModal) bookingModal.style.display = 'none';
-                            // No need to reset UI here, it's reset when modal is next opened.
                         }
                     }, 1000);
                 } catch (error) {
@@ -1088,9 +1114,15 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
         window.addEventListener('click', (event) => {
             if (event.target === bookingModal) {
                 bookingModal.style.display = 'none';
-                if (countdownInterval) { // Also clear countdown if modal is closed by clicking outside
+                if (countdownInterval) { 
                     clearInterval(countdownInterval);
                     countdownInterval = null;
+                    // Reset UI elements for next modal opening
+                    if (modalConfirmBtn) modalConfirmBtn.style.display = 'inline-block';
+                    if (modalSlotOptionsContainer) modalSlotOptionsContainer.style.display = 'block';
+                    if (modalBookingTitle && modalBookingTitle.parentElement) modalBookingTitle.parentElement.style.display = 'block';
+                    if (modalAckCloseBtn) modalAckCloseBtn.style.display = 'none';
+                    if(modalStatusMsg) modalStatusMsg.className = 'status-message'; // Reset class
                 }
             }
         });
@@ -1102,7 +1134,12 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
                     countdownInterval = null;
                 }
                 if (bookingModal) bookingModal.style.display = 'none';
-                // No need to reset UI here, it's reset when modal is next opened.
+                 // Reset UI elements for next modal opening
+                if (modalConfirmBtn) modalConfirmBtn.style.display = 'inline-block';
+                if (modalSlotOptionsContainer) modalSlotOptionsContainer.style.display = 'block';
+                if (modalBookingTitle && modalBookingTitle.parentElement) modalBookingTitle.parentElement.style.display = 'block';
+                if (modalAckCloseBtn) modalAckCloseBtn.style.display = 'none';
+                if(modalStatusMsg) modalStatusMsg.className = 'status-message'; // Reset class
             });
         }
 
