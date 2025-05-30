@@ -886,25 +886,84 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
                         if (!currentResourceBookingsCache[resourceId]) currentResourceBookingsCache[resourceId] = bookings; // Cache if fetched now
                         hideMessage(modalStatusMsg);
 
-                        modalSlotOptionsContainer.querySelectorAll('.time-slot-btn').forEach(slotBtn => {
-                            const slotStartTime = slotBtn.dataset.startTime;
-                            const slotEndTime = slotBtn.dataset.endTime;
-                            const slotStart = new Date(`${selectedDate}T${slotStartTime}:00`);
-                            const slotEnd = new Date(`${selectedDate}T${slotEndTime}:00`);
-                            let isSlotBooked = false;
-                            for (const booking of bookings) {
-                                const bookingStart = new Date(`${selectedDate}T${booking.start_time}`);
-                                const bookingEnd = new Date(`${selectedDate}T${booking.end_time}`);
-                                if (bookingStart < slotEnd && bookingEnd > slotStart) {
-                                    isSlotBooked = true;
-                                    break;
-                                }
-                            }
-                            slotBtn.disabled = isSlotBooked;
-                            slotBtn.classList.remove('selected'); // Clear previous selection
-                            slotBtn.textContent = slotBtn.textContent.split(' (')[0] + (isSlotBooked ? ' (Booked)' : '');
-                        });
+                        // Get button references
+                        const firstHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="first_half"]');
+                        const secondHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]');
+                        const fullDayBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]');
 
+                        // Reset button states
+                        [firstHalfBtn, secondHalfBtn, fullDayBtn].forEach(btn => {
+                            if (btn) {
+                                btn.disabled = false;
+                                btn.classList.remove('unavailable', 'selected', 'booked'); // 'booked' might be a conceptual class
+                                btn.classList.add('available'); // Assuming 'available' is for enabled, non-booked buttons
+                                // Reset text content (remove " (Booked)" or " (Unavailable)")
+                                const baseText = btn.textContent.split(' (')[0];
+                                btn.textContent = baseText;
+                            }
+                        });
+                        
+                        let isFirstHalfBooked = false;
+                        let isSecondHalfBooked = false;
+
+                        const firstHalfStartTime = "08:00:00";
+                        const firstHalfEndTime = "12:00:00";
+                        const secondHalfStartTime = "13:00:00";
+                        const secondHalfEndTime = "17:00:00";
+
+                        for (const booking of bookings) {
+                            const bookingStart = booking.start_time; // Assuming HH:MM:SS format
+                            const bookingEnd = booking.end_time;   // Assuming HH:MM:SS format
+
+                            // Check for First Half conflict
+                            if (bookingStart < firstHalfEndTime && bookingEnd > firstHalfStartTime) {
+                                isFirstHalfBooked = true;
+                            }
+                            // Check for Second Half conflict
+                            if (bookingStart < secondHalfEndTime && bookingEnd > secondHalfStartTime) {
+                                isSecondHalfBooked = true;
+                            }
+                        }
+
+                        // Update First Half Button
+                        if (firstHalfBtn) {
+                            if (isFirstHalfBooked) {
+                                firstHalfBtn.disabled = true;
+                                firstHalfBtn.classList.add('unavailable');
+                                firstHalfBtn.classList.remove('available');
+                                firstHalfBtn.textContent = `${firstHalfBtn.textContent.split(' (')[0]} (Booked)`;
+                            } else {
+                                firstHalfBtn.classList.add('available');
+                                firstHalfBtn.classList.remove('unavailable');
+                            }
+                        }
+
+                        // Update Second Half Button
+                        if (secondHalfBtn) {
+                            if (isSecondHalfBooked) {
+                                secondHalfBtn.disabled = true;
+                                secondHalfBtn.classList.add('unavailable');
+                                secondHalfBtn.classList.remove('available');
+                                secondHalfBtn.textContent = `${secondHalfBtn.textContent.split(' (')[0]} (Booked)`;
+                            } else {
+                                secondHalfBtn.classList.add('available');
+                                secondHalfBtn.classList.remove('unavailable');
+                            }
+                        }
+
+                        // Update Full Day Button
+                        if (fullDayBtn) {
+                            if (isFirstHalfBooked || isSecondHalfBooked) {
+                                fullDayBtn.disabled = true;
+                                fullDayBtn.classList.add('unavailable');
+                                fullDayBtn.classList.remove('available');
+                                fullDayBtn.textContent = `${fullDayBtn.textContent.split(' (')[0]} (Unavailable)`;
+                            } else {
+                                fullDayBtn.classList.add('available');
+                                fullDayBtn.classList.remove('unavailable');
+                            }
+                        }
+                        
                         selectedSlotDetails = null; // Reset selected slot
                         modalConfirmBtn.dataset.resourceId = resourceId;
                         modalBookingTitle.value = `Booking for ${resourceName}`;
