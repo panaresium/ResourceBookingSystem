@@ -9,6 +9,8 @@
     --border-color: #dddddd;
     --error-color: #e74c3c; /* A distinct red for errors */
     --success-color: #2ecc71; /* A distinct green for success */
+    --error-bg-color: #fdecea;    /* Light red background for readability */
+    --success-bg-color: #e6f8ee;  /* Light green background for readability */
     --unavailable-color: #bdc3c7; /* Light grey for unavailable slots */
     --font-family-modern: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 
@@ -346,8 +348,8 @@ footer {
 }
 
 .success {
-    color: var(--text-color-light); 
-    background-color: var(--success-color);
+    color: var(--success-color);
+    background-color: var(--success-bg-color);
     border: 1px solid var(--success-color); /* Simplified border */
     padding: 0.75rem; /* 12px -> 0.75rem */
     border-radius: 5px;
@@ -355,8 +357,8 @@ footer {
 }
 
 .error {
-    color: var(--text-color-light); 
-    background-color: var(--error-color);
+    color: var(--error-color);
+    background-color: var(--error-bg-color);
     border: 1px solid var(--error-color); /* Simplified border */
     padding: 0.75rem; /* 12px -> 0.75rem */
     border-radius: 5px;
@@ -670,11 +672,11 @@ body.high-contrast input[type="button"]:hover {
     justify-content: center;
     text-align: center;
     overflow: hidden;
-    color: white;
+    color: #000;
     font-size: 12px;
 }
 .resource-area-available {
-    background-color: rgba(0, 255, 0, 0.4);
+    background-color: rgba(0, 255, 0, 0.2);
     border-color: darkgreen;
 }
 .resource-area-partially-booked {
@@ -682,7 +684,7 @@ body.high-contrast input[type="button"]:hover {
     border-color: #cca300;
 }
 .resource-area-fully-booked {
-    background-color: rgba(255, 0, 0, 0.5);
+    background-color: rgba(255, 0, 0, 0.2);
     border-color: darkred;
 }
 .resource-area-unknown {
@@ -808,12 +810,12 @@ body.high-contrast input[type="button"]:hover {
 }
 
 .resource-availability-button.available {
-    background-color: #4CAF50; /* Green */
-    color: white;
+    background-color: var(--success-bg-color); /* Light green */
+    color: var(--success-color);
     border-color: #388E3C;
 }
 .resource-availability-button.available:hover {
-    background-color: #45a049;
+    background-color: #d3f0d9;
 }
 
 .resource-availability-button.partial {
@@ -826,12 +828,12 @@ body.high-contrast input[type="button"]:hover {
 }
 
 .resource-availability-button.unavailable {
-    background-color: #f44336; /* Red */
-    color: white;
+    background-color: var(--error-bg-color); /* Light red */
+    color: var(--error-color);
     border-color: #d32f2f;
 }
 .resource-availability-button.unavailable:hover {
-    background-color: #e53935;
+    background-color: #f2c2bd;
 }
 
 .resource-availability-button.error {
@@ -849,8 +851,8 @@ body.high-contrast input[type="button"]:hover {
 #rpbm-slot-options .time-slot-btn.unavailable,
 #rpbm-slot-options .time-slot-btn.booked,
 #rpbm-slot-options .time-slot-btn:disabled {
-    background-color: #f44336; /* Red for booked/unavailable */
-    color: white;
+    background-color: var(--error-bg-color); /* Light red for unavailable */
+    color: var(--error-color);
     cursor: not-allowed;
     opacity: 0.7; /* Slightly faded */
     border-color: #d32f2f; /* Optional: darker border */
@@ -868,13 +870,13 @@ body.high-contrast input[type="button"]:hover {
 /* Styling for available slot buttons in the rpbm, if different from general .time-slot-btn or .button */
 /* This ensures they have a clear "available" state distinct from general buttons if needed */
 #rpbm-slot-options .time-slot-btn.available {
-    background-color: #4CAF50; /* Green for available */
-    color: white;
+    background-color: var(--success-bg-color); /* Light green for available */
+    color: var(--success-color);
     border-color: #388E3C; /* Optional: darker border for available */
     opacity: 1; /* Ensure full opacity for available buttons */
 }
 #rpbm-slot-options .time-slot-btn.available:hover {
-    background-color: #45a049; /* Slightly darker green on hover */
+    background-color: #d3f0d9; /* Slightly darker green on hover */
 }
 
 /* Styling for Floor Map Groupings on Resources Page */
