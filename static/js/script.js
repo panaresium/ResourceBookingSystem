@@ -955,6 +955,41 @@ document.addEventListener('DOMContentLoaded', function() {
             console.log("RPBM modal reset complete.");
         }
 
+        function updateGroupVisibility() {
+            console.log("Updating group visibility...");
+            const allHeadings = document.querySelectorAll('#resource-buttons-container .map-group-heading');
+    
+            allHeadings.forEach(heading => {
+                // A bit fragile if structure changes, but common pattern for heading + content div
+                const gridContainer = heading.nextElementSibling; 
+    
+                if (gridContainer && gridContainer.classList.contains('resource-buttons-grid')) {
+                    // More robust check for visibility:
+                    // Iterate through buttons and check computed style or explicit style.display !== 'none'
+                    let hasVisibleButton = false;
+                    const buttonsInGroup = gridContainer.querySelectorAll('.resource-availability-button');
+                    for (let i = 0; i < buttonsInGroup.length; i++) {
+                        if (buttonsInGroup[i].style.display !== 'none') {
+                            hasVisibleButton = true;
+                            break;
+                        }
+                    }
+    
+                    if (hasVisibleButton) {
+                        heading.style.display = ''; // Reset to default (visible)
+                        gridContainer.style.display = ''; // Reset to default (visible)
+                        console.log(`Group for heading "${heading.textContent}" has visible resources, showing group.`);
+                    } else {
+                        heading.style.display = 'none';
+                        gridContainer.style.display = 'none';
+                        console.log(`Group for heading "${heading.textContent}" has NO visible resources, hiding group.`);
+                    }
+                } else {
+                    // console.warn("Could not find grid container for heading:", heading.textContent);
+                }
+            });
+        }
+
         // 2. fetchAndRenderResources() function
         async function fetchAndRenderResources() {
             // Ensure resourceLoadingStatusDiv is defined in this scope or passed.
@@ -1368,11 +1403,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (resourceLoadingStatusDiv && !resourceLoadingStatusDiv.classList.contains('error')) { // Check if an error occurred during any update
                     hideMessage(resourceLoadingStatusDiv); // Hide general loading message
                 }
+                updateGroupVisibility(); // Call here after successful updates
             } catch (error) {
                 console.error("Error during Promise.all for updateAllButtonColors:", error);
                 // Individual errors are handled in updateButtonColor. 
                 // This catch is for Promise.all itself if it rejects for some reason not caught by individual calls.
                 if (resourceLoadingStatusDiv) showError(resourceLoadingStatusDiv, "An error occurred while updating resource statuses.");
+                // Consider if updateGroupVisibility() should also be called in case of error, 
+                // if partially updated button states are possible and groups might need hiding.
+                // For now, calling only on full success of all button updates.
             }
         }
         
