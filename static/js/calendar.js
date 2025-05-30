@@ -132,10 +132,12 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (isSameDay) {
             console.log("customEventDrop: Handling same-day drag.");
-            const dropHourLocal = info.event.start.getHours(); 
-            let targetSlotType = (dropHourLocal < 12) ? 'morning' : 'afternoon'; 
-            console.log('customEventDrop: Same-day drag: dropHour (local):', dropHourLocal, 'targetSlotType:', targetSlotType);
-
+            const dropHourInUtc = info.event.start.getUTCHours(); // Use UTC hour for decision
+            let targetSlotType = (dropHourInUtc < 12) ? 'morning' : 'afternoon'; // Assuming 12 UTC is the threshold
+            console.log('customEventDrop: Same-day drag: dropHourInUtc:', dropHourInUtc, 'targetSlotType:', targetSlotType);
+            
+            // Conceptual local slot logging (reflects wall clock time if calendar display were local)
+            // This part is mostly for debugging user intent vs. actual UTC slot.
             let conceptualDayForLocalSlots = new Date(event.start); 
             let determinedTargetStartLocal = new Date(conceptualDayForLocalSlots);
             determinedTargetStartLocal.setHours(MORNING_SLOT_START_HOUR, 0, 0, 0);
@@ -360,6 +362,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const calendar = new FullCalendar.Calendar(calendarEl, {
         initialView: 'timeGridWeek',
+        timeZone: 'UTC', // Set timezone to UTC
         headerToolbar: {
             left: 'prev,next today',
             center: 'title',
@@ -438,6 +441,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     calendar.render();
+    console.log('FullCalendar effective timeZone:', calendar.getOption('timeZone')); // Log effective timezone
 
     handleEventChange = async function(info) { 
         console.log('[handleEventChange] Function called. Event ID:', info.event.id);
