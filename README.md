@@ -42,12 +42,9 @@ After activating your virtual environment, run the initialization script:
 python init_setup.py
 ```
 
-This script checks your Python version, creates the required directories, and initializes the database **only if one does not already exist**.  When an existing `site.db` file is present it is left untouched, but the script will ensure new fields such as the `resource.tags` column are added when upgrading from older versions.  Run this once after cloning the repository or when updating to a newer release.
+This script checks your Python version, creates the required directories, and then verifies the database. If no database exists, a new one is created. When a database is present its structure is compared against the expected schema. If the schema is incorrect the old file is removed and recreated. If everything looks good, the existing database is left untouched.
 
-The application itself will also perform a quick check for the `resource.tags`
-column whenever it starts, so you can simply run `python app.py` or `flask run`
-after upgrading. However, running `init_setup.py` remains the safest approach
-when setting up a new environment.
+Running `python app.py` or `flask run` performs a minimal check as well, but `init_setup.py` is the preferred method to ensure the environment is healthy.
 
 
 ### Installing Dependencies
@@ -98,24 +95,10 @@ The application uses an SQLite database to store resource information. If you ha
 
 ### Updating Existing Databases
 
-If you upgrade from an earlier version and encounter a database error such as
-`no such column: resource.tags`, `no such column: resource.image_filename`,
-`no such column: floor_map.location`, or
-`no such column: resource.scheduled_status`, your `site.db` file is missing
-recently added fields.
-
-Running `python init_setup.py` will now add these columns automatically. If you prefer you can also run the helper script directly:
-
-
-```bash
-python add_resource_tags_column.py
-```
-
-Recent versions of `app.py` also attempt to add this column on startup,
-but running `init_setup.py` is recommended if you see schema errors.
-
-If you do not need to keep your current data, you can instead recreate the
-database with `init_db(force=True)`.
+If you upgrade and encounter database errors, run `python init_setup.py` again.
+The script will verify the schema of the existing `site.db` file. If it doesn't
+match the current models, the old database is deleted and rebuilt. Make sure you
+back up any important data before running the script in these situations.
 
 ### Email Configuration
 

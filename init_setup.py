@@ -202,6 +202,65 @@ def ensure_scheduled_status_columns():
         if 'conn' in locals():
             conn.close()
 
+def verify_db_schema():
+    """Check if the existing database has the expected tables and columns."""
+    if not os.path.exists(DB_PATH):
+        return False
+
+    import sqlite3
+
+    expected_schema = {
+        'user': {
+            'id', 'username', 'email', 'password_hash', 'is_admin',
+            'google_id', 'google_email'
+        },
+        'role': {
+            'id', 'name', 'description', 'permissions'
+        },
+        'user_roles': {'user_id', 'role_id'},
+        'floor_map': {
+            'id', 'name', 'image_filename', 'location', 'floor'
+        },
+        'resource': {
+            'id', 'name', 'capacity', 'equipment', 'tags',
+            'booking_restriction', 'status', 'published_at',
+            'allowed_user_ids', 'image_filename', 'is_under_maintenance',
+            'maintenance_until', 'max_recurrence_count',
+            'scheduled_status', 'scheduled_status_at',
+            'floor_map_id', 'map_coordinates'
+        },
+        'resource_roles': {'resource_id', 'role_id'},
+        'booking': {
+            'id', 'resource_id', 'user_name', 'start_time',
+            'end_time', 'title', 'checked_in_at', 'checked_out_at',
+            'status', 'recurrence_rule'
+        },
+        'waitlist_entry': {'id', 'resource_id', 'user_id', 'timestamp'},
+        'audit_log': {'id', 'timestamp', 'user_id', 'username', 'action', 'details'}
+    }
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        for table, cols in expected_schema.items():
+            cursor.execute(f"PRAGMA table_info({table})")
+            info = cursor.fetchall()
+            if not info:
+                print(f"Missing table: {table}")
+                return False
+            existing = {row[1] for row in info}
+            if not cols.issubset(existing):
+                missing = cols - existing
+                print(f"Table '{table}' missing columns: {', '.join(missing)}")
+                return False
+        return True
+    except Exception as exc:
+        print(f"Error verifying database schema: {exc}")
+        return False
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
 
 # Moved from app.py
 def init_db(force=False):
@@ -493,20 +552,26 @@ def main():
     print("-" * 30) 
 
     if os.path.exists(DB_PATH):
-        print(f"Existing database found at {DB_PATH}. Skipping init_db to preserve data.")
-        ensure_tags_column()
-        ensure_resource_image_column()
-        ensure_floor_map_columns()
-        ensure_scheduled_status_columns()
-    else:
-        print("Initializing database...")
-        try:
-            init_db()
-            print("Database initialization process completed.")
-        except Exception as e:
-            print(f"An error occurred during database initialization: {e}")
-            print("Please check the output from init_db for more details, or run this script again if issues persist.")
-            sys.exit(1)  # Exit if DB initialization fails
+        print(f"Existing database found at {DB_PATH}. Verifying structure...")
+        if verify_db_schema():
+            print("Database structure looks correct. No action needed.")
+            return
+        else:
+            print("Database structure invalid or outdated. Recreating database...")
+            try:
+                os.remove(DB_PATH)
+            except OSError as exc:
+                print(f"Unable to remove old database: {exc}")
+                sys.exit(1)
+
+    print("Initializing database...")
+    try:
+        init_db()
+        print("Database initialization process completed.")
+    except Exception as e:
+        print(f"An error occurred during database initialization: {e}")
+        print("Please check the output from init_db for more details, or run this script again if issues persist.")
+        sys.exit(1)  # Exit if DB initialization fails
 
     print("-" * 30)
     print("Project initialization script completed successfully.")

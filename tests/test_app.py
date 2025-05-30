@@ -792,9 +792,10 @@ class TestMapBookingAPI(AppTests):
         """Test GET /api/admin/maps with no maps present."""
         self.login(self.admin_user.username, 'adminpass')
         # Delete the map created in setUp
+        map_id = self.floor_map.id
         db.session.delete(self.floor_map)
         # Also delete any resources associated with it to avoid FK constraint issues if not cascaded
-        Resource.query.filter_by(floor_map_id=self.floor_map.id).delete()
+        Resource.query.filter_by(floor_map_id=map_id).delete()
         db.session.commit()
         
         response = self.client.get('/api/admin/maps')
@@ -825,7 +826,8 @@ class TestMapBookingAPI(AppTests):
         self.assertIsNotNone(resource1_data)
         self.assertEqual(resource1_data['name'], self.resource1.name)
         self.assertIn('map_coordinates', resource1_data)
-        self.assertEqual(json.loads(resource1_data['map_coordinates'])['x'], 10) # From setup
+        self.assertIsInstance(resource1_data['map_coordinates'], dict)
+        self.assertEqual(resource1_data['map_coordinates']['x'], 10)  # From setup
         self.assertIn('bookings_on_date', resource1_data) # Should be present, even if empty
         self.assertIsInstance(resource1_data['bookings_on_date'], list)
 
@@ -941,9 +943,12 @@ class TestMapBookingAPI(AppTests):
         response = self.client.post('/api/bookings', json=payload)
         self.assertEqual(response.status_code, 201)
         data = response.get_json()
-        self.assertEqual(data['title'], 'Map Modal Booking')
-        self.assertEqual(data['resource_id'], self.resource1.id)
-        self.assertTrue(Booking.query.filter_by(id=data['id']).count() == 1)
+        self.assertIn('bookings', data)
+        self.assertEqual(len(data['bookings']), 1)
+        booking_data = data['bookings'][0]
+        self.assertEqual(booking_data['title'], 'Map Modal Booking')
+        self.assertEqual(booking_data['resource_id'], self.resource1.id)
+        self.assertTrue(Booking.query.filter_by(id=booking_data['id']).count() == 1)
 
     def test_post_booking_conflict_from_map_modal(self):
         """Test POST /api/bookings for conflict from map modal."""
@@ -951,7 +956,9 @@ class TestMapBookingAPI(AppTests):
         # Create an existing booking
         existing_start = datetime.combine(date.today(), time(10, 0))
         existing_end = datetime.combine(date.today(), time(11, 0))
-        Booking(resource_id=self.resource1.id, user_name='anotheruser', start_time=existing_start, end_time=existing_end, title='Existing').save()
+        existing = Booking(resource_id=self.resource1.id, user_name='anotheruser', start_time=existing_start, end_time=existing_end, title='Existing')
+        db.session.add(existing)
+        db.session.commit()
 
         payload = {
             'resource_id': self.resource1.id,
@@ -962,8 +969,8 @@ class TestMapBookingAPI(AppTests):
             'user_name': 'testuser'
         }
         response = self.client.post('/api/bookings', json=payload)
-        self.assertEqual(response.status_code, 409) # Expect conflict
-        self.assertIn('conflicts with an existing booking', response.get_json().get('error', ''))
+        self.assertEqual(response.status_code, 409)  # Expect conflict
+        self.assertIn('time slot is no longer available', response.get_json().get('error', '').lower())
 
     def test_post_booking_invalid_data_from_map_modal(self):
         """Test POST /api/bookings with invalid data from map modal."""
