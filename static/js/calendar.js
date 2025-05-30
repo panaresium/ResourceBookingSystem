@@ -13,56 +13,43 @@ document.addEventListener('DOMContentLoaded', () => {
     const MORNING_SLOT_END_HOUR = 12;
     const AFTERNOON_SLOT_START_HOUR = 13;
     const AFTERNOON_SLOT_END_HOUR = 17;
-    // FULL_DAY is derived from these: 8:00 - 17:00
 
-    // Helper to create Date objects in UTC from YYYY-MM-DD date string and HH:MM time string
     function createDateAsUTC(dateStr, timeStr) { // dateStr: YYYY-MM-DD, timeStr: HH:MM
         const [year, month, day] = dateStr.split('-').map(Number);
         const [hours, minutes] = timeStr.split(':').map(Number);
         return new Date(Date.UTC(year, month - 1, day, hours, minutes));
     }
 
-    async function getResourceAvailabilityClientSide(resourceId, dateString) { // dateString YYYY-MM-DD
+    async function getResourceAvailabilityClientSide(resourceId, dateString) { 
         if (!resourceId) {
-            console.error("getResourceAvailabilityClientSide: resourceId is undefined or null. This can happen if the event object doesn't have resource_id set.");
-            // Attempt to get selected resource from dropdown as a fallback if applicable to context
-            // const selectedResource = calendarResourceSelect.value;
-            // if(selectedResource && selectedResource !== 'all') resourceId = selectedResource;
-            // else {
-            //     console.error("No specific resource selected or event has no resource_id.");
-            //     return [];
-            // }
-             return []; // Prevent further errors
+            console.error("getResourceAvailabilityClientSide: resourceId is undefined or null.");
+            return []; 
         }
         try {
-            // Uses the global apiCall function defined elsewhere (assuming it's available)
             const bookedSlots = await apiCall(`/api/resources/${resourceId}/availability?date=${dateString}`);
-            return bookedSlots || []; // Ensure it's always an array
+            return bookedSlots || []; 
         } catch (error) {
             console.error(`Error fetching availability for resource ${resourceId} on ${dateString}:`, error);
-            return []; // Return empty on error to prevent cascading failures
+            return []; 
         }
     }
 
-
     async function populateResourceSelector() {
         try {
-            // Call the new endpoint to get resources booked by the current user
-            const resources = await apiCall('/api/bookings/my_booked_resources');
-            // Keep the "-- All My Booked Resources --" option, clear others
+            const resources = await apiCall('/api/bookings/my_booked_resources'); // UPDATED
             const firstOption = calendarResourceSelect.options[0];
             calendarResourceSelect.innerHTML = '';
             calendarResourceSelect.add(firstOption);
 
             if (resources && resources.length > 0) {
                 resources.forEach(resource => {
-                    // Displaying all booked resources regardless of their current status for selection
+                    // Displaying all booked resources, not just 'published'
                     const option = new Option(`${resource.name} (Status: ${resource.status}, Capacity: ${resource.capacity || 'N/A'})`, resource.id);
                     calendarResourceSelect.add(option);
                 });
                 calendarResourceSelect.disabled = false;
             } else {
-                // If no other resources, it will just have the "All" option
+                // No other resources, only "All My Booked Resources"
             }
         } catch (error) {
             console.error('Error fetching resources for calendar selector:', error);
@@ -70,13 +57,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // generateAvailableSlots function is removed
+    let handleEventChange; // Forward declared
+    let customEventDrop;
+    let customEventResize;
 
-    // Forward declaration for handleEventChange
-    let handleEventChange;
-
-    async function customEventDrop(info) {
-        // --- Detailed Logging for resource ID ---
+    customEventDrop = async function(info) {
         console.log('customEventDrop - Full event object received:', JSON.parse(JSON.stringify(info.event)));
         if (info.event.extendedProps) {
             console.log('customEventDrop - info.event.extendedProps:', JSON.parse(JSON.stringify(info.event.extendedProps)));
@@ -89,7 +74,6 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log('customEventDrop - info.event.getResources(): method does not exist');
         }
         console.log('customEventDrop - info.event.resource_id (top-level):', info.event.resource_id);
-        // --- End of Detailed Logging ---
 
         const event = info.event;
         const oldEventStart = info.oldEvent.start;
@@ -113,16 +97,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         console.log("customEventDrop triggered for event ID:", event.id, "Resource ID:", resourceId);
 
-        const newDateStr = event.start.toISOString().split('T')[0]; // Date of the drop YYYY-MM-DD (UTC)
+        const newDateStr = event.start.toISOString().split('T')[0]; 
         const existingBookingsOnDate = await getResourceAvailabilityClientSide(resourceId, newDateStr);
         let targetStart = null;
         let targetEnd = null;
-        let alertMessage = 'The selected time slot is not available or does not align with standard booking slots (Morning, Afternoon, Full Day). Reverting.'; // Default alert
+        let alertMessage = 'The selected time slot is not available or does not align with standard booking slots (Morning, Afternoon, Full Day). Reverting.';
+        let triedAlternative = false; // Initialize here for broader scope, used in final logging
         
         const isSameDay = (event.start.toDateString() === oldEventStart.toDateString());
         console.log("customEventDrop: isSameDay:", isSameDay);
 
-        // This helper needs newDateStr to create UTC dates for comparison with bookings from API
         const isSlotCompletelyFree = (slotStartUtc, slotEndUtc, bookings, eventIdToIgnore) => {
             console.log(`customEventDrop: Checking availability for UTC slot: ${slotStartUtc.toISOString()} - ${slotEndUtc.toISOString()}, ignoring event ID: ${eventIdToIgnore}`);
             for (const booking of bookings) {
@@ -134,7 +118,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.warn("customEventDrop: Skipping booking with invalid time:", booking);
                     continue;
                 }
-                // Bookings from API are HH:MM:SS, create UTC dates for comparison
                 const bookingStartUtc = createDateAsUTC(newDateStr, booking.start_time.substring(0, 5)); 
                 const bookingEndUtc = createDateAsUTC(newDateStr, booking.end_time.substring(0, 5));   
                 
@@ -149,32 +132,28 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (isSameDay) {
             console.log("customEventDrop: Handling same-day drag.");
-            const dropHourLocal = info.event.start.getHours(); // Use local hour for decision
+            const dropHourLocal = info.event.start.getHours(); 
             let targetSlotType = (dropHourLocal < 12) ? 'morning' : 'afternoon'; 
             console.log('customEventDrop: Same-day drag: dropHour (local):', dropHourLocal, 'targetSlotType:', targetSlotType);
 
-            // Construct conceptual local target slot times for logging
-            const [year, monthZeroUtc, dayUtc] = newDateStr.split('-').map(Number); // newDateStr is UTC
-            let determinedTargetStartLocal = new Date(year, monthZeroUtc - 1, dayUtc); 
-            let determinedTargetEndLocal = new Date(year, monthZeroUtc - 1, dayUtc);
+            let conceptualDayForLocalSlots = new Date(event.start); 
+            let determinedTargetStartLocal = new Date(conceptualDayForLocalSlots);
+            determinedTargetStartLocal.setHours(MORNING_SLOT_START_HOUR, 0, 0, 0);
+            let determinedTargetEndLocal = new Date(conceptualDayForLocalSlots);
+            determinedTargetEndLocal.setHours(MORNING_SLOT_END_HOUR, 0, 0, 0);
 
-            if (targetSlotType === 'morning') {
-                determinedTargetStartLocal.setHours(MORNING_SLOT_START_HOUR, 0, 0, 0);
-                determinedTargetEndLocal.setHours(MORNING_SLOT_END_HOUR, 0, 0, 0);
-            } else { // afternoon
+            if (targetSlotType === 'afternoon') {
                 determinedTargetStartLocal.setHours(AFTERNOON_SLOT_START_HOUR, 0, 0, 0);
                 determinedTargetEndLocal.setHours(AFTERNOON_SLOT_END_HOUR, 0, 0, 0);
             }
-             console.log('customEventDrop: Same-day drag: conceptual determinedTargetStart (local day):', determinedTargetStartLocal.toString(), 
-                        'conceptual determinedTargetEnd (local day):', determinedTargetEndLocal.toString());
+             console.log('customEventDrop: Same-day drag: conceptual determinedTargetStart (local):', determinedTargetStartLocal.toString(), 
+                        'conceptual determinedTargetEnd (local):', determinedTargetEndLocal.toString());
 
-            // Actual target times for calendar and checking must be UTC.
-            // These are derived from newDateStr (which is UTC YYYY-MM-DD) and standard slot hours.
             let targetStartUtcForCheck, targetEndUtcForCheck;
             if (targetSlotType === 'morning') {
                 targetStartUtcForCheck = createDateAsUTC(newDateStr, `${String(MORNING_SLOT_START_HOUR).padStart(2, '0')}:00`);
                 targetEndUtcForCheck = createDateAsUTC(newDateStr, `${String(MORNING_SLOT_END_HOUR).padStart(2, '0')}:00`);
-            } else { // afternoon
+            } else { 
                 targetStartUtcForCheck = createDateAsUTC(newDateStr, `${String(AFTERNOON_SLOT_START_HOUR).padStart(2, '0')}:00`);
                 targetEndUtcForCheck = createDateAsUTC(newDateStr, `${String(AFTERNOON_SLOT_END_HOUR).padStart(2, '0')}:00`);
             }
@@ -187,10 +166,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log(`customEventDrop: Same-day drag: Snapping to ${targetSlotType} slot (UTC times set).`);
             } else {
                 console.log(`customEventDrop: Same-day drag: Target ${targetSlotType} slot on ${newDateStr} is not available. Reverting.`);
-                alertMessage = `The target ${targetSlotType} slot on ${newDateStr} is not available. Reverting.`;
+                alertMessage = `The target ${targetSlotType} slot on ${newDateStr} (local times implied by drop) is not available. Reverting.`;
                 targetStart = null; targetEnd = null; 
             }
-        } else { // Logic for new-date drags (uses UTC for slot definitions)
+        } else { 
             console.log("customEventDrop: Handling new-date drag.");
             const originalDurationMs = (info.oldEvent.end || oldEventStart) - oldEventStart;
             const oldDateStr = oldEventStart.toISOString().split('T')[0];
@@ -241,7 +220,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (isSlotCompletelyFree(newDateFullDayStartUtc, newDateFullDayEndUtc, existingBookingsOnDate, event.id)) {
                      targetStart = newDateFullDayStartUtc; targetEnd = newDateFullDayEndUtc;
                 }
-            } else { // 'custom'
+            } else { 
                 const morningSlotDuration = MORNING_SLOT_END_HOUR - MORNING_SLOT_START_HOUR;
                 const customDurationHours = originalDurationMs / (1000 * 60 * 60);
                 if (customDurationHours <= morningSlotDuration) {
@@ -264,10 +243,9 @@ document.addEventListener('DOMContentLoaded', () => {
              else if (targetStart) console.log(`customEventDrop (new-date): Successfully moved to target slot.`);
         }
         
-        // Common finalization logic
         if (targetStart && targetEnd) {
-            info.event.start = targetStart; // These should be UTC dates for FullCalendar
-            info.event.end = targetEnd;    // These should be UTC dates for FullCalendar
+            info.event.start = targetStart; 
+            info.event.end = targetEnd;    
             const finalDecisionLogMessage = isSameDay ? 
                 `Snapped to ${ (info.event.start.getUTCHours() < 12) ? 'morning' : 'afternoon'} slot on same day.` : 
                 (triedAlternative ? `Original slot was unavailable, successfully moved to alternative slot.` : `Successfully moved to target slot.`);
@@ -278,12 +256,10 @@ document.addEventListener('DOMContentLoaded', () => {
             alert(alertMessage); 
             info.revert();
         }
-    }
+    };
 
-    async function customEventResize(info) {
+    customEventResize = async function(info) {
         const event = info.event;
-
-        // Improved resourceId retrieval with logging
         let resourceId = null;
         if (event.extendedProps && event.extendedProps.resource_id) {
             resourceId = event.extendedProps.resource_id;
@@ -291,9 +267,7 @@ document.addEventListener('DOMContentLoaded', () => {
             resourceId = event.resource_id;
         } else if (typeof event.getResources === 'function') {
             const resources = event.getResources();
-            if (resources.length > 0) {
-                resourceId = resources[0].id;
-            }
+            if (resources.length > 0) resourceId = resources[0].id;
         }
         
         console.log('customEventResize: event object:', JSON.parse(JSON.stringify(event)));
@@ -316,11 +290,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const dateFullDayStart = dateMorningStart;
         const dateFullDayEnd = dateAfternoonEnd;
 
-        const isSlotFree = (slotStart, slotEnd, bookings) => { // Simplified for resize, not excluding current event perfectly yet
+        const isSlotFree = (slotStart, slotEnd, bookings) => { 
             for (const booking of bookings) {
-                 // Check if the booking from API (which has booking_id) is the same as the event being resized (event.id from FullCalendar)
                 if (String(booking.booking_id) === String(event.id)) {
-                    continue; // Don't check against self
+                    continue; 
                 }
                 if (!booking.start_time || !booking.end_time) continue;
                 const bookingStart = createDateAsUTC(eventDateStr, booking.start_time.substring(0,5));
@@ -330,7 +303,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return true;
         };
 
-        const newStart = event.start; // Already reflects the resize attempt
+        const newStart = event.start; 
         const newEnd = event.end;
 
         const isResizedToFullDay = (newStart <= dateFullDayStart && newEnd >= dateFullDayEnd);
@@ -346,8 +319,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (otherHalfIsFree) {
-                // event.setStart(dateFullDayStart); // FC5
-                // event.setEnd(dateFullDayEnd); // FC5
                 info.event.start = dateFullDayStart;
                 info.event.end = dateFullDayEnd;
                 console.log(`Event ${event.id} resized to full day: ${dateFullDayStart.toISOString()} - ${dateFullDayEnd.toISOString()}`);
@@ -368,8 +339,7 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Invalid resize. Bookings can only be full day, morning, or afternoon, or extended from half to full if available. Reverting.');
             info.revert();
         }
-    }
-
+    };
 
     const calendar = new FullCalendar.Calendar(calendarEl, {
         initialView: 'timeGridWeek',
@@ -385,7 +355,7 @@ document.addEventListener('DOMContentLoaded', () => {
             {
                 id: 'actualBookings',
                 events: function(fetchInfo, successCallback, failureCallback) {
-                    if (allUserEvents.length > 0 /* && !fetchInfo.force */) {
+                    if (allUserEvents.length > 0 ) { 
                         const selectedResourceId = calendarResourceSelect.value;
                         let eventsToDisplay = (selectedResourceId === 'all' || !selectedResourceId)
                             ? allUserEvents
@@ -395,22 +365,18 @@ document.addEventListener('DOMContentLoaded', () => {
                         return;
                     }
 
-                    apiCall('/api/bookings/calendar')
+                    apiCall('/api/bookings/calendar') 
                         .then(bookings => {
                             allUserEvents = bookings.map(b => {
-                                // b.resource_id should now be directly from the API
                                 const apiResourceId = b.resource_id; 
-                                
                                 console.log('Mapping booking to event. Raw booking data:', JSON.parse(JSON.stringify(b)));
-
-                                // Ensure extendedProps exists, initialize if not
                                 const extendedProps = b.extendedProps || {};
-                                extendedProps.isActualBooking = true; // Mark as an actual booking
-                                extendedProps.resource_id = apiResourceId; // Ensure resource_id is in extendedProps
+                                extendedProps.isActualBooking = true; 
+                                extendedProps.resource_id = apiResourceId; 
 
                                 const eventObject = {
-                                    ...b, // Spread booking properties (id, title, start, end, recurrence_rule, and now resource_id)
-                                    resource_id: apiResourceId, // Ensure top-level access for convenience
+                                    ...b, 
+                                    resource_id: apiResourceId, 
                                     extendedProps: extendedProps 
                                 };
                                 
@@ -427,18 +393,18 @@ document.addEventListener('DOMContentLoaded', () => {
                         })
                         .catch(error => {
                             console.error('Error fetching user bookings for calendar:', error);
-                            allUserEvents = [];
+                            allUserEvents = []; 
                             failureCallback(error);
                         });
                 }
             }
         ],
-        eventOrder: function(a, b) {
+        eventOrder: function(a, b) { 
             if (a.extendedProps && a.extendedProps.isActualBooking) return 1;
             if (b.extendedProps && b.extendedProps.isActualBooking) return -1;
-            return 0;
+            return 0; 
         },
-        eventContent: function(arg) {
+        eventContent: function(arg) { // For month view time display
             if (arg.view.type === 'dayGridMonth') {
                 let eventHtml = `<b>${arg.event.title}</b>`;
                 if (arg.event.start) {
@@ -450,14 +416,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return { html: eventHtml };
             }
-            return { html: `<b>${arg.event.title}</b>` };
+            return { html: `<b>${arg.event.title}</b>` }; 
         }
     });
 
     calendar.render();
 
-    handleEventChange = async function(info) { // Assign to the forward-declared variable
-        // Ensure extendedProps exists before trying to access isActualBooking
+    handleEventChange = async function(info) { 
         if (!info.event.extendedProps || !info.event.extendedProps.isActualBooking) {
             console.log('Attempted to modify a non-booking event. Reverting.');
             info.revert();
@@ -472,30 +437,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     start_time: event.start.toISOString(),
-                    // Ensure end_time is also sent, use start_time if event.end is null (e.g. for all-day events in some FC versions)
                     end_time: event.end ? event.end.toISOString() : event.start.toISOString(),
-                    title: event.title // Persist title changes if any future modification allows it
+                    title: event.title 
                 })
             });
             console.log(`Booking ${event.id} updated successfully.`);
-            // calendar.refetchEvents(); // Or more targeted refetch if possible
         } catch (e) {
             console.error('Failed to update booking time via API:', e);
             alert(`Error updating booking: ${e.message || 'Server error'}. Reverting.`);
             info.revert();
         }
-    }
-
+    };
 
     if (calendarResourceSelect) {
         calendarResourceSelect.addEventListener('change', () => {
             const actualBookingsSource = calendar.getEventSourceById('actualBookings');
             if (actualBookingsSource) {
-                allUserEvents = []; // Clear cache before refetching for different resource
+                allUserEvents = []; 
                 actualBookingsSource.refetch();
             }
         });
     }
 
-    populateResourceSelector();
+    populateResourceSelector(); 
 });
