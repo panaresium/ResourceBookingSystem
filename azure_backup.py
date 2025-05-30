@@ -1,3 +1,4 @@
+
 """Utility script to upload the local database and media to Azure Blob Storage.
 
 This script reuses the helpers from :mod:`azure_storage` and simply calls the
@@ -16,7 +17,6 @@ def backup_database():
 def backup_media():
     """Upload floor map and resource images."""
     upload_media()
-
 
 def main():
     db_blob = backup_database()

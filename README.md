@@ -193,6 +193,7 @@ python azure_backup.py
 ```
 All floor map and resource images from `static/` along with `data/site.db` will be uploaded.
 
+
 ## Using Azure Blob Storage as Primary Storage
 
 Set the environment variable `AZURE_PRIMARY_STORAGE` to use Azure Blob Storage for the application's database and uploaded images. When enabled, running `init_setup.py` downloads `site.db` and media files from the configured containers before performing any initialization. After the process completes the data is uploaded back so your changes persist in Azure.
@@ -210,3 +211,4 @@ AZURE_PRIMARY_STORAGE=1 python init_setup.py
 ```
 
 The application continues to use the local files during runtime. You can run `azure_backup.py` periodically to sync updated data back to Azure.
+
