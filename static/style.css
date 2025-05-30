@@ -875,8 +875,8 @@ body.high-contrast input[type="button"]:hover {
 /* Styling for Floor Map Groupings on Resources Page */
 .map-group-heading {
     margin-top: 25px;
-    margin-bottom: 15px;
-    font-size: 1.4em; /* Slightly larger than default h3 if needed */
+    margin-bottom: 10px; /* Adjusted */
+    font-size: 1.2em; /* Reduced */
     color: #333; /* Or match your theme's heading color */
     border-bottom: 2px solid #eee; /* A light separator */
     padding-bottom: 5px;
@@ -886,13 +886,13 @@ body.high-contrast input[type="button"]:hover {
     /* If the default .resource-buttons-grid already has good spacing, 
        you might not need much here. This is a placeholder. */
     /* Example: add some padding if grids are too close to headings */
-    padding-top: 10px;
+    margin-top: 15px; /* Changed from padding-top */
     margin-bottom: 20px; /* Space before the next map group heading */
 }
 
 .unassigned-grid {
     /* Similar to map-specific-grid, if needed */
-    padding-top: 10px;
+    margin-top: 15px; /* Changed from padding-top */
 }
 
 /* Ensure the main container still allows for these new elements */

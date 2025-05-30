@@ -886,66 +886,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     clearCalendar(true);
                 });
         }
-        
-        const floorMapsListUl = document.getElementById('floor-maps-list');
-        const floorMapsLoadingStatusDiv = document.getElementById('floor-maps-loading-status');
-        const locationFilter = document.getElementById('location-filter');
-        const floorFilter = document.getElementById('floor-filter');
-        if (floorMapsListUl && floorMapsLoadingStatusDiv) {
-            // ... (Keep existing floor map list logic as is) ...
-            let allMaps = [];
-
-            function renderMapLinks() {
-                floorMapsListUl.innerHTML = '';
-                const loc = locationFilter ? locationFilter.value : '';
-                const fl = floorFilter ? floorFilter.value : '';
-                const filtered = allMaps.filter(m => (!loc || m.location === loc) && (!fl || m.floor === fl));
-                if (filtered.length === 0) {
-                    floorMapsListUl.innerHTML = '<li>No floor maps match selection.</li>';
-                    return;
-                }
-                filtered.forEach(map => {
-                    const li = document.createElement('li');
-                    const link = document.createElement('a');
-                    link.href = `/map_view/${map.id}`;
-                    link.textContent = map.name;
-                    li.appendChild(link);
-                    floorMapsListUl.appendChild(li);
-                });
-            }
-
-            function updateFloorOptions() {
-                if (!floorFilter) return;
-                const loc = locationFilter ? locationFilter.value : '';
-                const floors = [...new Set(allMaps.filter(m => !loc || m.location === loc).map(m => m.floor).filter(f => f))];
-                floorFilter.innerHTML = '<option value="">All</option>';
-                floors.forEach(f => {
-                    const opt = new Option(f, f);
-                    floorFilter.add(opt);
-                });
-            }
-
-            async function fetchAndDisplayFloorMapLinks() {
-                try {
-                    const maps = await apiCall('/api/admin/maps', {}, floorMapsLoadingStatusDiv);
-                    allMaps = maps || [];
-                    if (locationFilter) {
-                        const locations = [...new Set(allMaps.map(m => m.location).filter(l => l))];
-                        locationFilter.innerHTML = '<option value="">All</option>';
-                        locations.forEach(loc => locationFilter.add(new Option(loc, loc)));
-                    }
-                    updateFloorOptions();
-                    renderMapLinks();
-                } catch (error) {
-                    if (floorMapsListUl) floorMapsListUl.innerHTML = '<li>Error loading floor maps.</li>';
-                }
-            }
-
-            if (locationFilter) locationFilter.addEventListener('change', () => { updateFloorOptions(); renderMapLinks(); });
-            if (floorFilter) floorFilter.addEventListener('change', renderMapLinks);
-
-            fetchAndDisplayFloorMapLinks();
-        }
+        // Removed the floorMapsListUl, floorMapsLoadingStatusDiv, locationFilter, floorFilter related block
     } 
 
 
