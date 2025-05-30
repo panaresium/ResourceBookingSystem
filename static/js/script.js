@@ -751,7 +751,9 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
         const modalConfirmBtn = document.getElementById('rpbm-confirm-booking-btn');
         const modalStatusMsg = document.getElementById('rpbm-status-message');
         const resourceLoadingStatusDiv = document.getElementById('resource-loading-status');
+        const modalAckCloseBtn = document.getElementById('rpbm-ack-close-btn'); // Added
 
+        let countdownInterval = null; // Added
         let allFetchedResources = [];
         let currentResourceBookingsCache = {}; // Cache for bookings: { resourceId: [bookings] }
         let selectedSlotDetails = null; // To store {startTime, endTime} for selected slot
@@ -967,7 +969,19 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
                         selectedSlotDetails = null; // Reset selected slot
                         modalConfirmBtn.dataset.resourceId = resourceId;
                         modalBookingTitle.value = `Booking for ${resourceName}`;
-                        modalStatusMsg.textContent = '';
+                        
+                        // Reset modal from any previous confirmation state
+                        if (modalConfirmBtn) modalConfirmBtn.style.display = 'inline-block';
+                        if (modalSlotOptionsContainer) modalSlotOptionsContainer.style.display = 'block';
+                        if (modalBookingTitle && modalBookingTitle.parentElement) modalBookingTitle.parentElement.style.display = 'block';
+                        if (modalAckCloseBtn) modalAckCloseBtn.style.display = 'none';
+                        if (modalStatusMsg) modalStatusMsg.innerHTML = ''; // Clear old messages
+                        if (countdownInterval) {
+                            clearInterval(countdownInterval);
+                            countdownInterval = null;
+                        }
+
+                        modalStatusMsg.textContent = ''; // Ensure status is clear before showing.
                         bookingModal.style.display = 'block';
                     });
                     resourceButtonsContainer.appendChild(button);
@@ -1032,12 +1046,35 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
                     }, modalStatusMsg); // apiCall will show success/error
                     
                     // If successful (no error thrown by apiCall)
-                    showSuccess(modalStatusMsg, 'Booking confirmed!');
-                    setTimeout(() => { 
-                        bookingModal.style.display = 'none'; 
-                        hideMessage(modalStatusMsg);
-                    }, 1500);
-                    await updateAllButtonColors(); // Refresh button colors on main page
+                    updateAllButtonColors(); // Refresh main page buttons immediately
+
+                    if (modalConfirmBtn) modalConfirmBtn.style.display = 'none';
+                    if (modalSlotOptionsContainer) modalSlotOptionsContainer.style.display = 'none';
+                    if (modalBookingTitle && modalBookingTitle.parentElement) modalBookingTitle.parentElement.style.display = 'none';
+                    if (modalAckCloseBtn) modalAckCloseBtn.style.display = 'inline-block';
+
+                    let countdown = 5;
+                    // Use showSuccess once to style the message area correctly
+                    showSuccess(modalStatusMsg, `Booking confirmed! Closing in <span id="rpbm-countdown-timer">${countdown}</span>s...`);
+                    
+                    const timerSpan = document.getElementById('rpbm-countdown-timer'); // Get span after innerHTML is set
+
+                    if (countdownInterval) clearInterval(countdownInterval); // Clear previous, just in case
+
+                    countdownInterval = setInterval(() => {
+                        countdown--;
+                        if (timerSpan) timerSpan.textContent = countdown;
+                        // Update the full message to ensure the span is part of it if it was initially created by showSuccess
+                        if (modalStatusMsg) modalStatusMsg.innerHTML = `Booking confirmed! Closing in <span id="rpbm-countdown-timer">${countdown}</span>s...`;
+
+
+                        if (countdown <= 0) {
+                            clearInterval(countdownInterval);
+                            countdownInterval = null;
+                            if (bookingModal) bookingModal.style.display = 'none';
+                            // No need to reset UI here, it's reset when modal is next opened.
+                        }
+                    }, 1000);
                 } catch (error) {
                     // Error already shown by apiCall in modalStatusMsg
                     console.error('Booking confirmation failed:', error);
@@ -1051,8 +1088,23 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
         window.addEventListener('click', (event) => {
             if (event.target === bookingModal) {
                 bookingModal.style.display = 'none';
+                if (countdownInterval) { // Also clear countdown if modal is closed by clicking outside
+                    clearInterval(countdownInterval);
+                    countdownInterval = null;
+                }
             }
         });
+
+        if (modalAckCloseBtn) {
+            modalAckCloseBtn.addEventListener('click', () => {
+                if (countdownInterval) {
+                    clearInterval(countdownInterval);
+                    countdownInterval = null;
+                }
+                if (bookingModal) bookingModal.style.display = 'none';
+                // No need to reset UI here, it's reset when modal is next opened.
+            });
+        }
 
         fetchAndRenderResources(); // Initial fetch and render
     }
