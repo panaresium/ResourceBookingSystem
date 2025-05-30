@@ -11,3 +11,5 @@ Authlib>=1.0.0
 Flask-Mail>=0.9
 requests>=2.25
 gunicorn
+
+azure-storage-blob
