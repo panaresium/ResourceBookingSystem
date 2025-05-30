@@ -24,7 +24,7 @@ function showLoading(element, message = "Loading...") {
 function showSuccess(element, message) {
     if (element) {
         element.innerHTML = message; // Use innerHTML to support <br> tags
-        element.style.color = 'green';
+        element.style.color = '';
         element.classList.add('success');
         element.classList.remove('error');
         element.style.display = 'block';
@@ -39,7 +39,7 @@ function showSuccess(element, message) {
 function showError(element, message) {
     if (element) {
         element.textContent = message;
-        element.style.color = 'red';
+        element.style.color = '';
         element.classList.add('error');
         element.classList.remove('success');
         element.style.display = 'block';
