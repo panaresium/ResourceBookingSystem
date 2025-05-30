@@ -1467,6 +1467,77 @@ def create_resource():
         app.logger.exception("Error creating resource:")
         return jsonify({'error': 'Failed to create resource due to a server error.'}), 500
 
+@app.route('/api/admin/resources/bulk', methods=['POST'])
+@login_required
+@permission_required('manage_resources')
+def create_resources_bulk():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+    prefix = data.get('prefix', '')
+    suffix = data.get('suffix', '')
+    start = data.get('start', 1)
+    count = data.get('count')
+    padding = data.get('padding', 0)
+
+    try:
+        start = int(start)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'start must be an integer.'}), 400
+
+    if count is None:
+        return jsonify({'error': 'count is required.'}), 400
+    try:
+        count = int(count)
+        if count <= 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        return jsonify({'error': 'count must be a positive integer.'}), 400
+
+    try:
+        padding = int(padding)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'padding must be an integer.'}), 400
+
+    capacity = data.get('capacity')
+    try:
+        if capacity not in (None, ''):
+            capacity = int(capacity)
+        else:
+            capacity = None
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Capacity must be an integer or null.'}), 400
+
+    equipment = data.get('equipment')
+    status = data.get('status', 'draft')
+    valid_statuses = ['draft', 'published', 'archived']
+    if status not in valid_statuses:
+        return jsonify({'error': f"Invalid status value. Allowed values are: {', '.join(valid_statuses)}."}), 400
+
+    created_resources = []
+    skipped = []
+    for i in range(count):
+        number = str(start + i).zfill(padding) if padding > 0 else str(start + i)
+        name = f"{prefix}{number}{suffix}"
+        if not name.strip():
+            skipped.append(name)
+            continue
+        existing = Resource.query.filter(func.lower(Resource.name) == func.lower(name.strip())).first()
+        if existing:
+            skipped.append(name)
+            continue
+        r = Resource(name=name.strip(), capacity=capacity, equipment=equipment, status=status)
+        db.session.add(r)
+        created_resources.append(r)
+    try:
+        db.session.commit()
+        return jsonify({'created': [resource_to_dict(r) for r in created_resources], 'skipped': skipped}), 201
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Error creating resources in bulk:")
+        return jsonify({'error': 'Failed to create resources due to a server error.'}), 500
+
 @app.route('/api/admin/resources/<int:resource_id>', methods=['GET'])
 @login_required
 @permission_required('manage_resources')

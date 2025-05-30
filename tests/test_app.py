@@ -1064,5 +1064,31 @@ class TestMapBookingAPI(AppTests):
         self.assertIn('Resource not found', response.get_json().get('error', ''))
 
 
+class TestBulkResourceCreation(AppTests):
+    def test_bulk_resource_creation(self):
+        admin = User(username='bulkadmin', email='bulkadmin@example.com', is_admin=True)
+        admin.set_password('adminpass')
+        db.session.add(admin)
+        db.session.commit()
+
+        self.login('bulkadmin', 'adminpass')
+
+        payload = {
+            'prefix': 'Room-',
+            'start': 1,
+            'count': 3,
+            'padding': 2,
+            'status': 'published'
+        }
+        resp = self.client.post('/api/admin/resources/bulk', json=payload)
+        self.assertEqual(resp.status_code, 201)
+        data = resp.get_json()
+        self.assertEqual(len(data['created']), 3)
+        names = [r['name'] for r in data['created']]
+        self.assertEqual(names, ['Room-01', 'Room-02', 'Room-03'])
+        for name in names:
+            self.assertIsNotNone(Resource.query.filter_by(name=name).first())
+
+
 if __name__ == '__main__':
     unittest.main()

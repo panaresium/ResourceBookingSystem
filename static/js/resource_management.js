@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusDiv = document.getElementById('resource-management-status');
     const tableBody = document.querySelector('#resources-table tbody');
     const addBtn = document.getElementById('add-new-resource-btn');
+    const addBulkBtn = document.getElementById('add-bulk-resource-btn');
     const resourceFormModal = document.getElementById('resource-form-modal');
     const closeModalBtn = resourceFormModal ? resourceFormModal.querySelector('.close-modal-btn') : null;
     const resourceForm = document.getElementById('resource-form');
@@ -12,6 +13,19 @@ document.addEventListener('DOMContentLoaded', function() {
     const resourceCapacityInput = document.getElementById('resource-capacity');
     const resourceEquipmentInput = document.getElementById('resource-equipment');
     const resourceStatusModalInput = document.getElementById('resource-status-modal'); // Added
+
+    const bulkModal = document.getElementById('bulk-resource-modal');
+    const bulkCloseBtn = bulkModal ? bulkModal.querySelector('.close-modal-btn') : null;
+    const bulkForm = document.getElementById('bulk-resource-form');
+    const bulkFormStatus = document.getElementById('bulk-resource-form-status');
+    const bulkPrefixInput = document.getElementById('bulk-prefix');
+    const bulkSuffixInput = document.getElementById('bulk-suffix');
+    const bulkStartInput = document.getElementById('bulk-start');
+    const bulkCountInput = document.getElementById('bulk-count');
+    const bulkPaddingInput = document.getElementById('bulk-padding');
+    const bulkCapacityInput = document.getElementById('bulk-capacity');
+    const bulkEquipmentInput = document.getElementById('bulk-equipment');
+    const bulkStatusInput = document.getElementById('bulk-status');
 
     async function fetchAndDisplayResources() {
         showLoading(statusDiv, 'Fetching resources...');
@@ -50,8 +64,23 @@ document.addEventListener('DOMContentLoaded', function() {
         resourceFormModal.style.display = 'block';
     });
 
+    if (addBulkBtn) {
+        addBulkBtn.addEventListener('click', () => {
+            if (bulkForm) bulkForm.reset();
+            if (bulkStartInput) bulkStartInput.value = 1;
+            if (bulkCountInput) bulkCountInput.value = 1;
+            if (bulkPaddingInput) bulkPaddingInput.value = 0;
+            if (bulkStatusInput) bulkStatusInput.value = 'draft';
+            hideMessage(bulkFormStatus);
+            if (bulkModal) bulkModal.style.display = 'block';
+        });
+    }
+
     closeModalBtn && closeModalBtn.addEventListener('click', () => resourceFormModal.style.display = 'none');
     window.addEventListener('click', e => { if (e.target === resourceFormModal) resourceFormModal.style.display = 'none'; });
+
+    bulkCloseBtn && bulkCloseBtn.addEventListener('click', () => bulkModal.style.display = 'none');
+    window.addEventListener('click', e => { if (e.target === bulkModal) bulkModal.style.display = 'none'; });
 
     tableBody.addEventListener('click', async function(event) {
         if (event.target.classList.contains('edit-resource-btn')) {
@@ -112,6 +141,36 @@ document.addEventListener('DOMContentLoaded', function() {
             /* error shown by apiCall */
         }
     });
+
+    if (bulkForm) {
+        bulkForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const payload = {
+                prefix: bulkPrefixInput.value,
+                suffix: bulkSuffixInput.value,
+                start: bulkStartInput.value !== '' ? parseInt(bulkStartInput.value, 10) : 1,
+                count: bulkCountInput.value !== '' ? parseInt(bulkCountInput.value, 10) : 0,
+                padding: bulkPaddingInput.value !== '' ? parseInt(bulkPaddingInput.value, 10) : 0,
+                capacity: bulkCapacityInput.value !== '' ? parseInt(bulkCapacityInput.value, 10) : null,
+                equipment: bulkEquipmentInput.value,
+                status: bulkStatusInput.value
+            };
+            try {
+                const result = await apiCall('/api/admin/resources/bulk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }, bulkFormStatus);
+                await fetchAndDisplayResources();
+                if (result && result.created) {
+                    showSuccess(bulkFormStatus, `Created ${result.created.length} resources.` + (result.skipped && result.skipped.length ? ` Skipped: ${result.skipped.join(', ')}` : ''));
+                }
+                setTimeout(() => { bulkModal.style.display = 'none'; }, 500);
+            } catch (error) {
+                /* error shown by apiCall */
+            }
+        });
+    }
 
     fetchAndDisplayResources();
 });
