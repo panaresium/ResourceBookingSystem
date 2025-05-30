@@ -178,3 +178,17 @@ Pushing to the `main` branch triggers the workflow. The action zips the project 
 
 Make sure the database is initialized by running `python init_setup.py` locally or as part of your deployment process.
 
+
+## Backing Up Data to Azure Blob Storage
+
+Use `azure_backup.py` to upload the SQLite database and uploaded images to Azure Blob Storage. The script reads these environment variables:
+
+- `AZURE_STORAGE_CONNECTION_STRING` – connection string to your storage account
+- `AZURE_DB_CONTAINER` – container name for database backups (default `db-backups`)
+- `AZURE_MEDIA_CONTAINER` – container name for uploaded images (default `media`)
+
+Run the script with:
+```bash
+python azure_backup.py
+```
+All floor map and resource images from `static/` along with `data/site.db` will be uploaded.
