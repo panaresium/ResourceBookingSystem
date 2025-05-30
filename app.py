@@ -2598,7 +2598,7 @@ def update_booking_by_user(booking_id):
                 parsed_new_start_time = datetime.fromisoformat(new_start_iso)
                 parsed_new_end_time = datetime.fromisoformat(new_end_iso)
             except ValueError:
-        app.logger.warning(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' provided invalid ISO format. Start: {new_start_iso}, End: {new_end_iso}")
+                app.logger.warning(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' provided invalid ISO format. Start: {new_start_iso}, End: {new_end_iso}")
                 return jsonify({'error': 'Invalid datetime format. Use ISO 8601.'}), 400
 
             if parsed_new_start_time >= parsed_new_end_time:
