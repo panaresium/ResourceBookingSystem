@@ -839,3 +839,35 @@ body.high-contrast input[type="button"]:hover {
     background-color: #6a6a6a;
 }
 /* End of /resources page button styles */
+
+/* Styles for time slot buttons within the resource-page-booking-modal (rpbm) */
+#rpbm-slot-options .time-slot-btn.unavailable,
+#rpbm-slot-options .time-slot-btn.booked,
+#rpbm-slot-options .time-slot-btn:disabled {
+    background-color: #f44336; /* Red for booked/unavailable */
+    color: white;
+    cursor: not-allowed;
+    opacity: 0.7; /* Slightly faded */
+    border-color: #d32f2f; /* Optional: darker border */
+}
+
+/* Ensure no confusing hover effects on disabled/unavailable slot buttons in rpbm */
+#rpbm-slot-options .time-slot-btn.unavailable:hover,
+#rpbm-slot-options .time-slot-btn.booked:hover,
+#rpbm-slot-options .time-slot-btn:disabled:hover {
+    background-color: #d32f2f; /* Maintain or slightly darken the unavailable color */
+    transform: none; /* Remove any lift effect if present on general .time-slot-btn */
+    box-shadow: none; /* Remove any hover shadow if present */
+}
+
+/* Styling for available slot buttons in the rpbm, if different from general .time-slot-btn or .button */
+/* This ensures they have a clear "available" state distinct from general buttons if needed */
+#rpbm-slot-options .time-slot-btn.available {
+    background-color: #4CAF50; /* Green for available */
+    color: white;
+    border-color: #388E3C; /* Optional: darker border for available */
+    opacity: 1; /* Ensure full opacity for available buttons */
+}
+#rpbm-slot-options .time-slot-btn.available:hover {
+    background-color: #45a049; /* Slightly darker green on hover */
+}
