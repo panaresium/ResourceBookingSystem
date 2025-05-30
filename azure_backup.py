@@ -1,3 +1,4 @@
+
 import os
 from datetime import datetime
 
@@ -68,6 +69,7 @@ def main():
     db_file = backup_database()
     backup_media()
     print(f'Backup completed. Database file: {db_file}')
+
 
 
 if __name__ == '__main__':

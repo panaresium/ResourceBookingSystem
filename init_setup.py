@@ -19,12 +19,32 @@ from werkzeug.security import generate_password_hash
 from datetime import datetime, date, timedelta, time
 from add_resource_tags_column import add_tags_column
 
+AZURE_PRIMARY_STORAGE = bool(os.environ.get("AZURE_PRIMARY_STORAGE"))
+if AZURE_PRIMARY_STORAGE:
+    try:
+        from azure_storage import (
+            download_database,
+            download_media,
+            upload_database,
+            upload_media,
+        )
+    except Exception as exc:  # pragma: no cover - optional
+        print(f"Warning: Azure storage unavailable: {exc}")
+        AZURE_PRIMARY_STORAGE = False
+
 MIN_PYTHON_VERSION = (3, 7)
 DATA_DIR_NAME = "data"
 STATIC_DIR_NAME = "static"
 FLOOR_MAP_UPLOADS_DIR_NAME = os.path.join(STATIC_DIR_NAME, "floor_map_uploads")
 RESOURCE_UPLOADS_DIR_NAME = os.path.join(STATIC_DIR_NAME, "resource_uploads")
 DB_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)), DATA_DIR_NAME, 'site.db')
+
+if AZURE_PRIMARY_STORAGE:
+    print("Downloading database from Azure storage...")
+    try:
+        download_database()
+    except Exception as exc:
+        print(f"Failed to download database from Azure: {exc}")
 
 def check_python_version():
     """Checks if the current Python version meets the minimum requirement."""
@@ -90,6 +110,14 @@ def create_required_directories():
             print(f"Error: Could not create '{resource_uploads_dir}' directory: {e}")
     else:
         print(f"'{resource_uploads_dir}' directory already exists.")
+
+    if AZURE_PRIMARY_STORAGE:
+        print("Downloading media from Azure storage...")
+        try:
+            download_media()
+        except Exception as exc:
+            print(f"Failed to download media from Azure: {exc}")
+
     return True
 
 def ensure_tags_column():
@@ -541,6 +569,14 @@ def init_db(force=False):
             )
 
         app.logger.info("Database initialization script completed.")
+
+        if AZURE_PRIMARY_STORAGE:
+            print("Uploading database and media to Azure storage...")
+            try:
+                upload_database(versioned=False)
+                upload_media()
+            except Exception as exc:
+                print(f"Failed to upload data to Azure: {exc}")
 
 def main():
     """Main function to run setup checks and tasks."""

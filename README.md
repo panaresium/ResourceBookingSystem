@@ -187,8 +187,10 @@ Use `azure_backup.py` to upload the SQLite database and uploaded images to an Az
 - `AZURE_DB_SHARE` – file share name for database backups (default `db-backups`)
 - `AZURE_MEDIA_SHARE` – file share name for uploaded images (default `media`)
 
+
 Run the script with:
 ```bash
 python azure_backup.py
 ```
 All floor map and resource images from `static/` along with `data/site.db` will be uploaded.
+
