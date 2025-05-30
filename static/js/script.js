@@ -750,6 +750,7 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
         const modalBookingTitle = document.getElementById('rpbm-booking-title');
         const modalConfirmBtn = document.getElementById('rpbm-confirm-booking-btn');
         const modalStatusMsg = document.getElementById('rpbm-status-message');
+        const resourceLoadingStatusDiv = document.getElementById('resource-loading-status');
 
         let allFetchedResources = [];
         let currentResourceBookingsCache = {}; // Cache for bookings: { resourceId: [bookings] }
@@ -841,15 +842,18 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
         async function fetchAndRenderResources() {
             try {
                 console.log('Fetching all resources...');
-                showLoading(resourceButtonsContainer, 'Loading resources...');
-                const resources = await apiCall('/api/resources', {}, resourceButtonsContainer); // temp store in 'resources'
+                // showLoading(resourceButtonsContainer, 'Loading resources...'); // Removed this line
+                const resources = await apiCall('/api/resources', {}, resourceLoadingStatusDiv); // Use resourceLoadingStatusDiv
                 console.log('Fetched all resources raw:', JSON.stringify(resources));
                 allFetchedResources = resources; // Assign to global cache
                 console.log('Processed allFetchedResources:', JSON.stringify(allFetchedResources));
-                resourceButtonsContainer.innerHTML = ''; // Clear "Loading..."
+                
+                resourceButtonsContainer.innerHTML = ''; // Clear placeholder/previous buttons
                 
                 if (!allFetchedResources || allFetchedResources.length === 0) {
-                    resourceButtonsContainer.innerHTML = '<p>No resources found.</p>';
+                    // If resourceLoadingStatusDiv handled an error, it will show. 
+                    // If it was successful but no resources, we might want to show a message in resourceButtonsContainer or resourceLoadingStatusDiv
+                    showError(resourceLoadingStatusDiv, 'No resources found.'); // Or use resourceButtonsContainer if preferred for this specific message
                     return;
                 }
 
@@ -912,8 +916,12 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
                 await updateAllButtonColors(); // Initial color update
 
             } catch (error) {
-                showError(resourceButtonsContainer, 'Failed to load resources.');
+                // showError(resourceButtonsContainer, 'Failed to load resources.'); // apiCall will use resourceLoadingStatusDiv
                 console.error('Error in fetchAndRenderResources:', error);
+                // If resourceLoadingStatusDiv is not already displaying an error from apiCall, set it.
+                if (resourceLoadingStatusDiv && !resourceLoadingStatusDiv.textContent.includes('Error')) {
+                    showError(resourceLoadingStatusDiv, 'Failed to load resources.');
+                }
             }
         }
 
