@@ -250,6 +250,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 `Snapped to ${ (info.event.start.getUTCHours() < 12) ? 'morning' : 'afternoon'} slot on same day.` : 
                 (triedAlternative ? `Original slot was unavailable, successfully moved to alternative slot.` : `Successfully moved to target slot.`);
             console.log(`customEventDrop: Final decision - ALLOW. ${finalDecisionLogMessage} New times (UTC): ${targetStart.toISOString()} - ${targetEnd.toISOString()}`);
+            
+            console.log('[customEventDrop] Valid placement determined. Calling handleEventChange. Event ID:', info.event.id, 
+                        'New Start:', info.event.start ? info.event.start.toISOString() : 'null', 
+                        'New End:', info.event.end ? info.event.end.toISOString() : 'null',
+                        'Title:', info.event.title);
             handleEventChange(info);
         } else {
             console.log(`customEventDrop: Final decision - REVERT. No suitable standard slot available on ${newDateStr}.`);
@@ -322,6 +327,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 info.event.start = dateFullDayStart;
                 info.event.end = dateFullDayEnd;
                 console.log(`Event ${event.id} resized to full day: ${dateFullDayStart.toISOString()} - ${dateFullDayEnd.toISOString()}`);
+                console.log('[customEventResize] Valid resize. Calling handleEventChange. Event ID:', info.event.id, 
+                            'New Start:', info.event.start ? info.event.start.toISOString() : 'null', 
+                            'New End:', info.event.end ? info.event.end.toISOString() : 'null',
+                            'Title:', info.event.title);
                 handleEventChange(info);
             } else {
                 alert('Cannot resize to full day because the other half of the day is booked. Reverting.');
@@ -330,10 +339,18 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (newStart.getUTCHours() === MORNING_SLOT_START_HOUR && newStart.getUTCMinutes() === 0 &&
                    newEnd.getUTCHours() === MORNING_SLOT_END_HOUR && newEnd.getUTCMinutes() === 0) {
             console.log(`Event ${event.id} resized to morning slot.`);
+            console.log('[customEventResize] Valid resize. Calling handleEventChange. Event ID:', info.event.id, 
+                        'New Start:', info.event.start ? info.event.start.toISOString() : 'null', 
+                        'New End:', info.event.end ? info.event.end.toISOString() : 'null',
+                        'Title:', info.event.title);
             handleEventChange(info);
         } else if (newStart.getUTCHours() === AFTERNOON_SLOT_START_HOUR && newStart.getUTCMinutes() === 0 &&
                    newEnd.getUTCHours() === AFTERNOON_SLOT_END_HOUR && newEnd.getUTCMinutes() === 0) {
             console.log(`Event ${event.id} resized to afternoon slot.`);
+            console.log('[customEventResize] Valid resize. Calling handleEventChange. Event ID:', info.event.id, 
+                        'New Start:', info.event.start ? info.event.start.toISOString() : 'null', 
+                        'New End:', info.event.end ? info.event.end.toISOString() : 'null',
+                        'Title:', info.event.title);
             handleEventChange(info);
         } else {
             alert('Invalid resize. Bookings can only be full day, morning, or afternoon, or extended from half to full if available. Reverting.');
@@ -423,29 +440,79 @@ document.addEventListener('DOMContentLoaded', () => {
     calendar.render();
 
     handleEventChange = async function(info) { 
-        if (!info.event.extendedProps || !info.event.extendedProps.isActualBooking) {
-            console.log('Attempted to modify a non-booking event. Reverting.');
-            info.revert();
+        console.log('[handleEventChange] Function called. Event ID:', info.event.id);
+        if (!info.event.id) {
+            console.error('[handleEventChange] CRITICAL: Event ID is missing. Cannot save.', info.event);
+            alert('Error: Booking ID is missing, cannot save the change.');
+            return; 
+        }
+        if (!info.event.start) {
+            console.error('[handleEventChange] CRITICAL: Event start time is missing. Cannot save.', info.event);
+            alert('Error: Booking start time is missing, cannot save the change.');
             return;
         }
 
-        const event = info.event;
-        console.log(`Calling API to update booking ${event.id}: Start: ${event.start.toISOString()}, End: ${event.end ? event.end.toISOString() : 'N/A'}`);
+        if (!info.event.extendedProps || !info.event.extendedProps.isActualBooking) {
+            console.log('[handleEventChange] Attempted to modify a non-booking event. Reverting.');
+            // Check if info.revert is a function before calling, as it might not be available if called directly
+            if (typeof info.revert === 'function') {
+                info.revert();
+            }
+            return;
+        }
+
+        const event = info.event; // Use info.event directly as it's already the correct reference
+        
+        const eventPayload = {
+            start_time: event.start.toISOString(),
+            end_time: event.end ? event.end.toISOString() : event.start.toISOString(), 
+            title: event.title 
+        };
+        console.log('[handleEventChange] Attempting to save booking via API. Event ID:', event.id, 'Payload:', JSON.stringify(eventPayload));
+        
         try {
-            await apiCall(`/api/bookings/${event.id}`, {
+            const response = await apiCall(`/api/bookings/${event.id}`, { // Capture response
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    start_time: event.start.toISOString(),
-                    end_time: event.end ? event.end.toISOString() : event.start.toISOString(),
-                    title: event.title 
-                })
+                body: JSON.stringify(eventPayload)
             });
-            console.log(`Booking ${event.id} updated successfully.`);
+            console.log('[handleEventChange] API call successful. Server response:', response);
+            if (response && typeof response === 'object') {
+                if (response.message) {
+                    console.log('[handleEventChange] Server message:', response.message);
+                }
+                if (response.error) { // Should ideally not happen if HTTP status is 2xx
+                    console.error('[handleEventChange] Server error reported in 2xx response:', response.error);
+                }
+            }
+            console.log(`Booking ${event.id} updated successfully with server.`); // Clarified log
         } catch (e) {
-            console.error('Failed to update booking time via API:', e);
+            console.error('[handleEventChange] Error during API call to save booking:', e);
+            if (e && e.status) { // Check if error object has status (like from a fetch response error)
+                 console.error(`[handleEventChange] API Error Status: ${e.status}`);
+            }
+            // Attempt to log body if it's a response object that failed
+            if (e && typeof e.json === 'function') {
+                e.json().then(jsonError => {
+                    console.error('[handleEventChange] API Error JSON Body:', jsonError);
+                }).catch(jsonParseError => {
+                    console.error('[handleEventChange] Could not parse error response as JSON:', jsonParseError);
+                     // If not JSON, try to log as text
+                    if (typeof e.text === 'function') {
+                        e.text().then(textError => {
+                            console.error('[handleEventChange] API Error Text Body:', textError);
+                        }).catch(textParseError => {
+                             console.error('[handleEventChange] Could not parse error response as text:', textParseError);
+                        });
+                    }
+                });
+            } else if (e && e.message) {
+                 console.error('[handleEventChange] Error message:', e.message);
+            }
             alert(`Error updating booking: ${e.message || 'Server error'}. Reverting.`);
-            info.revert();
+            if (typeof info.revert === 'function') {
+                info.revert();
+            }
         }
     };
 

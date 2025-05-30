@@ -2540,21 +2540,27 @@ def update_booking_by_user(booking_id):
     Allows an authenticated user to update the title, start_time, or end_time of their own booking.
     Expects start_time and end_time as ISO 8601 formatted datetime strings.
     """
+    app.logger.info(f"[API PUT /api/bookings/{booking_id}] Request received. User: {current_user.username}")
+    data = request.get_json()
+    app.logger.info(f"[API PUT /api/bookings/{booking_id}] Request JSON data: {data}")
+
+    if not data:
+        app.logger.warning(f"[API PUT /api/bookings/{booking_id}] No JSON data received.")
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400 # Existing error return is good
+
     try:
         booking = Booking.query.get(booking_id)
 
         if not booking:
-            app.logger.warning(f"User '{current_user.username}' attempted to update non-existent booking ID: {booking_id}")
+            app.logger.warning(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' attempted to update non-existent booking ID.")
             return jsonify({'error': 'Booking not found.'}), 404
 
         if booking.user_name != current_user.username:
-            app.logger.warning(f"User '{current_user.username}' unauthorized attempt to update booking ID: {booking_id} owned by '{booking.user_name}'.")
+            app.logger.warning(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' unauthorized attempt to update booking ID owned by '{booking.user_name}'.")
             return jsonify({'error': 'You are not authorized to update this booking.'}), 403
 
-        data = request.get_json()
-        if not data:
-            app.logger.warning(f"User '{current_user.username}' attempt to update booking ID: {booking_id} with no JSON data.")
-            return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+        # data variable is already defined and logged above.
+        # Redundant check `if not data:` is removed as it's covered by the initial check.
 
         old_title = booking.title
         old_start_time = booking.start_time
@@ -2592,16 +2598,16 @@ def update_booking_by_user(booking_id):
                 parsed_new_start_time = datetime.fromisoformat(new_start_iso)
                 parsed_new_end_time = datetime.fromisoformat(new_end_iso)
             except ValueError:
-                app.logger.warning(f"User '{current_user.username}' provided invalid ISO format for booking {booking_id}. Start: {new_start_iso}, End: {new_end_iso}")
+        app.logger.warning(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' provided invalid ISO format. Start: {new_start_iso}, End: {new_end_iso}")
                 return jsonify({'error': 'Invalid datetime format. Use ISO 8601.'}), 400
 
             if parsed_new_start_time >= parsed_new_end_time:
-                app.logger.warning(f"User '{current_user.username}' provided start_time not before end_time for booking {booking_id}.")
+        app.logger.warning(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' provided start_time not before end_time.")
                 return jsonify({'error': 'Start time must be before end time.'}), 400
 
             resource = Resource.query.get(booking.resource_id)
-            if not resource: # Should not happen if booking exists, but good practice
-                app.logger.error(f"Resource ID {booking.resource_id} for booking {booking_id} not found during update.")
+            if not resource: 
+                app.logger.error(f"[API PUT /api/bookings/{booking_id}] Resource ID {booking.resource_id} for booking {booking_id} not found during update.")
                 return jsonify({'error': 'Associated resource not found.'}), 500
             
             # Check for maintenance conflict ONLY IF the new time range is different from old,
@@ -2622,7 +2628,7 @@ def update_booking_by_user(booking_id):
                     # A more nuanced check might be needed if bookings *during* maintenance are allowed to be shifted.
                     # Current logic: if resource is under maintenance and new times are proposed, check them.
                     maint_until_str = resource.maintenance_until.isoformat() if resource.maintenance_until else "indefinitely"
-                    app.logger.warning(f"Booking update for {booking_id} conflicts with resource maintenance (until {maint_until_str}).")
+                    app.logger.warning(f"[API PUT /api/bookings/{booking_id}] Booking update conflicts with resource maintenance (until {maint_until_str}).")
                     return jsonify({'error': f'Resource is under maintenance until {maint_until_str} and the new time slot falls within this period.'}), 403
 
             # Conflict checking with other bookings
@@ -2635,7 +2641,7 @@ def update_booking_by_user(booking_id):
                 ).first()
 
                 if conflicting_booking:
-                    app.logger.warning(f"Update for booking {booking_id} conflicts with existing booking {conflicting_booking.id} for resource {booking.resource_id}.")
+                    app.logger.warning(f"[API PUT /api/bookings/{booking_id}] Update conflicts with existing booking {conflicting_booking.id} for resource {booking.resource_id}.")
                     return jsonify({'error': 'The updated time slot conflicts with an existing booking.'}), 409
             
             if time_changed:
@@ -2645,10 +2651,12 @@ def update_booking_by_user(booking_id):
                 change_details_list.append(f"time from {old_start_time.isoformat()} to {parsed_new_start_time.isoformat()}-{parsed_new_end_time.isoformat()}")
 
         if not changes_made:
-            app.logger.info(f"User '{current_user.username}' submitted update for booking {booking_id} with no actual changes.")
+            app.logger.info(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' submitted update with no actual changes.")
             return jsonify({'error': 'No changes supplied.'}), 400
 
+        app.logger.info(f"[API PUT /api/bookings/{booking_id}] Attempting to commit changes to DB: Title='{booking.title}', Start='{booking.start_time.isoformat()}', End='{booking.end_time.isoformat()}'")
         db.session.commit()
+        app.logger.info(f"[API PUT /api/bookings/{booking_id}] DB commit successful.")
         
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
 
@@ -2666,8 +2674,8 @@ def update_booking_by_user(booking_id):
                     )
                 )
                 mail.send(msg)
-            except Exception as e:
-                app.logger.exception(f"Failed to send booking update email to {current_user.email} for booking {booking_id}: {e}")
+            except Exception as mail_e: # Use different variable name for mail exception
+                app.logger.exception(f"[API PUT /api/bookings/{booking_id}] Failed to send booking update email to {current_user.email}: {mail_e}")
         
         change_summary_text = '; '.join(change_details_list)
         add_audit_log(
@@ -2677,7 +2685,7 @@ def update_booking_by_user(booking_id):
                 f"for resource '{resource_name}'. Changes: {change_summary_text}."
             )
         )
-        app.logger.info(f"User '{current_user.username}' successfully updated booking ID: {booking.id}. Changes: {change_summary_text}.")
+        app.logger.info(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' successfully updated booking. Changes: {change_summary_text}.")
         
         return jsonify({
             'id': booking.id,
@@ -2691,7 +2699,7 @@ def update_booking_by_user(booking_id):
 
     except Exception as e:
         db.session.rollback()
-        app.logger.exception(f"Error updating booking ID {booking_id} for user '{current_user.username}': {e}")
+        app.logger.exception(f"[API PUT /api/bookings/{booking_id}] Error updating booking for user '{current_user.username}': {e}")
         add_audit_log(action="UPDATE_BOOKING_USER_FAILED", details=f"User '{current_user.username}' failed to update booking ID: {booking_id}. Error: {str(e)}")
         return jsonify({'error': 'Failed to update booking due to a server error.'}), 500
 
