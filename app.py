@@ -2602,7 +2602,7 @@ def update_booking_by_user(booking_id):
                 return jsonify({'error': 'Invalid datetime format. Use ISO 8601.'}), 400
 
             if parsed_new_start_time >= parsed_new_end_time:
-        app.logger.warning(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' provided start_time not before end_time.")
+                app.logger.warning(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' provided start_time not before end_time.")
                 return jsonify({'error': 'Start time must be before end time.'}), 400
 
             resource = Resource.query.get(booking.resource_id)
