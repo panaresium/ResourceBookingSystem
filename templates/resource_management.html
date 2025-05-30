@@ -5,6 +5,7 @@
 {% block content %}
     <h1>{{ _('Resource Management') }}</h1>
     <button id="add-new-resource-btn" class="button">{{ _('Add New Resource') }}</button>
+    <button id="add-bulk-resource-btn" class="button" style="margin-left:5px;">{{ _('Bulk Add Resources') }}</button>
     <div id="resource-management-status" class="status-message" style="margin-top: 15px;"></div>
 
     <table id="resources-table" class="styled-table" style="margin-top: 15px;">
@@ -50,6 +51,53 @@
                 </div>
                 <button type="submit" class="button" style="margin-top: 10px;">{{ _('Save Resource') }}</button>
                 <div id="resource-form-modal-status" class="status-message" style="margin-top: 10px;"></div>
+            </form>
+        </div>
+    </div>
+
+    <div id="bulk-resource-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close-modal-btn" data-modal-id="bulk-resource-modal">&times;</span>
+            <h3>{{ _('Bulk Add Resources') }}</h3>
+            <form id="bulk-resource-form">
+                <div>
+                    <label for="bulk-prefix">{{ _('Prefix:') }}</label>
+                    <input type="text" id="bulk-prefix" name="prefix">
+                </div>
+                <div>
+                    <label for="bulk-start">{{ _('Start Number:') }}</label>
+                    <input type="number" id="bulk-start" name="start" value="1">
+                </div>
+                <div>
+                    <label for="bulk-count">{{ _('Count:') }}</label>
+                    <input type="number" id="bulk-count" name="count" value="1" min="1">
+                </div>
+                <div>
+                    <label for="bulk-padding">{{ _('Number Padding:') }}</label>
+                    <input type="number" id="bulk-padding" name="padding" value="0" min="0">
+                </div>
+                <div>
+                    <label for="bulk-suffix">{{ _('Suffix:') }}</label>
+                    <input type="text" id="bulk-suffix" name="suffix">
+                </div>
+                <div>
+                    <label for="bulk-capacity">{{ _('Capacity:') }}</label>
+                    <input type="number" id="bulk-capacity" name="capacity" min="0">
+                </div>
+                <div>
+                    <label for="bulk-equipment">{{ _('Equipment:') }}</label>
+                    <input type="text" id="bulk-equipment" name="equipment">
+                </div>
+                <div>
+                    <label for="bulk-status">{{ _('Status:') }}</label>
+                    <select id="bulk-status" name="status" class="form-control">
+                        <option value="draft">{{ _('Draft') }}</option>
+                        <option value="published">{{ _('Published') }}</option>
+                        <option value="archived">{{ _('Archived') }}</option>
+                    </select>
+                </div>
+                <button type="submit" class="button" style="margin-top: 10px;">{{ _('Create Resources') }}</button>
+                <div id="bulk-resource-form-status" class="status-message" style="margin-top: 10px;"></div>
             </form>
         </div>
     </div>
