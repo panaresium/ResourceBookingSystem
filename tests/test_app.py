@@ -711,6 +711,56 @@ class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusi
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(Booking.query.count(), 0)
 
+    def test_get_my_booked_resources_api(self):
+        """Test the /api/bookings/my_booked_resources endpoint."""
+        # Create a third resource for more comprehensive testing
+        resource3 = Resource(name='Room C - Bookable by testuser', status='published')
+        db.session.add(resource3)
+        db.session.commit()
+        
+        # Log in the default testuser
+        login_response = self.login('testuser', 'password')
+        self.assertEqual(login_response.status_code, 200)
+        self.assertTrue(login_response.get_json().get('success'))
+
+        # Create bookings for 'testuser'
+        # Booking 1: testuser books self.resource1
+        self._create_booking(user_name='testuser', resource_id=self.resource1.id, start_offset_hours=1, title="Booking for Res1")
+        # Booking 2: testuser books resource3
+        self._create_booking(user_name='testuser', resource_id=resource3.id, start_offset_hours=2, title="Booking for Res3")
+        # self.resource2 is NOT booked by testuser
+
+        # Make GET request to /api/bookings/my_booked_resources
+        response = self.client.get('/api/bookings/my_booked_resources')
+        self.assertEqual(response.status_code, 200)
+        
+        data = response.get_json()
+        self.assertIsInstance(data, list)
+        self.assertEqual(len(data), 2, "Should return only the 2 resources booked by the user.")
+
+        returned_resource_ids = {r['id'] for r in data}
+        expected_resource_ids = {self.resource1.id, resource3.id}
+        
+        self.assertEqual(returned_resource_ids, expected_resource_ids, "Returned resource IDs do not match expected.")
+        self.assertNotIn(self.resource2.id, returned_resource_ids, "Resource2 should not be in the list as it was not booked by testuser.")
+
+        # Test that different statuses of booked resources are returned (e.g., if one was archived after booking)
+        resource3.status = 'archived'
+        db.session.commit()
+        
+        response_after_status_change = self.client.get('/api/bookings/my_booked_resources')
+        self.assertEqual(response_after_status_change.status_code, 200)
+        data_after_status_change = response_after_status_change.get_json()
+        self.assertEqual(len(data_after_status_change), 2) # Still 2, as it returns booked resources regardless of current status
+        archived_resource_returned = any(r['id'] == resource3.id and r['status'] == 'archived' for r in data_after_status_change)
+        self.assertTrue(archived_resource_returned, "Archived booked resource should be returned with its current status.")
+
+        # Test unauthenticated access
+        self.logout()
+        unauthenticated_response = self.client.get('/api/bookings/my_booked_resources')
+        self.assertEqual(unauthenticated_response.status_code, 401, "Unauthenticated access should be denied (401).")
+
+
     def test_sqlite_wal_mode_enabled(self):
         """Ensure WAL mode is set for SQLite databases."""
         admin = User(username='waladmin', email='wal@example.com', is_admin=True)
