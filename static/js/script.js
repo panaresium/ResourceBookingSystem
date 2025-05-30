@@ -1,3 +1,4 @@
+console.log('script.js: File loaded and executing.');
 // JavaScript for Smart Resource Booking
 
 // --- Global Helper Functions ---
@@ -383,6 +384,8 @@ async function displayAvailableResourcesNow() {
 
 
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('script.js: DOMContentLoaded event fired.');
+    console.log('script.js: Attempting to find resource-buttons-container before assignment. Element found:', document.getElementById('resource-buttons-container'));
     // Set login URL on body for dynamic link creation
     // Simplified login URL setup (as per subtask)
     document.body.dataset.loginUrl = document.getElementById('login-form') ? "#" : "/login";
@@ -736,6 +739,7 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
     // --- Logic for the new resources.html page ---
     const resourceButtonsContainer = document.getElementById('resource-buttons-container');
     if (resourceButtonsContainer) { // Check if we are on the new resources.html page
+        console.log('script.js: Executing script for /resources page.'); // Added as per subtask instructions
         const availabilityDateInput = document.getElementById('availability-date');
         const bookingModal = document.getElementById('resource-page-booking-modal');
         const closeModalBtn = document.getElementById('rpbm-close-modal-btn');
@@ -764,12 +768,15 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
         }
 
         async function updateButtonColor(button, dateStr) {
+            console.log('updateButtonColor for button:', button.dataset.resourceName, '(ID:', button.dataset.resourceId, ') on date:', dateStr);
             const resourceId = button.dataset.resourceId;
             let bookings;
             // Use cache if available for this resourceId on this date (cache key could be `${resourceId}_${dateStr}`)
             // For simplicity, this example refetches or assumes cache is managed by date change
             try {
+                console.log('Fetching availability for resource ID:', resourceId, 'on date:', dateStr);
                 bookings = await apiCall(`/api/resources/${resourceId}/availability?date=${dateStr}`, {}, modalStatusMsg); // Use a relevant status element
+                console.log('Bookings received for', button.dataset.resourceName, ':', JSON.stringify(bookings));
                 currentResourceBookingsCache[resourceId] = bookings; // Cache it
             } catch (error) {
                 console.error(`Failed to fetch availability for resource ${resourceId}:`, error);
@@ -812,9 +819,11 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
                 button.classList.add('unavailable');
                 button.title = `${button.dataset.resourceName} - No half-day slots available.`;
             }
+            console.log('Availability for', button.dataset.resourceName, ': First Half -', availableSlotsCount >= 1, ', Second Half -', availableSlotsCount === 2 || (availableSlotsCount === 1 && !isSlotAvailable), '. Determined class:', button.className);
         }
 
         async function updateAllButtonColors() {
+            console.log('updateAllButtonColors called for date:', availabilityDateInput.value);
             const dateStr = availabilityDateInput.value;
             currentResourceBookingsCache = {}; // Clear cache for the new date
             const buttons = resourceButtonsContainer.querySelectorAll('.resource-availability-button');
@@ -827,8 +836,12 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
         
         async function fetchAndRenderResources() {
             try {
+                console.log('Fetching all resources...');
                 showLoading(resourceButtonsContainer, 'Loading resources...');
-                allFetchedResources = await apiCall('/api/resources', {}, resourceButtonsContainer);
+                const resources = await apiCall('/api/resources', {}, resourceButtonsContainer); // temp store in 'resources'
+                console.log('Fetched all resources raw:', JSON.stringify(resources));
+                allFetchedResources = resources; // Assign to global cache
+                console.log('Processed allFetchedResources:', JSON.stringify(allFetchedResources));
                 resourceButtonsContainer.innerHTML = ''; // Clear "Loading..."
                 
                 if (!allFetchedResources || allFetchedResources.length === 0) {
@@ -837,6 +850,7 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
                 }
 
                 allFetchedResources.forEach(resource => {
+                    console.log('Creating button for resource:', JSON.stringify(resource));
                     const button = document.createElement('button');
                     button.textContent = resource.name;
                     button.dataset.resourceId = resource.id;
