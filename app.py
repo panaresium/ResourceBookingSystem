@@ -2414,6 +2414,41 @@ def bookings_calendar():
         app.logger.exception("Error fetching calendar bookings:")
         return jsonify({'error': 'Failed to fetch bookings.'}), 500
 
+@app.route('/api/bookings/my_booked_resources', methods=['GET'])
+@login_required
+def get_my_booked_resources():
+    """
+    Returns a list of unique resources the current user has booked.
+    """
+    try:
+        # Step 1: Get distinct resource_ids booked by the current user
+        # Assuming Booking.user_name stores the username of the user who made the booking.
+        booked_resource_ids_query = db.session.query(Booking.resource_id)\
+            .filter(Booking.user_name == current_user.username)\
+            .distinct()\
+            .all()
+        
+        booked_resource_ids = [item[0] for item in booked_resource_ids_query]
+
+        if not booked_resource_ids:
+            app.logger.info(f"User '{current_user.username}' has not booked any resources yet.")
+            return jsonify([]), 200
+
+        # Step 2: Fetch the details of these resources
+        # We are interested in all statuses of resources they have booked, not just 'published'
+        resources = Resource.query.filter(Resource.id.in_(booked_resource_ids)).all()
+        
+        # Step 3: Serialize the resources to dictionary/JSON
+        # Using the existing resource_to_dict helper if suitable, or define custom serialization
+        resources_list = [resource_to_dict(resource) for resource in resources]
+        
+        app.logger.info(f"Successfully fetched {len(resources_list)} unique booked resources for user '{current_user.username}'.")
+        return jsonify(resources_list), 200
+
+    except Exception as e:
+        app.logger.exception(f"Error fetching booked resources for user '{current_user.username}':")
+        return jsonify({'error': 'Failed to fetch booked resources due to a server error.'}), 500
+
 @app.route('/api/bookings/<int:booking_id>', methods=['DELETE'])
 @login_required
 def delete_booking_by_user(booking_id):
