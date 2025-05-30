@@ -786,27 +786,31 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
             }
 
             const slots = [
-                { start: 8, end: 12 },  // First Half
-                { start: 13, end: 17 } // Second Half
+                { start: 8, end: 12, name: "First Half" },  // First Half
+                { start: 13, end: 17, name: "Second Half" } // Second Half
             ];
             let availableSlotsCount = 0;
+            let isFirstHalfAvailable = false;
+            let isSecondHalfAvailable = false;
 
-            for (const slot of slots) {
+            slots.forEach((slot, index) => {
                 const slotStart = new Date(`${dateStr}T${String(slot.start).padStart(2, '0')}:00:00`);
                 const slotEnd = new Date(`${dateStr}T${String(slot.end).padStart(2, '0')}:00:00`);
-                let isSlotAvailable = true;
+                let isThisSpecificSlotAvailable = true;
                 for (const booking of bookings) {
                     const bookingStart = new Date(`${dateStr}T${booking.start_time}`);
                     const bookingEnd = new Date(`${dateStr}T${booking.end_time}`);
                     if (bookingStart < slotEnd && bookingEnd > slotStart) {
-                        isSlotAvailable = false;
+                        isThisSpecificSlotAvailable = false;
                         break;
                     }
                 }
-                if (isSlotAvailable) {
+                if (isThisSpecificSlotAvailable) {
                     availableSlotsCount++;
+                    if (index === 0) isFirstHalfAvailable = true;
+                    if (index === 1) isSecondHalfAvailable = true;
                 }
-            }
+            });
 
             button.classList.remove('available', 'partial', 'unavailable', 'error');
             if (availableSlotsCount === 2) {
@@ -819,7 +823,7 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
                 button.classList.add('unavailable');
                 button.title = `${button.dataset.resourceName} - No half-day slots available.`;
             }
-            console.log('Availability for', button.dataset.resourceName, ': First Half -', availableSlotsCount >= 1, ', Second Half -', availableSlotsCount === 2 || (availableSlotsCount === 1 && !isSlotAvailable), '. Determined class:', button.className);
+            console.log('Availability for', button.dataset.resourceName, ': First Half -', isFirstHalfAvailable, ', Second Half -', isSecondHalfAvailable, '. Determined class applied:', button.className);
         }
 
         async function updateAllButtonColors() {
