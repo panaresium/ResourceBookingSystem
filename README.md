@@ -165,3 +165,16 @@ results:
 - `tags` – comma-separated tags assigned to a resource (e.g. `?tags=quiet`)
 
 These filters can be combined. Only resources with `status='published'` are returned.
+
+## Deploying to Azure Web App
+
+This project includes a GitHub Actions workflow that can publish the application to Azure Web App. Configure these secrets in your repository settings:
+
+- `AZURE_CLIENT_ID`
+- `AZURE_TENANT_ID`
+- `AZURE_SUBSCRIPTION_ID`
+
+Pushing to the `main` branch triggers the workflow. The action zips the project and deploys it to an App Service named `resourcebooking`.
+
+Make sure the database is initialized by running `python init_setup.py` locally or as part of your deployment process.
+
