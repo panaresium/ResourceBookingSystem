@@ -773,26 +773,31 @@ body.high-contrast input[type="button"]:hover {
 
 /* Styles for the /resources page resource buttons */
 .resource-buttons-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); /* Adjust minmax width as needed */
-    gap: 15px; /* Spacing between buttons */
-    padding: 10px 0; /* Some padding around the grid */
+    display: flex;         /* Use Flexbox for internal layout */
+    flex-wrap: wrap;       /* Allow buttons to wrap to the next line */
+    gap: 10px;             /* Spacing between buttons (both row and column) */
+    width: 100%;           /* Keep it full width */
+    padding: 10px 0;       /* Retain existing vertical padding, or adjust as needed */
+    /* Remove any leftover grid-specific properties if they weren't already */
 }
 
 .resource-availability-button {
-    display: block; /* Or inline-block if preferred, but block might be better for grid items */
-    width: 100%; /* Make button take full width of grid cell */
-    padding: 12px 15px;
-    margin: 0; /* Grid gap will handle spacing */
-    border: 1px solid #ccc;
+    flex: 1 0 calc(20% - 10px); /* Allow grow, basis is 1/5th minus gap. */
+    box-sizing: border-box;    /* Crucial for width calculation to include padding/border */
+    min-height: 50px;          /* Or your preferred height */
+    padding: 10px 5px;         /* Adjust padding */
+    /* display: block; and width: 100%; are overridden/irrelevant due to flex */
+    margin: 0; /* Grid gap will handle spacing, so explicit margin on button is 0 */
+    border: 1px solid #ccc; /* Keep existing border */
     border-radius: 5px;
     background-color: #f0f0f0; /* Default background */
     color: #333; /* Default text color */
-    text-align: center;
+    text-align: center;        /* Ensure text is centered */
     cursor: pointer;
     font-size: 0.9rem;
     line-height: 1.3;
     transition: background-color 0.3s ease, transform 0.1s ease; /* Smooth transitions */
+    /* Ensure other .button styles (background-color, color for different states) are applied */
 }
 .resource-availability-button:hover {
     background-color: #e0e0e0; /* Slight hover effect */
