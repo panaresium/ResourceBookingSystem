@@ -1016,176 +1016,287 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 2. fetchAndRenderResources() function
         async function fetchAndRenderResources() {
-            console.log("Fetching all resources...");
-            if (resourceLoadingStatusDiv) showLoading(resourceLoadingStatusDiv, "Loading resources...");
-            else console.warn("resourceLoadingStatusDiv not found for fetchAndRenderResources");
+            // Ensure resourceLoadingStatusDiv is defined in this scope or passed.
+            // const resourceLoadingStatusDiv = document.getElementById('resource-loading-status'); 
+            if (resourceLoadingStatusDiv) showLoading(resourceLoadingStatusDiv, "Loading resources and maps...");
+            else console.warn("resourceLoadingStatusDiv not found for fetchAndRenderResources initial loading message.");
 
             try {
-                const resources = await apiCall('/api/resources', {}, resourceLoadingStatusDiv);
-                allFetchedResources = resources || [];
-                console.log("Raw resources fetched:", allFetchedResources);
+                const [resourcesResponse, mapsResponse] = await Promise.all([
+                    apiCall('/api/resources', {}, resourceLoadingStatusDiv),
+                    apiCall('/api/maps', {}, resourceLoadingStatusDiv) 
+                ]);
 
-                if (resourceButtonsContainer) resourceButtonsContainer.innerHTML = ''; // Clear previous buttons
+                allFetchedResources = resourcesResponse || []; 
+                const allMaps = mapsResponse || [];
+
+                if (resourceButtonsContainer) resourceButtonsContainer.innerHTML = ''; // Clear previous content
 
                 if (!allFetchedResources || allFetchedResources.length === 0) {
                     if (resourceLoadingStatusDiv) showSuccess(resourceLoadingStatusDiv, "No resources found.");
+                    if (resourceButtonsContainer) resourceButtonsContainer.innerHTML = '<p>No resources found.</p>';
                     return;
                 }
 
+                const mapsById = {};
+                allMaps.forEach(map => { mapsById[map.id] = map; });
+
+                const groupedResources = { unassigned: [] }; 
+
                 allFetchedResources.forEach(resource => {
-                    console.log("Creating button for resource:", resource.name, resource.id);
-                    const button = document.createElement('button');
-                    button.textContent = resource.name;
-                    button.classList.add('button', 'resource-availability-button'); // General button styling + specific
-                    button.dataset.resourceId = resource.id;
-                    button.dataset.resourceName = resource.name;
-                    button.dataset.imageUrl = resource.image_url || '';
-                    // Add other necessary data attributes from resource if needed for checkUserPermissionForResource
-                    button.dataset.bookingRestriction = resource.booking_restriction || "";
-                    button.dataset.allowedUserIds = resource.allowed_user_ids || "";
-                    button.dataset.roleIds = (resource.roles || []).map(r => r.id).join(',');
-
-
-                    // Resource Button Click Listener
-                    button.addEventListener('click', async function() {
-                        console.log(`Resource button clicked: ${this.dataset.resourceName} (ID: ${this.dataset.resourceId})`);
-                        const clickedButton = this; // Keep reference to the button
-
-                        if (clickedButton.classList.contains('unavailable') && !clickedButton.classList.contains('partial')) {
-                            console.log("Resource button is completely unavailable, click ignored.");
-                            // Optionally show a small message or just do nothing
-                            return;
+                    const mapId = resource.floor_map_id;
+                    if (mapId && mapsById[mapId]) {
+                        if (!groupedResources[mapId]) {
+                            groupedResources[mapId] = [];
                         }
-                        
-                        const resourceId = clickedButton.dataset.resourceId;
-                        const resourceName = clickedButton.dataset.resourceName;
-                        const selectedDate = availabilityDateInput ? availabilityDateInput.value : getTodayDateString();
-                        const imageUrl = clickedButton.dataset.imageUrl;
-
-                        console.log(`Modal to be opened for: ID=${resourceId}, Name=${resourceName}, Date=${selectedDate}`);
-
-                        resetRpbmModal(); // Reset modal to initial state
-
-                        if (modalResourceName) modalResourceName.textContent = resourceName;
-                        if (modalSelectedDate) modalSelectedDate.textContent = selectedDate;
-                        if (modalResourceImage) {
-                            if (imageUrl) {
-                                modalResourceImage.src = imageUrl;
-                                modalResourceImage.style.display = 'block';
-                            } else {
-                                modalResourceImage.style.display = 'none';
-                            }
-                        }
-                        // Store resourceId on the confirm button for later use during booking submission
-                        if (modalConfirmBtn) modalConfirmBtn.dataset.resourceId = resourceId;
-
-
-                        let bookings = currentResourceBookingsCache[resourceId + '_' + selectedDate];
-                        if (!bookings) {
-                            console.log(`No cached bookings for ${resourceId} on ${selectedDate}. Fetching...`);
-                            try {
-                                bookings = await apiCall(`/api/resources/${resourceId}/availability?date=${selectedDate}`, {}, modalStatusMsg);
-                                currentResourceBookingsCache[resourceId + '_' + selectedDate] = bookings;
-                                console.log("Bookings fetched and cached:", bookings);
-                            } catch (error) {
-                                console.error("Failed to fetch bookings for modal:", error);
-                                // Error already shown by apiCall in modalStatusMsg.
-                                // Optionally, prevent modal from opening or show error within modal more explicitly.
-                                showError(modalStatusMsg, `Could not load availability for ${resourceName}.`);
-                                if (bookingModal) bookingModal.style.display = 'block'; // Show modal to display error
-                                return;
-                            }
-                        } else {
-                            console.log(`Using cached bookings for ${resourceId} on ${selectedDate}:`, bookings);
-                        }
-
-                        // Slot Button Logic
-                        const firstHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="first_half"]');
-                        const secondHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]');
-                        const fullDayBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]');
-
-                        if (!firstHalfBtn || !secondHalfBtn || !fullDayBtn) {
-                            console.error("One or more slot buttons not found in the modal! Ensure modalSlotOptionsContainer is defined and contains these buttons.", modalSlotOptionsContainer);
-                            if (modalStatusMsg) showError(modalStatusMsg, "Modal slot buttons are missing. Cannot proceed.");
-                            if (bookingModal) bookingModal.style.display = 'block';
-                            return;
-                        }
-                        
-                        // Reset slot buttons
-                        [firstHalfBtn, secondHalfBtn, fullDayBtn].forEach(btn => {
-                            btn.disabled = false;
-                            btn.classList.remove('unavailable', 'booked', 'selected', 'partial'); // Ensure 'partial' is also reset
-                            btn.classList.add('available');
-                            // Reset text content (remove " (Booked)", " (Partial)")
-                            const baseText = btn.textContent.split(" (")[0];
-                            btn.textContent = baseText;
-                        });
-
-                        let isFirstHalfBooked = false;
-                        let isSecondHalfBooked = false;
-
-                        // Slot times as "HH:MM:SS" strings for direct comparison
-                        const firstHalfSlotStartStr = "08:00:00";
-                        const firstHalfSlotEndStr = "12:00:00";
-                        const secondHalfSlotStartStr = "13:00:00";
-                        const secondHalfSlotEndStr = "17:00:00";
-
-                        if (bookings && bookings.length > 0) {
-                            for (const booking of bookings) {
-                                // Check for first half conflict
-                                if (booking.start_time < firstHalfSlotEndStr && booking.end_time > firstHalfSlotStartStr) {
-                                    isFirstHalfBooked = true;
-                                    console.log("Conflict found for first half:", booking);
-                                }
-                                // Check for second half conflict
-                                if (booking.start_time < secondHalfSlotEndStr && booking.end_time > secondHalfSlotStartStr) {
-                                    isSecondHalfBooked = true;
-                                    console.log("Conflict found for second half:", booking);
-                                }
-                            }
-                        }
-                        console.log(`Slot availability: First Half Booked: ${isFirstHalfBooked}, Second Half Booked: ${isSecondHalfBooked}`);
-
-                        if (isFirstHalfBooked) {
-                            firstHalfBtn.disabled = true;
-                            firstHalfBtn.classList.add('unavailable', 'booked');
-                            firstHalfBtn.classList.remove('available');
-                            firstHalfBtn.textContent = firstHalfBtn.textContent.split(" (")[0] + " (Booked)";
-                        }
-                        if (isSecondHalfBooked) {
-                            secondHalfBtn.disabled = true;
-                            secondHalfBtn.classList.add('unavailable', 'booked');
-                            secondHalfBtn.classList.remove('available');
-                            secondHalfBtn.textContent = secondHalfBtn.textContent.split(" (")[0] + " (Booked)";
-                        }
-                        
-                        if (isFirstHalfBooked || isSecondHalfBooked) {
-                            fullDayBtn.disabled = true;
-                            fullDayBtn.classList.add('unavailable', 'booked'); 
-                            fullDayBtn.classList.remove('available');
-                            let fullDayBaseText = fullDayBtn.textContent.split(" (")[0];
-                            if (isFirstHalfBooked && isSecondHalfBooked) {
-                                fullDayBtn.textContent = fullDayBaseText + " (Booked)";
-                            } else {
-                                fullDayBtn.textContent = fullDayBaseText + " (Unavailable)"; 
-                            }
-                        }
-                        
-                        if (bookingModal) bookingModal.style.display = 'block';
-                        console.log("Booking modal displayed.");
-                    });
-                    if (resourceButtonsContainer) resourceButtonsContainer.appendChild(button);
+                        groupedResources[mapId].push(resource);
+                    } else {
+                        groupedResources.unassigned.push(resource);
+                    }
                 });
-                
-                await updateAllButtonColors(); // Update colors after rendering all buttons
+
+                let resourcesRenderedInAnyGroup = false;
+
+                allMaps.forEach(map => {
+                    if (groupedResources[map.id] && groupedResources[map.id].length > 0) {
+                        resourcesRenderedInAnyGroup = true;
+                        const mapHeading = document.createElement('h3');
+                        let headingText = `Map: ${map.name}`;
+                        if (map.location && map.floor) {
+                            headingText += ` (${map.location} - Floor ${map.floor})`;
+                        } else if (map.location) {
+                            headingText += ` (${map.location})`;
+                        } else if (map.floor) {
+                            headingText += ` (Floor ${map.floor})`;
+                        }
+                        mapHeading.textContent = headingText;
+                        mapHeading.className = 'map-group-heading';
+                        if (resourceButtonsContainer) resourceButtonsContainer.appendChild(mapHeading);
+
+                        const mapGroupGrid = document.createElement('div');
+                        mapGroupGrid.className = 'resource-buttons-grid map-specific-grid';
+                        if (resourceButtonsContainer) resourceButtonsContainer.appendChild(mapGroupGrid);
+
+                        groupedResources[map.id].forEach(resource => {
+                            const button = document.createElement('button');
+                            button.textContent = resource.name;
+                            button.classList.add('button', 'resource-availability-button');
+                            button.dataset.resourceId = resource.id;
+                            button.dataset.resourceName = resource.name;
+                            button.dataset.imageUrl = resource.image_url || '';
+                            button.dataset.bookingRestriction = resource.booking_restriction || "";
+                            button.dataset.allowedUserIds = resource.allowed_user_ids || "";
+                            button.dataset.roleIds = (resource.roles || []).map(r => r.id).join(',');
+                            
+                            button.addEventListener('click', async function() {
+                                console.log(`Resource button clicked: ${this.dataset.resourceName} (ID: ${this.dataset.resourceId})`);
+                                const clickedButton = this; // Keep reference to the button
+        
+                                if (clickedButton.classList.contains('unavailable') && !clickedButton.classList.contains('partial')) {
+                                    console.log("Resource button is completely unavailable, click ignored.");
+                                    return;
+                                }
+                                
+                                const resourceId = clickedButton.dataset.resourceId;
+                                const resourceName = clickedButton.dataset.resourceName;
+                                const selectedDate = availabilityDateInput ? availabilityDateInput.value : getTodayDateString();
+                                const imageUrl = clickedButton.dataset.imageUrl;
+        
+                                console.log(`Modal to be opened for: ID=${resourceId}, Name=${resourceName}, Date=${selectedDate}`);
+        
+                                resetRpbmModal(); 
+        
+                                if (modalResourceName) modalResourceName.textContent = resourceName;
+                                if (modalSelectedDate) modalSelectedDate.textContent = selectedDate;
+                                if (modalResourceImage) {
+                                    if (imageUrl) {
+                                        modalResourceImage.src = imageUrl;
+                                        modalResourceImage.style.display = 'block';
+                                    } else {
+                                        modalResourceImage.style.display = 'none';
+                                    }
+                                }
+                                if (modalConfirmBtn) modalConfirmBtn.dataset.resourceId = resourceId;
+        
+                                const cacheKey = resourceId + '_' + selectedDate;
+                                let bookings = currentResourceBookingsCache[cacheKey]; 
+                                if (!bookings) {
+                                    try {
+                                        bookings = await apiCall(`/api/resources/${resourceId}/availability?date=${selectedDate}`, {}, modalStatusMsg);
+                                        currentResourceBookingsCache[cacheKey] = bookings;
+                                    } catch (error) {
+                                        showError(modalStatusMsg, `Could not load availability for ${resourceName}.`);
+                                        if (bookingModal) bookingModal.style.display = 'block'; 
+                                        return;
+                                    }
+                                }
+                                
+                                const firstHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="first_half"]');
+                                const secondHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]');
+                                const fullDayBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]');
+        
+                                if (firstHalfBtn && secondHalfBtn && fullDayBtn) {
+                                    [firstHalfBtn, secondHalfBtn, fullDayBtn].forEach(btn => {
+                                        btn.disabled = false;
+                                        btn.classList.remove('unavailable', 'booked', 'selected', 'partial');
+                                        btn.classList.add('available');
+                                        const baseText = btn.textContent.split(" (")[0];
+                                        btn.textContent = baseText;
+                                    });
+        
+                                    let isFirstHalfBooked = false;
+                                    let isSecondHalfBooked = false;
+                                    const firstHalfSlotStartStr = "08:00:00";
+                                    const firstHalfSlotEndStr = "12:00:00";
+                                    const secondHalfSlotStartStr = "13:00:00";
+                                    const secondHalfSlotEndStr = "17:00:00";
+        
+                                    if (bookings && bookings.length > 0) {
+                                        for (const booking of bookings) {
+                                            if (booking.start_time < firstHalfSlotEndStr && booking.end_time > firstHalfSlotStartStr) {
+                                                isFirstHalfBooked = true;
+                                            }
+                                            if (booking.start_time < secondHalfSlotEndStr && booking.end_time > secondHalfSlotStartStr) {
+                                                isSecondHalfBooked = true;
+                                            }
+                                        }
+                                    }
+        
+                                    if (isFirstHalfBooked) {
+                                        firstHalfBtn.disabled = true;
+                                        firstHalfBtn.classList.add('unavailable', 'booked');
+                                        firstHalfBtn.classList.remove('available');
+                                        firstHalfBtn.textContent = firstHalfBtn.textContent.split(" (")[0] + " (Booked)";
+                                    }
+                                    if (isSecondHalfBooked) {
+                                        secondHalfBtn.disabled = true;
+                                        secondHalfBtn.classList.add('unavailable', 'booked');
+                                        secondHalfBtn.classList.remove('available');
+                                        secondHalfBtn.textContent = secondHalfBtn.textContent.split(" (")[0] + " (Booked)";
+                                    }
+                                    if (isFirstHalfBooked || isSecondHalfBooked) {
+                                        fullDayBtn.disabled = true;
+                                        fullDayBtn.classList.add('unavailable', 'booked');
+                                        fullDayBtn.classList.remove('available');
+                                        let fullDayBaseText = fullDayBtn.textContent.split(" (")[0];
+                                        fullDayBtn.textContent = fullDayBaseText + ((isFirstHalfBooked && isSecondHalfBooked) ? " (Booked)" : " (Unavailable)");
+                                    }
+                                }
+        
+                                if (bookingModal) bookingModal.style.display = 'block';
+                                console.log("Booking modal displayed for resource from group.");
+                            });
+                            mapGroupGrid.appendChild(button);
+                        });
+                    }
+                });
+
+                if (groupedResources.unassigned.length > 0) {
+                    resourcesRenderedInAnyGroup = true;
+                    const unassignedHeading = document.createElement('h3');
+                    unassignedHeading.textContent = 'Other Resources';
+                    unassignedHeading.className = 'map-group-heading';
+                    if (resourceButtonsContainer) resourceButtonsContainer.appendChild(unassignedHeading);
+
+                    const unassignedGroupGrid = document.createElement('div');
+                    unassignedGroupGrid.className = 'resource-buttons-grid unassigned-grid';
+                    if (resourceButtonsContainer) resourceButtonsContainer.appendChild(unassignedGroupGrid);
+
+                    groupedResources.unassigned.forEach(resource => {
+                        const button = document.createElement('button');
+                        button.textContent = resource.name;
+                        button.classList.add('button', 'resource-availability-button');
+                        button.dataset.resourceId = resource.id;
+                        button.dataset.resourceName = resource.name;
+                        button.dataset.imageUrl = resource.image_url || '';
+                        button.dataset.bookingRestriction = resource.booking_restriction || "";
+                        button.dataset.allowedUserIds = resource.allowed_user_ids || "";
+                        button.dataset.roleIds = (resource.roles || []).map(r => r.id).join(',');
+
+                        button.addEventListener('click', async function() {
+                            console.log(`Resource button clicked: ${this.dataset.resourceName} (ID: ${this.dataset.resourceId})`);
+                            const clickedButton = this; 
+                            const resourceId = clickedButton.dataset.resourceId;
+                            const resourceName = clickedButton.dataset.resourceName;
+                            const selectedDate = availabilityDateInput ? availabilityDateInput.value : getTodayDateString();
+                            const imageUrl = clickedButton.dataset.imageUrl;
+                            resetRpbmModal(); 
+                            if (modalResourceName) modalResourceName.textContent = resourceName;
+                            if (modalSelectedDate) modalSelectedDate.textContent = selectedDate;
+                            if (modalResourceImage) {
+                                if (imageUrl) {
+                                    modalResourceImage.src = imageUrl; modalResourceImage.style.display = 'block';
+                                } else {
+                                    modalResourceImage.style.display = 'none';
+                                }
+                            }
+                            if (modalConfirmBtn) modalConfirmBtn.dataset.resourceId = resourceId;
+                            const cacheKey = resourceId + '_' + selectedDate;
+                            let bookings = currentResourceBookingsCache[cacheKey];
+                            if (!bookings) {
+                                try {
+                                    bookings = await apiCall(`/api/resources/${resourceId}/availability?date=${selectedDate}`, {}, modalStatusMsg);
+                                    currentResourceBookingsCache[cacheKey] = bookings;
+                                } catch (error) {
+                                    showError(modalStatusMsg, `Could not load availability for ${resourceName}.`);
+                                    if (bookingModal) bookingModal.style.display = 'block'; return;
+                                }
+                            }
+                            const firstHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="first_half"]');
+                            const secondHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]');
+                            const fullDayBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]');
+                            if (firstHalfBtn && secondHalfBtn && fullDayBtn) {
+                                [firstHalfBtn, secondHalfBtn, fullDayBtn].forEach(btn => {
+                                    btn.disabled = false; btn.classList.remove('unavailable', 'booked', 'selected', 'partial');
+                                    btn.classList.add('available');
+                                    const baseText = btn.textContent.split(" (")[0]; btn.textContent = baseText;
+                                });
+                                let isFirstHalfBooked = false, isSecondHalfBooked = false;
+                                const firstHalfSlotStartStr = "08:00:00", firstHalfSlotEndStr = "12:00:00";
+                                const secondHalfSlotStartStr = "13:00:00", secondHalfSlotEndStr = "17:00:00";
+                                if (bookings && bookings.length > 0) {
+                                    for (const booking of bookings) {
+                                        if (booking.start_time < firstHalfSlotEndStr && booking.end_time > firstHalfSlotStartStr) isFirstHalfBooked = true;
+                                        if (booking.start_time < secondHalfSlotEndStr && booking.end_time > secondHalfSlotStartStr) isSecondHalfBooked = true;
+                                    }
+                                }
+                                if (isFirstHalfBooked) {
+                                    firstHalfBtn.disabled = true; firstHalfBtn.classList.add('unavailable', 'booked');
+                                    firstHalfBtn.classList.remove('available');
+                                    firstHalfBtn.textContent = firstHalfBtn.textContent.split(" (")[0] + " (Booked)";
+                                }
+                                if (isSecondHalfBooked) {
+                                    secondHalfBtn.disabled = true; secondHalfBtn.classList.add('unavailable', 'booked');
+                                    secondHalfBtn.classList.remove('available');
+                                    secondHalfBtn.textContent = secondHalfBtn.textContent.split(" (")[0] + " (Booked)";
+                                }
+                                if (isFirstHalfBooked || isSecondHalfBooked) {
+                                    fullDayBtn.disabled = true; fullDayBtn.classList.add('unavailable', 'booked');
+                                    fullDayBtn.classList.remove('available');
+                                    let fullDayBaseText = fullDayBtn.textContent.split(" (")[0];
+                                    fullDayBtn.textContent = fullDayBaseText + ((isFirstHalfBooked && isSecondHalfBooked) ? " (Booked)" : " (Unavailable)");
+                                }
+                            }
+                            if (bookingModal) bookingModal.style.display = 'block';
+                            console.log("Booking modal displayed for unassigned resource.");
+                        });
+                        unassignedGroupGrid.appendChild(button);
+                    });
+                }
+
+                if (!resourcesRenderedInAnyGroup && resourceButtonsContainer) {
+                     resourceButtonsContainer.innerHTML = '<p>No resources found matching current criteria or groups.</p>';
+                }
+
+                await updateAllButtonColors(); 
                 if (resourceLoadingStatusDiv && !resourceLoadingStatusDiv.classList.contains('error')) {
-                     hideMessage(resourceLoadingStatusDiv); // Hide "Loading resources..." if no error occurred
+                    hideMessage(resourceLoadingStatusDiv);
                 }
 
             } catch (error) {
-                console.error("Failed to fetch and render resources:", error);
-                // Error message already shown by apiCall in resourceLoadingStatusDiv
-                if (resourceButtonsContainer) resourceButtonsContainer.innerHTML = '<p class="error">Could not load resources. Please try again later.</p>';
+                console.error("Failed to fetch and render grouped resources:", error);
+                if (resourceLoadingStatusDiv) showError(resourceLoadingStatusDiv, error.message || "Could not load grouped resources. Check console for details.");
+                if (resourceButtonsContainer) resourceButtonsContainer.innerHTML = '<p class="error">Error loading resources. Please try refreshing.</p>';
             }
         }
 

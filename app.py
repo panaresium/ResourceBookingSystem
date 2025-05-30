@@ -906,6 +906,27 @@ def get_resource_availability(resource_id):
         app.logger.exception(f"Error fetching availability for resource {resource_id} on {target_date_obj}:")
         return jsonify({'error': 'Failed to fetch resource availability due to a server error.'}), 500
 
+
+@app.route('/api/maps', methods=['GET'])
+def get_public_floor_maps():
+    try:
+        maps = FloorMap.query.all()
+        maps_list = []
+        for m in maps:
+            maps_list.append({
+                'id': m.id,
+                'name': m.name,
+                'image_filename': m.image_filename, # Keep for consistency, though frontend might not use it directly for this feature
+                'location': m.location,
+                'floor': m.floor,
+                'image_url': url_for('static', filename=f'floor_map_uploads/{m.image_filename}')
+            })
+        # app.logger.info("Successfully fetched all floor maps for public API.") # Optional logging
+        return jsonify(maps_list), 200
+    except Exception as e:
+        app.logger.exception("Error fetching public floor maps:")
+        return jsonify({'error': 'Failed to fetch maps due to a server error.'}), 500
+
 # Helper function to check allowed file extensions
 def allowed_file(filename):
     return '.' in filename and \
