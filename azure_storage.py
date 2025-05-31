@@ -11,7 +11,6 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
 FLOOR_MAP_UPLOADS = os.path.join(STATIC_DIR, 'floor_map_uploads')
 RESOURCE_UPLOADS = os.path.join(STATIC_DIR, 'resource_uploads')
-CONFIG_JSON = os.path.join(DATA_DIR, 'admin_config.json')
 
 
 def _get_service_client():
@@ -94,28 +93,3 @@ def download_media():
             f.write(download_stream.readall())
 
 
-def upload_config():
-    """Upload admin configuration JSON to the media container."""
-    if not os.path.exists(CONFIG_JSON):
-        return None
-    service_client = _get_service_client()
-    container_name = os.environ.get('AZURE_MEDIA_CONTAINER', 'media')
-    container_client = _get_container_client(service_client, container_name)
-    with open(CONFIG_JSON, 'rb') as f:
-        container_client.upload_blob(name=os.path.basename(CONFIG_JSON), data=f, overwrite=True)
-    return os.path.basename(CONFIG_JSON)
-
-
-def download_config():
-    """Download admin configuration JSON from the media container if available."""
-    service_client = _get_service_client()
-    container_name = os.environ.get('AZURE_MEDIA_CONTAINER', 'media')
-    container_client = _get_container_client(service_client, container_name)
-    blob_client = container_client.get_blob_client(os.path.basename(CONFIG_JSON))
-    if not blob_client.exists():
-        raise RuntimeError('Config blob not found in Azure storage')
-    os.makedirs(DATA_DIR, exist_ok=True)
-    download_stream = blob_client.download_blob()
-    with open(CONFIG_JSON, 'wb') as f:
-        f.write(download_stream.readall())
-    return CONFIG_JSON
