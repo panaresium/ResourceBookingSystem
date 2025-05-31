@@ -592,11 +592,6 @@ def parse_simple_rrule(rule_str: str):
 def serve_index():
     return render_template("index.html")
 
-@app.route("/new_booking")
-@login_required
-def serve_new_booking():
-    return render_template("new_booking.html")
-
 @app.route("/resources")
 def serve_resources():
     return render_template("resources.html")
