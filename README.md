@@ -94,6 +94,9 @@ The database is excluded from version control, but the `azure_backup.py` script
 automatically uploads `data/site.db` to Azure File Share whenever its contents
 change.
 You should see messages indicating success.
+An additional JSON file `data/admin_config.json` stores floor map, resource,
+user and permission configuration. The initialization script creates this file
+if it is missing, and it is backed up to Azure along with uploaded media.
 Pass `force=True` if you want to **reset and wipe** existing data:
    ```python
    >>> init_db(force=True)
@@ -204,6 +207,7 @@ Use `azure_backup.py` to upload the SQLite database and uploaded images to an Az
 - `AZURE_DB_SHARE` – file share name for database backups (default `db-backups`)
 - `AZURE_MEDIA_SHARE` – file share name for uploaded images (default `media`)
 
+`data/admin_config.json` holds admin configuration for floor maps, resources, users and permissions. This JSON file is backed up together with `site.db` and uploaded images.
 
 Run the script with:
 ```bash

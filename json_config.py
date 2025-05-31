@@ -124,11 +124,13 @@ DEFAULT_CONFIG = {
     ]
 }
 
+
 def get_config_path():
     return CONFIG_FILE
 
 
 def load_config():
+
     os.makedirs(DATA_DIR, exist_ok=True)
     if not os.path.exists(CONFIG_FILE):
         return DEFAULT_CONFIG.copy()
@@ -147,7 +149,6 @@ def load_config():
     if changed:
         save_config(data)
     return data
-
 
 def save_config(data):
     os.makedirs(DATA_DIR, exist_ok=True)
