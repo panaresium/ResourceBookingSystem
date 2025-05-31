@@ -1723,7 +1723,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         <img src="${map.image_url}" alt="${map.name}" style="max-width: 200px; max-height: 150px; border: 1px solid #eee;">
                         <br>
                         <button class="select-map-for-areas-btn button" data-map-id="${map.id}" data-map-name="${map.name}" data-map-image-url="${map.image_url}">Define Areas</button>
-                    `; // Added "button" class
+                        <button class="delete-map-btn button btn-danger btn-sm" data-map-id="${map.id}" data-map-name="${map.name}" style="margin-left: 5px;">Delete Map</button>
+                    `; // Added "button" class and Delete Map button
                     mapsListUl.appendChild(listItem);
                 });
             } catch (error) {
@@ -1766,71 +1767,71 @@ document.addEventListener('DOMContentLoaded', function() {
         const selectedMapNameH3 = document.getElementById('selected-map-name');
         const selectedMapImageImg = document.getElementById('selected-map-image');
         const resourceToMapSelect = document.getElementById('resource-to-map');
-        const defineAreaForm = document.getElementById('define-area-form'); 
+        const defineAreaForm = document.getElementById('define-area-form');
         const hiddenFloorMapIdInput = document.getElementById('selected-floor-map-id');
         const areaDefinitionStatusDiv = document.getElementById('area-definition-status');
-        const bookingPermissionDropdown = document.getElementById('booking-permission'); 
+        const bookingPermissionDropdown = document.getElementById('booking-permission');
         const resourceActionsContainer = document.getElementById('resource-actions-container');
-        const authorizedUsersCheckboxContainer = document.getElementById('authorized-users-checkbox-container'); // Added
-        const authorizedRolesInput = document.getElementById('authorized-roles'); // Added
+        const authorizedUsersCheckboxContainer = document.getElementById('define-area-authorized-users-checkbox-container'); // Corrected ID
+        const authorizedRolesCheckboxContainer = document.getElementById('define-area-authorized-roles-checkbox-container'); // Corrected ID
 
 
         const drawingCanvas = document.getElementById('drawing-canvas');
-        let canvasCtx = null; 
+        let canvasCtx = null;
         let isDrawing = false;
         let startX, startY;
-        let currentDrawnRect = null; 
-        let existingMapAreas = []; 
-        let selectedAreaForEditing = null; 
+        let currentDrawnRect = null;
+        let existingMapAreas = [];
+        let selectedAreaForEditing = null;
 
         let isMovingArea = false;
         let isResizingArea = false;
-        let resizeHandle = null; 
-        let dragStartX, dragStartY; 
-        let initialAreaX, initialAreaY; 
-        let initialAreaWidth, initialAreaHeight; 
+        let resizeHandle = null;
+        let dragStartX, dragStartY;
+        let initialAreaX, initialAreaY;
+        let initialAreaWidth, initialAreaHeight;
 
-        const HANDLE_SIZE = 8; 
-        const HANDLE_COLOR = 'rgba(0, 0, 255, 0.7)'; 
-        const SELECTED_BORDER_COLOR = 'rgba(0, 0, 255, 0.9)'; 
+        const HANDLE_SIZE = 8;
+        const HANDLE_COLOR = 'rgba(0, 0, 255, 0.7)';
+        const SELECTED_BORDER_COLOR = 'rgba(0, 0, 255, 0.9)';
         const SELECTED_LINE_WIDTH = 2;
 
-        // Populate Users for Checkbox List (if container exists)
-        async function populateUserCheckboxes() {
-            if (!authorizedUsersCheckboxContainer) return;
-            authorizedUsersCheckboxContainer.innerHTML = '<em>Loading users...</em>';
+        // Populate Roles for Checkbox List in Define Area Form
+        async function populateDefineAreaRolesCheckboxes() {
+            if (!authorizedRolesCheckboxContainer) return;
+            authorizedRolesCheckboxContainer.innerHTML = '<em>Loading roles...</em>';
             try {
-                const users = await apiCall('/api/users'); // Assuming this endpoint exists
-                authorizedUsersCheckboxContainer.innerHTML = ''; // Clear loading message
-                if (users && users.length > 0) {
-                    users.forEach(user => {
+                const roles = await apiCall('/api/admin/roles'); // Assuming this endpoint exists
+                authorizedRolesCheckboxContainer.innerHTML = ''; // Clear loading message
+                if (roles && roles.length > 0) {
+                    roles.forEach(role => {
                         const div = document.createElement('div');
                         const checkbox = document.createElement('input');
                         checkbox.type = 'checkbox';
-                        checkbox.id = `user-${user.id}`;
-                        checkbox.value = user.id;
-                        checkbox.name = 'authorized_user_ids';
+                        checkbox.id = `define-area-role-${role.id}`;
+                        checkbox.value = role.id;
+                        checkbox.name = 'define_area_authorized_role_ids';
                         const label = document.createElement('label');
-                        label.htmlFor = `user-${user.id}`;
-                        label.textContent = user.username;
+                        label.htmlFor = `define-area-role-${role.id}`;
+                        label.textContent = role.name;
                         div.appendChild(checkbox);
                         div.appendChild(label);
-                        authorizedUsersCheckboxContainer.appendChild(div);
+                        authorizedRolesCheckboxContainer.appendChild(div);
                     });
                 } else {
-                    authorizedUsersCheckboxContainer.innerHTML = '<em>No users found.</em>';
+                    authorizedRolesCheckboxContainer.innerHTML = '<em>No roles found. Create roles in User Management.</em>';
                 }
             } catch (error) {
-                console.error("Failed to load users for checkboxes:", error);
-                authorizedUsersCheckboxContainer.innerHTML = '<em class="error">Could not load users.</em>';
+                console.error("Failed to load roles for define area checkboxes:", error);
+                authorizedRolesCheckboxContainer.innerHTML = '<em class="error">Could not load roles.</em>';
             }
         }
-        populateUserCheckboxes(); // Call when admin map section is initialized
+        populateDefineAreaRolesCheckboxes();
 
 
         async function fetchAndDrawExistingMapAreas(mapId) {
-            existingMapAreas = []; 
-            const defineAreasStatusDiv = document.getElementById('define-areas-status'); 
+            existingMapAreas = [];
+            const defineAreasStatusDiv = document.getElementById('define-areas-status');
             if (!defineAreasStatusDiv) {
                 console.warn("define-areas-status element not found for fetchAndDrawExistingMapAreas messages.");
             }
@@ -1840,13 +1841,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (data.mapped_resources && data.mapped_resources.length > 0) {
                     data.mapped_resources.forEach(resource => {
                         if (resource.map_coordinates && resource.map_coordinates.type === 'rect') {
-                            existingMapAreas.push({ 
+                            existingMapAreas.push({
                                 id: resource.id, resource_id: resource.id, name: resource.name,
                                 map_coordinates: resource.map_coordinates,
                                 booking_restriction: resource.booking_restriction,
                                 allowed_user_ids: resource.allowed_user_ids,
                                 roles: resource.roles, // Assuming roles is an array of objects [{id, name}, ...]
-                                status: resource.status, floor_map_id: resource.floor_map_id 
+                                status: resource.status, floor_map_id: resource.floor_map_id
                             });
                         }
                     });
@@ -1860,28 +1861,28 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (error) {
                 console.error('Error fetching existing map areas:', error.message);
             }
-            redrawCanvas(); 
+            redrawCanvas();
         }
 
         function redrawCanvas() {
             if (!canvasCtx) return;
             canvasCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
-    
+
             canvasCtx.font = "10px Arial";
             existingMapAreas.forEach(area => {
                 if (selectedAreaForEditing && selectedAreaForEditing.id === area.id) {
-                    return; 
+                    return;
                 }
                 if (area.map_coordinates && area.map_coordinates.type === 'rect') {
                     const coords = area.map_coordinates;
-                    canvasCtx.fillStyle = 'rgba(255, 0, 0, 0.1)';   
-                    canvasCtx.strokeStyle = 'rgba(255, 0, 0, 0.7)'; 
+                    canvasCtx.fillStyle = 'rgba(255, 0, 0, 0.1)';
+                    canvasCtx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
                     canvasCtx.lineWidth = 1;
 
                     canvasCtx.fillRect(coords.x, coords.y, coords.width, coords.height);
                     canvasCtx.strokeRect(coords.x, coords.y, coords.width, coords.height);
-                    
-                    canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.7)'; 
+
+                    canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
                     canvasCtx.textAlign = "center";
                     canvasCtx.textBaseline = "middle";
                     if (coords.width > 30 && coords.height > 10) {
@@ -1892,15 +1893,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (selectedAreaForEditing && selectedAreaForEditing.map_coordinates && selectedAreaForEditing.map_coordinates.type === 'rect') {
                 const coords = selectedAreaForEditing.map_coordinates;
-                
-                canvasCtx.fillStyle = 'rgba(0, 0, 255, 0.2)'; 
+
+                canvasCtx.fillStyle = 'rgba(0, 0, 255, 0.2)';
                 canvasCtx.strokeStyle = SELECTED_BORDER_COLOR;
                 canvasCtx.lineWidth = SELECTED_LINE_WIDTH;
-                
+
                 canvasCtx.fillRect(coords.x, coords.y, coords.width, coords.height);
                 canvasCtx.strokeRect(coords.x, coords.y, coords.width, coords.height);
 
-                canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.9)'; 
+                canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.9)';
                 canvasCtx.textAlign = "center";
                 canvasCtx.textBaseline = "middle";
                 if (coords.width > 30 && coords.height > 10) {
@@ -1909,26 +1910,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 canvasCtx.fillStyle = HANDLE_COLOR;
                 const halfHandle = HANDLE_SIZE / 2;
-                canvasCtx.fillRect(coords.x - halfHandle, coords.y - halfHandle, HANDLE_SIZE, HANDLE_SIZE); 
-                canvasCtx.fillRect(coords.x + coords.width - halfHandle, coords.y - halfHandle, HANDLE_SIZE, HANDLE_SIZE); 
-                canvasCtx.fillRect(coords.x - halfHandle, coords.y + coords.height - halfHandle, HANDLE_SIZE, HANDLE_SIZE); 
-                canvasCtx.fillRect(coords.x + coords.width - halfHandle, coords.y + coords.height - halfHandle, HANDLE_SIZE, HANDLE_SIZE); 
+                canvasCtx.fillRect(coords.x - halfHandle, coords.y - halfHandle, HANDLE_SIZE, HANDLE_SIZE);
+                canvasCtx.fillRect(coords.x + coords.width - halfHandle, coords.y - halfHandle, HANDLE_SIZE, HANDLE_SIZE);
+                canvasCtx.fillRect(coords.x - halfHandle, coords.y + coords.height - halfHandle, HANDLE_SIZE, HANDLE_SIZE);
+                canvasCtx.fillRect(coords.x + coords.width - halfHandle, coords.y + coords.height - halfHandle, HANDLE_SIZE, HANDLE_SIZE);
             }
-    
+
             if (currentDrawnRect && currentDrawnRect.width !== undefined) {
-                canvasCtx.strokeStyle = 'rgba(0, 0, 255, 0.7)'; 
-                canvasCtx.fillStyle = 'rgba(0, 0, 255, 0.1)';   
+                canvasCtx.strokeStyle = 'rgba(0, 0, 255, 0.7)';
+                canvasCtx.fillStyle = 'rgba(0, 0, 255, 0.1)';
                 canvasCtx.lineWidth = 2;
-                
+
                 let x = currentDrawnRect.x;
                 let y = currentDrawnRect.y;
                 let w = currentDrawnRect.width;
                 let h = currentDrawnRect.height;
-    
+
                 if (w < 0) { x = currentDrawnRect.x + w; w = -w; }
                 if (h < 0) { y = currentDrawnRect.y + h; h = -h; }
-                
-                canvasCtx.fillRect(x,y,w,h); 
+
+                canvasCtx.fillRect(x,y,w,h);
                 canvasCtx.strokeRect(x, y, w, h);
             }
         }
@@ -1946,6 +1947,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const payload = {
                 floor_map_id: selectedAreaForEditing.floor_map_id, // Should be correct from selectedAreaForEditing
                 coordinates: { type: 'rect', x: coords.x, y: coords.y, width: coords.width, height: coords.height }
+                // No need to send booking_restriction, allowed_user_ids, role_ids here
+                // as this function is only for updating geometry after drag/resize.
+                // Those are handled by the main form submission.
             };
             try {
                 await apiCall(
@@ -1966,7 +1970,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!resourceToMapSelect) return;
 
             try {
-                const resources = await apiCall('/api/resources', {}, defineAreasStatusDiv); 
+                const resources = await apiCall('/api/admin/resources', {}, defineAreasStatusDiv); // Changed to admin resources endpoint
                 resourceToMapSelect.innerHTML = '<option value="">-- Select a Resource to Map --</option>';
                 let count = 0;
                 if (resources && resources.length > 0) {
@@ -1975,10 +1979,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (!r.floor_map_id || !r.map_coordinates || r.floor_map_id === parseInt(currentMapId)) {
                             count++;
                             const opt = new Option(`${r.name} (ID: ${r.id}) - Status: ${r.status || 'N/A'}`, r.id);
-                            Object.assign(opt.dataset, { 
+                            Object.assign(opt.dataset, {
                                 resourceId: r.id, resourceName: r.name, resourceStatus: r.status || 'draft',
                                 bookingRestriction: r.booking_restriction || "",
-                                allowedUserIds: r.allowed_user_ids || "", 
+                                allowedUserIds: r.allowed_user_ids || "",
                                 roleIds: (r.roles || []).map(role => role.id).join(','), // Store role IDs
                                 imageUrl: r.image_url || "",
                                 isUnderMaintenance: r.is_under_maintenance ? "true" : "false",
@@ -2013,7 +2017,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         selectedMapImageImg.src = mapImageUrl;
                         selectedMapImageImg.alt = mapName;
                     }
-                    if (hiddenFloorMapIdInput) hiddenFloorMapIdInput.value = mapId; 
+                    if (hiddenFloorMapIdInput) hiddenFloorMapIdInput.value = mapId;
 
                     if (resourceToMapSelect) await populateResourcesForMapping(mapId);
                     if (defineAreasSection) defineAreasSection.scrollIntoView({ behavior: 'smooth' });
@@ -2025,14 +2029,14 @@ document.addEventListener('DOMContentLoaded', function() {
                             canvasCtx = drawingCanvas.getContext('2d');
                             canvasCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
                             isDrawing = false;
-                            currentDrawnRect = null; 
-                            
-                            const currentMapIdForAreas = hiddenFloorMapIdInput.value; 
+                            currentDrawnRect = null;
+
+                            const currentMapIdForAreas = hiddenFloorMapIdInput.value;
                             if (currentMapIdForAreas) {
-                                fetchAndDrawExistingMapAreas(currentMapIdForAreas); 
+                                fetchAndDrawExistingMapAreas(currentMapIdForAreas);
                             } else {
-                                existingMapAreas = []; 
-                                redrawCanvas(); 
+                                existingMapAreas = [];
+                                redrawCanvas();
                             }
 
                             drawingCanvas.onmousedown = function(event) {
@@ -2064,55 +2068,54 @@ document.addEventListener('DOMContentLoaded', function() {
                                         redrawCanvas(); return;
                                     }
                                 }
-                        
+
                                 let clickedOnExistingArea = false;
                                 for (const area of existingMapAreas) {
                                     if (area.map_coordinates && area.map_coordinates.type === 'rect') {
                                         const coords = area.map_coordinates;
                                         if (clickX >= coords.x && clickX <= coords.x + coords.width && clickY >= coords.y && clickY <= coords.y + coords.height) {
-                                            selectedAreaForEditing = area; isDrawing = false; currentDrawnRect = null; clickedOnExistingArea = true;
+                                            selectedAreaForEditing = area;
+                                            console.log('Area selected:', JSON.parse(JSON.stringify(selectedAreaForEditing))); // DEBUG
+                                            isDrawing = false; currentDrawnRect = null; clickedOnExistingArea = true;
                                             if (editDeleteButtonsDiv) editDeleteButtonsDiv.style.display = 'block';
-                                            
+
                                             updateCoordinateInputs(coords); // Update X,Y,W,H inputs
                                             if (resourceToMapSelect) resourceToMapSelect.value = area.resource_id; // Select resource in dropdown
                                             if (bookingPermissionDropdown) bookingPermissionDropdown.value = area.booking_restriction || "";
-                                            
-                                            const allowedUserIdsArr = (area.allowed_user_ids || "").split(',').filter(id => id.trim() !== '');
-                                            if(authorizedUsersCheckboxContainer) {
-                                                authorizedUsersCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-                                                    cb.checked = allowedUserIdsArr.includes(cb.value);
+
+                                            // const allowedUserIdsArr = (area.allowed_user_ids || "").split(',').filter(id => id.trim() !== '');
+                                            // if(authorizedUsersCheckboxContainer) { // This container is for defining new areas, not editing existing ones directly from map click
+                                            // }
+                                            if (authorizedRolesCheckboxContainer) { // Populate for define area form
+                                                const selectedRoleIds = (area.roles || []).map(r => String(r.id));
+                                                authorizedRolesCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                                                    cb.checked = selectedRoleIds.includes(cb.value);
                                                 });
                                             }
-                                            if(authorizedRolesInput) { // Assuming roles is array of {id, name}
-                                                 authorizedRolesInput.value = (area.roles || []).map(r => r.id).join(',');
-                                            }
-
-                                            resourceToMapSelect.dispatchEvent(new Event('change')); 
-                                            break; 
+                                            resourceToMapSelect.dispatchEvent(new Event('change'));
+                                            break;
                                         }
                                     }
                                 }
-                        
-                                if (!clickedOnExistingArea) { 
-                                    selectedAreaForEditing = null; 
+
+                                if (!clickedOnExistingArea) {
+                                    selectedAreaForEditing = null;
                                     if (editDeleteButtonsDiv) editDeleteButtonsDiv.style.display = 'none';
                                     isDrawing = true; startX = clickX; startY = clickY;
                                     currentDrawnRect = { x: startX, y: startY, width: 0, height: 0 };
-                                    
+
                                     const defineAreaFormElement = document.getElementById('define-area-form');
                                     if(defineAreaFormElement) {
-                                        defineAreaFormElement.reset(); 
+                                        defineAreaFormElement.reset();
                                         const submitButton = defineAreaFormElement.querySelector('button[type="submit"]');
                                         if (submitButton) submitButton.textContent = 'Save New Area Mapping';
-                                        // Clear user/role selections manually if reset() doesn't
-                                        if(authorizedUsersCheckboxContainer) authorizedUsersCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
-                                        if(authorizedRolesInput) authorizedRolesInput.value = '';
+                                        if(authorizedRolesCheckboxContainer) authorizedRolesCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
                                     }
-                                    if (resourceToMapSelect) resourceToMapSelect.value = ''; 
+                                    if (resourceToMapSelect) resourceToMapSelect.value = '';
                                     if (bookingPermissionDropdown) bookingPermissionDropdown.value = "";
                                     resourceToMapSelect.dispatchEvent(new Event('change')); // Update resource actions UI
                                 }
-                                redrawCanvas(); 
+                                redrawCanvas();
                             };
 
                             drawingCanvas.onmousemove = function(event) {
@@ -2124,7 +2127,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     const deltaX = currentX - dragStartX; const deltaY = currentY - dragStartY;
                                     const coords = selectedAreaForEditing.map_coordinates;
                                     coords.x = initialAreaX + deltaX; coords.y = initialAreaY + deltaY;
-                                    updateCoordinateInputs(coords); currentDrawnRect = { ...coords }; 
+                                    updateCoordinateInputs(coords); currentDrawnRect = { ...coords };
                                     redrawCanvas();
                                 } else if (isResizingArea && selectedAreaForEditing) {
                                     const deltaX = currentX - dragStartX; const deltaY = currentY - dragStartY;
@@ -2163,7 +2166,41 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     };
                     if (selectedMapImageImg.complete && selectedMapImageImg.src && selectedMapImageImg.src !== 'data:,') {
-                        selectedMapImageImg.onload(); 
+                        selectedMapImageImg.onload();
+                    }
+                } else if (event.target.classList.contains('delete-map-btn')) {
+                    const button = event.target;
+                    const mapId = button.dataset.mapId;
+                    const mapName = button.dataset.mapName;
+
+                    if (confirm(`Are you sure you want to delete the map "${mapName}" (ID: ${mapId})? This will also unmap any resources on it.`)) {
+                        showLoading(adminMapsListStatusDiv, `Deleting map ${mapName}...`);
+                        try {
+                            await apiCall(`/api/admin/maps/${mapId}`, { method: 'DELETE' }, adminMapsListStatusDiv);
+                            showSuccess(adminMapsListStatusDiv, `Map "${mapName}" deleted successfully.`);
+                            fetchAndDisplayMaps(); // Refresh the list
+
+                            // If the deleted map was being edited, hide the define areas section
+                            if (defineAreasSection.style.display !== 'none' && hiddenFloorMapIdInput.value === mapId) {
+                                defineAreasSection.style.display = 'none';
+                                if (selectedMapNameH3) selectedMapNameH3.textContent = '';
+                                if (selectedMapImageImg) { selectedMapImageImg.src = '#'; selectedMapImageImg.alt = 'No map selected'; }
+                                if (canvasCtx) canvasCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+                                if (hiddenFloorMapIdInput) hiddenFloorMapIdInput.value = '';
+                                if (resourceToMapSelect) resourceToMapSelect.innerHTML = '<option value="">-- Select a Resource to Map --</option>';
+                                if (defineAreaForm) defineAreaForm.reset();
+                                if (areaDefinitionStatusDiv) areaDefinitionStatusDiv.innerHTML = '';
+                                existingMapAreas = [];
+                                currentDrawnRect = null;
+                                selectedAreaForEditing = null;
+                                const editDelBtns = document.getElementById('edit-delete-buttons');
+                                if (editDelBtns) editDelBtns.style.display = 'none';
+                                if (resourceActionsContainer) resourceActionsContainer.innerHTML = '<p><em>Select a resource to see its status or actions.</em></p>';
+                            }
+                        } catch (error) {
+                            // apiCall already shows the error in adminMapsListStatusDiv
+                            console.error(`Error deleting map ${mapName}:`, error);
+                        }
                     }
                 }
             });
@@ -2249,36 +2286,39 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (deleteSelectedAreaBtn) {
             deleteSelectedAreaBtn.addEventListener('click', async function() {
-                if (!selectedAreaForEditing || !selectedAreaForEditing.id) { // Check against resource_id
-                    alert("No area selected for deletion, or selected area has no resource ID."); return;
+                console.log('Attempting to delete area. Current selectedAreaForEditing:', JSON.parse(JSON.stringify(selectedAreaForEditing || {}))); // DEBUG
+                if (!selectedAreaForEditing || !selectedAreaForEditing.id) {
+                    alert("No area selected for deletion, or selected area has no valid resource ID."); return;
                 }
                 const resourceName = selectedAreaForEditing.name || `ID: ${selectedAreaForEditing.id}`;
                 if (!confirm(`Are you sure you want to remove the map mapping for resource: ${resourceName}?`)) return;
     
                 showLoading(areaDefinitionStatusDiv, `Deleting mapping for ${resourceName}...`);
                 try {
-                    // Using selectedAreaForEditing.id which should be the resource_id
+                    const resourceIdForDeletion = selectedAreaForEditing.id; // This should be the resource_id
                     const responseData = await apiCall(
-                        `/api/admin/resources/${selectedAreaForEditing.id}/map_info`, 
-                        { method: 'DELETE' }, 
-                        areaDefinitionStatusDiv 
+                        `/api/admin/resources/${resourceIdForDeletion}/map_info`,
+                        { method: 'DELETE' },
+                        areaDefinitionStatusDiv
                     );
                     showSuccess(areaDefinitionStatusDiv, responseData.message || `Mapping for '${resourceName}' deleted.`);
-                    selectedAreaForEditing = null; 
+                    selectedAreaForEditing = null;
                     const btnsDiv = document.getElementById('edit-delete-buttons');
                     if(btnsDiv) btnsDiv.style.display = 'none';
-                    if(defineAreaForm) defineAreaForm.reset(); 
-                    if(resourceToMapSelect) resourceToMapSelect.value = ''; 
-                    if(bookingPermissionDropdown) bookingPermissionDropdown.value = ""; 
-                    currentDrawnRect = null; 
+                    if(defineAreaForm) defineAreaForm.reset();
+                    if(resourceToMapSelect) resourceToMapSelect.value = '';
+                    if(bookingPermissionDropdown) bookingPermissionDropdown.value = "";
+                    if (authorizedRolesCheckboxContainer) authorizedRolesCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+                    currentDrawnRect = null;
                     const mapIdRefresh = hiddenFloorMapIdInput.value;
                     if (mapIdRefresh) {
-                        await fetchAndDrawExistingMapAreas(mapIdRefresh); 
-                        await populateResourcesForMapping(mapIdRefresh);   
+                        await fetchAndDrawExistingMapAreas(mapIdRefresh);
+                        await populateResourcesForMapping(mapIdRefresh);
                     }
-                    redrawCanvas(); 
+                    redrawCanvas();
                 } catch (error) {
                     console.error('Error deleting map mapping:', error.message);
+                     // apiCall should handle displaying the error in areaDefinitionStatusDiv
                 }
             });
         }
@@ -2288,24 +2328,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!selectedAreaForEditing || !selectedAreaForEditing.id || !selectedAreaForEditing.map_coordinates) {
                     alert("No area selected for editing, or selected area is missing data."); return;
                 }
-                if (resourceToMapSelect) resourceToMapSelect.value = selectedAreaForEditing.id; // resource_id
+                if (resourceToMapSelect) resourceToMapSelect.value = selectedAreaForEditing.id;
                 const coords = selectedAreaForEditing.map_coordinates;
                 if (coords.type === 'rect') {
                     updateCoordinateInputs(coords);
-                    if (bookingPermissionDropdown) bookingPermissionDropdown.value = selectedAreaForEditing.booking_restriction || ""; 
+                    if (bookingPermissionDropdown) bookingPermissionDropdown.value = selectedAreaForEditing.booking_restriction || "";
                     
-                    const allowedUserIdsArr = (selectedAreaForEditing.allowed_user_ids || "").split(',').filter(id => id.trim() !== '');
-                     if(authorizedUsersCheckboxContainer) {
-                        authorizedUsersCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-                            cb.checked = allowedUserIdsArr.includes(cb.value);
+                    // const allowedUserIdsArr = (selectedAreaForEditing.allowed_user_ids || "").split(',').filter(id => id.trim() !== '');
+                    // if(authorizedUsersCheckboxContainer) { // For define-area form, not directly applicable here
+                    // }
+                    if (authorizedRolesCheckboxContainer) { // Populate for define area form
+                        const selectedRoleIds = (selectedAreaForEditing.roles || []).map(r => String(r.id));
+                        authorizedRolesCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                            cb.checked = selectedRoleIds.includes(cb.value);
                         });
-                    }
-                    if(authorizedRolesInput) {
-                        authorizedRolesInput.value = (selectedAreaForEditing.roles || []).map(r => r.id).join(',');
                     }
 
                     currentDrawnRect = { ...coords };
-                    redrawCanvas(); 
+                    redrawCanvas();
                 } else {
                     alert("Cannot edit non-rectangular areas with this form.");
                     if(defineAreaForm) defineAreaForm.reset(); currentDrawnRect = null; redrawCanvas(); return;
