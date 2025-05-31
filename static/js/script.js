@@ -719,7 +719,24 @@ document.addEventListener('DOMContentLoaded', function() {
                     {}, 
                     calendarStatusMessageDiv 
                 );
-                updateCalendarDisplay(bookedSlots, dateString, currentResourceDetails);
+
+                let currentUserDailyBookings = [];
+                const loggedInUsername = sessionStorage.getItem('loggedInUserUsername');
+                if (loggedInUsername) {
+                    try {
+                        // Fetch current user's bookings for the given date to check for overlaps on other resources
+                        currentUserDailyBookings = await apiCall(
+                            `/api/bookings/my_bookings_for_date?date=${dateString}`,
+                            {},
+                            null // Or calendarStatusMessageDiv if messages are desired for this secondary call
+                        );
+                    } catch (userBookingError) {
+                        console.warn(`Could not fetch current user's bookings for ${dateString}:`, userBookingError.message);
+                        // Non-critical, proceed with empty currentUserDailyBookings
+                    }
+                }
+                // Pass currentResourceDetails as the third argument and currentUserDailyBookings as the fourth
+                updateCalendarDisplay(bookedSlots, dateString, currentResourceDetails, currentUserDailyBookings);
             } catch (error) {
                 console.error(`Error fetching availability for resource ${resourceId} on ${dateString}:`, error.message);
                 clearCalendar(true); 
@@ -787,7 +804,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        function updateCalendarDisplay(bookedSlots, dateString, currentResourceDetails) {
+        function updateCalendarDisplay(bookedSlots, dateString, currentResourceDetails, currentUserDailyBookings = []) {
             const calendarCells = calendarTable.querySelectorAll('tbody td[data-time-slot]');
             const currentUserId = parseInt(sessionStorage.getItem('loggedInUserId'), 10);
             const currentUserIsAdmin = sessionStorage.getItem('loggedInUserIsAdmin') === 'true';
@@ -830,16 +847,42 @@ document.addEventListener('DOMContentLoaded', function() {
                         cellIsClickable = false;
                     }
                 }
+
+                // New check: If the slot is still available for the current resource,
+                // check if the user has another booking elsewhere at this time.
+                if (cellIsClickable && currentUserDailyBookings && currentUserDailyBookings.length > 0) {
+                    for (const userBooking of currentUserDailyBookings) {
+                        // userBooking times are 'HH:MM:SS'
+                        const [u_sH, u_sM] = userBooking.start_time.split(':').map(Number);
+                        const [u_eH, u_eM] = userBooking.end_time.split(':').map(Number);
+
+                        // Create Date objects for comparison, using the cell's date part
+                        const userBookingStartDateTime = new Date(cellStartDateTime);
+                        userBookingStartDateTime.setHours(u_sH, u_sM, 0, 0); // Set hours, minutes, seconds, ms
+                        const userBookingEndDateTime = new Date(cellStartDateTime);
+                        userBookingEndDateTime.setHours(u_eH, u_eM, 0, 0);
+
+                        // Check for overlap
+                        if (userBookingStartDateTime < cellEndDateTime && userBookingEndDateTime > cellStartDateTime) {
+                            // User has an overlapping booking on another resource
+                            cellClass = 'booked'; // Mark as booked (or a new class like 'user-booked-elsewhere')
+                            cellText = `Booked (${userBooking.resource_name})`; // Indicate the conflict
+                            cellIsClickable = false;
+                            break; // Found a conflict for this cell, no need to check further user bookings
+                        }
+                    }
+                }
                 
                 let new_cell = cell.cloneNode(false); 
                 new_cell.textContent = cellText; 
                 new_cell.className = cellClass;  
                 new_cell.dataset.timeSlot = cellTimeSlot; 
                 cell.parentNode.replaceChild(new_cell, cell);
-                cell = new_cell; 
+                cell = new_cell; // Re-assign cell to the new cloned node
 
                 if (cellIsClickable) { 
                     cell.addEventListener('click', (event) => {
+                        // Ensure currentResourceDetails is correctly passed or retrieved for handleAvailableSlotClick
                         const currentResourceIdFromDropdown = currentResourceDetails ? currentResourceDetails.id : roomSelectDropdown.value;
                         const currentDateStringFromPicker = availabilityDateInputCalendar.value;
                         handleAvailableSlotClick(event, currentResourceIdFromDropdown, currentDateStringFromPicker);

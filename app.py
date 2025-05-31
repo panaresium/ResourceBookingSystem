@@ -3186,6 +3186,57 @@ def get_my_bookings():
         app.logger.exception(f"Error fetching bookings for user '{current_user.username}':")
         return jsonify({'error': 'Failed to fetch your bookings due to a server error.'}), 500
 
+
+@app.route('/api/bookings/my_bookings_for_date', methods=['GET'])
+@login_required
+def get_my_bookings_for_date():
+    """
+    Fetches bookings for the currently authenticated user for a specific date.
+    Expects a 'date' query parameter in 'YYYY-MM-DD' format.
+    """
+    date_str = request.args.get('date')
+    if not date_str:
+        app.logger.warning(f"User '{current_user.username}' called my_bookings_for_date without a date parameter.")
+        return jsonify({'error': 'Missing date query parameter. Please provide a date in YYYY-MM-DD format.'}), 400
+
+    try:
+        target_date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        app.logger.warning(f"User '{current_user.username}' provided invalid date format '{date_str}' for my_bookings_for_date.")
+        return jsonify({'error': 'Invalid date format. Please use YYYY-MM-DD.'}), 400
+
+    try:
+        user_bookings_on_date = db.session.query(
+                Booking.id, # Added booking ID
+                Booking.title, # Added booking title
+                Booking.resource_id,
+                Resource.name.label('resource_name'),
+                Booking.start_time,
+                Booking.end_time
+            ).join(Resource, Booking.resource_id == Resource.id)\
+            .filter(Booking.user_name == current_user.username)\
+            .filter(func.date(Booking.start_time) == target_date_obj)\
+            .order_by(Booking.start_time.asc())\
+            .all()
+
+        bookings_list = []
+        for booking_row in user_bookings_on_date:
+            bookings_list.append({
+                'booking_id': booking_row.id,
+                'title': booking_row.title,
+                'resource_id': booking_row.resource_id,
+                'resource_name': booking_row.resource_name,
+                'start_time': booking_row.start_time.strftime('%H:%M:%S'),
+                'end_time': booking_row.end_time.strftime('%H:%M:%S')
+            })
+
+        app.logger.info(f"User '{current_user.username}' fetched their bookings for date {date_str}. Count: {len(bookings_list)}")
+        return jsonify(bookings_list), 200
+
+    except Exception as e:
+        app.logger.exception(f"Error fetching bookings for user '{current_user.username}' on date {date_str}:")
+        return jsonify({'error': 'Failed to fetch your bookings for the specified date due to a server error.'}), 500
+
 @app.route('/api/bookings/calendar', methods=['GET'])
 @login_required
 def bookings_calendar():
