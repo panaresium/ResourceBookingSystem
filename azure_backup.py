@@ -1,8 +1,8 @@
 
 import os
-import json
 import hashlib
 import logging
+import sqlite3
 from datetime import datetime
 from azure.core.exceptions import ResourceNotFoundError
 
@@ -19,8 +19,7 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
 FLOOR_MAP_UPLOADS = os.path.join(STATIC_DIR, 'floor_map_uploads')
 RESOURCE_UPLOADS = os.path.join(STATIC_DIR, 'resource_uploads')
-HASH_FILE = os.path.join(DATA_DIR, 'backup_hashes.json')
-CONFIG_JSON = os.path.join(DATA_DIR, 'admin_config.json')
+HASH_DB = os.path.join(DATA_DIR, 'backup_hashes.db')
 
 # Module-level logger used for backup operations
 logger = logging.getLogger(__name__)
@@ -58,20 +57,32 @@ def _client_exists(client):
             continue
     return False
 
+def _get_hash_conn():
+    os.makedirs(os.path.dirname(HASH_DB), exist_ok=True)
+    conn = sqlite3.connect(HASH_DB)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS backup_hashes (filename TEXT PRIMARY KEY, filehash TEXT)"
+    )
+    return conn
+
+
 def _load_hashes():
-    if os.path.exists(HASH_FILE):
-        with open(HASH_FILE, 'r', encoding='utf-8') as f:
-            try:
-                return json.load(f)
-            except Exception:
-                return {}
-    return {}
+    conn = _get_hash_conn()
+    cur = conn.execute("SELECT filename, filehash FROM backup_hashes")
+    hashes = {row[0]: row[1] for row in cur.fetchall()}
+    conn.close()
+    return hashes
 
 
 def _save_hashes(hashes):
-    os.makedirs(os.path.dirname(HASH_FILE), exist_ok=True)
-    with open(HASH_FILE, 'w', encoding='utf-8') as f:
-        json.dump(hashes, f)
+    conn = _get_hash_conn()
+    conn.execute("DELETE FROM backup_hashes")
+    conn.executemany(
+        "INSERT OR REPLACE INTO backup_hashes(filename, filehash) VALUES (?, ?)",
+        list(hashes.items()),
+    )
+    conn.commit()
+    conn.close()
 
 
 def _hash_file(path):
@@ -201,14 +212,6 @@ def backup_if_changed():
                 hashes[rel] = f_hash
                 logger.info("Uploaded media file '%s' to share '%s'", rel, media_share)
 
-    # Admin configuration JSON backup
-    if os.path.exists(CONFIG_JSON):
-        cfg_hash = _hash_file(CONFIG_JSON)
-        cfg_rel = os.path.basename(CONFIG_JSON)
-        if hashes.get(cfg_rel) != cfg_hash:
-            upload_file(media_client, CONFIG_JSON, cfg_rel)
-            hashes[cfg_rel] = cfg_hash
-            logger.info("Uploaded config '%s' to share '%s'", cfg_rel, media_share)
 
     _save_hashes(hashes)
 
@@ -233,8 +236,6 @@ def restore_from_share():
                 file_path = f"{prefix}/{item['name']}"
                 dest = os.path.join(STATIC_DIR, prefix, item['name'])
                 download_file(media_client, file_path, dest)
-        # Admin configuration JSON
-        download_file(media_client, os.path.basename(CONFIG_JSON), CONFIG_JSON)
 
 
 def main():

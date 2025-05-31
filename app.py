@@ -515,17 +515,6 @@ slack_log = []
 
 teams_log = []
 
-from sqlalchemy import event
-from json_config import export_admin_config
-
-@event.listens_for(db.session, 'after_commit')
-def _sync_config_after_commit(session):
-    """Export admin configuration to JSON after each commit."""
-    try:
-        export_admin_config(db, User, Role, FloorMap, Resource)
-    except Exception as exc:
-        app.logger.error('Failed to export admin configuration after commit')
-        app.logger.exception(exc)
 
 def send_email(to_address: str, subject: str, body: str):
     """Log an outgoing email (placeholder for real email delivery)."""

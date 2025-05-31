@@ -25,10 +25,8 @@ if AZURE_PRIMARY_STORAGE:
         from azure_storage import (
             download_database,
             download_media,
-            download_config,
             upload_database,
             upload_media,
-            upload_config,
         )
     except Exception as exc:  # pragma: no cover - optional
         print(f"Warning: Azure storage unavailable: {exc}")
@@ -117,7 +115,6 @@ def create_required_directories():
         print("Downloading media from Azure storage...")
         try:
             download_media()
-            download_config()
         except Exception as exc:
             print(f"Failed to download media from Azure: {exc}")
 
@@ -357,13 +354,6 @@ def init_db(force=False):
             db.session.rollback()
             app.logger.exception("Error committing deletions during DB initialization:")
 
-        # Populate admin configuration from JSON
-        try:
-            import_admin_data(db, User, Role, FloorMap, Resource)
-            app.logger.info("Imported admin configuration from JSON.")
-        except Exception as e:
-            db.session.rollback()
-            app.logger.exception("Error importing admin config during DB initialization:")
 
         admin_user_for_perms = User.query.filter_by(username='admin').first()
         standard_user_for_perms = User.query.filter_by(username='user').first()
@@ -513,19 +503,12 @@ def init_db(force=False):
             )
 
         app.logger.info("Database initialization script completed.")
-        # Export current admin configuration to JSON
-        try:
-#            export_admin_config(db, User, Role, FloorMap, Resource)
-            app.logger.info("Exported admin configuration to JSON.")
-        except Exception as e:
-            app.logger.exception("Error exporting admin config after initialization:")
 
         if AZURE_PRIMARY_STORAGE:
             print("Uploading database and media to Azure storage...")
             try:
                 upload_database(versioned=False)
                 upload_media()
-                upload_config()
             except Exception as exc:
                 print(f"Failed to upload data to Azure: {exc}")
 
