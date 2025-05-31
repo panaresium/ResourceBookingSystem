@@ -200,6 +200,7 @@ Use `azure_backup.py` to upload the SQLite database and uploaded images to an Az
 - `AZURE_DB_SHARE` – file share name for database backups (default `db-backups`)
 - `AZURE_MEDIA_SHARE` – file share name for uploaded images (default `media`)
 
+`data/admin_config.json` holds admin configuration for floor maps, resources, users and permissions. This JSON file is backed up together with `site.db` and uploaded images.
 
 Run the script with:
 ```bash
