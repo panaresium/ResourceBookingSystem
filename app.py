@@ -588,9 +588,15 @@ def parse_simple_rrule(rule_str: str):
     return freq, max(1, count)
 
 @app.route("/")
-@login_required
 def serve_index():
-    return render_template("index.html")
+    if current_user.is_authenticated:
+        upcoming_bookings = Booking.query.filter(
+            Booking.user_name == current_user.username, # Assuming bookings are linked by username
+            Booking.start_time > datetime.utcnow()
+        ).order_by(Booking.start_time.asc()).all()
+        return render_template("index.html", upcoming_bookings=upcoming_bookings)
+    else:
+        return render_template("login.html")
 
 @app.route("/resources")
 def serve_resources():
