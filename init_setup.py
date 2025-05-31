@@ -359,7 +359,7 @@ def init_db(force=False):
             admin_role = Role(
                 name="Administrator",
                 description="Full system access",
-                permissions="all_permissions,view_analytics",
+                permissions="all_permissions,view_analytics,manage_bookings",
             )
             standard_role = Role(
                 name="StandardUser",

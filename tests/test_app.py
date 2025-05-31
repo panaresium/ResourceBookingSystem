@@ -1175,5 +1175,160 @@ class TestUserImportExport(AppTests):
         self.assertIsNone(User.query.get(u2.id))
 
 
+class TestAdminBookings(AppTests):
+    def _create_admin_user(self, username="adminbookings", email_ext="adminbookings"):
+        admin_user = User(username=username, email=f"{email_ext}@example.com", is_admin=True)
+        admin_user.set_password("adminpass")
+        # Add 'manage_bookings' permission to this admin user via a role
+        admin_role = db.session.query(Role).filter_by(name="Administrator").first()
+        if not admin_role:
+            admin_role = Role(name="Administrator", permissions="all_permissions,manage_bookings")
+            db.session.add(admin_role)
+        admin_user.roles.append(admin_role)
+        db.session.add(admin_user)
+        db.session.commit()
+        return admin_user
+
+    def test_admin_bookings_page_access_permission(self):
+        """Test access permissions for the admin bookings page."""
+        # Unauthenticated
+        response_unauth = self.client.get('/admin/bookings', follow_redirects=False)
+        self.assertEqual(response_unauth.status_code, 302)
+        self.assertIn('/login', response_unauth.location)
+
+        # Non-admin login (testuser is not admin by default)
+        self.login('testuser', 'password')
+        response_non_admin = self.client.get('/admin/bookings', follow_redirects=False)
+        self.assertEqual(response_non_admin.status_code, 403)
+        self.logout()
+
+        # Admin login
+        admin = self._create_admin_user()
+        self.login(admin.username, 'adminpass')
+        response_admin = self.client.get('/admin/bookings')
+        self.assertEqual(response_admin.status_code, 200)
+        self.assertIn(b'Admin Bookings Management', response_admin.data) # Check for page title/heading
+        self.logout()
+
+    def test_admin_bookings_page_displays_bookings(self):
+        """Test that the admin bookings page displays created bookings."""
+        admin = self._create_admin_user()
+        self.login(admin.username, 'adminpass')
+
+        # Create a second user for variety
+        user2 = User(username='testuser2', email='test2@example.com')
+        user2.set_password('password2')
+        db.session.add(user2)
+        db.session.commit()
+
+        booking1 = self._create_booking(user_name='testuser', resource_id=self.resource1.id, start_offset_hours=1, title="Booking Alpha")
+        booking2 = self._create_booking(user_name='testuser2', resource_id=self.resource2.id, start_offset_hours=2, title="Booking Beta")
+
+        response = self.client.get('/admin/bookings')
+        self.assertEqual(response.status_code, 200)
+        html_content = response.data.decode('utf-8')
+
+        self.assertIn(booking1.title, html_content)
+        self.assertIn(booking1.user_name, html_content) # testuser
+        self.assertIn(self.resource1.name, html_content) # Room A
+
+        self.assertIn(booking2.title, html_content)
+        self.assertIn(booking2.user_name, html_content) # testuser2
+        self.assertIn(self.resource2.name, html_content) # Room B
+        self.logout()
+
+    def test_admin_cancel_booking_permission(self):
+        """Test permissions for the admin cancel booking API endpoint."""
+        booking = self._create_booking(user_name='testuser', resource_id=self.resource1.id, start_offset_hours=1)
+
+        # Unauthenticated
+        response_unauth = self.client.post(f'/api/admin/bookings/{booking.id}/cancel')
+        self.assertEqual(response_unauth.status_code, 401) # Expect 401 for API if not logged in
+
+        # Non-admin login
+        self.login('testuser', 'password')
+        response_non_admin = self.client.post(f'/api/admin/bookings/{booking.id}/cancel')
+        self.assertEqual(response_non_admin.status_code, 403)
+        self.logout()
+
+        # Admin with permission should be tested in functionality test
+
+    def test_admin_cancel_booking_functionality(self):
+        """Test functionality of admin cancelling a booking."""
+        admin = self._create_admin_user()
+        self.login(admin.username, 'adminpass')
+
+        booking_user = User.query.filter_by(username='testuser').first()
+        booking = self._create_booking(user_name=booking_user.username, resource_id=self.resource1.id, start_offset_hours=1, title="To Be Cancelled")
+        initial_status = booking.status
+        self.assertNotEqual(initial_status, 'cancelled')
+
+        response = self.client.post(f'/api/admin/bookings/{booking.id}/cancel')
+        self.assertEqual(response.status_code, 200)
+        json_data = response.get_json()
+        self.assertTrue(json_data.get('message'), 'Booking cancelled successfully')
+        self.assertEqual(json_data.get('new_status'), 'cancelled')
+
+        # Verify booking status in DB
+        updated_booking = Booking.query.get(booking.id)
+        self.assertEqual(updated_booking.status, 'cancelled')
+
+        # Verify audit log
+        audit_log = AuditLog.query.filter(
+            AuditLog.action == "ADMIN_CANCEL_BOOKING",
+            AuditLog.user_id == admin.id
+        ).order_by(AuditLog.id.desc()).first()
+
+        self.assertIsNotNone(audit_log)
+        self.assertIn(f"Admin '{admin.username}' cancelled booking ID {booking.id}", audit_log.details)
+        self.assertIn(f"Booked by: '{booking_user.username}'", audit_log.details)
+        self.assertIn(f"Resource: '{self.resource1.name}'", audit_log.details)
+        self.assertIn(f"Title: '{booking.title}'", audit_log.details)
+        self.logout()
+
+    def test_admin_cancel_already_cancelled_booking(self):
+        """Test attempting to cancel an already cancelled booking by admin."""
+        admin = self._create_admin_user()
+        self.login(admin.username, 'adminpass')
+
+        booking = self._create_booking(user_name='testuser', resource_id=self.resource1.id, start_offset_hours=1)
+
+        # First cancellation
+        response_first_cancel = self.client.post(f'/api/admin/bookings/{booking.id}/cancel')
+        self.assertEqual(response_first_cancel.status_code, 200)
+        self.assertEqual(Booking.query.get(booking.id).status, 'cancelled')
+
+        # Attempt to cancel again
+        response_second_cancel = self.client.post(f'/api/admin/bookings/{booking.id}/cancel')
+        self.assertEqual(response_second_cancel.status_code, 400)
+        json_data = response_second_cancel.get_json()
+        self.assertIn('already in a terminal state', json_data.get('error', '').lower())
+        self.logout()
+
+    def test_admin_bookings_nav_link_visibility(self):
+        """Test that the admin bookings nav link is rendered in base.html."""
+        # Unauthenticated
+        response_unauth = self.client.get('/')
+        self.assertEqual(response_unauth.status_code, 200) # Home page should be accessible
+        self.assertIn(b'<li id="admin-bookings-nav-link"', response_unauth.data)
+        # We expect style="display: none;" due to JS, but testing exact style is tricky here.
+        # The main check is that the element is part of the server-rendered HTML.
+
+        # Non-admin login
+        self.login('testuser', 'password')
+        response_non_admin = self.client.get('/')
+        self.assertEqual(response_non_admin.status_code, 200)
+        self.assertIn(b'<li id="admin-bookings-nav-link"', response_non_admin.data)
+        self.logout()
+
+        # Admin login
+        admin = self._create_admin_user()
+        self.login(admin.username, 'adminpass')
+        response_admin = self.client.get('/')
+        self.assertEqual(response_admin.status_code, 200)
+        self.assertIn(b'<li id="admin-bookings-nav-link"', response_admin.data)
+        self.logout()
+
+
 if __name__ == '__main__':
     unittest.main()

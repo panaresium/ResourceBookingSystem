@@ -155,6 +155,7 @@ async function updateAuthLink() {
     const logoutLinkDropdown = document.getElementById('logout-link-dropdown');
     const myBookingsNavLink = document.getElementById('my-bookings-nav-link'); 
     const analyticsNavLink = document.getElementById('analytics-nav-link');
+    const adminBookingsNavLink = document.getElementById('admin-bookings-nav-link');
 
     const loginUrl = document.body.dataset.loginUrl || '/login';
 
@@ -181,6 +182,7 @@ async function updateAuthLink() {
         if (manualBackupNavLink) manualBackupNavLink.style.display = 'none';
         if (myBookingsNavLink) myBookingsNavLink.style.display = 'none'; 
         if (analyticsNavLink) analyticsNavLink.style.display = 'none';
+        if (adminBookingsNavLink) adminBookingsNavLink.style.display = 'none';
     }
 
     try {
@@ -230,6 +232,9 @@ async function updateAuthLink() {
             }
             if (analyticsNavLink) {
                 analyticsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
+            }
+            if (adminBookingsNavLink) {
+                adminBookingsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
             }
 
             if (logoutLinkDropdown) {
