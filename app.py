@@ -1115,6 +1115,61 @@ def get_floor_maps():
         app.logger.exception("Error fetching floor maps:")
         return jsonify({'error': 'Failed to fetch maps due to a server error.'}), 500
 
+@app.route('/api/admin/maps/<int:map_id>', methods=['DELETE'])
+@login_required
+@permission_required('manage_floor_maps')
+def delete_floor_map(map_id):
+    floor_map = FloorMap.query.get(map_id)
+    if not floor_map:
+        app.logger.warning(f"Attempt to delete non-existent floor map ID: {map_id} by user {current_user.username}")
+        return jsonify({'error': 'Floor map not found.'}), 404
+
+    map_name_for_log = floor_map.name # Capture for logging before deletion
+    image_filename_for_log = floor_map.image_filename
+
+    try:
+        # Unmap resources associated with this floor map
+        associated_resources = Resource.query.filter_by(floor_map_id=map_id).all()
+        for resource in associated_resources:
+            resource.floor_map_id = None
+            resource.map_coordinates = None
+
+        db.session.flush() # Flush changes to resources before committing map deletion
+
+        # Delete the FloorMap object
+        db.session.delete(floor_map)
+
+        # Delete the associated image file
+        if floor_map.image_filename:
+            image_path = os.path.join(app.config['UPLOAD_FOLDER'], floor_map.image_filename)
+            try:
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+                    app.logger.info(f"Successfully deleted map image file: {image_path}")
+                else:
+                    app.logger.warning(f"Map image file not found for deletion: {image_path}")
+            except OSError as e:
+                # Log the error but continue with map deletion from DB
+                app.logger.error(f"Error deleting map image file {image_path}: {e}", exc_info=True)
+
+        db.session.commit()
+
+        app.logger.info(f"Floor map ID {map_id} ('{map_name_for_log}') and its image '{image_filename_for_log}' deleted successfully by {current_user.username}.")
+        add_audit_log(
+            action="DELETE_MAP_SUCCESS",
+            details=f"Floor map ID {map_id} ('{map_name_for_log}', image: '{image_filename_for_log}') and associated resource mappings deleted by user {current_user.username}."
+        )
+        return jsonify({'message': f"Floor map '{map_name_for_log}' and associated resource mappings deleted successfully."}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error deleting floor map ID {map_id} ('{map_name_for_log}'):")
+        add_audit_log(
+            action="DELETE_MAP_FAILED",
+            details=f"Failed to delete floor map ID {map_id} ('{map_name_for_log}'). Error: {str(e)}"
+        )
+        return jsonify({'error': 'Failed to delete floor map due to a server error.'}), 500
+
 @app.route('/api/admin/maps/export_configuration', methods=['GET'])
 @login_required
 @permission_required('manage_floor_maps') # Or a new, more specific permission if desired
