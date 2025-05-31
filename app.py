@@ -82,6 +82,8 @@ except ImportError:  # pragma: no cover - fallback for environments without Flas
             self.recipients = recipients or []
             self.body = body
 
+mail = Mail() # Define global mail object
+
 # Base directory of the app - project root
 basedir = os.path.abspath(os.path.dirname(__file__))
 DATA_DIR = os.path.join(basedir, 'data')
@@ -197,6 +199,10 @@ app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'false').lower() in 
 app.config['MAIL_USE_SSL'] = os.environ.get('MAIL_USE_SSL', 'false').lower() in ['true', '1', 'yes']
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', app.config['MAIL_USERNAME'] or 'noreply@example.com')
 
+# Initialize Flask-Mail if available
+if mail_available:
+    mail.init_app(app)
+
 # Booking check-in configuration
 app.config['CHECK_IN_GRACE_MINUTES'] = int(os.environ.get('CHECK_IN_GRACE_MINUTES', '15'))
 app.config['AUTO_CANCEL_CHECK_INTERVAL_MINUTES'] = int(os.environ.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', '5'))
@@ -213,24 +219,22 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(mes
 # However, if you were to use it, this is how you might define its path:
 # CLIENT_SECRET_FILE = os.path.join(pathlib.Path(__file__).parent, 'client_secret.json') 
 
-# Ensure this URL is exactly as registered in your Google Cloud Console Authorized redirect URIs
-REDIRECT_URI = 'http://127.0.0.1:5000/login/google/callback' # Or https if using https
-
 # OAuth Scopes, request email and profile
 SCOPES = ['openid', 'https://www.googleapis.com/auth/userinfo.email', 'https://www.googleapis.com/auth/userinfo.profile']
 
 def get_google_flow():
+    redirect_uri_dynamic = url_for('login_google_callback', _external=True)
     return Flow.from_client_config(
         client_config={'web': {
             'client_id': app.config['GOOGLE_CLIENT_ID'],
             'client_secret': app.config['GOOGLE_CLIENT_SECRET'],
             'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
             'token_uri': 'https://oauth2.googleapis.com/token',
-            'redirect_uris': [REDIRECT_URI], # Must match exactly what's in Google Cloud Console
-            'javascript_origins': ['http://127.0.0.1:5000'] # Or your app's origin
+            'redirect_uris': [redirect_uri_dynamic], # Use dynamic URI
+            'javascript_origins': ['http://127.0.0.1:5000'] # Or your app's origin - this might also need to be dynamic in a real-world scenario
         }},
         scopes=SCOPES,
-        redirect_uri=REDIRECT_URI
+        redirect_uri=redirect_uri_dynamic # Use dynamic URI
     )
 
 db = SQLAlchemy(app)
@@ -525,7 +529,23 @@ def send_email(to_address: str, subject: str, body: str):
         'timestamp': datetime.utcnow().isoformat(),
     }
     email_log.append(email_entry)
-    app.logger.info(f"Email queued to {to_address}: {subject}")
+    app.logger.info(f"Email queued to {to_address}: {subject}") # This log remains for all cases
+
+    if mail_available:
+        try:
+            msg = Message(
+                subject=subject,
+                recipients=[to_address],
+                body=body,
+                sender=app.config.get('MAIL_DEFAULT_SENDER')
+            )
+            mail.send(msg)
+            app.logger.info(f"Email successfully sent to {to_address} via Flask-Mail.")
+        except Exception as e:
+            app.logger.error(f"Failed to send email to {to_address} via Flask-Mail: {e}", exc_info=True)
+    elif not mail_available:
+        app.logger.info("Flask-Mail not available, email not sent via external server.")
+
 
 def send_slack_notification(text: str):
     """Record a slack notification in the log (placeholder)."""
@@ -2421,6 +2441,7 @@ def get_map_details(map_id):
         app.logger.exception(f"Error fetching map details for map_id {map_id}:")
         return jsonify({'error': 'Failed to fetch map details due to a server error.'}), 500
 
+@csrf.exempt # Login endpoint should be exempt from CSRF
 @app.route('/api/auth/login', methods=['POST'])
 def api_login():
     data = request.get_json()
@@ -3000,7 +3021,7 @@ def update_booking_by_user(booking_id):
         # Send update email if times changed
         if mail_available and current_user.email and any("time from" in change for change in change_details_list):
             try:
-                msg = Message(
+                msg = Message( # This will now use the global mail object's Message class if mail_available is True
                     subject="Booking Updated",
                     recipients=[current_user.email],
                     body=(
@@ -3008,11 +3029,13 @@ def update_booking_by_user(booking_id):
                         f"New Title: {booking.title}\n"
                         f"New Start Time: {booking.start_time.strftime('%Y-%m-%d %H:%M')}\n"
                         f"New End Time: {booking.end_time.strftime('%Y-%m-%d %H:%M')}\n"
-                    )
+                    ),
+                    sender=app.config.get('MAIL_DEFAULT_SENDER') # Added sender
                 )
-                mail.send(msg)
+                mail.send(msg) # This will use the global mail object
+                app.logger.info(f"Booking update email sent to {current_user.email} via Flask-Mail.")
             except Exception as mail_e: # Use different variable name for mail exception
-                app.logger.exception(f"[API PUT /api/bookings/{booking_id}] Failed to send booking update email to {current_user.email}: {mail_e}")
+                app.logger.exception(f"[API PUT /api/bookings/{booking_id}] Failed to send booking update email to {current_user.email} via Flask-Mail: {mail_e}")
         
         change_summary_text = '; '.join(change_details_list)
         add_audit_log(

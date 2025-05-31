@@ -381,6 +381,12 @@ def init_db(force=False):
             admin_user.roles.append(admin_role)
             standard_user.roles.append(standard_role)
             db.session.add_all([admin_role, standard_role, admin_user, standard_user])
+            # Add warning for default admin user
+            app.logger.warning(
+                "IMPORTANT SECURITY WARNING: A default admin user ('admin') with a default password ('admin') "
+                "has been created. This password MUST be changed immediately in a production or shared environment. "
+                "Leaving default credentials poses a significant security risk."
+            )
             db.session.commit()
             app.logger.info("Default roles and users created.")
         except Exception:
