@@ -3,23 +3,13 @@
 {% block title %}{{ _('Smart Resource Booking - Dashboard') }}{% endblock %}
 
 {% block content %}
-    <div id="accessibility-controls" class="accessibility-top">
-        <span class="menu-icon" aria-hidden="true">&#9855;</span>
-        <button id="toggle-high-contrast" title="{{ _('Toggle High Contrast') }}">HC</button>
-        <button id="increase-font-size" title="{{ _('Increase Font Size') }}">A+</button>
-        <button id="decrease-font-size" title="{{ _('Decrease Font Size') }}">A-</button>
-        <button id="reset-font-size" title="{{ _('Reset Font Size') }}">A</button>
-    </div>
     <h1>{{ _('Welcome to Smart Resource Booking') }}</h1>
     <p>{{ _('Your smart solution for managing and booking resources efficiently.') }}</p>
     <section id="upcoming-bookings">
         <h2>{{ _('Available Resources (Now)') }}</h2>
         <div id="available-resources-now-list"></div>
     </section>
-    <section id="quick-actions">
-        <h2>{{ _('Quick Actions') }}</h2>
-        <button>{{ _('Book a Room') }}</button>
-    </section>
+    
 {% endblock %}
 
 {% block footer_extra %}{% endblock %}
