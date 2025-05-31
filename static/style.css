@@ -560,6 +560,22 @@ body.high-contrast .app-header #user-dropdown-menu a.dropdown-item:hover {
     color: #ffff00 !important;
 }
 
+/* Ensure header icons are visible */
+body.high-contrast .app-header .menu-icon,
+body.high-contrast .app-header .user-icon,
+body.high-contrast .app-header .dropdown-arrow { /* also style dropdown arrow if present */
+    color: #ffffff !important;
+    /* If using SVG/image icons that don't inherit color, filter might be needed: */
+    /* filter: invert(1) brightness(2); */
+}
+body.high-contrast .app-header a:hover .menu-icon, /* Keep icons white on link hover */
+body.high-contrast .app-header a:hover .user-icon,
+body.high-contrast .app-header button:hover .menu-icon,
+body.high-contrast .app-header button:hover .user-icon,
+body.high-contrast .app-header button:hover .dropdown-arrow {
+    color: #ffff00 !important; /* Icon color changes on hover for consistency with text */
+}
+
 
 body.high-contrast #sidebar { /* Was nav.sidebar */
     background-color: #000000 !important;
@@ -574,6 +590,60 @@ body.high-contrast #sidebar ul li a:focus { color: #ffff00 !important; text-deco
 body.high-contrast #sidebar ul li button { color: #ffffff !important; }
 body.high-contrast #sidebar ul li button:hover,
 body.high-contrast #sidebar ul li button:focus { color: #ffff00 !important; text-decoration: underline !important; }
+
+/* Sidebar Icons */
+body.high-contrast #sidebar .menu-icon {
+    color: #ffffff !important;
+    /* filter: invert(1) brightness(2); if SVG/image */
+}
+body.high-contrast #sidebar ul li a:hover .menu-icon,
+body.high-contrast #sidebar ul li a:focus .menu-icon,
+body.high-contrast #sidebar ul li button:hover .menu-icon,
+body.high-contrast #sidebar ul li button:focus .menu-icon {
+    color: #ffff00 !important; /* Icon color changes on hover/focus */
+}
+
+/* Sidebar Toggle Button */
+body.high-contrast #sidebar-toggle {
+    background-color: #000000 !important;
+    color: #ffffff !important;
+    border: 1px solid #ffffff !important; /* Simple border */
+}
+body.high-contrast #sidebar-toggle:hover,
+body.high-contrast #sidebar-toggle:focus {
+    background-color: #333333 !important;
+    color: #ffff00 !important;
+    border-color: #ffff00 !important;
+}
+
+/* Sidebar Admin Dropdown Summary */
+body.high-contrast #sidebar details summary {
+    color: #ffffff !important;
+    border: 1px dashed transparent; /* For focus indication */
+}
+body.high-contrast #sidebar details summary:hover,
+body.high-contrast #sidebar details summary:focus {
+    color: #ffff00 !important;
+    border-color: #ffff00 !important; /* Indicate focus on summary */
+    background-color: #1a1a1a !important; /* Slight background change on hover/focus */
+}
+body.high-contrast #sidebar details summary .menu-icon { /* Icon within summary */
+    color: #ffffff !important;
+}
+body.high-contrast #sidebar details summary:hover .menu-icon,
+body.high-contrast #sidebar details summary:focus .menu-icon {
+    color: #ffff00 !important;
+}
+
+/* Ensure admin submenu items also get high contrast link styles */
+body.high-contrast #sidebar details ul.admin-menu li a {
+    color: #ffffff !important;
+}
+body.high-contrast #sidebar details ul.admin-menu li a:hover,
+body.high-contrast #sidebar details ul.admin-menu li a:focus {
+    color: #ffff00 !important;
+    text-decoration: underline !important;
+}
 
 
 body.high-contrast #main-content { /* Added */
