@@ -1330,5 +1330,72 @@ class TestAdminBookings(AppTests):
         self.logout()
 
 
+class TestHomePage(AppTests):
+    def test_home_page_not_authenticated(self):
+        """Test home page when user is not authenticated."""
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        content = response.data.decode('utf-8')
+        self.assertIn('<h2>Login</h2>', content) # Assuming login.html has this
+        self.assertIn('<form id="login-form">', content) # Assuming login.html has this form
+        self.assertNotIn('<h2>Upcoming Bookings</h2>', content)
+
+    def test_home_page_authenticated_no_bookings(self):
+        """Test home page when user is authenticated but has no upcoming bookings."""
+        self.login('testuser', 'password')
+
+        # Ensure no future bookings for 'testuser'
+        Booking.query.filter(Booking.user_name == 'testuser', Booking.start_time > datetime.utcnow()).delete()
+        db.session.commit()
+
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        content = response.data.decode('utf-8')
+        self.assertIn('<h2>Upcoming Bookings</h2>', content)
+        self.assertIn('No upcoming bookings.', content) # Or translated equivalent
+
+    def test_home_page_authenticated_with_bookings(self):
+        """Test home page when user is authenticated and has upcoming bookings."""
+        self.login('testuser', 'password')
+
+        # Clean up any existing future bookings for testuser to ensure clean test state
+        Booking.query.filter(Booking.user_name == 'testuser', Booking.start_time > datetime.utcnow()).delete()
+        db.session.commit()
+
+        # Create a future booking for 'testuser'
+        future_booking = self._create_booking(
+            user_name='testuser',
+            resource_id=self.resource1.id,
+            start_offset_hours=2,
+            title="Future Meeting"
+        )
+        # Create a past booking for 'testuser'
+        past_booking = self._create_booking(
+            user_name='testuser',
+            resource_id=self.resource2.id,
+            start_offset_hours=-2,
+            title="Past Meeting"
+        )
+
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        content = response.data.decode('utf-8')
+
+        self.assertIn('<h2>Upcoming Bookings</h2>', content)
+        self.assertNotIn('No upcoming bookings.', content)
+
+        # Check for future booking details
+        self.assertIn(future_booking.title, content)
+        self.assertIn(self.resource1.name, content) # Assuming resource_booked.name is used
+        self.assertIn(future_booking.start_time.strftime('%Y-%m-%d %H:%M'), content)
+        self.assertIn(future_booking.end_time.strftime('%Y-%m-%d %H:%M'), content)
+
+        # Check that past booking details are NOT present
+        self.assertNotIn(past_booking.title, content)
+        if self.resource2: # resource2 might be None if setup failed, though unlikely here
+             self.assertNotIn(self.resource2.name, content)
+        # We don't need to check for past_booking times as the title/resource name absence is sufficient
+
+
 if __name__ == '__main__':
     unittest.main()
