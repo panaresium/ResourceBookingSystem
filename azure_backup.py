@@ -3,6 +3,7 @@ import os
 import json
 import hashlib
 from datetime import datetime
+from azure.core.exceptions import ResourceNotFoundError
 
 try:
     from azure.storage.fileshare import ShareServiceClient
@@ -30,22 +31,27 @@ def _get_service_client():
 
 
 def _client_exists(client):
-    """Return True if the given share/file/directory client exists."""
-    try:
-        if hasattr(client, 'get_share_properties'):
-            client.get_share_properties()
-        elif hasattr(client, 'get_file_properties'):
-            client.get_file_properties()
-        elif hasattr(client, 'get_directory_properties'):
-            client.get_directory_properties()
-        else:
-            return True
-        return True
-    except ResourceNotFoundError:
-        return False
-    except Exception:
-        return False
 
+    """Return True if the given Share/File/Directory client exists."""
+    if hasattr(client, 'exists'):
+        return client.exists()
+    check_methods = [
+        'get_file_properties',
+        'get_share_properties',
+        'get_directory_properties'
+    ]
+    for name in check_methods:
+        method = getattr(client, name, None)
+        if not method:
+            continue
+        try:
+            method()
+            return True
+        except ResourceNotFoundError:
+            return False
+        except Exception:
+            continue
+    return False
 
 def _load_hashes():
     if os.path.exists(HASH_FILE):
@@ -200,7 +206,7 @@ def restore_from_share():
 
 
 def main():
-
+    """Run an incremental backup when executed as a script."""
     backup_if_changed()
     print('Backup completed.')
 

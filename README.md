@@ -168,20 +168,13 @@ These filters can be combined. Only resources with `status='published'` are retu
 
 ## Bulk User Management
 
-Admins can manage many users at once from the Users page.
+Admins can manage many users at once from the **User Management** screen.
 
-- **Export Users** – Download a JSON file describing all users and their roles.
-- **Import Users** – Upload a JSON file (same structure as the export) to create
-  new users or update existing ones. Missing required fields for new users are
-  reported and existing usernames/emails are validated.
-- **Delete Selected** – Select multiple users in the table and remove them in one
-  request.
+- **Export Users** – `GET /api/admin/users/export` returns a JSON payload containing all users and roles.
+- **Import Users** – `POST /api/admin/users/import` accepts the same structure to create or update users in bulk.
+- **Bulk Delete** – `DELETE /api/admin/users/bulk` removes multiple users by ID.
 
-Corresponding API endpoints:
-
-- `GET /api/admin/users/export`
-- `POST /api/admin/users/import`
-- `DELETE /api/admin/users/bulk` with body `{ "ids": [1,2,3] }`
+These actions are also accessible via buttons on the User Management page.
 
 ## Deploying to Azure Web App
 
@@ -217,7 +210,6 @@ When the app runs, it will attempt to restore `site.db` and uploaded images from
 
 Configure the interval via the `AZURE_BACKUP_INTERVAL_MINUTES` environment variable (default `60`).  Files are only uploaded when their content changes.
 
-Running `python azure_backup.py` performs the same check using cached file hashes
-so unchanged files are skipped during manual backups as well.
+Admins can trigger a backup on demand from the UI's **Manual Sync** button (or send a `POST` request to `/api/admin/manual_backup`).
 
 
