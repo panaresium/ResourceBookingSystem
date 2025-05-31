@@ -205,7 +205,7 @@ async function updateAuthLink() {
 
             if (userDropdownContainer) userDropdownContainer.style.display = 'list-item';
             if (userDropdownButton) {
-                userDropdownButton.innerHTML = `<span class="user-icon">&#x1F464;</span> &#9662;`;
+                userDropdownButton.innerHTML = `<span class="user-icon">&#x1F464;</span><span class="dropdown-arrow"> &#9662;</span>`;
                 userDropdownButton.setAttribute('aria-expanded', 'false');
                 userDropdownButton.title = data.user.username;
             }
