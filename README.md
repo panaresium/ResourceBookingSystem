@@ -200,3 +200,13 @@ When the app runs, it will attempt to restore `site.db` and uploaded images from
 
 Configure the interval via the `AZURE_BACKUP_INTERVAL_MINUTES` environment variable (default `60`).  Files are only uploaded when their content changes.
 
+
+## Bulk User Management
+Admins can manage users in batches using the provided APIs and UI tools.
+
+- **Export** all user accounts and roles via `GET /api/admin/users/export`.
+- **Import** users and roles from a JSON file with `POST /api/admin/users/import`. Existing users are updated when an `id` is provided.
+- **Delete** multiple users by sending their IDs to `DELETE /api/admin/users/bulk`.
+
+The user management page offers buttons to export, import and remove selected users.
+
