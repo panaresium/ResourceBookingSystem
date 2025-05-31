@@ -32,6 +32,7 @@ DEFAULT_CONFIG = {
     ],
     "users": [
         {
+
             "id": 1,
             "username": "admin",
             "email": "admin@example.com",
@@ -128,3 +129,4 @@ def export_admin_data(db, User, Role):
         for u in User.query.all()
     ]
     save_config(cfg)
+

@@ -25,6 +25,7 @@ from json_config import (
     export_admin_data,
 )
 
+
 AZURE_PRIMARY_STORAGE = bool(os.environ.get("AZURE_PRIMARY_STORAGE"))
 if AZURE_PRIMARY_STORAGE:
     try:
@@ -45,7 +46,9 @@ DATA_DIR_NAME = "data"
 STATIC_DIR_NAME = "static"
 FLOOR_MAP_UPLOADS_DIR_NAME = os.path.join(STATIC_DIR_NAME, "floor_map_uploads")
 RESOURCE_UPLOADS_DIR_NAME = os.path.join(STATIC_DIR_NAME, "resource_uploads")
-DB_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)), DATA_DIR_NAME, 'site.db')
+DB_PATH = os.path.join(
+    os.path.abspath(os.path.dirname(__file__)), DATA_DIR_NAME, "site.db"
+)
 
 if AZURE_PRIMARY_STORAGE:
     print("Downloading database from Azure storage...")
@@ -53,6 +56,7 @@ if AZURE_PRIMARY_STORAGE:
         download_database()
     except Exception as exc:
         print(f"Failed to download database from Azure: {exc}")
+
 
 def check_python_version():
     """Checks if the current Python version meets the minimum requirement."""
@@ -63,8 +67,11 @@ def check_python_version():
             f" This project requires Python {MIN_PYTHON_VERSION[0]}.{MIN_PYTHON_VERSION[1]} or higher."
         )
         sys.exit(1)
-    print(f"Python version {sys.version_info.major}.{sys.version_info.minor} is sufficient.")
+    print(
+        f"Python version {sys.version_info.major}.{sys.version_info.minor} is sufficient."
+    )
     return True
+
 
 def create_required_directories():
     """Creates the data directory and floor map uploads directory if they don't exist."""
@@ -90,12 +97,14 @@ def create_required_directories():
         except OSError as e:
             print(f"Error: Could not create '{static_dir}' directory: {e}")
             # Decide if this is fatal, for now, we'll let it pass if data_dir was created
-            # sys.exit(1) 
+            # sys.exit(1)
     else:
         print(f"'{static_dir}' directory already exists (good).")
-       
+
     # Create floor map uploads directory
-    floor_map_uploads_dir = pathlib.Path(__file__).resolve().parent / FLOOR_MAP_UPLOADS_DIR_NAME
+    floor_map_uploads_dir = (
+        pathlib.Path(__file__).resolve().parent / FLOOR_MAP_UPLOADS_DIR_NAME
+    )
     print(f"Checking for '{FLOOR_MAP_UPLOADS_DIR_NAME}' directory...")
     if not floor_map_uploads_dir.exists():
         try:
@@ -104,11 +113,13 @@ def create_required_directories():
         except OSError as e:
             print(f"Error: Could not create '{floor_map_uploads_dir}' directory: {e}")
             # Decide if this is fatal
-            # sys.exit(1) 
+            # sys.exit(1)
     else:
         print(f"'{floor_map_uploads_dir}' directory already exists.")
 
-    resource_uploads_dir = pathlib.Path(__file__).resolve().parent / RESOURCE_UPLOADS_DIR_NAME
+    resource_uploads_dir = (
+        pathlib.Path(__file__).resolve().parent / RESOURCE_UPLOADS_DIR_NAME
+    )
     print(f"Checking for '{RESOURCE_UPLOADS_DIR_NAME}' directory...")
     if not resource_uploads_dir.exists():
         try:
@@ -129,6 +140,7 @@ def create_required_directories():
 
     return True
 
+
 def ensure_tags_column():
     """Ensure the 'tags' column exists in the resource table."""
     if not os.path.exists(DB_PATH):
@@ -140,6 +152,7 @@ def ensure_tags_column():
     except Exception as exc:
         print(f"Failed to ensure 'tags' column exists: {exc}")
 
+
 def ensure_resource_image_column():
     """Ensure the 'image_filename' column exists in the resource table."""
     if not os.path.exists(DB_PATH):
@@ -147,14 +160,17 @@ def ensure_resource_image_column():
         return
 
     import sqlite3
+
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("PRAGMA table_info(resource)")
         columns = [info[1] for info in cursor.fetchall()]
-        if 'image_filename' not in columns:
+        if "image_filename" not in columns:
             print("Adding 'image_filename' column to 'resource' table...")
-            cursor.execute("ALTER TABLE resource ADD COLUMN image_filename VARCHAR(255)")
+            cursor.execute(
+                "ALTER TABLE resource ADD COLUMN image_filename VARCHAR(255)"
+            )
             conn.commit()
             print("'image_filename' column added.")
         else:
@@ -162,8 +178,9 @@ def ensure_resource_image_column():
     except Exception as exc:
         print(f"Failed to ensure 'image_filename' column exists: {exc}")
     finally:
-        if 'conn' in locals():
+        if "conn" in locals():
             conn.close()
+
 
 def ensure_floor_map_columns():
     """Ensure the 'location' and 'floor' columns exist in the floor_map table."""
@@ -172,6 +189,7 @@ def ensure_floor_map_columns():
         return
 
     import sqlite3
+
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -179,14 +197,14 @@ def ensure_floor_map_columns():
         columns = [info[1] for info in cursor.fetchall()]
         to_commit = False
 
-        if 'location' not in columns:
+        if "location" not in columns:
             print("Adding 'location' column to 'floor_map' table...")
             cursor.execute("ALTER TABLE floor_map ADD COLUMN location VARCHAR(100)")
             to_commit = True
         else:
             print("'location' column already exists. No action taken for this column.")
 
-        if 'floor' not in columns:
+        if "floor" not in columns:
             print("Adding 'floor' column to 'floor_map' table...")
             cursor.execute("ALTER TABLE floor_map ADD COLUMN floor VARCHAR(50)")
             to_commit = True
@@ -199,8 +217,9 @@ def ensure_floor_map_columns():
     except Exception as exc:
         print(f"Failed to ensure floor_map columns exist: {exc}")
     finally:
-        if 'conn' in locals():
+        if "conn" in locals():
             conn.close()
+
 
 def ensure_scheduled_status_columns():
     """Ensure the 'scheduled_status' and 'scheduled_status_at' columns exist in the resource table."""
@@ -209,6 +228,7 @@ def ensure_scheduled_status_columns():
         return
 
     import sqlite3
+
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -216,19 +236,27 @@ def ensure_scheduled_status_columns():
         columns = [info[1] for info in cursor.fetchall()]
         to_commit = False
 
-        if 'scheduled_status' not in columns:
+        if "scheduled_status" not in columns:
             print("Adding 'scheduled_status' column to 'resource' table...")
-            cursor.execute("ALTER TABLE resource ADD COLUMN scheduled_status VARCHAR(50)")
+            cursor.execute(
+                "ALTER TABLE resource ADD COLUMN scheduled_status VARCHAR(50)"
+            )
             to_commit = True
         else:
-            print("'scheduled_status' column already exists. No action taken for this column.")
+            print(
+                "'scheduled_status' column already exists. No action taken for this column."
+            )
 
-        if 'scheduled_status_at' not in columns:
+        if "scheduled_status_at" not in columns:
             print("Adding 'scheduled_status_at' column to 'resource' table...")
-            cursor.execute("ALTER TABLE resource ADD COLUMN scheduled_status_at DATETIME")
+            cursor.execute(
+                "ALTER TABLE resource ADD COLUMN scheduled_status_at DATETIME"
+            )
             to_commit = True
         else:
-            print("'scheduled_status_at' column already exists. No action taken for this column.")
+            print(
+                "'scheduled_status_at' column already exists. No action taken for this column."
+            )
 
         if to_commit:
             conn.commit()
@@ -236,8 +264,9 @@ def ensure_scheduled_status_columns():
     except Exception as exc:
         print(f"Failed to ensure scheduled status columns exist: {exc}")
     finally:
-        if 'conn' in locals():
+        if "conn" in locals():
             conn.close()
+
 
 def verify_db_schema():
     """Check if the existing database has the expected tables and columns."""
@@ -247,33 +276,52 @@ def verify_db_schema():
     import sqlite3
 
     expected_schema = {
-        'user': {
-            'id', 'username', 'email', 'password_hash', 'is_admin',
-            'google_id', 'google_email'
+        "user": {
+            "id",
+            "username",
+            "email",
+            "password_hash",
+            "is_admin",
+            "google_id",
+            "google_email",
         },
-        'role': {
-            'id', 'name', 'description', 'permissions'
+        "role": {"id", "name", "description", "permissions"},
+        "user_roles": {"user_id", "role_id"},
+        "floor_map": {"id", "name", "image_filename", "location", "floor"},
+        "resource": {
+            "id",
+            "name",
+            "capacity",
+            "equipment",
+            "tags",
+            "booking_restriction",
+            "status",
+            "published_at",
+            "allowed_user_ids",
+            "image_filename",
+            "is_under_maintenance",
+            "maintenance_until",
+            "max_recurrence_count",
+            "scheduled_status",
+            "scheduled_status_at",
+            "floor_map_id",
+            "map_coordinates",
         },
-        'user_roles': {'user_id', 'role_id'},
-        'floor_map': {
-            'id', 'name', 'image_filename', 'location', 'floor'
+        "resource_roles": {"resource_id", "role_id"},
+        "booking": {
+            "id",
+            "resource_id",
+            "user_name",
+            "start_time",
+            "end_time",
+            "title",
+            "checked_in_at",
+            "checked_out_at",
+            "status",
+            "recurrence_rule",
         },
-        'resource': {
-            'id', 'name', 'capacity', 'equipment', 'tags',
-            'booking_restriction', 'status', 'published_at',
-            'allowed_user_ids', 'image_filename', 'is_under_maintenance',
-            'maintenance_until', 'max_recurrence_count',
-            'scheduled_status', 'scheduled_status_at',
-            'floor_map_id', 'map_coordinates'
-        },
-        'resource_roles': {'resource_id', 'role_id'},
-        'booking': {
-            'id', 'resource_id', 'user_name', 'start_time',
-            'end_time', 'title', 'checked_in_at', 'checked_out_at',
-            'status', 'recurrence_rule'
-        },
-        'waitlist_entry': {'id', 'resource_id', 'user_id', 'timestamp'},
-        'audit_log': {'id', 'timestamp', 'user_id', 'username', 'action', 'details'}
+        "waitlist_entry": {"id", "resource_id", "user_id", "timestamp"},
+        "audit_log": {"id", "timestamp", "user_id", "username", "action", "details"},
     }
 
     try:
@@ -295,7 +343,7 @@ def verify_db_schema():
         print(f"Error verifying database schema: {exc}")
         return False
     finally:
-        if 'conn' in locals():
+        if "conn" in locals():
             conn.close()
 
 
@@ -309,12 +357,14 @@ def init_db(force=False):
         app.logger.info("Database tables creation/verification step completed.")
 
         if not force:
-            existing = any([
-                db.session.query(User.id).first(),
-                db.session.query(Resource.id).first(),
-                db.session.query(Role.id).first(),
-                db.session.query(Booking.id).first(),
-            ])
+            existing = any(
+                [
+                    db.session.query(User.id).first(),
+                    db.session.query(Resource.id).first(),
+                    db.session.query(Role.id).first(),
+                    db.session.query(Booking.id).first(),
+                ]
+            )
             if existing:
                 app.logger.warning(
                     "init_db aborted: existing data detected. "
@@ -460,6 +510,7 @@ def init_db(force=False):
             db.session.rollback()
             app.logger.exception("Error adding sample resources during DB initialization:")
 
+
         app.logger.info("Adding sample bookings...")
         resource_alpha = Resource.query.filter_by(name="Conference Room Alpha").first()
         resource_beta = Resource.query.filter_by(name="Meeting Room Beta").first()
@@ -485,8 +536,12 @@ def init_db(force=False):
                         resource_id=resource_alpha.id,
                         user_name="user1",
                         title="Project Update Alpha",
-                        start_time=datetime.combine(date.today() + timedelta(days=1), time(14, 0)),
-                        end_time=datetime.combine(date.today() + timedelta(days=1), time(15, 0)),
+                        start_time=datetime.combine(
+                            date.today() + timedelta(days=1), time(14, 0)
+                        ),
+                        end_time=datetime.combine(
+                            date.today() + timedelta(days=1), time(15, 0)
+                        ),
                     ),
                     Booking(
                         resource_id=resource_beta.id,
@@ -524,6 +579,7 @@ def init_db(force=False):
         except Exception:
             app.logger.exception("Failed to export admin data to configuration:")
 
+
         app.logger.info("Database initialization script completed.")
 
         if AZURE_PRIMARY_STORAGE:
@@ -535,10 +591,11 @@ def init_db(force=False):
             except Exception as exc:
                 print(f"Failed to upload data to Azure: {exc}")
 
+
 def main():
     """Main function to run setup checks and tasks."""
     print("Starting project initialization...")
-    
+
     check_python_version()
     print("-" * 30)
     create_required_directories()
@@ -564,9 +621,16 @@ def main():
     try:
         init_db()
         print("Database initialization process completed.")
+        try:
+            from app import export_admin_config
+            export_admin_config()
+        except Exception as exc:
+            print(f"Failed to export admin config: {exc}")
     except Exception as e:
         print(f"An error occurred during database initialization: {e}")
-        print("Please check the output from init_db for more details, or run this script again if issues persist.")
+        print(
+            "Please check the output from init_db for more details, or run this script again if issues persist."
+        )
         sys.exit(1)  # Exit if DB initialization fails
 
     print("-" * 30)
@@ -575,6 +639,7 @@ def main():
     print("Next steps (if applicable):")
     print("  - Install dependencies: pip install -r requirements.txt")
     print("  - Run the application (see README.md for details)")
+
 
 if __name__ == "__main__":
     main()
