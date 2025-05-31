@@ -3257,7 +3257,7 @@ if __name__ == "__main__":
         app.logger.exception("Failed to start background scheduler")
     # Avoid using _() here because no request context exists at startup
     app.logger.info(translator.gettext("Flask app starting...", translator.default_locale))
-    socketio.run(app, debug=True)
+    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
 
 @app.route('/api/resources/<int:resource_id>/all_bookings', methods=['GET'])
 @login_required
