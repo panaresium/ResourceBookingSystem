@@ -22,6 +22,7 @@ DEFAULT_CONFIG = {
     "resources": [],
     "users": [],
     "permissions": []
+    }
 
 def get_config_path():
     return CONFIG_FILE
