@@ -10,8 +10,10 @@ from flask import (
     has_request_context,
 )  # Added Blueprint and has_request_context
 from flask_sqlalchemy import SQLAlchemy
+
 from sqlalchemy import func, text  # Add this and for WAL pragma setup
 from datetime import datetime, date, timedelta, time, timezone  # Ensure all are here
+
 import os
 import json  # For serializing coordinates
 from werkzeug.utils import secure_filename
@@ -52,6 +54,8 @@ except Exception:
     save_floor_map_to_share = None
     backup_if_changed = None
     restore_from_share = None
+
+from json_config import load_config, save_config
 
 # Attempt to import APScheduler; provide a basic fallback if unavailable
 try:
@@ -321,6 +325,15 @@ def _sync_admin_config(session):
         export_admin_config(session)
     except Exception:
         app.logger.exception("Failed to export admin configuration after commit")
+
+
+@event.listens_for(db.session.__class__, 'after_commit')
+def _sync_config_after_commit(session):
+    """Write admin configuration to JSON after each DB commit."""
+    try:
+        export_admin_config()
+    except Exception:
+        app.logger.exception('Failed to export admin config')
 
 
 # Configure SQLite pragmas (e.g., WAL mode) on the first request

@@ -85,7 +85,6 @@ DEFAULT_CONFIG = {
 def get_config_path():
     return CONFIG_FILE
 
-
 def _ensure_keys(data):
     for key in DEFAULT_CONFIG:
         data.setdefault(
@@ -104,7 +103,6 @@ def load_config():
             return _ensure_keys(data)
     except Exception:
         return _ensure_keys(DEFAULT_CONFIG.copy())
-
 
 def save_config(data):
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -244,3 +242,4 @@ def export_admin_config(session):
         )
 
     save_config(data)
+

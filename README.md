@@ -46,6 +46,10 @@ This script checks your Python version, creates the required directories, and th
 
 Running `python app.py` or `flask run` performs a minimal check as well, but `init_setup.py` is the preferred method to ensure the environment is healthy.
 
+The initialization process also creates `data/admin_config.json` if it does not
+exist. This file stores floor map, resource, user and permission information in
+JSON format so you can easily modify it or replace it from an Azure file share.
+
 
 ### Installing Dependencies
 
@@ -90,7 +94,9 @@ The database is excluded from version control, but the `azure_backup.py` script
 automatically uploads `data/site.db` to Azure File Share whenever its contents
 change.
 You should see messages indicating success.
+
 The initialization also creates `data/admin_config.json` containing example users, roles and resources. If this file already exists, it will be loaded and used to populate the database. Any changes made to admin records are written back to this JSON file so it can be easily backed up or edited.
+
 Pass `force=True` if you want to **reset and wipe** existing data:
    ```python
    >>> init_db(force=True)
@@ -201,6 +207,7 @@ Use `azure_backup.py` to upload the SQLite database, uploaded images, and the ad
 - `AZURE_DB_SHARE` – file share name for database backups (default `db-backups`)
 - `AZURE_MEDIA_SHARE` – file share name for uploaded images (default `media`)
 
+`data/admin_config.json` holds admin configuration for floor maps, resources, users and permissions. This JSON file is backed up together with `site.db` and uploaded images.
 
 Run the script with:
 ```bash
@@ -209,11 +216,14 @@ python azure_backup.py
 All floor map and resource images from `static/` along with `data/site.db` will be uploaded. The script stores hashes of previous uploads so unchanged files are skipped on subsequent runs. During the process, log messages indicate whether `site.db` was uploaded or skipped because it did not change.
 `data/admin_config.json` is included in these backups so any configuration changes are preserved.
 
+
 ### Automatic Backups
 
 When the app runs, it will attempt to restore `site.db` and uploaded images from the configured Azure File Shares.  A background job then backs up the database and media files at regular intervals.
 
 Configure the interval via the `AZURE_BACKUP_INTERVAL_MINUTES` environment variable (default `60`).  Files are only uploaded when their content changes.
+
+In addition to the database, the application keeps admin configuration (floor maps, resources, roles and users) in `data/admin_config.json`.  This JSON file is downloaded from Azure during setup if available and is uploaded whenever changes are committed.
 
 
 ## Bulk User Management
