@@ -5,6 +5,22 @@
 {% block content %}
     <h1>{{ _('User Management') }}</h1>
     <button id="add-new-user-btn" class="button">{{ _('Add New User') }}</button>
+    <div class="filters-section" style="margin-top:15px;">
+        <h3>{{ _('Filters') }}</h3>
+        <label for="user-filter-username">{{ _('Username:') }}</label>
+        <input type="text" id="user-filter-username" placeholder="{{ _('Filter by Username') }}">
+
+        <label for="user-filter-admin">{{ _('Admin Status:') }}</label>
+        <select id="user-filter-admin">
+            <option value="">{{ _('-- Any --') }}</option>
+            <option value="true">{{ _('Admin') }}</option>
+            <option value="false">{{ _('Non-Admin') }}</option>
+        </select>
+
+        <button id="user-apply-filters-btn" class="button">{{ _('Apply Filters') }}</button>
+        <button id="user-clear-filters-btn" class="button">{{ _('Clear Filters') }}</button>
+    </div>
+
     <div id="user-management-status" class="status-message" style="margin-top: 15px;"></div>
 
     <table id="users-table" class="styled-table" style="margin-top: 15px;">

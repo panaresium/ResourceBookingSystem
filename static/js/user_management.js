@@ -21,6 +21,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const isAdminCheckbox = document.getElementById('is-admin');
     const userRolesCheckboxContainer = document.getElementById('user-roles-checkbox-container'); // For user edit modal
 
+    const userFilterUsernameInput = document.getElementById('user-filter-username');
+    const userFilterAdminSelect = document.getElementById('user-filter-admin');
+    const userApplyFiltersBtn = document.getElementById('user-apply-filters-btn');
+    const userClearFiltersBtn = document.getElementById('user-clear-filters-btn');
+
+    let currentFilters = {};
+
     let localUsersCache = []; // To store fetched users for editing
     let allAvailableRolesCache = null; // To cache all available roles
 
@@ -39,11 +46,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
     }
 
-    async function fetchAndDisplayUsers() {
+    async function fetchAndDisplayUsers(filters = {}) {
         if (!usersTableBody) return;
         showLoading(userManagementStatusDiv, 'Fetching users...');
         try {
-            const users = await apiCall('/api/admin/users'); // Assumes apiCall is global
+            let queryParams = [];
+            const activeFilters = Object.keys(filters).length > 0 ? filters : currentFilters;
+            if (activeFilters.username) queryParams.push(`username_filter=${encodeURIComponent(activeFilters.username)}`);
+            if (activeFilters.isAdmin !== undefined && activeFilters.isAdmin !== '') queryParams.push(`is_admin=${activeFilters.isAdmin}`);
+            const queryString = queryParams.length ? `?${queryParams.join('&')}` : '';
+
+            const users = await apiCall(`/api/admin/users${queryString}`); // Assumes apiCall is global
             localUsersCache = users; // Store for local use (e.g., populating edit form)
             
             usersTableBody.innerHTML = ''; // Clear existing rows
@@ -75,6 +88,23 @@ document.addEventListener('DOMContentLoaded', function() {
             showError(userManagementStatusDiv, `Error fetching users: ${error.message}`);
             localUsersCache = []; // Clear cache on error
         }
+    }
+
+    if (userApplyFiltersBtn) {
+        userApplyFiltersBtn.addEventListener('click', () => {
+            currentFilters.username = userFilterUsernameInput.value.trim();
+            currentFilters.isAdmin = userFilterAdminSelect.value;
+            fetchAndDisplayUsers(currentFilters);
+        });
+    }
+
+    if (userClearFiltersBtn) {
+        userClearFiltersBtn.addEventListener('click', () => {
+            if (userFilterUsernameInput) userFilterUsernameInput.value = '';
+            if (userFilterAdminSelect) userFilterAdminSelect.value = '';
+            currentFilters = {};
+            fetchAndDisplayUsers(currentFilters);
+        });
     }
 
     // Modal Handling
@@ -189,7 +219,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             // apiCall's default behavior is to show response.message on success, 
                             // or hide messageElement if no message. We want a consistent success message.
                             showSuccess(userManagementStatusDiv, response.message || `User '${usernameForConfirmation}' deleted successfully.`);
-                            fetchAndDisplayUsers(); // Refresh the table
+                            fetchAndDisplayUsers(currentFilters); // Refresh the table
                         })
                         .catch(error => {
                             // apiCall already shows the error in userManagementStatusDiv
@@ -219,7 +249,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     }, userManagementStatusDiv)
                     .then(response => {
                         showSuccess(userManagementStatusDiv, response.message || `Google ID successfully assigned to '${username}'.`);
-                        fetchAndDisplayUsers(); // Refresh table
+                        fetchAndDisplayUsers(currentFilters); // Refresh table
                     })
                     .catch(error => {
                         // apiCall already shows the error in userManagementStatusDiv
@@ -303,7 +333,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (response && (response.id || response.message)) { // Check for successful response indicators
                     showSuccess(userManagementStatusDiv, `User ${id ? 'updated' : 'added'} successfully!`);
                     if (userFormModal) userFormModal.style.display = 'none';
-                    fetchAndDisplayUsers(); // Refresh the table
+                    fetchAndDisplayUsers(currentFilters); // Refresh the table
                 } else if (!userFormModalStatusDiv.textContent || userFormModalStatusDiv.style.display === 'none') {
                     // If apiCall didn't show a message (e.g. 204 No Content or just hid loading)
                     showError(userFormModalStatusDiv, "Operation completed, but no specific confirmation received.");
@@ -322,7 +352,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initial Setup
     if (userFormModal) userFormModal.style.display = 'none'; // Ensure modal is hidden initially
-    fetchAndDisplayUsers(); // Fetch and display users on page load
+    fetchAndDisplayUsers(currentFilters); // Fetch and display users on page load
 
     // --- Role Management ---
     const roleManagementStatusDiv = document.getElementById('role-management-status');
