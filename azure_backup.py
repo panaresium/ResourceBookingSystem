@@ -2,6 +2,7 @@
 import os
 import json
 import hashlib
+import logging
 from datetime import datetime
 from azure.core.exceptions import ResourceNotFoundError
 
@@ -19,6 +20,9 @@ STATIC_DIR = os.path.join(BASE_DIR, 'static')
 FLOOR_MAP_UPLOADS = os.path.join(STATIC_DIR, 'floor_map_uploads')
 RESOURCE_UPLOADS = os.path.join(STATIC_DIR, 'resource_uploads')
 HASH_FILE = os.path.join(DATA_DIR, 'backup_hashes.json')
+
+# Module-level logger used for backup operations
+logger = logging.getLogger(__name__)
 
 
 def _get_service_client():
@@ -89,7 +93,10 @@ def upload_file(share_client, source_path, file_path):
     file_client = share_client.get_file_client(file_path)
     with open(source_path, 'rb') as f:
         data = f.read()
-    file_client.upload_file(data, overwrite=True)
+    # ShareFileClient.upload_file does not support an 'overwrite' parameter.
+    # Passing it causes a TypeError when the request is sent. Simply uploading
+    # the data will overwrite the file if it already exists.
+    file_client.upload_file(data)
 
 
 def download_file(share_client, file_path, dest_path):
@@ -159,9 +166,14 @@ def backup_if_changed():
     db_local = os.path.join(DATA_DIR, 'site.db')
     db_rel = 'site.db'
     db_hash = _hash_file(db_local) if os.path.exists(db_local) else None
-    if db_hash and hashes.get(db_rel) != db_hash:
+    if db_hash is None:
+        logger.warning("Database file not found: %s", db_local)
+    elif hashes.get(db_rel) != db_hash:
         upload_file(db_client, db_local, db_rel)
         hashes[db_rel] = db_hash
+        logger.info("Uploaded database '%s' to share '%s'", db_rel, db_share)
+    else:
+        logger.info("Database unchanged; skipping upload")
 
     # Media backup
     media_share = os.environ.get('AZURE_MEDIA_SHARE', 'media')
@@ -180,6 +192,7 @@ def backup_if_changed():
             if hashes.get(rel) != f_hash:
                 upload_file(media_client, fpath, rel)
                 hashes[rel] = f_hash
+                logger.info("Uploaded media file '%s' to share '%s'", rel, media_share)
 
     _save_hashes(hashes)
 
