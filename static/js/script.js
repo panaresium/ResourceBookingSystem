@@ -256,6 +256,23 @@ async function updateAuthLink() {
                 if (sidebarToggleBtn) sidebarToggleBtn.style.display = 'none'; // Hide toggle for admin
                 document.body.classList.remove('no-sidebar');
                 document.body.classList.remove('sidebar-collapsed');
+
+                // Prevent admin menu details from collapsing
+                const adminSectionDetails = document.getElementById('admin-section');
+                if (adminSectionDetails) {
+                    const adminSectionSummary = adminSectionDetails.querySelector('summary');
+                    if (adminSectionSummary) {
+                        // Ensure this listener is added only once
+                        if (!adminSectionSummary.dataset.clickListenerAdded) {
+                            adminSectionSummary.addEventListener('click', function(event) {
+                                if (adminSectionDetails.hasAttribute('open')) {
+                                    event.preventDefault();
+                                }
+                            });
+                            adminSectionSummary.dataset.clickListenerAdded = 'true';
+                        }
+                    }
+                }
             } else { // Non-admin user
                 if (sidebar) sidebar.style.display = 'none';
                 if (sidebarToggleBtn) sidebarToggleBtn.style.display = 'none';
