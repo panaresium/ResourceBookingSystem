@@ -89,6 +89,9 @@ This will create a `site.db` file in the `data/` directory and set up the tables
 The database is excluded from version control, but the `azure_backup.py` script
 automatically uploads `data/site.db` to Azure File Share whenever its contents
 change.
+After initialization an administrator account is created automatically with the
+credentials **admin/admin**. Log in with this account to access the admin
+features and create additional users.
 You should see messages indicating success.
 Pass `force=True` if you want to **reset and wipe** existing data:
    ```python

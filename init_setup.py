@@ -354,6 +354,18 @@ def init_db(force=False):
             db.session.rollback()
             app.logger.exception("Error committing deletions during DB initialization:")
 
+        # Create default roles and admin account if starting from an empty DB
+        admin_role = Role(name="Administrator", description="Admin role", permissions="all_permissions")
+        standard_role = Role(name="StandardUser", description="Basic user role")
+        db.session.add_all([admin_role, standard_role])
+        db.session.commit()
+
+        default_admin = User(username="admin", email="admin@example.com", is_admin=True)
+        default_admin.set_password("admin")
+        default_admin.roles.append(admin_role)
+        db.session.add(default_admin)
+        db.session.commit()
+
 
         admin_user_for_perms = User.query.filter_by(username='admin').first()
         standard_user_for_perms = User.query.filter_by(username='user').first()
