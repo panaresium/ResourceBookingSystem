@@ -8,7 +8,8 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     {% block head_extra %}{% endblock %}
 </head>
-<body class="with-sidebar sidebar-collapsed">
+<body>
+    <header class="app-header"><div class="header-content"></div></header>
     <nav id="sidebar" class="collapsed">
         <button id="sidebar-toggle" aria-label="{{ _('Toggle menu') }}">&#9776;</button>
         <ul>
@@ -17,11 +18,6 @@
             <li><a href="{{ url_for('serve_calendar') }}"><span class="menu-icon" aria-hidden="true">📅</span><span class="menu-text">{{ _('Calendar') }}</span></a></li>
             
             {# General links visible to all - JavaScript will manage the display of login/logout and user info #}
-
-            {# Container for the 'Login' link - shown by JS when logged out #}
-            <li id="auth-link-container" style="display: none; margin-left:auto;">
-                <a href="{{ url_for('serve_login') }}"><span class="menu-icon" aria-hidden="true">🔑</span><span class="menu-text">{{ _('Login') }}</span></a>
-            </li>
 
             {# Container for 'My Bookings' - shown by JS when logged in #}
             <li id="my-bookings-nav-link" style="display: none;">
@@ -58,24 +54,8 @@
             </details>
         </li>
 
-            <li>
-                <button id="theme-toggle" type="button"><span class="menu-icon" aria-hidden="true">🌓</span><span class="menu-text">{{ _('Toggle Theme') }}</span></button>
-            </li>
-
-
             {# Container for user-specific welcome message - populated by JS when logged in #}
-            <li id="welcome-message-container" style="display: none; margin-right: 10px; color: white; align-self: center;"></li>
-
             {# Container for user dropdown (Profile, Logout) - shown by JS when logged in #}
-            <li id="user-dropdown-container" style="display: none; position: relative; margin-left:auto;">
-                <button id="user-dropdown-button" aria-haspopup="true" aria-expanded="false" style="background: none; border: none; color: white; font-size: 1em; cursor: pointer; padding: 10px; font-weight: bold; display:flex; align-items:center;">
-                    <span class="user-icon" style="font-size:1.2em;">&#x1F464;</span><span class="dropdown-arrow"> &#9662;</span>
-                </button>
-                <div class="dropdown-menu" id="user-dropdown-menu" style="display: none; position: absolute; top: 100%; left: 0; background-color: #333; border: 1px solid #555; min-width: 160px; z-index: 1000; list-style-type: none; padding: 0; margin: 0; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
-                    <a class="dropdown-item" href="{{ url_for('serve_profile_page') }}" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Profile') }}</a>
-                    <a class="dropdown-item" href="{{ url_for('logout_and_redirect') }}" id="logout-link-dropdown" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Logout') }}</a>
-                </div>
-            </li>
             {# Links for admin users or specific roles could be added here with appropriate checks #}
             {# Example: {% if current_user.is_admin %}<li><a href="{{ url_for('serve_admin_dashboard') }}">{{ _('Admin') }}</a></li>{% endif %} #}
         </ul>
@@ -95,6 +75,13 @@
         {% block content %}{% endblock %}
     </main>
     <footer>
+        <div class="footer-accessibility-controls">
+            <button id="theme-toggle" type="button"><span class="menu-icon" aria-hidden="true">🌓</span><span class="menu-text">{{ _('Toggle Theme') }}</span></button>
+            <button id="toggle-high-contrast" type="button"><span class="menu-icon" aria-hidden="true">◐</span><span class="menu-text">{{ _('Toggle Contrast') }}</span></button>
+            <button id="increase-font-size" type="button"><span class="menu-icon" aria-hidden="true">Aa+</span><span class="menu-text">{{ _('Increase Font') }}</span></button>
+            <button id="decrease-font-size" type="button"><span class="menu-icon" aria-hidden="true">Aa-</span><span class="menu-text">{{ _('Decrease Font') }}</span></button>
+            <button id="reset-font-size" type="button"><span class="menu-icon" aria-hidden="true">Aa</span><span class="menu-text">{{ _('Reset Font') }}</span></button>
+        </div>
         <p>{{ _('&copy; 2024 Smart Resource Booking') }}</p>
         <form id="language-form" method="get" style="margin-top:5px;">
             <label for="language-selector">{{ _('Language:') }}</label>
