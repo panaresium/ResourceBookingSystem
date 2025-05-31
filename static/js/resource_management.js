@@ -167,13 +167,16 @@ document.addEventListener('DOMContentLoaded', function() {
             formData.append('file', file);
 
             try {
+                const csrfTokenTag = document.querySelector('meta[name="csrf-token"]');
+                const headers = {};
+                if (csrfTokenTag) {
+                    headers['X-CSRFToken'] = csrfTokenTag.content;
+                }
+
                 const response = await fetch('/api/admin/resources/import', {
                     method: 'POST',
                     body: formData,
-                    headers: {
-                        // 'Content-Type': 'multipart/form-data' is automatically set by browser with FormData
-                        'X-CSRFToken': getCsrfToken() // Assuming you have a function to get CSRF token
-                    }
+                    headers: headers // Use the constructed headers object
                 });
                 const result = await response.json();
 
