@@ -491,7 +491,7 @@ def init_db(force=False):
                 sample_bookings = [
                     Booking(
                         resource_id=resource_alpha.id,
-                        user_name="user1",
+                        user_name="user",  # Changed from user1 to user
                         title="Team Sync Alpha",
                         start_time=datetime.combine(date.today(), time(9, 0)),
                         end_time=datetime.combine(date.today(), time(10, 0)),
