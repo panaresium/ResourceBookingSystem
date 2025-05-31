@@ -481,6 +481,7 @@ def resource_to_dict(resource: Resource) -> dict:
         'capacity': resource.capacity,
         'equipment': resource.equipment,
         'status': resource.status,
+        'tags': resource.tags,
         'booking_restriction': resource.booking_restriction,
         'image_url': url_for('static', filename=f'resource_uploads/{resource.image_filename}') if resource.image_filename else None,
         'published_at': resource.published_at.replace(tzinfo=timezone.utc).isoformat() if resource.published_at else None,
@@ -1208,10 +1209,11 @@ def update_resource_details(resource_id):
 
     # Fields that can be updated via this endpoint
     allowed_fields = [
-        'name', 'capacity', 'equipment', 'status', 
-        'booking_restriction', 'allowed_user_ids', 
-        'is_under_maintenance', 'maintenance_until', 
-        'max_recurrence_count', 'scheduled_status', 'scheduled_status_at'
+        'name', 'capacity', 'equipment', 'status',
+        'booking_restriction', 'allowed_user_ids',
+        'is_under_maintenance', 'maintenance_until',
+        'max_recurrence_count', 'scheduled_status', 'scheduled_status_at',
+        'tags'
     ]
     
     # Validate status if provided
@@ -1302,6 +1304,8 @@ def update_resource_details(resource_id):
                         resource.scheduled_status_at = datetime.fromisoformat(value)
                     except ValueError:
                         return jsonify({'error': 'Invalid scheduled_status_at format. Use ISO datetime string (YYYY-MM-DDTHH:MM:SS) or empty/null.'}), 400
+            elif field == 'tags':
+                resource.tags = data.get('tags')
             else: # For 'name', 'equipment'
                 setattr(resource, field, data[field])
 
@@ -1332,6 +1336,7 @@ def update_resource_details(resource_id):
             'name': resource.name,
             'capacity': resource.capacity,
             'equipment': resource.equipment,
+            'tags': resource.tags,
             'status': resource.status,
             'published_at': resource.published_at.isoformat() if resource.published_at else None,
             'booking_restriction': resource.booking_restriction,
@@ -1462,8 +1467,9 @@ def create_resource():
         return jsonify({'error': 'Capacity must be an integer or null.'}), 400
 
     equipment = data.get('equipment')
+    tags = data.get('tags')
 
-    new_resource = Resource(name=name.strip(), capacity=capacity, equipment=equipment)
+    new_resource = Resource(name=name.strip(), capacity=capacity, equipment=equipment, tags=tags)
     try:
         db.session.add(new_resource)
         db.session.commit()
@@ -1516,6 +1522,7 @@ def create_resources_bulk():
         return jsonify({'error': 'Capacity must be an integer or null.'}), 400
 
     equipment = data.get('equipment')
+    tags = data.get('tags')
     status = data.get('status', 'draft')
     valid_statuses = ['draft', 'published', 'archived']
     if status not in valid_statuses:
@@ -1533,7 +1540,7 @@ def create_resources_bulk():
         if existing:
             skipped.append(name)
             continue
-        r = Resource(name=name.strip(), capacity=capacity, equipment=equipment, status=status)
+        r = Resource(name=name.strip(), capacity=capacity, equipment=equipment, status=status, tags=tags)
         db.session.add(r)
         created_resources.append(r)
     try:
@@ -1558,7 +1565,7 @@ def update_resources_bulk():
     if not updates:
         return jsonify({'error': 'No update fields provided.'}), 400
 
-    allowed_fields = ['name', 'capacity', 'equipment', 'status']
+    allowed_fields = ['name', 'capacity', 'equipment', 'status', 'tags']
     valid_statuses = ['draft', 'published', 'archived']
 
     updated = []
@@ -1586,6 +1593,8 @@ def update_resources_bulk():
                         setattr(resource, field, value)
                     except (ValueError, TypeError):
                         return jsonify({'error': f'Invalid value for capacity. Must be an integer or null.'}), 400
+                elif field == 'tags':
+                    setattr(resource, field, updates[field])
                 else:
                     setattr(resource, field, updates[field])
         updated.append(rid)

@@ -16,6 +16,15 @@ document.addEventListener('DOMContentLoaded', function() {
     const resourceCapacityInput = document.getElementById('resource-capacity');
     const resourceEquipmentInput = document.getElementById('resource-equipment');
     const resourceStatusModalInput = document.getElementById('resource-status-modal'); // Added
+    const resourceTagsInput = document.getElementById('resource-tags');
+
+    const filterNameInput = document.getElementById('resource-filter-name');
+    const filterStatusSelect = document.getElementById('resource-filter-status');
+    const filterMapSelect = document.getElementById('resource-filter-map');
+    const filterTagsInput = document.getElementById('resource-filter-tags');
+    const applyFiltersBtn = document.getElementById('resource-apply-filters-btn');
+    const clearFiltersBtn = document.getElementById('resource-clear-filters-btn');
+    let currentFilters = {};
 
     const bulkModal = document.getElementById('bulk-resource-modal');
     const bulkCloseBtn = bulkModal ? bulkModal.querySelector('.close-modal-btn') : null;
@@ -28,6 +37,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const bulkPaddingInput = document.getElementById('bulk-padding');
     const bulkCapacityInput = document.getElementById('bulk-capacity');
     const bulkEquipmentInput = document.getElementById('bulk-equipment');
+    const bulkTagsInput = document.getElementById('bulk-tags');
     const bulkStatusInput = document.getElementById('bulk-status');
     const bulkEditModal = document.getElementById('bulk-edit-modal');
     const bulkEditForm = document.getElementById('bulk-edit-form');
@@ -35,26 +45,73 @@ document.addEventListener('DOMContentLoaded', function() {
     const bulkEditStatusInput = document.getElementById('bulk-edit-status');
     const bulkEditCapacityInput = document.getElementById('bulk-edit-capacity');
     const bulkEditEquipmentInput = document.getElementById('bulk-edit-equipment');
+    const bulkEditTagsInput = document.getElementById('bulk-edit-tags');
 
-    async function fetchAndDisplayResources() {
+    async function fetchAndDisplayResources(filters = {}) {
         showLoading(statusDiv, 'Fetching resources...');
         try {
-            const resources = await apiCall('/api/admin/resources');
+            const [resources, maps] = await Promise.all([
+                apiCall('/api/admin/resources'),
+                apiCall('/api/admin/maps')
+            ]);
             tableBody.innerHTML = '';
-            if (resources && resources.length > 0) {
-                resources.forEach(r => {
-                    const row = tableBody.insertRow();
-                    const selectCell = row.insertCell();
-                    selectCell.innerHTML = `<input type="checkbox" class="select-resource-checkbox" data-id="${r.id}">`;
-                    row.insertCell().textContent = r.id;
-                    row.insertCell().textContent = r.name;
-                    row.insertCell().textContent = r.status || 'draft';
-                    row.insertCell().textContent = r.capacity !== null && r.capacity !== undefined ? r.capacity : '';
-                    const actionsCell = row.insertCell();
-                    actionsCell.innerHTML = `
-                        <button class="button edit-resource-btn" data-id="${r.id}">Edit</button>
-                        <button class="button danger delete-resource-btn" data-id="${r.id}" data-name="${r.name}">Delete</button>
-                    `;
+            const mapsById = {};
+            if (maps) maps.forEach(m => { mapsById[m.id] = m; });
+
+            if (filterMapSelect && filterMapSelect.options.length === 1 && maps) {
+                maps.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m.id;
+                    opt.textContent = m.name;
+                    filterMapSelect.appendChild(opt);
+                });
+            }
+
+            let filtered = resources || [];
+            if (filters.name) {
+                filtered = filtered.filter(r => r.name.toLowerCase().includes(filters.name.toLowerCase()));
+            }
+            if (filters.status) {
+                filtered = filtered.filter(r => r.status === filters.status);
+            }
+            if (filters.mapId) {
+                filtered = filtered.filter(r => String(r.floor_map_id || '') === String(filters.mapId));
+            }
+            if (filters.tags) {
+                filtered = filtered.filter(r => r.tags && r.tags.toLowerCase().includes(filters.tags.toLowerCase()));
+            }
+
+            const grouped = {};
+            filtered.forEach(r => {
+                const key = r.floor_map_id ? String(r.floor_map_id) : 'none';
+                if (!grouped[key]) grouped[key] = [];
+                grouped[key].push(r);
+            });
+
+            const mapIdsInOrder = Object.keys(grouped);
+            if (mapIdsInOrder.length > 0) {
+                mapIdsInOrder.forEach(mid => {
+                    const headingRow = tableBody.insertRow();
+                    const headingCell = headingRow.insertCell();
+                    headingCell.colSpan = 7;
+                    const mapName = mid === 'none' ? 'Unassigned' : (mapsById[mid] ? mapsById[mid].name : 'Map ' + mid);
+                    headingCell.textContent = `Map: ${mapName}`;
+
+                    grouped[mid].forEach(r => {
+                        const row = tableBody.insertRow();
+                        const selectCell = row.insertCell();
+                        selectCell.innerHTML = `<input type="checkbox" class="select-resource-checkbox" data-id="${r.id}">`;
+                        row.insertCell().textContent = r.id;
+                        row.insertCell().textContent = r.name;
+                        row.insertCell().textContent = r.status || 'draft';
+                        row.insertCell().textContent = r.capacity !== null && r.capacity !== undefined ? r.capacity : '';
+                        row.insertCell().textContent = r.tags || '';
+                        const actionsCell = row.insertCell();
+                        actionsCell.innerHTML = `
+                            <button class="button edit-resource-btn" data-id="${r.id}">Edit</button>
+                            <button class="button danger delete-resource-btn" data-id="${r.id}" data-name="${r.name}">Delete</button>
+                        `;
+                    });
                 });
                 hideMessage(statusDiv);
             } else {
@@ -147,6 +204,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 resourceNameInput.value = data.name || '';
                 resourceCapacityInput.value = data.capacity !== null && data.capacity !== undefined ? data.capacity : '';
                 resourceEquipmentInput.value = data.equipment || '';
+                if (resourceTagsInput) resourceTagsInput.value = data.tags || '';
                 resourceStatusModalInput.value = data.status || 'draft'; // Populate status for editing
                 resourceFormModalTitle.textContent = 'Edit Resource';
                 hideMessage(resourceFormStatus);
@@ -173,7 +231,8 @@ document.addEventListener('DOMContentLoaded', function() {
             name: resourceNameInput.value,
             capacity: resourceCapacityInput.value !== '' ? parseInt(resourceCapacityInput.value, 10) : null,
             equipment: resourceEquipmentInput.value,
-            status: resourceStatusModalInput.value // Add status to payload
+            status: resourceStatusModalInput.value, // Add status to payload
+            tags: resourceTagsInput ? resourceTagsInput.value : ''
         };
         const id = resourceIdInput.value;
         try {
@@ -208,7 +267,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 padding: bulkPaddingInput.value !== '' ? parseInt(bulkPaddingInput.value, 10) : 0,
                 capacity: bulkCapacityInput.value !== '' ? parseInt(bulkCapacityInput.value, 10) : null,
                 equipment: bulkEquipmentInput.value,
-                status: bulkStatusInput.value
+                status: bulkStatusInput.value,
+                tags: bulkTagsInput ? bulkTagsInput.value : ''
             };
             try {
                 const result = await apiCall('/api/admin/resources/bulk', {
@@ -239,6 +299,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (bulkEditStatusInput.value) fields.status = bulkEditStatusInput.value;
             if (bulkEditCapacityInput.value !== '') fields.capacity = parseInt(bulkEditCapacityInput.value, 10);
             if (bulkEditEquipmentInput.value !== '') fields.equipment = bulkEditEquipmentInput.value;
+            if (bulkEditTagsInput && bulkEditTagsInput.value !== '') fields.tags = bulkEditTagsInput.value;
             try {
                 await apiCall('/api/admin/resources/bulk', {
                     method: 'PUT',
@@ -250,6 +311,29 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (error) {
                 /* handled by apiCall */
             }
+        });
+    }
+
+    if (applyFiltersBtn) {
+        applyFiltersBtn.addEventListener('click', () => {
+            currentFilters = {
+                name: filterNameInput.value.trim(),
+                status: filterStatusSelect.value,
+                mapId: filterMapSelect.value,
+                tags: filterTagsInput.value.trim()
+            };
+            fetchAndDisplayResources(currentFilters);
+        });
+    }
+
+    if (clearFiltersBtn) {
+        clearFiltersBtn.addEventListener('click', () => {
+            if (filterNameInput) filterNameInput.value = '';
+            if (filterStatusSelect) filterStatusSelect.value = '';
+            if (filterMapSelect) filterMapSelect.value = '';
+            if (filterTagsInput) filterTagsInput.value = '';
+            currentFilters = {};
+            fetchAndDisplayResources(currentFilters);
         });
     }
 
