@@ -88,6 +88,35 @@ nav ul li a:focus {
     margin-right: 2px;
 }
 
+/* Icons and text handling for sidebar menu */
+#sidebar li .menu-icon {
+    display: inline-block;
+    width: 1.2em;
+    text-align: center;
+    margin-right: 0.5em;
+}
+#sidebar.collapsed .menu-text {
+    display: none;
+}
+#sidebar.collapsed li {
+    text-align: center;
+}
+
+/* Compact accessibility controls at top */
+.accessibility-top {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+}
+
+.accessibility-top button {
+    font-size: 0.75rem;
+    padding: 2px 4px;
+}
+
 /* Keep icon and arrow vertically centered */
 #user-dropdown-button {
     display: flex;
