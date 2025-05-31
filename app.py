@@ -1643,18 +1643,40 @@ def get_all_users():
         return jsonify({'error': 'Permission denied to manage users.'}), 403
 
     try:
-        users = User.query.all()
+        username_filter = request.args.get('username_filter')
+        is_admin_filter = request.args.get('is_admin')
+        role_id_filter = request.args.get('role_id', type=int)
+
+        query = User.query
+
+        if username_filter:
+            query = query.filter(User.username.ilike(f"%{username_filter}%"))
+
+        if is_admin_filter is not None and is_admin_filter != '':
+            val = is_admin_filter.lower()
+            if val in ['true', '1', 'yes']:
+                query = query.filter_by(is_admin=True)
+            elif val in ['false', '0', 'no']:
+                query = query.filter_by(is_admin=False)
+            else:
+                return jsonify({'error': 'Invalid is_admin value. Use true or false.'}), 400
+
+        if role_id_filter:
+            query = query.join(User.roles).filter(Role.id == role_id_filter)
+
+        users = query.all()
+
         users_list = [{
-            'id': u.id, 
-            'username': u.username, 
-            'email': u.email, 
+            'id': u.id,
+            'username': u.username,
+            'email': u.email,
             'is_admin': u.is_admin,
             'google_id': u.google_id,
-            'roles': [{'id': role.id, 'name': role.name} for role in u.roles] # Added roles
+            'roles': [{'id': role.id, 'name': role.name} for role in u.roles]  # Added roles
         } for u in users]
-        app.logger.info(f"Admin user {current_user.username} fetched all users list.")
+        app.logger.info(f"Admin user {current_user.username} fetched users list with filters.")
         return jsonify(users_list), 200
-    except Exception as e:
+    except Exception:
         app.logger.exception("Error fetching all users:")
         return jsonify({'error': 'Failed to fetch users due to a server error.'}), 500
 
