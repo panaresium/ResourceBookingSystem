@@ -18,7 +18,7 @@ import logging # Added for logging
 from functools import wraps # For permission_required decorator
 from flask import abort # For permission_required decorator
 from flask import g  # For storing current locale
-from flask_wtf.csrf import CSRFProtect # For CSRF protection
+from flask_wtf.csrf import CSRFProtect, CSRFError # For CSRF protection
 from flask_socketio import SocketIO
 
 try:
@@ -164,6 +164,11 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev_secret_key_123!@#')
 
 # Initialize CSRF Protection - AFTER app.config['SECRET_KEY'] is set
 csrf = CSRFProtect(app)
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    app.logger.warning(f"CSRF error encountered: {e.description}")
+    return jsonify({'error': e.description, 'type': 'CSRF_ERROR'}), 400
 
 # Localization configuration
 app.config['LANGUAGES'] = ['en', 'es', 'th']
