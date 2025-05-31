@@ -3055,6 +3055,24 @@ def create_booking():
     for i in range(count):
         delta = timedelta(days=i) if freq == 'DAILY' else timedelta(weeks=i) if freq == 'WEEKLY' else timedelta(0)
         occurrences.append((new_booking_start_time + delta, new_booking_end_time + delta))
+
+    # Check for user's overlapping bookings on ANY resource for the first slot
+    # This check is primarily for non-recurring bookings or the very first instance of a recurrence.
+    # More specific checks for each recurrence instance are done inside the loop.
+    if occurrences: # Only check if there's at least one occurrence
+        first_occ_start, first_occ_end = occurrences[0]
+        first_slot_user_conflict = Booking.query.filter(
+            Booking.user_name == user_name_for_record,
+            Booking.start_time < first_occ_end,
+            Booking.end_time > first_occ_start
+        ).first()
+
+        if first_slot_user_conflict:
+            # Ensure resource_booked relationship is loaded to access its name
+            # This might require a join or selectinload if not automatically handled by backref,
+            # but direct access usually works if the session is active.
+            conflicting_resource_name = first_slot_user_conflict.resource_booked.name if first_slot_user_conflict.resource_booked else "an unknown resource"
+            return jsonify({'error': f"You already have a booking for resource '{conflicting_resource_name}' from {first_slot_user_conflict.start_time.strftime('%H:%M')} to {first_slot_user_conflict.end_time.strftime('%H:%M')} that overlaps with the requested time slot on {first_occ_start.strftime('%Y-%m-%d')}."}), 409
     
     for occ_start, occ_end in occurrences:
         conflicting = Booking.query.filter(
@@ -3064,12 +3082,25 @@ def create_booking():
         ).first()
         if conflicting:
             existing_waitlist_count = WaitlistEntry.query.filter_by(resource_id=resource_id).count()
-            if existing_waitlist_count < 2:
-                waitlist_entry = WaitlistEntry(resource_id=resource_id, user_id=current_user.id)
+            if existing_waitlist_count < 2: # Simplified waitlist logic for brevity
+                waitlist_entry = WaitlistEntry(resource_id=resource_id, user_id=current_user.id) # Assuming current_user context
                 db.session.add(waitlist_entry)
-                db.session.commit()
-                return jsonify({'error': 'This time slot is no longer available. You have been added to the waitlist.'}), 409
-            return jsonify({'error': 'This time slot is no longer available. Please try another slot.'}), 409
+                # db.session.commit() # Commit waitlist entry separately or with main booking transaction
+                app.logger.info(f"Added user {current_user.id} to waitlist for resource {resource_id} due to conflict with booking {conflicting.id}")
+
+            return jsonify({'error': f"This time slot ({occ_start.strftime('%Y-%m-%d %H:%M')} to {occ_end.strftime('%H:%M')}) on resource '{resource.name}' is already booked or conflicts. You may have been added to the waitlist if available."}), 409
+
+        # New check: User's overlapping bookings on ANY OTHER resource for this specific recurrence
+        user_conflicting_recurring = Booking.query.filter(
+            Booking.user_name == user_name_for_record,
+            Booking.resource_id != resource_id, # Important: only check OTHER resources
+            Booking.start_time < occ_end,
+            Booking.end_time > occ_start
+        ).first()
+
+        if user_conflicting_recurring:
+            conflicting_resource_name = user_conflicting_recurring.resource_booked.name if user_conflicting_recurring.resource_booked else "an unknown resource"
+            return jsonify({'error': f"You already have a booking for resource '{conflicting_resource_name}' from {user_conflicting_recurring.start_time.strftime('%H:%M')} to {user_conflicting_recurring.end_time.strftime('%H:%M')} that overlaps with the requested occurrence on {occ_start.strftime('%Y-%m-%d')}."}), 409
 
     try:
         created = []
