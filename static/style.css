@@ -104,6 +104,11 @@ nav ul li a:focus {
 }
 #sidebar.collapsed .menu-text {
     display: none; /* hide text when collapsed */
+
+}
+#sidebar.collapsed #welcome-message-container {
+    display: none !important;
+
 }
 #sidebar.collapsed li {
     text-align: center;
@@ -112,6 +117,16 @@ nav ul li a:focus {
     display: flex;
     justify-content: center; /* center icons horizontally */
 }
+
+#sidebar.collapsed li button {
+    display: flex;
+    justify-content: center;
+}
+#sidebar.collapsed #theme-toggle {
+    display: flex;
+    justify-content: center;
+}
+
 #sidebar.collapsed summary {
     display: flex;
     justify-content: center;
@@ -136,6 +151,12 @@ nav ul li a:focus {
 #user-dropdown-button {
     display: flex;
     align-items: center;
+}
+#sidebar.collapsed #user-dropdown-button {
+    justify-content: center;
+}
+#sidebar.collapsed .dropdown-arrow {
+    display: none;
 }
 
 main {
@@ -984,8 +1005,10 @@ body.with-sidebar {
     border: none;
     color: var(--text-color-light);
     cursor: pointer;
-    font-size: 1.2em;
-    margin: 0 0.5em 0.5em;
+    font-size: 1em;
+    margin: 0.5em auto;
+    display: flex;
+    justify-content: center;
 }
 
 #sidebar ul {
@@ -997,12 +1020,24 @@ body.with-sidebar {
 #sidebar ul li {
     padding: 0.5em 1em;
     white-space: nowrap;
+    font-size: 0.9rem;
 }
 
 #sidebar ul li a {
     color: var(--text-color-light);
     text-decoration: none;
     display: block;
+}
+#sidebar ul li button {
+    background: none;
+    border: none;
+    color: var(--text-color-light);
+    cursor: pointer;
+    width: 100%;
+    padding: 0.5em 0;
+    text-align: left;
+    font-weight: bold;
+    font-size: inherit;
 }
 
 body.with-sidebar #main-content {
