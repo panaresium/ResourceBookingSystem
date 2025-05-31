@@ -235,18 +235,6 @@ def get_google_flow():
 
 db = SQLAlchemy(app)
 
-<<<<<<< HEAD
-=======
-
-@event.listens_for(db.session, "after_commit")
-def _sync_config_after_commit(session):
-    try:
-        export_admin_config()
-    except Exception:
-        app.logger.exception("Failed to export admin configuration after commit")
-
->>>>>>> parent of b916f36 (Merge branch 'main' into lxfiie-codex/replace-sqlite-with-json-for-admin-config)
-
 # Configure SQLite pragmas (e.g., WAL mode) on the first request
 _sqlite_configured = False
 
@@ -527,7 +515,6 @@ slack_log = []
 
 teams_log = []
 
-<<<<<<< HEAD
 from sqlalchemy import event
 from json_config import export_admin_config
 
@@ -540,8 +527,6 @@ def _sync_config_after_commit(session):
         app.logger.error('Failed to export admin configuration after commit')
         app.logger.exception(exc)
 
-=======
->>>>>>> parent of b916f36 (Merge branch 'main' into lxfiie-codex/replace-sqlite-with-json-for-admin-config)
 def send_email(to_address: str, subject: str, body: str):
     """Log an outgoing email (placeholder for real email delivery)."""
     email_entry = {

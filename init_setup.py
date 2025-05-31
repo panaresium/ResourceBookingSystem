@@ -357,7 +357,6 @@ def init_db(force=False):
             db.session.rollback()
             app.logger.exception("Error committing deletions during DB initialization:")
 
-<<<<<<< HEAD
         # Populate admin configuration from JSON
         try:
             import_admin_data(db, User, Role, FloorMap, Resource)
@@ -365,74 +364,6 @@ def init_db(force=False):
         except Exception as e:
             db.session.rollback()
             app.logger.exception("Error importing admin config during DB initialization:")
-=======
-        app.logger.info("Adding default users (admin/admin, user/userpass)...")
-        try:
-            default_users = [
-                User(
-                    username='admin',
-                    email='admin@example.com',
-                    password_hash=generate_password_hash('admin', method='pbkdf2:sha256'),
-                    is_admin=True,
-                ),
-                User(
-                    username='user',
-                    email='user@example.com',
-                    password_hash=generate_password_hash('userpass', method='pbkdf2:sha256'),
-                    is_admin=False,
-                ),
-            ]
-            db.session.bulk_save_objects(default_users)
-            db.session.commit()
-            app.logger.info(f"Successfully added {len(default_users)} default users.")
-        except Exception as e:
-            db.session.rollback()
-            app.logger.exception("Error adding default users during DB initialization:")
-
-        app.logger.info("Adding default roles...")
-        try:
-            admin_role = Role(
-                name="Administrator",
-                description="Full system access",
-                permissions="all_permissions,view_analytics",
-            )
-            standard_role = Role(
-                name="StandardUser",
-                description="Can make bookings and view resources",
-                permissions="make_bookings,view_resources",
-            )
-            db.session.add_all([admin_role, standard_role])
-            db.session.commit()
-            app.logger.info("Successfully added default roles.")
-        except Exception as e:
-            db.session.rollback()
-            app.logger.exception("Error adding default roles during DB initialization:")
-            # Ensure admin_role and standard_role are None if creation failed, to prevent errors below
-            admin_role = None
-            standard_role = None
-
-        app.logger.info("Assigning roles to default users...")
-        admin_user = User.query.filter_by(username='admin').first()
-        standard_user = User.query.filter_by(username='user').first()
-
-        # Fetch roles again in case of session issues or if they were not committed properly
-        if not admin_role:
-            admin_role = Role.query.filter_by(name="Administrator").first()
-        if not standard_role:
-            standard_role = Role.query.filter_by(name="StandardUser").first()
-
-        if admin_user and admin_role:
-            admin_user.roles.append(admin_role)
-        if standard_user and standard_role:
-            standard_user.roles.append(standard_role)
-
-        try:
-            db.session.commit()
-            app.logger.info("Successfully assigned roles to default users.")
-        except Exception as e:
-            db.session.rollback()
-            app.logger.exception("Error assigning roles to default users:")
->>>>>>> parent of b916f36 (Merge branch 'main' into lxfiie-codex/replace-sqlite-with-json-for-admin-config)
 
         admin_user_for_perms = User.query.filter_by(username='admin').first()
         standard_user_for_perms = User.query.filter_by(username='user').first()
