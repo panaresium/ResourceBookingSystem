@@ -42,6 +42,8 @@ from flask import abort  # For permission_required decorator
 from flask import g  # For storing current locale
 from flask_wtf.csrf import CSRFProtect  # For CSRF protection
 from flask_socketio import SocketIO
+from sqlalchemy import event
+from json_config import export_admin_data
 
 
 try:
@@ -596,6 +598,15 @@ class AuditLog(db.Model):
             f'<AuditLog {self.timestamp} - {self.username or "System"} - {self.action}>'
         )
 
+
+
+@event.listens_for(db.session, "after_commit")
+def _export_admin_config(session):
+    """Persist admin data to JSON after any database commit."""
+    try:
+        export_admin_data(db, User, Role)
+    except Exception as exc:  # pragma: no cover - ignore export errors
+        app.logger.error("Failed to export admin config: %s", exc)
 
 # --- Audit Log Helper ---
 def add_audit_log(action: str, details: str, user_id: int = None, username: str = None):

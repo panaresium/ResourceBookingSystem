@@ -18,7 +18,13 @@ from app import (
 from werkzeug.security import generate_password_hash
 from datetime import datetime, date, timedelta, time
 from add_resource_tags_column import add_tags_column
-from json_config import load_config, save_config
+from json_config import (
+    load_config,
+    save_config,
+    import_admin_data,
+    export_admin_data,
+)
+
 
 AZURE_PRIMARY_STORAGE = bool(os.environ.get("AZURE_PRIMARY_STORAGE"))
 if AZURE_PRIMARY_STORAGE:
@@ -407,16 +413,103 @@ def init_db(force=False):
             db.session.rollback()
             app.logger.exception("Error committing deletions during DB initialization:")
 
-        app.logger.info("Loading admin configuration from JSON...")
+        app.logger.info("Importing admin data from JSON configuration...")
         try:
-            from json_config import load_config, import_admin_config
-
-            cfg = load_config()
-            import_admin_config(db.session, cfg)
-            app.logger.info("Admin configuration imported from JSON file.")
+            import_admin_data(db, User, Role)
+            app.logger.info("Admin users and roles imported from configuration.")
         except Exception as e:
             db.session.rollback()
-            app.logger.exception("Error importing admin configuration from JSON:")
+            app.logger.exception("Error importing admin configuration:")
+
+        admin_user_for_perms = User.query.filter_by(username='admin').first()
+        standard_user_for_perms = User.query.filter_by(username='user').first()
+
+        admin_user_id_str = str(admin_user_for_perms.id) if admin_user_for_perms else "1"
+        standard_user_id_str = str(standard_user_for_perms.id) if standard_user_for_perms else "2"
+
+        # Fetch roles for sample data assignment
+        admin_role_for_resource = Role.query.filter_by(name="Administrator").first()
+        standard_role_for_resource = Role.query.filter_by(name="StandardUser").first()
+
+        app.logger.info("Adding sample resources...")
+        try:
+            res_alpha = Resource(
+                name="Conference Room Alpha",
+                capacity=10,
+                equipment="Projector,Whiteboard,Teleconference",
+                tags="large,video",
+                booking_restriction=None,
+                status='published',
+                published_at=datetime.utcnow(),
+                allowed_user_ids=None,
+            )  # No specific user IDs, open to roles
+            if standard_role_for_resource:
+                res_alpha.roles.append(standard_role_for_resource)
+            if admin_role_for_resource:  # Admins can also book
+                res_alpha.roles.append(admin_role_for_resource)
+
+            res_beta = Resource(
+                name="Meeting Room Beta",
+                capacity=6,
+                equipment="Teleconference,Whiteboard",
+                tags="medium",
+                booking_restriction='all_users',
+                status='published',
+                published_at=datetime.utcnow(),  # 'all_users' might be redundant now
+                allowed_user_ids=f"{standard_user_id_str},{admin_user_id_str}",
+            )  # Can keep user_ids for specific overrides
+            # No specific roles assigned to Beta, relies on allowed_user_ids or booking_restriction logic
+
+            res_gamma = Resource(
+                name="Focus Room Gamma",
+                capacity=2,
+                equipment="Whiteboard",
+                tags="quiet",
+                booking_restriction='admin_only',
+                status='draft',
+                published_at=None,  # admin_only might be redundant
+                allowed_user_ids=None,
+            )
+            if admin_role_for_resource:
+                res_gamma.roles.append(admin_role_for_resource)
+
+            res_delta = Resource(
+                name="Quiet Pod Delta",
+                capacity=1,
+                equipment=None,
+                tags="quiet,small",
+                booking_restriction=None,
+                status='draft',
+                published_at=None,
+                allowed_user_ids=None,
+            )
+            if standard_role_for_resource:
+                res_delta.roles.append(standard_role_for_resource)
+            # If admin should also have access by default to standard_user resources, add admin_role too.
+            # Or rely on a global admin override in permission checking logic.
+
+            res_omega = Resource(
+                name="Archived Room Omega",
+                capacity=5,
+                equipment="Old Projector",
+                tags="archived",
+                booking_restriction=None,
+                status='archived',
+                published_at=datetime.utcnow() - timedelta(days=30),
+                allowed_user_ids=None,
+            )
+            # Typically archived resources don't need role assignments unless there's a use case.
+
+            sample_resources_list = [res_alpha, res_beta, res_gamma, res_delta, res_omega]
+            db.session.add_all(sample_resources_list)
+            db.session.commit()
+            app.logger.info(
+                f"Successfully added {len(sample_resources_list)} sample resources with roles."
+            )
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception("Error adding sample resources during DB initialization:")
+
 
         app.logger.info("Adding sample bookings...")
         resource_alpha = Resource.query.filter_by(name="Conference Room Alpha").first()
@@ -480,9 +573,13 @@ def init_db(force=False):
                 "Could not find sample resources 'Conference Room Alpha' or 'Meeting Room Beta' to create bookings for. Skipping sample booking addition."
             )
 
-        from json_config import export_admin_config
+        # Export any created users and roles back to the JSON configuration
+        try:
+            export_admin_data(db, User, Role)
+        except Exception:
+            app.logger.exception("Failed to export admin data to configuration:")
 
-        export_admin_config(db.session)
+
         app.logger.info("Database initialization script completed.")
 
         if AZURE_PRIMARY_STORAGE:
