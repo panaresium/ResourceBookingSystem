@@ -156,10 +156,15 @@ async function updateAuthLink() {
     const myBookingsNavLink = document.getElementById('my-bookings-nav-link'); 
     const analyticsNavLink = document.getElementById('analytics-nav-link');
     const adminBookingsNavLink = document.getElementById('admin-bookings-nav-link');
+    const sidebar = document.getElementById('sidebar'); // Added for sidebar visibility
+    const sidebarToggleBtn = document.getElementById('sidebar-toggle'); // Added for toggle button visibility
 
     const loginUrl = document.body.dataset.loginUrl || '/login';
 
     function setStateLoggedOut() {
+        const localSidebar = document.getElementById('sidebar'); // Ensure access within function
+        const localSidebarToggleBtn = document.getElementById('sidebar-toggle'); // Ensure access
+
         sessionStorage.removeItem('loggedInUserUsername');
         sessionStorage.removeItem('loggedInUserIsAdmin');
         sessionStorage.removeItem('loggedInUserId');
@@ -183,6 +188,11 @@ async function updateAuthLink() {
         if (myBookingsNavLink) myBookingsNavLink.style.display = 'none'; 
         if (analyticsNavLink) analyticsNavLink.style.display = 'none';
         if (adminBookingsNavLink) adminBookingsNavLink.style.display = 'none';
+
+        if (localSidebar) localSidebar.style.display = 'none';
+        if (localSidebarToggleBtn) localSidebarToggleBtn.style.display = 'none';
+        document.body.classList.add('no-sidebar');
+        document.body.classList.remove('sidebar-collapsed');
     }
 
     try {
@@ -228,13 +238,31 @@ async function updateAuthLink() {
                 manualBackupNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
             }
             if (myBookingsNavLink) { 
-                myBookingsNavLink.style.display = 'list-item'; 
+                myBookingsNavLink.style.display = 'flex'; // Changed from list-item to flex for header
             }
             if (analyticsNavLink) {
-                analyticsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
+                analyticsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none'; // Stays list-item if it's inside admin ul
             }
             if (adminBookingsNavLink) {
-                adminBookingsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
+                adminBookingsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none'; // Stays list-item
+            }
+
+            // Sidebar and body class management based on admin status
+            if (data.user.is_admin) {
+                if (sidebar) sidebar.style.display = ''; // Or 'block' or 'flex'
+                if (sidebarToggleBtn) sidebarToggleBtn.style.display = '';
+                document.body.classList.remove('no-sidebar');
+                // Ensure sidebar-collapsed state is consistent if sidebar was previously hidden
+                if (sidebar && !sidebar.classList.contains('collapsed')) {
+                    document.body.classList.remove('sidebar-collapsed');
+                } else if (sidebar && sidebar.classList.contains('collapsed')) {
+                    document.body.classList.add('sidebar-collapsed');
+                }
+            } else { // Non-admin user
+                if (sidebar) sidebar.style.display = 'none';
+                if (sidebarToggleBtn) sidebarToggleBtn.style.display = 'none';
+                document.body.classList.add('no-sidebar');
+                document.body.classList.remove('sidebar-collapsed');
             }
 
             if (logoutLinkDropdown) {
@@ -393,11 +421,14 @@ document.addEventListener('DOMContentLoaded', function() {
     updateAuthLink();
 
     const sidebar = document.getElementById('sidebar');
-    const sidebarToggle = document.getElementById('sidebar-toggle');
-    if (sidebar && sidebarToggle) {
+    const sidebarToggle = document.getElementById('sidebar-toggle'); // Already declared as sidebarToggleBtn in updateAuthLink scope
+    if (sidebar && sidebarToggle) { // sidebar is already declared in DOMContentLoaded scope
         sidebarToggle.addEventListener('click', function() {
-            sidebar.classList.toggle('collapsed');
-            document.body.classList.toggle('sidebar-collapsed');
+            // Only toggle if the sidebar is supposed to be visible (i.e., for admins)
+            if (sidebar.style.display !== 'none') {
+                sidebar.classList.toggle('collapsed');
+                document.body.classList.toggle('sidebar-collapsed');
+            }
         });
     }
 

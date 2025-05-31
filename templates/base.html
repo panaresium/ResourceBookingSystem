@@ -8,23 +8,33 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     {% block head_extra %}{% endblock %}
 </head>
-<body>
-    <header class="app-header"><div class="header-content"></div></header>
+<body class="no-sidebar">
+    <header class="app-header">
+        <div class="header-content">
+            <a href="{{ url_for('serve_index') }}"><span class="menu-icon" aria-hidden="true">🏠</span><span class="menu-text">{{ _('Home') }}</span></a>
+            <a href="{{ url_for('serve_resources') }}"><span class="menu-icon" aria-hidden="true">📁</span><span class="menu-text">{{ _('View Resources') }}</span></a>
+            <a href="{{ url_for('serve_calendar') }}"><span class="menu-icon" aria-hidden="true">📅</span><span class="menu-text">{{ _('Calendar') }}</span></a>
+            <div id="my-bookings-nav-link" style="display: none;">
+                 <a href="{{ url_for('serve_my_bookings_page') }}"><span class="menu-icon" aria-hidden="true">📖</span><span class="menu-text">{{ _('My Bookings') }}</span></a>
+            </div>
+            <div id="welcome-message-container" style="display: none; margin-right: 10px; color: white; align-self: center;"></div>
+            <div id="auth-link-container" style="display: none; margin-left:auto;">
+                <a href="{{ url_for('serve_login') }}"><span class="menu-icon" aria-hidden="true">🔑</span><span class="menu-text">{{ _('Login') }}</span></a>
+            </div>
+            <div id="user-dropdown-container" style="display: none; position: relative; margin-left:auto;">
+                <button id="user-dropdown-button" aria-haspopup="true" aria-expanded="false" style="background: none; border: none; color: white; font-size: 1em; cursor: pointer; padding: 10px; font-weight: bold; display:flex; align-items:center;">
+                    <span class="user-icon" style="font-size:1.2em;">&#x1F464;</span><span class="dropdown-arrow"> &#9662;</span>
+                </button>
+                <div class="dropdown-menu" id="user-dropdown-menu" style="display: none; position: absolute; top: 100%; left: 0; background-color: #333; border: 1px solid #555; min-width: 160px; z-index: 1000; list-style-type: none; padding: 0; margin: 0; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
+                    <a class="dropdown-item" href="{{ url_for('serve_profile_page') }}" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Profile') }}</a>
+                    <a class="dropdown-item" href="{{ url_for('logout_and_redirect') }}" id="logout-link-dropdown" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Logout') }}</a>
+                </div>
+            </div>
+        </div>
+    </header>
     <nav id="sidebar" class="collapsed">
         <button id="sidebar-toggle" aria-label="{{ _('Toggle menu') }}">&#9776;</button>
         <ul>
-            <li><a href="{{ url_for('serve_index') }}"><span class="menu-icon" aria-hidden="true">🏠</span><span class="menu-text">{{ _('Home') }}</span></a></li>
-            <li><a href="{{ url_for('serve_resources') }}"><span class="menu-icon" aria-hidden="true">📁</span><span class="menu-text">{{ _('View Resources') }}</span></a></li>
-            <li><a href="{{ url_for('serve_calendar') }}"><span class="menu-icon" aria-hidden="true">📅</span><span class="menu-text">{{ _('Calendar') }}</span></a></li>
-            
-            {# General links visible to all - JavaScript will manage the display of login/logout and user info #}
-
-            {# Container for 'My Bookings' - shown by JS when logged in #}
-            <li id="my-bookings-nav-link" style="display: none;">
-                 <a href="{{ url_for('serve_my_bookings_page') }}"><span class="menu-icon" aria-hidden="true">📖</span><span class="menu-text">{{ _('My Bookings') }}</span></a>
-            </li>
-            
-            {# Container for Admin Maps link - shown by JS if admin #}
         <li id="admin-menu-item" style="display:none;">
             <details id="admin-section">
                 <summary><span class="menu-icon" aria-hidden="true">⚙️</span><span class="menu-text">{{ _('Admin') }}</span></summary>
@@ -53,11 +63,6 @@
                 </ul>
             </details>
         </li>
-
-            {# Container for user-specific welcome message - populated by JS when logged in #}
-            {# Container for user dropdown (Profile, Logout) - shown by JS when logged in #}
-            {# Links for admin users or specific roles could be added here with appropriate checks #}
-            {# Example: {% if current_user.is_admin %}<li><a href="{{ url_for('serve_admin_dashboard') }}">{{ _('Admin') }}</a></li>{% endif %} #}
         </ul>
     </nav>
     <div id="manual-backup-status" class="status-message" style="display:none; margin: 10px;"></div>
