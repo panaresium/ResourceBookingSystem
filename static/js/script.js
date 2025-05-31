@@ -148,7 +148,6 @@ async function updateAuthLink() {
     const userManagementNavLink = document.getElementById('user-management-nav-link');
     const adminMenuItem = document.getElementById('admin-menu-item');
     const manualBackupNavLink = document.getElementById('manual-backup-nav-link');
-    const manualBackupBtn = document.getElementById('manual-backup-btn');
     const welcomeMessageContainer = document.getElementById('welcome-message-container');
     const userDropdownContainer = document.getElementById('user-dropdown-container');
     const userDropdownButton = document.getElementById('user-dropdown-button');
@@ -401,6 +400,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const bookingResultsDiv = document.getElementById('booking-results');
     const loginForm = document.getElementById('login-form');
     const loginMessageDiv = document.getElementById('login-message');
+    const manualBackupBtn = document.getElementById('manual-backup-btn');
 
     // --- New Booking Page Specific Logic ---
     if (bookingForm) {

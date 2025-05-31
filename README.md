@@ -46,6 +46,10 @@ This script checks your Python version, creates the required directories, and th
 
 Running `python app.py` or `flask run` performs a minimal check as well, but `init_setup.py` is the preferred method to ensure the environment is healthy.
 
+The initialization process also creates `data/admin_config.json` if it does not
+exist. This file stores floor map, resource, user and permission information in
+JSON format so you can easily modify it or replace it from an Azure file share.
+
 
 ### Installing Dependencies
 
@@ -90,6 +94,9 @@ The database is excluded from version control, but the `azure_backup.py` script
 automatically uploads `data/site.db` to Azure File Share whenever its contents
 change.
 You should see messages indicating success.
+An additional JSON file `data/admin_config.json` stores floor map, resource,
+user and permission configuration. The initialization script creates this file
+if it is missing, and it is backed up to Azure along with uploaded media.
 Pass `force=True` if you want to **reset and wipe** existing data:
    ```python
    >>> init_db(force=True)
@@ -200,12 +207,13 @@ Use `azure_backup.py` to upload the SQLite database and uploaded images to an Az
 - `AZURE_DB_SHARE` – file share name for database backups (default `db-backups`)
 - `AZURE_MEDIA_SHARE` – file share name for uploaded images (default `media`)
 
+`data/admin_config.json` holds admin configuration for floor maps, resources, users and permissions. This JSON file is backed up together with `site.db` and uploaded images.
 
 Run the script with:
 ```bash
 python azure_backup.py
 ```
-All floor map and resource images from `static/` along with `data/site.db` will be uploaded. The script stores hashes of previous uploads so unchanged files are skipped on subsequent runs. During the process, log messages indicate whether `site.db` was uploaded or skipped because it did not change.
+All floor map and resource images from `static/` along with `data/site.db` will be uploaded. The admin configuration JSON (`data/admin_config.json`) is also included. The script stores hashes of previous uploads so unchanged files are skipped on subsequent runs. During the process, log messages indicate whether files were uploaded or skipped because they did not change.
 
 ### Automatic Backups
 

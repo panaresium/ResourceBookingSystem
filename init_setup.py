@@ -584,6 +584,7 @@ def init_db(force=False):
                     export_admin_config()
                 except Exception as exc:
                     print(f"Failed to export admin config: {exc}")
+
                 upload_config()
             except Exception as exc:
                 print(f"Failed to upload data to Azure: {exc}")

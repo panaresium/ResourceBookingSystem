@@ -27,6 +27,7 @@ def get_config_path():
 
 
 def load_config():
+
     os.makedirs(DATA_DIR, exist_ok=True)
     if not os.path.exists(CONFIG_FILE):
         return DEFAULT_CONFIG.copy()
@@ -43,3 +44,4 @@ def save_config(data):
     cleaned = ensure_defaults(data)
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(cleaned, f, indent=2)
+
