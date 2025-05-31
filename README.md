@@ -205,7 +205,7 @@ Run the script with:
 ```bash
 python azure_backup.py
 ```
-All floor map and resource images from `static/` along with `data/site.db` will be uploaded. The script stores hashes of previous uploads so unchanged files are skipped on subsequent runs.
+All floor map and resource images from `static/` along with `data/site.db` will be uploaded. The script stores hashes of previous uploads so unchanged files are skipped on subsequent runs. During the process, log messages indicate whether `site.db` was uploaded or skipped because it did not change.
 
 ### Automatic Backups
 
