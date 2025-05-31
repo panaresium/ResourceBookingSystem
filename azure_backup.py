@@ -89,7 +89,10 @@ def upload_file(share_client, source_path, file_path):
     file_client = share_client.get_file_client(file_path)
     with open(source_path, 'rb') as f:
         data = f.read()
-    file_client.upload_file(data, overwrite=True)
+    # ShareFileClient.upload_file does not support an 'overwrite' parameter.
+    # Passing it causes a TypeError when the request is sent. Simply uploading
+    # the data will overwrite the file if it already exists.
+    file_client.upload_file(data)
 
 
 def download_file(share_client, file_path, dest_path):
