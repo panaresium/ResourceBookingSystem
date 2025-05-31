@@ -2283,8 +2283,16 @@ document.addEventListener('DOMContentLoaded', function() {
                         selectedUserIds.push(parseInt(cb.value));
                     });
                 }
-                const roleIdsStr = authorizedRolesInput ? authorizedRolesInput.value : "";
+                // const roleIdsStr = authorizedRolesInput ? authorizedRolesInput.value : ""; // This was causing ReferenceError
 
+                let selectedRoleIds = [];
+                const rolesContainer = document.getElementById('define-area-authorized-roles-checkbox-container');
+                if (rolesContainer) {
+                    const checkedRoles = rolesContainer.querySelectorAll('input[type="checkbox"]:checked');
+                    checkedRoles.forEach(checkbox => {
+                        selectedRoleIds.push(parseInt(checkbox.value));
+                    });
+                }
 
                 const payload = { 
                     floor_map_id: floorMapId, 
@@ -2293,9 +2301,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     // For now, assuming these are managed on the main Resource Management page,
                     // and map_info PUT only updates map-specific data.
                     // If you want to update these here, add them to payload:
-                    // booking_restriction: bookingPermissionDropdown.value,
-                    // allowed_user_ids: selectedUserIds.join(','), // Send as comma-separated string
-                    // role_ids: roleIdsStr.split(',').filter(id => id.trim() !== '').map(id => parseInt(id)) // Send as array of ints
+                    booking_restriction: bookingPermissionDropdown.value, // Example: if you want to update this
+                    allowed_user_ids: selectedUserIds.join(','), // Example: if you want to update this
+                    role_ids: selectedRoleIds // Send as array of ints
                 };
 
                 try {
@@ -2352,6 +2360,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     if(resourceToMapSelect) resourceToMapSelect.value = '';
                     if(bookingPermissionDropdown) bookingPermissionDropdown.value = "";
                     if (authorizedRolesCheckboxContainer) authorizedRolesCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+                    // Also clear authorizedUsersCheckboxContainer if it's being used in this form
+                    if (authorizedUsersCheckboxContainer) authorizedUsersCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
                     currentDrawnRect = null;
                     const mapIdRefresh = hiddenFloorMapIdInput.value;
                     if (mapIdRefresh) {
@@ -2377,10 +2387,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     updateCoordinateInputs(coords);
                     if (bookingPermissionDropdown) bookingPermissionDropdown.value = selectedAreaForEditing.booking_restriction || "";
                     
-                    // const allowedUserIdsArr = (selectedAreaForEditing.allowed_user_ids || "").split(',').filter(id => id.trim() !== '');
-                    // if(authorizedUsersCheckboxContainer) { // For define-area form, not directly applicable here
-                    // }
-                    if (authorizedRolesCheckboxContainer) { // Populate for define area form
+                    const allowedUserIdsArr = (selectedAreaForEditing.allowed_user_ids || "").split(',').filter(id => id.trim() !== '');
+                    if(authorizedUsersCheckboxContainer) {
+                        authorizedUsersCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                            cb.checked = allowedUserIdsArr.includes(cb.value);
+                        });
+                    }
+                    if (authorizedRolesCheckboxContainer) {
                         const selectedRoleIds = (selectedAreaForEditing.roles || []).map(r => String(r.id));
                         authorizedRolesCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
                             cb.checked = selectedRoleIds.includes(cb.value);
