@@ -2708,13 +2708,17 @@ document.addEventListener('DOMContentLoaded', function() {
     if (resetFontSizeBtn) resetFontSizeBtn.addEventListener('click', resetFontSize);
 
     if (manualBackupBtn) {
+        const manualBackupStatusDiv = document.getElementById('manual-backup-status');
         manualBackupBtn.addEventListener('click', async () => {
+            manualBackupBtn.disabled = true;
+            showLoading(manualBackupStatusDiv, 'Manual sync in progress...');
             try {
-                manualBackupBtn.disabled = true;
                 await apiCall('/api/admin/manual_backup', { method: 'POST' });
-                alert('Backup completed');
+                showSuccess(manualBackupStatusDiv, 'Manual sync completed.');
+                console.log('Manual sync completed');
             } catch (e) {
-                alert('Manual backup failed');
+                showError(manualBackupStatusDiv, 'Manual sync failed.');
+                console.error('Manual sync failed', e);
             } finally {
                 manualBackupBtn.disabled = false;
             }
