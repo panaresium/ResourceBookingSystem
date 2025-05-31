@@ -704,6 +704,42 @@ def serve_resource_management_page():
     app.logger.info(f"Admin user {current_user.username} accessed Resource Management page.")
     return render_template("resource_management.html")
 
+@app.route('/admin/bookings')
+@login_required
+@permission_required('manage_bookings')
+def serve_admin_bookings_page():
+    app.logger.info(f"User {current_user.username} accessed Admin Bookings page.")
+    try:
+        bookings_query = db.session.query(
+            Booking.id,
+            Booking.title,
+            Booking.start_time,
+            Booking.end_time,
+            Booking.status,
+            User.username.label('user_username'),
+            Resource.name.label('resource_name')
+        ).join(Resource, Booking.resource_id == Resource.id)\
+         .join(User, Booking.user_name == User.username)
+
+        all_bookings = bookings_query.order_by(Booking.start_time.desc()).all()
+
+        bookings_list = []
+        for booking_row in all_bookings:
+            bookings_list.append({
+                'id': booking_row.id,
+                'title': booking_row.title,
+                'start_time': booking_row.start_time,
+                'end_time': booking_row.end_time,
+                'status': booking_row.status,
+                'user_username': booking_row.user_username,
+                'resource_name': booking_row.resource_name
+            })
+
+        return render_template("admin_bookings.html", bookings=bookings_list)
+    except Exception as e:
+        app.logger.error(f"Error fetching bookings for admin page: {e}", exc_info=True)
+        return render_template("admin_bookings.html", bookings=[], error="Could not load bookings.")
+
 # --- Analytics Routes ---
 @analytics_bp.route('/')
 @login_required
@@ -2767,6 +2803,55 @@ def bookings_calendar():
     except Exception as e:
         app.logger.exception("Error fetching calendar bookings:")
         return jsonify({'error': 'Failed to fetch bookings.'}), 500
+
+@app.route('/api/admin/bookings/<int:booking_id>/cancel', methods=['POST'])
+@login_required
+@permission_required('manage_bookings')
+def admin_cancel_booking(booking_id):
+    app.logger.info(f"Admin user {current_user.username} attempting to cancel booking ID: {booking_id}")
+    try:
+        booking = Booking.query.get(booking_id)
+
+        if not booking:
+            app.logger.warning(f"Admin cancel attempt: Booking ID {booking_id} not found.")
+            return jsonify({'error': 'Booking not found.'}), 404
+
+        # Define terminal states where a booking cannot be cancelled
+        terminal_statuses = ['cancelled', 'rejected', 'completed', 'checked_out']
+        if booking.status and booking.status.lower() in terminal_statuses:
+            app.logger.warning(f"Admin cancel attempt: Booking ID {booking_id} is already in a terminal state: '{booking.status}'.")
+            return jsonify({'error': f'Booking is already in a terminal state ({booking.status}) and cannot be cancelled.'}), 400
+
+        original_status = booking.status
+        booking.status = 'cancelled'
+
+        resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
+        booking_title = booking.title or "N/A"
+
+        audit_details = (
+            f"Admin '{current_user.username}' cancelled booking ID {booking.id}. "
+            f"Original status: '{original_status}'. "
+            f"Booked by: '{booking.user_name}'. "
+            f"Resource: '{resource_name}' (ID: {booking.resource_id}). "
+            f"Title: '{booking_title}'."
+        )
+
+        db.session.commit()
+        add_audit_log(action="ADMIN_CANCEL_BOOKING", details=audit_details)
+        socketio.emit('booking_updated', {'action': 'cancelled_admin', 'booking_id': booking_id, 'resource_id': booking.resource_id, 'new_status': 'cancelled'})
+
+
+        app.logger.info(f"Admin user {current_user.username} successfully cancelled booking ID: {booking_id}.")
+        return jsonify({'message': 'Booking cancelled successfully.', 'booking_id': booking_id, 'new_status': 'cancelled'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error during admin cancellation of booking ID {booking_id}:")
+        add_audit_log(
+            action="ADMIN_CANCEL_BOOKING_FAILED",
+            details=f"Admin '{current_user.username}' failed to cancel booking ID {booking_id}. Error: {str(e)}"
+        )
+        return jsonify({'error': 'Failed to cancel booking due to a server error.'}), 500
 
 @app.route('/api/bookings/my_booked_resources', methods=['GET'])
 @login_required

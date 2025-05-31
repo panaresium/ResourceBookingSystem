@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Admin - Bookings - Smart Resource Booking') }}{% endblock %}
+
+{% block content %}
+<div class="container bookings-management-container">
+    <h1>{{ _('Admin Bookings Management') }}</h1>
+
+    <div id="admin-booking-status" class="status-message" role="alert">
+        <!-- Messages from JavaScript will appear here -->
+    </div>
+
+    {% if error %}
+    <div class="alert alert-danger" role="alert">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    {% if bookings %}
+    <div class="table-responsive">
+        <table class="table bookings-table">
+            <thead>
+                <tr>
+                    <th>{{ _('ID') }}</th>
+                    <th>{{ _('User') }}</th>
+                    <th>{{ _('Resource') }}</th>
+                    <th>{{ _('Title') }}</th>
+                    <th>{{ _('Start Time') }}</th>
+                    <th>{{ _('End Time') }}</th>
+                    <th>{{ _('Status') }}</th>
+                    <th>{{ _('Actions') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for booking in bookings %}
+                <tr>
+                    <td>{{ booking.id }}</td>
+                    <td>{{ booking.user_username }}</td>
+                    <td>{{ booking.resource_name }}</td>
+                    <td>{{ booking.title if booking.title else '-' }}</td>
+                    <td>{{ booking.start_time.strftime('%Y-%m-%d %H:%M') if booking.start_time else '-' }}</td>
+                    <td>{{ booking.end_time.strftime('%Y-%m-%d %H:%M') if booking.end_time else '-' }}</td>
+                    <td><span class="status-badge status-{{ booking.status | lower }}">{{ _(booking.status) }}</span></td>
+                    <td>
+                        {% if booking.status and booking.status.lower() not in ['cancelled', 'rejected', 'completed', 'checked_out'] %}
+                        <button class="button button-danger cancel-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel') }}</button>
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p>{{ _('No bookings found.') }}</p>
+    {% endif %}
+</div>
+
+<script>
+// Basic script placeholder if needed, though actual cancel logic might be in a site-wide JS file.
+// For now, this is just to acknowledge the potential for JS interaction with the status div.
+document.addEventListener('DOMContentLoaded', function() {
+    const statusDiv = document.getElementById('admin-booking-status');
+    // Example: if (statusDiv) { statusDiv.textContent = 'Page loaded.'; }
+});
+</script>
+
+{% endblock %}

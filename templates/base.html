@@ -48,6 +48,9 @@
                 <li id="analytics-nav-link" style="display: none;">
                     <a href="{{ url_for('analytics.analytics_dashboard') }}">{{ _('Analytics') }}</a>
                 </li>
+                <li id="admin-bookings-nav-link" style="display: none;">
+                    <a href="{{ url_for('serve_admin_bookings_page') }}">{{ _('Admin Bookings') }}</a>
+                </li>
                 <li id="manual-backup-nav-link" style="display:none;">
                     <button class="button" id="manual-backup-btn" type="button">{{ _('Manual Sync') }}</button>
                 </li>
