@@ -213,16 +213,12 @@ Configure the interval via the `AZURE_BACKUP_INTERVAL_MINUTES` environment varia
 
 ## Bulk User Management
 
-Administrators can manage users in bulk from the User Management page. The backend also provides API endpoints for automation.
+Admins can manage users in batches using the provided APIs and UI tools.
 
-### Export Users
-Visit the page and click **Export Users** or send a GET request to `/api/admin/users/export`. The response includes users with their assigned role IDs and role definitions.
+- **Export** all user accounts and roles via `GET /api/admin/users/export`.
+- **Import** users and roles from a JSON file with `POST /api/admin/users/import`. Existing users are updated when an `id` is provided.
+- **Delete** multiple users by sending their IDs to `DELETE /api/admin/users/bulk`.
 
-### Import Users
-Click **Import Users** to upload a previously exported JSON file or POST the same structure to `/api/admin/users/import`. Existing records are updated and new users are created.
-
-### Bulk Delete
-Select users in the table and press **Delete Selected** or send a DELETE request to `/api/admin/users/bulk` with a JSON payload of `{ "ids": [1,2,3] }`.
-
+The user management page offers buttons to export, import and remove selected users.
 
 

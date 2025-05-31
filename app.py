@@ -2076,7 +2076,6 @@ def import_users():
         app.logger.exception("Error importing users:")
         return jsonify({'error': 'Failed to import users due to a server error.'}), 500
 
-
 # --- Waitlist Management APIs ---
 @app.route('/api/admin/waitlist', methods=['GET'])
 @login_required
