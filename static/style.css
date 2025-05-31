@@ -83,12 +83,16 @@ body {
 .header-content > a:hover,
 .header-content > div:hover:not(#user-dropdown-container):not(#welcome-message-container) { /* Avoid hover on non-interactive divs unless they contain an <a> that handles it */
     background-color: var(--secondary-color);
+    color: var(--text-color-light);
+    text-decoration: none;
 }
 /* Specifically target <a> tags within the divs for hover, if the div itself shouldn't have hover */
 .header-content #my-bookings-nav-link a:hover,
 .header-content #auth-link-container a:hover {
     background-color: var(--secondary-color); /* Apply hover to the link itself */
     border-radius: 4px; /* Ensure hover matches overall item shape */
+    color: var(--text-color-light);
+    text-decoration: none;
 }
 .header-content #my-bookings-nav-link a,
 .header-content #auth-link-container a {
@@ -551,6 +555,12 @@ body.high-contrast .app-header #user-dropdown-button {
 body.high-contrast .app-header a,
 body.high-contrast .app-header a:visited {
     color: #ffffff !important;
+}
+
+body.high-contrast .app-header a:hover,
+body.high-contrast .app-header a:focus { /* Also include focus for consistency */
+    color: #ffffff !important;
+    text-decoration: none !important;
 }
 
 body.high-contrast .app-header #user-dropdown-menu {
