@@ -44,6 +44,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const bulkEditCapacityInput = document.getElementById('bulk-edit-capacity');
     const bulkEditEquipmentInput = document.getElementById('bulk-edit-equipment');
     const bulkEditTagsInput = document.getElementById('bulk-edit-tags');
+    const exportAllResourcesBtn = document.getElementById('export-all-resources-btn');
+    const importResourcesFile = document.getElementById('import-resources-file');
+    const importResourcesBtn = document.getElementById('import-resources-btn');
 
     async function fetchAndDisplayResources(filters = {}) {
         showLoading(statusDiv, 'Fetching resources...');
@@ -140,6 +143,95 @@ document.addEventListener('DOMContentLoaded', function() {
             if (bulkStatusInput) bulkStatusInput.value = 'draft';
             hideMessage(bulkFormStatus);
             if (bulkModal) bulkModal.style.display = 'block';
+        });
+    }
+
+    if (importResourcesBtn && importResourcesFile) {
+        importResourcesBtn.addEventListener('click', () => {
+            importResourcesFile.click(); // Trigger file input when button is clicked
+        });
+
+        importResourcesFile.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file) {
+                showError(statusDiv, 'No file selected.');
+                return;
+            }
+            if (file.type !== 'application/json') {
+                showError(statusDiv, 'Please select a valid JSON file.');
+                return;
+            }
+
+            showLoading(statusDiv, 'Importing resources...');
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/api/admin/resources/import', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        // 'Content-Type': 'multipart/form-data' is automatically set by browser with FormData
+                        'X-CSRFToken': getCsrfToken() // Assuming you have a function to get CSRF token
+                    }
+                });
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || `HTTP error! status: ${response.status}`);
+                }
+
+                let message = result.message || 'Import process completed.';
+                if (result.created) message += ` Created: ${result.created}.`;
+                if (result.updated) message += ` Updated: ${result.updated}.`;
+
+                if (result.errors && result.errors.length > 0) {
+                    showError(statusDiv, `${message} Some resources had errors: ${JSON.stringify(result.errors, null, 2)}`);
+                } else {
+                    showSuccess(statusDiv, message);
+                }
+                fetchAndDisplayResources(currentFilters); // Refresh the list
+            } catch (error) {
+                showError(statusDiv, `Error importing resources: ${error.message}`);
+            } finally {
+                // Reset file input to allow selecting the same file again if needed
+                importResourcesFile.value = '';
+            }
+        });
+    }
+
+    if (exportAllResourcesBtn) {
+        exportAllResourcesBtn.addEventListener('click', async () => {
+            showLoading(statusDiv, 'Exporting resources...');
+            try {
+                const response = await fetch('/api/admin/resources/export');
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                // Extract filename from Content-Disposition header
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = 'resources_export.json'; // Default filename
+                if (contentDisposition) {
+                    const filenameMatch = contentDisposition.match(/filename="?(.+?)"?$/);
+                    if (filenameMatch && filenameMatch.length > 1) {
+                        filename = filenameMatch[1];
+                    }
+                }
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                showSuccess(statusDiv, 'Resources exported successfully.');
+            } catch (error) {
+                showError(statusDiv, `Error exporting resources: ${error.message}`);
+            }
         });
     }
 

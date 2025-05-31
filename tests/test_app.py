@@ -1175,6 +1175,417 @@ class TestUserImportExport(AppTests):
         self.assertIsNone(User.query.get(u2.id))
 
 
+class TestResourceManagementImportExportAPI(AppTests):
+    def setUp(self):
+        super().setUp()
+        # Create an admin user with manage_resources permission
+        self.admin_user = User(username='resourcemgmtadmin', email='resourcemgmt@example.com', is_admin=True)
+        self.admin_user.set_password('adminpass')
+
+        # Create Administrator role with all_permissions if it doesn't exist
+        admin_role = Role.query.filter_by(name="Administrator").first()
+        if not admin_role:
+            admin_role = Role(name="Administrator", permissions="all_permissions")
+            db.session.add(admin_role)
+
+        self.admin_user.roles.append(admin_role) # Assign role that has 'manage_resources' (via all_permissions)
+        db.session.add(self.admin_user)
+
+        # Create a standard user for allowed_user_ids tests
+        self.standard_user = User(username='standarduser', email='standard@example.com')
+        self.standard_user.set_password('userpass')
+        db.session.add(self.standard_user)
+
+        # Create some roles for testing role assignment
+        self.role1 = Role(name='Test Role 1', permissions='can_book_special')
+        self.role2 = Role(name='Test Role 2', permissions='can_view_reports')
+        db.session.add_all([self.role1, self.role2])
+
+        db.session.commit()
+
+    def test_export_all_resources(self):
+        """Test export all resources API endpoint."""
+        self.login(self.admin_user.username, 'adminpass')
+
+        # Create a sample resource with all fields populated
+        resource_data = {
+            'name': 'Export Test Resource 1',
+            'capacity': 50,
+            'equipment': 'Projector, Whiteboard, AV System',
+            'status': 'published',
+            'tags': 'meeting, large-group',
+            'booking_restriction': 'admin_only',
+            'allowed_user_ids': str(self.standard_user.id),
+            'image_filename': 'test_image.jpg',
+            'is_under_maintenance': True,
+            'maintenance_until': datetime.utcnow() + timedelta(days=7),
+            'max_recurrence_count': 10,
+            'scheduled_status': 'archived',
+            'scheduled_status_at': datetime.utcnow() + timedelta(days=14),
+            'floor_map_id': self.floor_map.id,
+            'map_coordinates': json.dumps({'type': 'rect', 'x': 100, 'y': 100, 'width': 50, 'height': 25})
+        }
+        export_resource = Resource(**resource_data)
+        export_resource.roles.append(self.role1) # Add a role
+        db.session.add(export_resource)
+        db.session.commit()
+
+        # Add another simpler resource from parent setUp (self.resource1)
+        # self.resource1 already exists from AppTests.setUp
+
+        response = self.client.get('/api/admin/resources/export')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content_type, 'application/json')
+        self.assertIn('attachment; filename=resources_export.json', response.headers['Content-Disposition'])
+
+        data = json.loads(response.data.decode('utf-8'))
+        self.assertIsInstance(data, list)
+
+        # Find our test resource in the export
+        exported_res_data = next((r for r in data if r['name'] == 'Export Test Resource 1'), None)
+        self.assertIsNotNone(exported_res_data)
+
+        self.assertEqual(exported_res_data['name'], resource_data['name'])
+        self.assertEqual(exported_res_data['capacity'], resource_data['capacity'])
+        self.assertEqual(exported_res_data['equipment'], resource_data['equipment'])
+        self.assertEqual(exported_res_data['status'], resource_data['status'])
+        self.assertEqual(exported_res_data['tags'], resource_data['tags'])
+        self.assertEqual(exported_res_data['booking_restriction'], resource_data['booking_restriction'])
+        self.assertEqual(exported_res_data['allowed_user_ids'], resource_data['allowed_user_ids'])
+        self.assertIn(resource_data['image_filename'], exported_res_data['image_url']) # image_url is derived
+        self.assertEqual(exported_res_data['is_under_maintenance'], resource_data['is_under_maintenance'])
+        self.assertEqual(datetime.fromisoformat(exported_res_data['maintenance_until'].replace('Z', '+00:00')), resource_data['maintenance_until'].replace(tzinfo=None))
+        self.assertEqual(exported_res_data['max_recurrence_count'], resource_data['max_recurrence_count'])
+        self.assertEqual(exported_res_data['scheduled_status'], resource_data['scheduled_status'])
+        self.assertEqual(datetime.fromisoformat(exported_res_data['scheduled_status_at'].replace('Z', '+00:00')), resource_data['scheduled_status_at'].replace(tzinfo=None))
+        self.assertEqual(exported_res_data['floor_map_id'], resource_data['floor_map_id'])
+        self.assertEqual(exported_res_data['map_coordinates'], json.loads(resource_data['map_coordinates']))
+
+        self.assertIsInstance(exported_res_data['roles'], list)
+        self.assertEqual(len(exported_res_data['roles']), 1)
+        self.assertEqual(exported_res_data['roles'][0]['id'], self.role1.id)
+        self.assertEqual(exported_res_data['roles'][0]['name'], self.role1.name)
+        self.assertIsNotNone(exported_res_data['published_at']) # status is 'published'
+
+        # Check if self.resource1 (from parent setUp) is also present
+        parent_resource_data = next((r for r in data if r['id'] == self.resource1.id), None)
+        self.assertIsNotNone(parent_resource_data)
+        self.assertEqual(parent_resource_data['name'], self.resource1.name)
+
+    def test_import_resources_create_and_update(self):
+        """Test importing resources (create new and update existing)."""
+        self.login(self.admin_user.username, 'adminpass')
+
+        # Prepare initial resource to be updated by name
+        initial_resource_name = "Resource To Update By Name"
+        initial_res_by_name = Resource(name=initial_resource_name, capacity=10, status="draft")
+        db.session.add(initial_res_by_name)
+        db.session.commit()
+        initial_res_by_name_id = initial_res_by_name.id
+
+        # Prepare initial resource to be updated by ID (self.resource2 from AppTests.setUp)
+        initial_res_by_id_id = self.resource2.id
+        initial_res_by_id_original_name = self.resource2.name
+        initial_res_by_id_original_capacity = self.resource2.capacity
+
+
+        import_data = [
+            { # New resource
+                "name": "Imported Resource New",
+                "capacity": 5,
+                "equipment": "Laptop",
+                "status": "published",
+                "tags": "imported, new",
+                "booking_restriction": None,
+                "allowed_user_ids": f"{self.standard_user.id}",
+                "roles": [{"id": self.role1.id}], # Test role assignment by ID
+                "is_under_maintenance": False,
+                "floor_map_id": self.floor_map.id, # Use existing map
+                "map_coordinates": {"type": "rect", "x":10, "y":10, "width":10, "height":10}
+            },
+            { # Update existing resource (self.resource2) by its ID
+                "id": initial_res_by_id_id,
+                "name": "Updated Resource Name By ID", # Change name
+                "capacity": 15, # Change capacity
+                "status": "archived",
+                "roles": [{"name": self.role2.name}] # Test role assignment by name
+            },
+            { # Update existing resource by its name
+                "name": initial_resource_name, # Match by this name
+                "capacity": 20, # Change capacity
+                "equipment": "Updated Equipment",
+                "tags": "updated, by-name"
+            }
+        ]
+
+        # Simulate file upload
+        from io import BytesIO
+        file_content = json.dumps(import_data).encode('utf-8')
+        data = {'file': (BytesIO(file_content), 'import_resources.json')}
+
+        response = self.client.post('/api/admin/resources/import', data=data, content_type='multipart/form-data')
+
+        self.assertEqual(response.status_code, 200) # Or 207 if there are partial errors we're not testing yet
+        resp_json = response.get_json()
+
+        self.assertEqual(resp_json.get('created'), 1)
+        self.assertEqual(resp_json.get('updated'), 2)
+        self.assertEqual(len(resp_json.get('errors', [])), 0)
+
+        # Verify new resource
+        new_res = Resource.query.filter_by(name="Imported Resource New").first()
+        self.assertIsNotNone(new_res)
+        self.assertEqual(new_res.capacity, 5)
+        self.assertEqual(new_res.equipment, "Laptop")
+        self.assertEqual(new_res.status, "published")
+        self.assertEqual(new_res.tags, "imported, new")
+        self.assertEqual(new_res.allowed_user_ids, str(self.standard_user.id))
+        self.assertIn(self.role1, new_res.roles)
+        self.assertEqual(new_res.floor_map_id, self.floor_map.id)
+        self.assertIsNotNone(new_res.map_coordinates)
+        self.assertFalse(new_res.is_under_maintenance)
+
+        # Verify resource updated by ID (self.resource2)
+        updated_res_by_id = Resource.query.get(initial_res_by_id_id)
+        self.assertEqual(updated_res_by_id.name, "Updated Resource Name By ID")
+        self.assertEqual(updated_res_by_id.capacity, 15)
+        self.assertEqual(updated_res_by_id.status, "archived")
+        self.assertIn(self.role2, updated_res_by_id.roles)
+
+        # Verify resource updated by name
+        updated_res_by_name = Resource.query.get(initial_res_by_name_id)
+        self.assertEqual(updated_res_by_name.name, initial_resource_name) # Name should not change when matched by name unless explicitly in payload
+        self.assertEqual(updated_res_by_name.capacity, 20)
+        self.assertEqual(updated_res_by_name.equipment, "Updated Equipment")
+        self.assertEqual(updated_res_by_name.tags, "updated, by-name")
+
+    def test_import_resources_error_handling(self):
+        """Test error handling during resource import."""
+        self.login(self.admin_user.username, 'adminpass')
+
+        import_data_errors = [
+            { # Missing name for new resource
+                "capacity": 10
+            },
+            { # Existing resource by name, but role not found
+                "name": self.resource1.name, # self.resource1 is from AppTests.setUp
+                "roles": [{"id": 999}] # Non-existent role ID
+            },
+            { # Invalid data type for capacity
+                "name": "Resource Invalid Capacity",
+                "capacity": "not-a-number"
+            }
+        ]
+        file_content_errors = json.dumps(import_data_errors).encode('utf-8')
+        data_errors = {'file': (BytesIO(file_content_errors), 'import_errors.json')}
+
+        response_errors = self.client.post('/api/admin/resources/import', data=data_errors, content_type='multipart/form-data')
+        self.assertEqual(response_errors.status_code, 207) # Multi-Status
+        resp_json_errors = response_errors.get_json()
+
+        self.assertEqual(resp_json_errors.get('created', 0), 0) # No new resources should be fully created if they have errors.
+        self.assertEqual(resp_json_errors.get('updated', 0), 0) # No successful updates if the only changes are problematic.
+        self.assertTrue(len(resp_json_errors.get('errors', [])) >= 2) # Expecting at least 2 errors (missing name, role not found)
+                                                                    # The invalid capacity might be caught by setattr or type conversion
+
+        # Check specific error messages (optional, but good for confirming error details)
+        errors = resp_json_errors.get('errors')
+        self.assertTrue(any("Missing name for new resource" in e['error'] for e in errors))
+        self.assertTrue(any("Role not found" in e['error'] for e in errors))
+        # The "not-a-number" for capacity might result in a more generic "Error processing resource" or a DB error if not caught early.
+        # For now, checking the count of errors is the primary goal.
+
+
+class TestMapConfigurationImportExportAPI(AppTests):
+    def setUp(self):
+        super().setUp()
+        self.admin_user = User(username='mapconfigadmin', email='mapconfig@example.com', is_admin=True)
+        self.admin_user.set_password('adminpass')
+
+        admin_role = Role.query.filter_by(name="Administrator").first()
+        if not admin_role: # Ensure Administrator role with all_permissions exists
+            admin_role = Role(name="Administrator", permissions="all_permissions,manage_floor_maps") # Explicitly add manage_floor_maps
+            db.session.add(admin_role)
+
+        self.admin_user.roles.append(admin_role)
+        db.session.add(self.admin_user)
+
+        # Create a role and assign to one of the resources for export testing
+        self.map_test_role = Role(name='Map Test Role')
+        db.session.add(self.map_test_role)
+        db.session.commit()
+
+        self.resource1.roles.append(self.map_test_role)
+        self.resource1.booking_restriction = "admin_only" # Example value
+        self.resource1.allowed_user_ids = str(self.admin_user.id) # Example value
+        db.session.commit()
+
+
+    def test_export_map_configuration(self):
+        """Test export map configuration API endpoint."""
+        self.login(self.admin_user.username, 'adminpass')
+
+        response = self.client.get('/api/admin/maps/export_configuration')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content_type, 'application/json')
+        self.assertIn('attachment; filename=map_configuration_export.json', response.headers['Content-Disposition'])
+
+        data = json.loads(response.data.decode('utf-8'))
+        self.assertIn('floor_maps', data)
+        self.assertIn('mapped_resources', data)
+        self.assertIsInstance(data['floor_maps'], list)
+        self.assertIsInstance(data['mapped_resources'], list)
+
+        # Verify FloorMap data (self.floor_map is from AppTests.setUp)
+        fm_data = next((fm for fm in data['floor_maps'] if fm['id'] == self.floor_map.id), None)
+        self.assertIsNotNone(fm_data)
+        self.assertEqual(fm_data['name'], self.floor_map.name)
+        self.assertEqual(fm_data['image_filename'], self.floor_map.image_filename)
+        self.assertEqual(fm_data['location'], self.floor_map.location)
+        self.assertEqual(fm_data['floor'], self.floor_map.floor)
+
+        # Verify Mapped Resource data (self.resource1 is from AppTests.setUp and modified in this class's setUp)
+        # Resource1 is mapped to self.floor_map in AppTests.setUp
+        res_data = next((r for r in data['mapped_resources'] if r['id'] == self.resource1.id), None)
+        self.assertIsNotNone(res_data)
+        self.assertEqual(res_data['name'], self.resource1.name)
+        self.assertEqual(res_data['floor_map_id'], self.floor_map.id)
+        self.assertIsInstance(res_data['map_coordinates'], dict) # Should be parsed from JSON string
+        self.assertEqual(res_data['map_coordinates']['x'], 10) # From AppTests.setUp
+        self.assertEqual(res_data['booking_restriction'], "admin_only")
+        self.assertEqual(res_data['allowed_user_ids'], str(self.admin_user.id))
+
+        self.assertIsInstance(res_data['role_ids'], list)
+        self.assertIn(self.map_test_role.id, res_data['role_ids'])
+
+        # Ensure a resource NOT mapped is NOT in mapped_resources
+        # Create a resource not mapped
+        unmapped_res = Resource(name="Unmapped Export Test Res", status="published")
+        db.session.add(unmapped_res)
+        db.session.commit()
+        unmapped_res_data = next((r for r in data['mapped_resources'] if r['id'] == unmapped_res.id), None)
+        self.assertIsNone(unmapped_res_data)
+
+    def test_import_map_configuration(self):
+        """Test import map configuration API endpoint."""
+        self.login(self.admin_user.username, 'adminpass')
+
+        # Data for import
+        new_map_name = f"Imported New Map {unittest.mock.ANY}" # Make name unique for creation
+        new_map_image = "new_map_import.jpg"
+
+        # Existing map to be updated (self.floor_map from AppTests.setUp)
+        existing_map_id = self.floor_map.id
+        updated_map_location = "Updated Location Main Campus"
+
+        # Existing resource to be mapped/updated (self.resource2 from AppTests.setUp)
+        # self.resource1 is already mapped in setup, we can try re-mapping it or updating its mapping.
+
+        import_config_data = {
+            "floor_maps": [
+                { # Create new map
+                    "name": new_map_name,
+                    "image_filename": new_map_image,
+                    "location": "New Building",
+                    "floor": "5"
+                },
+                { # Update existing map (self.floor_map)
+                    "id": existing_map_id,
+                    "name": self.floor_map.name, # Keep name same or change it
+                    "location": updated_map_location
+                    # image_filename and floor could also be updated
+                }
+            ],
+            "mapped_resources": [
+                { # Map self.resource2 to the newly imported map (identified by name)
+                  # For this to work, the new map must be processed first and its ID made available.
+                  # The import logic should handle this by looking up map by name if ID from import isn't found yet.
+                  # Or, better, process maps first, then map resources using the *actual* DB IDs of maps.
+                  # The current export exports map ID. The import should try to use that ID.
+                  # If a map in the import file has an ID that doesn't exist, it will be treated as new if name is unique.
+                  # If a map in import has an ID that *does* exist, it's an update.
+                  # For mapping resources, it's best if the import file uses *original* map IDs, and the import
+                  # logic maps them to the *actual current* map IDs (which might be new if maps were re-created by name).
+                  # For this test, we'll assume the 'floor_map_id' in mapped_resources refers to an ID that *will* exist after map import.
+
+                    "id": self.resource2.id, # Target existing resource
+                    # "floor_map_id": existing_map_id, # Let's map it to the *updated* existing_map_id first
+                                                    # This map ID *should* be stable.
+                    # For testing mapping to a *newly created* map, we'd need its ID.
+                    # The import route currently uses `fm_data['processed_id']` to map.
+                    # So, if the new map "Imported New Map" is processed and gets an ID, say 100,
+                    # then a resource could refer to "floor_map_id": <original_id_of_new_map_if_it_had_one_in_json>
+                    # OR, if the import JSON for the new map doesn't have an ID, we can't directly reference it
+                    # by ID in the mapped_resources section of the *same* import file unless we assume order and lookup by name.
+                    # Let's test mapping self.resource2 to the map that will be 'Imported New Map'
+                    # We need to know what ID 'Imported New Map' will get, or modify import to allow name-based map linking for resources.
+                    # The current import logic for maps stores 'processed_id' in fm_data.
+                    # The resource mapping logic then tries to find the map using this 'processed_id' if the original map ID was in the file.
+                    # This is a bit complex for a direct test without knowing the assigned ID.
+                    # Let's simplify: map self.resource2 to the *existing* map (self.floor_map) but with new coords.
+                    "floor_map_id": existing_map_id,
+                    "map_coordinates": {"type": "rect", "x": 200, "y": 200, "width": 20, "height": 20},
+                    "booking_restriction": "all_users",
+                    "allowed_user_ids": "", # Clear allowed users
+                    "role_ids": [self.map_test_role.id, self.role1.id] # Assign two roles
+                },
+                { # Update mapping for self.resource1 (already mapped in setUp)
+                    "id": self.resource1.id,
+                    "floor_map_id": existing_map_id, # Keep on same map
+                    "map_coordinates": {"type": "rect", "x": 10, "y": 20, "width": 35, "height": 35}, # Change coords
+                    "role_ids": [self.role2.id] # Change role
+                }
+            ]
+        }
+
+        from io import BytesIO
+        file_content = json.dumps(import_config_data).encode('utf-8')
+        data_file = {'file': (BytesIO(file_content), 'import_map_config.json')}
+
+        response = self.client.post('/api/admin/maps/import_configuration', data=data_file, content_type='multipart/form-data')
+        self.assertEqual(response.status_code, 200) # Or 207 if expecting partial errors/reminders
+        resp_json = response.get_json()
+
+        self.assertEqual(resp_json.get('maps_created'), 1)
+        self.assertEqual(resp_json.get('maps_updated'), 1)
+        self.assertEqual(len(resp_json.get('maps_errors', [])), 0)
+        self.assertEqual(resp_json.get('resource_mappings_updated'), 2)
+        self.assertEqual(len(resp_json.get('resource_mapping_errors', [])), 0)
+        self.assertTrue(any(new_map_image in reminder for reminder in resp_json.get('image_reminders', [])))
+
+        # Verify new map
+        imported_map = FloorMap.query.filter_by(name=new_map_name).first()
+        self.assertIsNotNone(imported_map)
+        self.assertEqual(imported_map.image_filename, new_map_image)
+        self.assertEqual(imported_map.location, "New Building")
+
+        # Verify updated map
+        updated_map = FloorMap.query.get(existing_map_id)
+        self.assertEqual(updated_map.location, updated_map_location)
+
+        # Verify resource2 mapping
+        res2_updated = Resource.query.get(self.resource2.id)
+        self.assertEqual(res2_updated.floor_map_id, existing_map_id)
+        self.assertIsNotNone(res2_updated.map_coordinates)
+        coords_res2 = json.loads(res2_updated.map_coordinates)
+        self.assertEqual(coords_res2['x'], 200)
+        self.assertEqual(res2_updated.booking_restriction, "all_users")
+        self.assertEqual(res2_updated.allowed_user_ids, "")
+        self.assertIn(self.map_test_role, res2_updated.roles)
+        self.assertIn(self.role1, res2_updated.roles)
+        self.assertEqual(len(res2_updated.roles), 2)
+
+
+        # Verify resource1 mapping update
+        res1_updated = Resource.query.get(self.resource1.id)
+        self.assertEqual(res1_updated.floor_map_id, existing_map_id)
+        coords_res1 = json.loads(res1_updated.map_coordinates)
+        self.assertEqual(coords_res1['width'], 35)
+        self.assertNotIn(self.map_test_role, res1_updated.roles) # Original role should be replaced
+        self.assertIn(self.role2, res1_updated.roles)
+        self.assertEqual(len(res1_updated.roles), 1)
+
+
 class TestAdminBookings(AppTests):
     def _create_admin_user(self, username="adminbookings", email_ext="adminbookings"):
         admin_user = User(username=username, email=f"{email_ext}@example.com", is_admin=True)
