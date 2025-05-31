@@ -22,6 +22,14 @@ from flask_wtf.csrf import CSRFProtect # For CSRF protection
 from flask_socketio import SocketIO
 
 
+try:
+    from azure_backup import save_floor_map_to_share, backup_if_changed, restore_from_share
+except Exception:
+    save_floor_map_to_share = None
+    backup_if_changed = None
+    restore_from_share = None
+
+
 
 # Attempt to import APScheduler; provide a basic fallback if unavailable
 try:
@@ -171,7 +179,15 @@ if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
 if not os.path.exists(app.config['RESOURCE_UPLOAD_FOLDER']):
     os.makedirs(app.config['RESOURCE_UPLOAD_FOLDER'])
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(DATA_DIR, 'site.db')
+if restore_from_share:
+    try:
+        restore_from_share()
+    except Exception:
+        app.logger.exception('Failed to restore data from Azure File Share')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+    'AZURE_SQL_CONNECTION_STRING',
+    os.environ.get('DATABASE_URL', 'sqlite:///' + os.path.join(DATA_DIR, 'site.db'))
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # silence the warning
 
 # Flask-Mail configuration (defaults can be overridden with environment variables)
@@ -186,6 +202,7 @@ app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', app.co
 # Booking check-in configuration
 app.config['CHECK_IN_GRACE_MINUTES'] = int(os.environ.get('CHECK_IN_GRACE_MINUTES', '15'))
 app.config['AUTO_CANCEL_CHECK_INTERVAL_MINUTES'] = int(os.environ.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', '5'))
+app.config['AZURE_BACKUP_INTERVAL_MINUTES'] = int(os.environ.get('AZURE_BACKUP_INTERVAL_MINUTES', '60'))
 
 # Basic Logging Configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]')
@@ -981,6 +998,11 @@ def upload_floor_map():
         try:
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(file_path)
+            if save_floor_map_to_share:
+                try:
+                    save_floor_map_to_share(file_path, filename)
+                except Exception:
+                    app.logger.exception('Failed to upload floor map to Azure File Share')
 
             new_map = FloorMap(name=map_name, image_filename=filename,
                                location=location, floor=floor)
@@ -3077,6 +3099,13 @@ scheduler.add_job(
     'interval',
     minutes=1 # Check every minute, or a longer interval like 5 minutes
 )
+
+if backup_if_changed:
+    scheduler.add_job(
+        backup_if_changed,
+        'interval',
+        minutes=app.config.get('AZURE_BACKUP_INTERVAL_MINUTES', 60)
+    )
 
 
 # Exported names for easier importing in tests and other modules

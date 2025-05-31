@@ -7,7 +7,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
     const selectAllCheckbox = document.getElementById('select-all-resources');
     const resourceFormModal = document.getElementById('resource-form-modal');
-    const closeModalBtn = resourceFormModal ? resourceFormModal.querySelector('.close-modal-btn') : null;
     const resourceForm = document.getElementById('resource-form');
     const resourceFormModalTitle = document.getElementById('resource-form-modal-title');
     const resourceFormStatus = document.getElementById('resource-form-modal-status');
@@ -27,7 +26,6 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentFilters = {};
 
     const bulkModal = document.getElementById('bulk-resource-modal');
-    const bulkCloseBtn = bulkModal ? bulkModal.querySelector('.close-modal-btn') : null;
     const bulkForm = document.getElementById('bulk-resource-form');
     const bulkFormStatus = document.getElementById('bulk-resource-form-status');
     const bulkPrefixInput = document.getElementById('bulk-prefix');
@@ -158,11 +156,18 @@ document.addEventListener('DOMContentLoaded', function() {
         return Array.from(document.querySelectorAll('.select-resource-checkbox:checked')).map(cb => parseInt(cb.dataset.id, 10));
     }
 
-    closeModalBtn && closeModalBtn.addEventListener('click', () => resourceFormModal.style.display = 'none');
-    window.addEventListener('click', e => { if (e.target === resourceFormModal) resourceFormModal.style.display = 'none'; });
+    document.querySelectorAll('.close-modal-btn[data-modal-id]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const modal = document.getElementById(btn.dataset.modalId);
+            if (modal) modal.style.display = 'none';
+        });
+    });
 
-    bulkCloseBtn && bulkCloseBtn.addEventListener('click', () => bulkModal.style.display = 'none');
-    window.addEventListener('click', e => { if (e.target === bulkModal) bulkModal.style.display = 'none'; });
+    document.querySelectorAll('.modal').forEach(modal => {
+        window.addEventListener('click', e => {
+            if (e.target === modal) modal.style.display = 'none';
+        });
+    });
 
     bulkEditBtn && bulkEditBtn.addEventListener('click', () => {
         const ids = getSelectedResourceIds();
