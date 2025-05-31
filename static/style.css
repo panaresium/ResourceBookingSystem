@@ -48,9 +48,10 @@ body {
     position: fixed;
     top: 0;
     left: 0;
-    width: 100%;
+    right: 0;
     height: var(--header-height);
     background-color: var(--background-color-dark);
+    box-sizing: border-box;
     color: var(--text-color-light);
     padding: 0 1em;
     display: flex;
@@ -91,6 +92,8 @@ body {
 }
 .header-content #my-bookings-nav-link a,
 .header-content #auth-link-container a {
+    color: var(--text-color-light);
+    text-decoration: none;
     padding: 0; /* Remove padding from inner link if parent div has it */
 }
 
@@ -321,9 +324,10 @@ footer {
     position: fixed;
     bottom: 0;
     left: 0;
-    width: 100%;
+    right: 0;
     height: var(--footer-height);
     background-color: var(--background-color-dark);
+    box-sizing: border-box;
     color: var(--text-color-light);
     padding: 0 1em;
     display: flex;

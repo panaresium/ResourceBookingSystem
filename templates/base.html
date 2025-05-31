@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     {% block head_extra %}{% endblock %}
 </head>
-<body class="no-sidebar">
+<body class="{{ 'no-sidebar' if not (current_user and current_user.is_authenticated and current_user.is_admin) else '' }}">
     <header class="app-header">
         <div class="header-content">
             <a href="{{ url_for('serve_index') }}"><span class="menu-icon" aria-hidden="true">🏠</span><span class="menu-text">{{ _('Home') }}</span></a>
@@ -32,6 +32,7 @@
             </div>
         </div>
     </header>
+    {% if current_user and current_user.is_authenticated and current_user.is_admin %}
     <nav id="sidebar" class="collapsed">
         <button id="sidebar-toggle" aria-label="{{ _('Toggle menu') }}">&#9776;</button>
         <ul>
@@ -65,6 +66,7 @@
         </li>
         </ul>
     </nav>
+    {% endif %}
     <div id="manual-backup-status" class="status-message" style="display:none; margin: 10px;"></div>
     <div id="main-content">
     <main>
