@@ -48,6 +48,19 @@ def backup_database():
     return file_name
 
 
+def save_floor_map_to_share(local_path, dest_filename=None):
+    """Upload a single floor map file to the configured Azure File Share."""
+    service_client = _get_service_client()
+    share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media')
+    share_client = service_client.get_share_client(share_name)
+    if not share_client.exists():
+        share_client.create_share()
+    if dest_filename is None:
+        dest_filename = os.path.basename(local_path)
+    file_path = f'floor_map_uploads/{dest_filename}'
+    upload_file(share_client, local_path, file_path)
+
+
 def backup_media():
     service_client = _get_service_client()
     share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media')

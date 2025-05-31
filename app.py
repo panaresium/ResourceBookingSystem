@@ -22,6 +22,12 @@ from flask_wtf.csrf import CSRFProtect # For CSRF protection
 from flask_socketio import SocketIO
 
 
+try:
+    from azure_backup import save_floor_map_to_share
+except Exception:
+    save_floor_map_to_share = None
+
+
 
 # Attempt to import APScheduler; provide a basic fallback if unavailable
 try:
@@ -171,7 +177,10 @@ if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
 if not os.path.exists(app.config['RESOURCE_UPLOAD_FOLDER']):
     os.makedirs(app.config['RESOURCE_UPLOAD_FOLDER'])
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(DATA_DIR, 'site.db')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+    'AZURE_SQL_CONNECTION_STRING',
+    os.environ.get('DATABASE_URL', 'sqlite:///' + os.path.join(DATA_DIR, 'site.db'))
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # silence the warning
 
 # Flask-Mail configuration (defaults can be overridden with environment variables)
@@ -981,6 +990,11 @@ def upload_floor_map():
         try:
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(file_path)
+            if save_floor_map_to_share:
+                try:
+                    save_floor_map_to_share(file_path, filename)
+                except Exception:
+                    app.logger.exception('Failed to upload floor map to Azure File Share')
 
             new_map = FloorMap(name=map_name, image_filename=filename,
                                location=location, floor=floor)
