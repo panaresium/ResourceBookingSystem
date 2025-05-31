@@ -19,6 +19,7 @@ from werkzeug.security import generate_password_hash
 from datetime import datetime, date, timedelta, time
 from add_resource_tags_column import add_tags_column
 from json_config import load_config, save_config, import_admin_data, export_admin_config
+from json_config import import_admin_data
 
 
 AZURE_PRIMARY_STORAGE = bool(os.environ.get("AZURE_PRIMARY_STORAGE"))
