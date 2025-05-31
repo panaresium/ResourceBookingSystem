@@ -1,6 +1,6 @@
 from flask import Flask, jsonify, render_template, request, url_for, redirect, session, Blueprint, has_request_context # Added Blueprint and has_request_context
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, text  # Add this and for WAL pragma setup
+from sqlalchemy import func, text, event  # Add event for config sync
 from datetime import datetime, date, timedelta, time, timezone # Ensure all are here
 import os
 import json # For serializing coordinates
@@ -28,6 +28,8 @@ except Exception:
     save_floor_map_to_share = None
     backup_if_changed = None
     restore_from_share = None
+
+from json_config import load_config, save_config
 
 # Attempt to import APScheduler; provide a basic fallback if unavailable
 try:
@@ -235,6 +237,15 @@ def get_google_flow():
     )
 
 db = SQLAlchemy(app)
+
+
+@event.listens_for(db.session.__class__, 'after_commit')
+def _sync_config_after_commit(session):
+    """Write admin configuration to JSON after each DB commit."""
+    try:
+        export_admin_config()
+    except Exception:
+        app.logger.exception('Failed to export admin config')
 
 
 # Configure SQLite pragmas (e.g., WAL mode) on the first request
@@ -511,6 +522,74 @@ def resource_to_dict(resource: Resource) -> dict:
         'scheduled_status': resource.scheduled_status,
         'scheduled_status_at': resource.scheduled_status_at.replace(tzinfo=timezone.utc).isoformat() if resource.scheduled_status_at else None
     }
+
+
+def export_admin_config():
+    """Dump floor maps, resources, users and roles to JSON config."""
+    cfg = load_config()
+    cfg['floor_maps'] = [
+        {
+            'id': m.id,
+            'name': m.name,
+            'image_filename': m.image_filename,
+            'location': m.location,
+            'floor': m.floor,
+        }
+        for m in FloorMap.query.all()
+    ]
+
+    cfg['resources'] = [
+        {
+            'id': r.id,
+            'name': r.name,
+            'capacity': r.capacity,
+            'equipment': r.equipment,
+            'tags': r.tags,
+            'booking_restriction': r.booking_restriction,
+            'status': r.status,
+            'published_at': r.published_at.isoformat() if r.published_at else None,
+            'allowed_user_ids': r.allowed_user_ids,
+            'image_filename': r.image_filename,
+            'floor_map_id': r.floor_map_id,
+            'map_coordinates': r.map_coordinates,
+            'role_ids': [role.id for role in r.roles],
+        }
+        for r in Resource.query.all()
+    ]
+
+    cfg['users'] = [
+        {
+            'id': u.id,
+            'username': u.username,
+            'email': u.email,
+            'is_admin': u.is_admin,
+            'role_ids': [role.id for role in u.roles],
+            'google_id': u.google_id,
+            'google_email': u.google_email,
+        }
+        for u in User.query.all()
+    ]
+
+    cfg['roles'] = [
+        {
+            'id': role.id,
+            'name': role.name,
+            'description': role.description,
+            'permissions': role.permissions,
+        }
+        for role in Role.query.all()
+    ]
+
+    cfg['permissions'] = sorted(
+        {
+            perm
+            for role in Role.query.all()
+            if role.permissions
+            for perm in role.permissions.split(',')
+        }
+    )
+
+    save_config(cfg)
 # --- Simple Email Notification System ---
 email_log = []
 slack_log = []

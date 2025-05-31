@@ -213,6 +213,8 @@ When the app runs, it will attempt to restore `site.db` and uploaded images from
 
 Configure the interval via the `AZURE_BACKUP_INTERVAL_MINUTES` environment variable (default `60`).  Files are only uploaded when their content changes.
 
+In addition to the database, the application keeps admin configuration (floor maps, resources, roles and users) in `data/admin_config.json`.  This JSON file is downloaded from Azure during setup if available and is uploaded whenever changes are committed.
+
 
 ## Bulk User Management
 

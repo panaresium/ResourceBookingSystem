@@ -18,6 +18,7 @@ from app import (
 from werkzeug.security import generate_password_hash
 from datetime import datetime, date, timedelta, time
 from add_resource_tags_column import add_tags_column
+from json_config import load_config, save_config
 
 AZURE_PRIMARY_STORAGE = bool(os.environ.get("AZURE_PRIMARY_STORAGE"))
 if AZURE_PRIMARY_STORAGE:
@@ -25,8 +26,10 @@ if AZURE_PRIMARY_STORAGE:
         from azure_storage import (
             download_database,
             download_media,
+            download_config,
             upload_database,
             upload_media,
+            upload_config,
         )
     except Exception as exc:  # pragma: no cover - optional
         print(f"Warning: Azure storage unavailable: {exc}")
@@ -115,6 +118,7 @@ def create_required_directories():
         print("Downloading media from Azure storage...")
         try:
             download_media()
+            download_config()
         except Exception as exc:
             print(f"Failed to download media from Azure: {exc}")
 
@@ -575,6 +579,12 @@ def init_db(force=False):
             try:
                 upload_database(versioned=False)
                 upload_media()
+                try:
+                    from app import export_admin_config
+                    export_admin_config()
+                except Exception as exc:
+                    print(f"Failed to export admin config: {exc}")
+                upload_config()
             except Exception as exc:
                 print(f"Failed to upload data to Azure: {exc}")
 
@@ -585,7 +595,10 @@ def main():
     check_python_version()
     print("-" * 30)
     create_required_directories()
-    print("-" * 30) 
+    # Ensure configuration JSON exists
+    cfg = load_config()
+    save_config(cfg)
+    print("-" * 30)
 
     if os.path.exists(DB_PATH):
         print(f"Existing database found at {DB_PATH}. Verifying structure...")
@@ -604,6 +617,11 @@ def main():
     try:
         init_db()
         print("Database initialization process completed.")
+        try:
+            from app import export_admin_config
+            export_admin_config()
+        except Exception as exc:
+            print(f"Failed to export admin config: {exc}")
     except Exception as e:
         print(f"An error occurred during database initialization: {e}")
         print("Please check the output from init_db for more details, or run this script again if issues persist.")
