@@ -36,24 +36,27 @@ body {
     font-size: 1rem; /* Ensure body font size is relative */
 }
 
-nav {
+nav.sidebar {
     background-color: var(--background-color-dark);
     color: var(--text-color-light);
-    padding: 1em 0;
-    text-align: left;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    padding: 1em;
+    width: 200px;
+    min-height: 100vh;
+    position: fixed;
+    top: 0;
+    left: 0;
 }
 
-nav ul {
+nav.sidebar ul {
     list-style-type: none;
     padding: 0;
     margin: 0;
     display: flex;
-    align-items: center;
+    flex-direction: column;
 }
 
-nav ul li {
-    margin: 0 15px;
+nav.sidebar ul li {
+    margin: 10px 0;
 }
 
 nav ul li a {
@@ -88,9 +91,10 @@ nav ul li a:focus {
 }
 
 main {
-    width: 85%; /* Slightly wider for modern feel */
+    width: calc(100% - 220px);
+    margin-left: 220px;
     max-width: 1200px; /* Max width for large screens */
-    margin: 30px auto; /* Increased margin */
+    margin: 30px auto; /* Keep vertical centering */
     background-color: var(--background-color-light);
     padding: 25px; /* Increased padding */
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08); /* Softer, more modern shadow */
@@ -395,19 +399,19 @@ body.high-contrast {
     font-size: 1rem; /* Ensure base font size is respected */
 }
 
-body.high-contrast nav {
+body.high-contrast nav.sidebar {
     background-color: #000000 !important;
     color: #ffffff !important;
     box-shadow: 0 2px 5px rgba(255,255,255,0.2) !important; /* Light shadow on dark bg */
     text-align: left !important;
 }
 
-body.high-contrast nav ul li a {
+body.high-contrast nav.sidebar ul li a {
     color: #ffffff !important;
 }
 
-body.high-contrast nav ul li a:hover,
-body.high-contrast nav ul li a:focus {
+body.high-contrast nav.sidebar ul li a:hover,
+body.high-contrast nav.sidebar ul li a:focus {
     color: #ffff00 !important; /* Yellow for hover/focus in high contrast */
     text-decoration: underline !important;
 }
@@ -589,7 +593,7 @@ body.high-contrast input[type="submit"]:focus,
 body.high-contrast input[type="button"]:focus {
     box-shadow: 0 0 0 3px #ffff00 !important; /* Example: re-apply focus shadow if needed, or use outline */
 }
-body.high-contrast nav {
+body.high-contrast nav.sidebar {
     box-shadow: 0 2px 5px rgba(255,255,255,0.2) !important;
     text-align: left !important;
 }
@@ -633,11 +637,11 @@ body.high-contrast input[type="button"]:hover {
 
 /* Responsive adjustments for smaller screens */
 @media (max-width: 600px) {
-    nav ul {
+    nav.sidebar ul {
         flex-direction: column;
         align-items: flex-start;
     }
-    nav ul li {
+    nav.sidebar ul li {
         margin: 10px 0;
     }
     main {

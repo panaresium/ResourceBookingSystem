@@ -166,6 +166,16 @@ results:
 
 These filters can be combined. Only resources with `status='published'` are returned.
 
+## Bulk User Management
+
+Admins can manage many users at once from the **User Management** screen.
+
+- **Export Users** – `GET /api/admin/users/export` returns a JSON payload containing all users and roles.
+- **Import Users** – `POST /api/admin/users/import` accepts the same structure to create or update users in bulk.
+- **Bulk Delete** – `DELETE /api/admin/users/bulk` removes multiple users by ID.
+
+These actions are also accessible via buttons on the User Management page.
+
 ## Deploying to Azure Web App
 
 This project includes a GitHub Actions workflow that can publish the application to Azure Web App. Configure these secrets in your repository settings:
@@ -199,4 +209,6 @@ All floor map and resource images from `static/` along with `data/site.db` will 
 When the app runs, it will attempt to restore `site.db` and uploaded images from the configured Azure File Shares.  A background job then backs up the database and media files at regular intervals.
 
 Configure the interval via the `AZURE_BACKUP_INTERVAL_MINUTES` environment variable (default `60`).  Files are only uploaded when their content changes.
+
+Admins can trigger a backup on demand from the UI's **Manual Sync** button (or send a `POST` request to `/api/admin/manual_backup`).
 

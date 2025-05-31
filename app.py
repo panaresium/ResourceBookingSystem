@@ -1950,6 +1950,147 @@ def assign_google_auth(user_id):
         app.logger.exception(f"Error assigning Google ID to user {user_id}:")
         return jsonify({'error': 'Failed to assign Google ID due to a server error.'}), 500
 
+@app.route('/api/admin/users/bulk', methods=['DELETE'])
+@login_required
+def delete_users_bulk():
+    if not current_user.has_permission('manage_users'):
+        return jsonify({'error': 'Permission denied to manage users.'}), 403
+
+    data = request.get_json()
+    if not data or 'ids' not in data or not isinstance(data['ids'], list):
+        return jsonify({'error': 'Invalid input. "ids" list required.'}), 400
+
+    ids = data['ids']
+    deleted = []
+    skipped = []
+    for uid in ids:
+        user = User.query.get(uid)
+        if not user or user.id == current_user.id:
+            skipped.append(uid)
+            continue
+        db.session.delete(user)
+        deleted.append(uid)
+
+    try:
+        db.session.commit()
+        return jsonify({'deleted': deleted, 'skipped': skipped}), 200
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Error deleting users in bulk:")
+        return jsonify({'error': 'Failed to delete users due to a server error.'}), 500
+
+
+@app.route('/api/admin/users/export', methods=['GET'])
+@login_required
+def export_users():
+    if not current_user.has_permission('manage_users'):
+        return jsonify({'error': 'Permission denied to manage users.'}), 403
+
+    users = User.query.all()
+    roles = Role.query.all()
+
+    users_data = []
+    for u in users:
+        users_data.append({
+            'id': u.id,
+            'username': u.username,
+            'email': u.email,
+            'is_admin': u.is_admin,
+            'roles': [r.id for r in u.roles]
+        })
+
+    roles_data = []
+    for r in roles:
+        roles_data.append({
+            'id': r.id,
+            'name': r.name,
+            'description': r.description,
+            'permissions': r.permissions
+        })
+
+    return jsonify({'users': users_data, 'roles': roles_data}), 200
+
+
+@app.route('/api/admin/users/import', methods=['POST'])
+@login_required
+def import_users():
+    if not current_user.has_permission('manage_users'):
+        return jsonify({'error': 'Permission denied to manage users.'}), 403
+
+    data = request.get_json()
+    if not data or 'users' not in data or not isinstance(data['users'], list):
+        return jsonify({'error': 'Invalid input. "users" list required.'}), 400
+
+    created = []
+    updated = []
+    errors = []
+
+    for item in data['users']:
+        if 'id' in item:
+            user = User.query.get(item['id'])
+            if not user:
+                errors.append({'id': item['id'], 'error': 'User not found'})
+                continue
+            if 'username' in item and item['username']:
+                if User.query.filter(User.id != user.id, User.username == item['username']).first():
+                    errors.append({'id': item['id'], 'error': 'Username already exists'})
+                    continue
+                user.username = item['username']
+            if 'email' in item and item['email']:
+                if User.query.filter(User.id != user.id, User.email == item['email']).first():
+                    errors.append({'id': item['id'], 'error': 'Email already exists'})
+                    continue
+                user.email = item['email']
+            if 'password' in item and item['password']:
+                user.set_password(item['password'])
+            if 'is_admin' in item:
+                user.is_admin = bool(item['is_admin'])
+            if 'role_ids' in item and isinstance(item['role_ids'], list):
+                roles = [Role.query.get(rid) for rid in item['role_ids'] if Role.query.get(rid)]
+                user.roles = roles
+            updated.append(user.id)
+        else:
+            username = item.get('username')
+            email = item.get('email')
+            password = item.get('password')
+            if not username or not email or not password:
+                errors.append({'username': username, 'error': 'Missing required fields'})
+                continue
+            if User.query.filter_by(username=username).first() or User.query.filter_by(email=email).first():
+                errors.append({'username': username, 'error': 'User exists'})
+                continue
+            new_user = User(username=username, email=email, is_admin=item.get('is_admin', False))
+            new_user.set_password(password)
+            if 'role_ids' in item and isinstance(item['role_ids'], list):
+                roles = [Role.query.get(rid) for rid in item['role_ids'] if Role.query.get(rid)]
+                new_user.roles = roles
+            db.session.add(new_user)
+            db.session.flush()
+            created.append(new_user.id)
+
+    try:
+        db.session.commit()
+        return jsonify({'created': created, 'updated': updated, 'errors': errors}), 200
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("Error importing users:")
+        return jsonify({'error': 'Failed to import users due to a server error.'}), 500
+
+
+@app.route('/api/admin/manual_backup', methods=['POST'])
+@login_required
+def manual_backup():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Permission denied.'}), 403
+    if not backup_if_changed:
+        return jsonify({'error': 'Backup service unavailable.'}), 500
+    try:
+        backup_if_changed()
+        return jsonify({'message': 'Backup completed.'}), 200
+    except Exception:
+        app.logger.exception('Manual backup failed:')
+        return jsonify({'error': 'Manual backup failed.'}), 500
+
 # --- Waitlist Management APIs ---
 @app.route('/api/admin/waitlist', methods=['GET'])
 @login_required
