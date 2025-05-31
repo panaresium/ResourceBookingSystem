@@ -18,7 +18,6 @@ DEFAULT_CONFIG = {
             "name": "StandardUser",
             "description": "Can make bookings and view resources",
             "permissions": "make_bookings,view_resources"
-
         }
     ],
     "users": [
@@ -53,10 +52,12 @@ def load_config():
     except Exception:
         return DEFAULT_CONFIG.copy()
 
+
 def save_config(data):
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2)
+
 
 def ensure_required_keys(cfg):
     """Ensure top-level keys exist in the configuration."""
