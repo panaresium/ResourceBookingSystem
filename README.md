@@ -201,7 +201,8 @@ Make sure the database is initialized by running `python init_setup.py` locally 
 
 ## Backing Up Data to Azure File Share
 
-Use `azure_backup.py` to upload the SQLite database, uploaded images, and the admin configuration JSON (`data/admin_config.json`) to an Azure File Share. The script reads these environment variables:
+Use `azure_backup.py` to upload the SQLite database, the admin configuration JSON and uploaded images to an Azure File Share. The script reads these environment variables:
+
 
 - `AZURE_STORAGE_CONNECTION_STRING` – connection string to your storage account
 - `AZURE_DB_SHARE` – file share name for database backups (default `db-backups`)

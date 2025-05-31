@@ -18,7 +18,7 @@ from app import (
 from werkzeug.security import generate_password_hash
 from datetime import datetime, date, timedelta, time
 from add_resource_tags_column import add_tags_column
-from json_config import load_config, save_config
+from json_config import load_config, save_config, import_admin_data, export_admin_config
 
 
 AZURE_PRIMARY_STORAGE = bool(os.environ.get("AZURE_PRIMARY_STORAGE"))
@@ -412,13 +412,14 @@ def init_db(force=False):
             db.session.rollback()
             app.logger.exception("Error committing deletions during DB initialization:")
 
-        app.logger.info("Importing admin data from JSON configuration...")
+        # Populate admin configuration from JSON
         try:
-            import_admin_data(db, User, Role)
-            app.logger.info("Admin users and roles imported from configuration.")
+            import_admin_data(db, User, Role, FloorMap, Resource)
+            app.logger.info("Imported admin configuration from JSON.")
         except Exception as e:
             db.session.rollback()
-            app.logger.exception("Error importing admin configuration:")
+            app.logger.exception("Error importing admin config during DB initialization:")
+
 
         admin_user_for_perms = User.query.filter_by(username='admin').first()
         standard_user_for_perms = User.query.filter_by(username='user').first()
@@ -580,6 +581,12 @@ def init_db(force=False):
 
 
         app.logger.info("Database initialization script completed.")
+        # Export current admin configuration to JSON
+        try:
+            export_admin_config(db, User, Role, FloorMap, Resource)
+            app.logger.info("Exported admin configuration to JSON.")
+        except Exception as e:
+            app.logger.exception("Error exporting admin config after initialization:")
 
         if AZURE_PRIMARY_STORAGE:
             print("Uploading database and media to Azure storage...")
