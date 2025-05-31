@@ -180,9 +180,9 @@ def restore_from_share():
 
 
 def main():
-    db_file = backup_database()
-    backup_media()
-    print(f'Backup completed. Database file: {db_file}')
+    """Run a backup only if data has changed."""
+    backup_if_changed()
+    print('Backup completed if changes were detected.')
 
 
 
