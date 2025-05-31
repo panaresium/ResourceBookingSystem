@@ -9,6 +9,20 @@
         <input type="date" id="availability-date" name="availability-date">
     </div>
 
+    <div class="filters-section" style="margin-top:15px;">
+        <label for="resource-filter-capacity">{{ _('Min Capacity:') }}</label>
+        <input type="number" id="resource-filter-capacity" min="1">
+
+        <label for="resource-filter-equipment">{{ _('Equipment:') }}</label>
+        <input type="text" id="resource-filter-equipment">
+
+        <label for="resource-filter-tags">{{ _('Tags:') }}</label>
+        <input type="text" id="resource-filter-tags">
+
+        <button id="resource-apply-filters-btn" class="button">{{ _('Apply Filters') }}</button>
+        <button id="resource-clear-filters-btn" class="button">{{ _('Clear Filters') }}</button>
+    </div>
+
     <div id="resource-loading-status" class="status-message" style="margin-bottom: 15px;"></div>
     <div id="resource-buttons-container" class="resource-buttons-grid" style="margin-top: 20px;">
         <!-- Resource buttons will be populated by JavaScript -->
