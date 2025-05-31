@@ -2768,9 +2768,15 @@ def get_my_bookings():
             resource_name = resource.name if resource else "Unknown Resource"
             grace = app.config.get('CHECK_IN_GRACE_MINUTES', 15)
             now = datetime.now(timezone.utc)
+
+            # Ensure booking.start_time is offset-aware (UTC) before comparison
+            booking_start_time_aware = booking.start_time
+            if booking_start_time_aware.tzinfo is None:
+                booking_start_time_aware = booking_start_time_aware.replace(tzinfo=timezone.utc)
+
             can_check_in = (
                 booking.checked_in_at is None and
-                booking.start_time - timedelta(minutes=grace) <= now <= booking.start_time + timedelta(minutes=grace)
+                booking_start_time_aware - timedelta(minutes=grace) <= now <= booking_start_time_aware + timedelta(minutes=grace)
             )
             bookings_list.append({
                 'id': booking.id,
