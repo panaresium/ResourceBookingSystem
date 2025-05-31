@@ -377,6 +377,15 @@ document.addEventListener('DOMContentLoaded', function() {
     document.body.dataset.loginUrl = document.getElementById('login-form') ? "#" : "/login";
     updateAuthLink();
 
+    const sidebar = document.getElementById('sidebar');
+    const sidebarToggle = document.getElementById('sidebar-toggle');
+    if (sidebar && sidebarToggle) {
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+        });
+    }
+
     const bookingForm = document.getElementById('booking-form');
     const bookingResultsDiv = document.getElementById('booking-results');
     const loginForm = document.getElementById('login-form');
