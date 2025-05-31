@@ -48,9 +48,10 @@ body {
     position: fixed;
     top: 0;
     left: 0;
-    width: 100%;
+    right: 0;
     height: var(--header-height);
     background-color: var(--background-color-dark);
+    box-sizing: border-box;
     color: var(--text-color-light);
     padding: 0 1em;
     display: flex;
@@ -62,13 +63,48 @@ body {
 
 .header-content {
     display: flex;
+    width: 100%;
     align-items: center;
-    gap: 15px;
+    justify-content: flex-start; /* Default, items start on left */
+    gap: 10px; /* Adjusted gap for items within header-content */
 }
 
-.app-header #user-dropdown-container { /* Specific to header context */
-    margin-left: auto;
+/* Style for the moved navigation links and containers */
+.header-content > a, /* Direct <a> links like Home, Resources, Calendar */
+.header-content > div { /* Wrappers for My Bookings, Welcome, Auth, User Dropdown */
+    color: var(--text-color-light);
+    text-decoration: none;
+    padding: 0.5em 0.75em; /* Uniform padding for clickable areas */
+    border-radius: 4px;
+    display: flex; /* For internal alignment of icon/text */
+    align-items: center;
+}
+
+.header-content > a:hover,
+.header-content > div:hover:not(#user-dropdown-container):not(#welcome-message-container) { /* Avoid hover on non-interactive divs unless they contain an <a> that handles it */
+    background-color: var(--secondary-color);
+}
+/* Specifically target <a> tags within the divs for hover, if the div itself shouldn't have hover */
+.header-content #my-bookings-nav-link a:hover,
+.header-content #auth-link-container a:hover {
+    background-color: var(--secondary-color); /* Apply hover to the link itself */
+    border-radius: 4px; /* Ensure hover matches overall item shape */
+}
+.header-content #my-bookings-nav-link a,
+.header-content #auth-link-container a {
+    color: var(--text-color-light);
+    text-decoration: none;
+    padding: 0; /* Remove padding from inner link if parent div has it */
+}
+
+
+.header-content > #user-dropdown-container {
+    margin-left: auto; /* This will push the user dropdown to the far right */
     position: relative; /* Needed for dropdown positioning */
+    padding: 0; /* User dropdown button itself has padding */
+}
+.header-content > #user-dropdown-container:hover {
+    background-color: transparent; /* Prevent hover on the container itself */
 }
 
 .app-header #user-dropdown-button { /* Copied from existing #user-dropdown-button and adapted */
@@ -256,7 +292,7 @@ body {
     padding: 20px;
     height: calc(100vh - var(--header-height) - var(--footer-height));
     overflow-y: auto;
-    transition: margin-left 0.3s;
+    transition: margin-left 0.3s ease-in-out;
     background-color: var(--background-color-light);
     /* flex-grow: 1; REMOVED */
 }
@@ -264,6 +300,11 @@ body {
 /* Adjust margin-left when sidebar is collapsed */
 body.sidebar-collapsed #main-content {
     margin-left: var(--sidebar-collapsed-width);
+}
+
+/* Adjust margin-left when sidebar is not present (e.g., for non-admins) */
+body.no-sidebar #main-content {
+    margin-left: 0;
 }
 
 main { /* The <main> tag inside #main-content */
@@ -283,9 +324,10 @@ footer {
     position: fixed;
     bottom: 0;
     left: 0;
-    width: 100%;
+    right: 0;
     height: var(--footer-height);
     background-color: var(--background-color-dark);
+    box-sizing: border-box;
     color: var(--text-color-light);
     padding: 0 1em;
     display: flex;

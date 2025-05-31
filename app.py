@@ -307,7 +307,7 @@ def unauthorized_callback():
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    return db.session.get(User, int(user_id))
 
 # Association table for User and Role (Many-to-Many)
 user_roles_table = db.Table('user_roles',
@@ -433,7 +433,7 @@ class WaitlistEntry(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     resource_id = db.Column(db.Integer, db.ForeignKey('resource.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     resource = db.relationship('Resource')
     user = db.relationship('User')
@@ -443,7 +443,7 @@ class WaitlistEntry(db.Model):
 
 class AuditLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True) # User performing action
     username = db.Column(db.String(80), nullable=True) # Denormalized for easy display
     action = db.Column(db.String(100), nullable=False) # e.g., "LOGIN", "CREATE_USER"
@@ -526,7 +526,7 @@ def send_email(to_address: str, subject: str, body: str):
         'to': to_address,
         'subject': subject,
         'body': body,
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
     }
     email_log.append(email_entry)
     app.logger.info(f"Email queued to {to_address}: {subject}") # This log remains for all cases
@@ -549,7 +549,7 @@ def send_email(to_address: str, subject: str, body: str):
 
 def send_slack_notification(text: str):
     """Record a slack notification in the log (placeholder)."""
-    slack_log.append({'message': text, 'timestamp': datetime.utcnow().isoformat()})
+    slack_log.append({'message': text, 'timestamp': datetime.now(timezone.utc).isoformat()})
 
 def send_teams_notification(to_email: str, title: str, text: str):
     """Send a simple Teams notification via webhook if configured."""
@@ -557,7 +557,7 @@ def send_teams_notification(to_email: str, title: str, text: str):
         'to': to_email,
         'title': title,
         'text': text,
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
     }
     teams_log.append(log_entry)
     webhook = os.environ.get('TEAMS_WEBHOOK_URL')
@@ -592,7 +592,7 @@ def serve_index():
     if current_user.is_authenticated:
         upcoming_bookings = Booking.query.filter(
             Booking.user_name == current_user.username, # Assuming bookings are linked by username
-            Booking.start_time > datetime.utcnow()
+            Booking.start_time > datetime.now(timezone.utc)
         ).order_by(Booking.start_time.asc()).all()
         return render_template("index.html", upcoming_bookings=upcoming_bookings)
     else:
@@ -759,7 +759,7 @@ def analytics_dashboard():
 @login_required
 @permission_required('view_analytics')
 def analytics_bookings_data():
-    last_30_days = datetime.utcnow() - timedelta(days=30)
+    last_30_days = datetime.now(timezone.utc) - timedelta(days=30)
     results = (
         db.session.query(Resource.name, func.date(Booking.start_time), func.count(Booking.id))
         .join(Resource)
@@ -963,7 +963,7 @@ def get_resource_availability(resource_id):
         booked_slots = []
         for booking in bookings_on_date:
             grace = app.config.get('CHECK_IN_GRACE_MINUTES', 15)
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             can_check_in = (
                 booking.checked_in_at is None and
                 booking.start_time - timedelta(minutes=grace) <= now <= booking.start_time + timedelta(minutes=grace)
@@ -1248,7 +1248,7 @@ def publish_resource(resource_id):
 
     try:
         resource.status = 'published'
-        resource.published_at = datetime.utcnow()
+        resource.published_at = datetime.now(timezone.utc)
         db.session.commit()
         app.logger.info(f"Resource {resource_id} ('{resource.name}') published successfully by {current_user.username}.")
         updated_resource_data = {
@@ -1304,7 +1304,7 @@ def update_resource_details(resource_id):
         # Handle published_at logic
         if new_status == 'published' and resource.status != 'published': # Changed to published
             if resource.published_at is None:
-                resource.published_at = datetime.utcnow()
+                resource.published_at = datetime.now(timezone.utc)
         # If status changes away from 'published', current requirements are to leave published_at as is.
         resource.status = new_status
 
@@ -2761,7 +2761,7 @@ def get_my_bookings():
             resource = Resource.query.get(booking.resource_id)
             resource_name = resource.name if resource else "Unknown Resource"
             grace = app.config.get('CHECK_IN_GRACE_MINUTES', 15)
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             can_check_in = (
                 booking.checked_in_at is None and
                 booking.start_time - timedelta(minutes=grace) <= now <= booking.start_time + timedelta(minutes=grace)
@@ -3164,7 +3164,7 @@ def check_in_booking(booking_id):
         return jsonify({'error': 'You are not authorized to check in for this booking.'}), 403
     if booking.checked_in_at:
         return jsonify({'error': 'Booking already checked in.'}), 400
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     grace = app.config.get('CHECK_IN_GRACE_MINUTES', 15)
     if now < booking.start_time - timedelta(minutes=grace) or now > booking.start_time + timedelta(minutes=grace):
         return jsonify({'error': 'Check-in not allowed at this time.'}), 400
@@ -3185,7 +3185,7 @@ def check_out_booking(booking_id):
         return jsonify({'error': 'Cannot check out without checking in.'}), 400
     if booking.checked_out_at:
         return jsonify({'error': 'Booking already checked out.'}), 400
-    booking.checked_out_at = datetime.utcnow()
+    booking.checked_out_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({'message': 'Checked out successfully.', 'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat()}), 200
 
@@ -3252,7 +3252,7 @@ app.register_blueprint(analytics_bp)
 def cancel_unchecked_bookings():
     with app.app_context():
         grace_minutes = app.config.get('CHECK_IN_GRACE_MINUTES', 15)
-        cutoff = datetime.utcnow() - timedelta(minutes=grace_minutes)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=grace_minutes)
         stale = Booking.query.filter(
             Booking.checked_in_at.is_(None),
             Booking.start_time < cutoff
@@ -3273,7 +3273,7 @@ scheduler.add_job(
 # --- Scheduled Resource Status Change Job ---
 def apply_scheduled_resource_status_changes():
     with app.app_context(): # Required for database operations outside of Flask request context
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         # Query for resources that have a scheduled_status_at in the past or present,
         # and have a non-null, non-empty scheduled_status.
         resources_to_update = Resource.query.filter(
