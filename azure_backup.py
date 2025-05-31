@@ -86,9 +86,10 @@ def upload_file(share_client, source_path, file_path):
         directory_client = share_client.get_directory_client(directory_path)
         if not _client_exists(directory_client):
             directory_client.create_directory()
+    file_client = share_client.get_file_client(file_path)
     with open(source_path, 'rb') as f:
-        file_client = share_client.get_file_client(file_path)
-        file_client.upload_file(f, overwrite=True)
+        data = f.read()
+    file_client.upload_file(data, overwrite=True)
 
 
 def download_file(share_client, file_path, dest_path):
