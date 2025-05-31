@@ -636,4 +636,99 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    const importMapConfigFile = document.getElementById('import-map-config-file');
+    const importMapConfigBtn = document.getElementById('import-map-config-btn');
+
+    if (importMapConfigBtn && importMapConfigFile) {
+        importMapConfigBtn.addEventListener('click', () => {
+            importMapConfigFile.click(); // Trigger file input
+        });
+
+        importMapConfigFile.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            const statusDiv = document.getElementById('admin-maps-list-status'); // Status div for this section
+
+            if (!file) {
+                if (statusDiv) showError(statusDiv, 'No file selected for map configuration import.');
+                return;
+            }
+            if (file.type !== 'application/json') {
+                if (statusDiv) showError(statusDiv, 'Please select a valid JSON file for map configuration.');
+                return;
+            }
+
+            if (statusDiv) showLoading(statusDiv, 'Importing map configuration...');
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                // apiCall is assumed to be globally available from script.js and handles CSRF
+                const result = await apiCall('/api/admin/maps/import_configuration', {
+                    method: 'POST',
+                    body: formData,
+                }, statusDiv); // Pass statusDiv for unified messaging by apiCall
+
+                // Construct a more detailed summary message based on the response
+                let summaryHtml = result.message || "Map configuration import processed.";
+                summaryHtml += `<br>Maps Created: ${result.maps_created || 0}, Maps Updated: ${result.maps_updated || 0}.`;
+                summaryHtml += `<br>Resource Mappings Updated: ${result.resource_mappings_updated || 0}.`;
+
+                if (result.image_reminders && result.image_reminders.length > 0) {
+                    summaryHtml += "<br><strong>Important Reminders:</strong><ul>";
+                    result.image_reminders.forEach(reminder => {
+                        summaryHtml += `<li>${reminder}</li>`;
+                    });
+                    summaryHtml += "</ul>";
+                }
+
+                let hasErrors = false;
+                if (result.maps_errors && result.maps_errors.length > 0) {
+                    hasErrors = true;
+                    summaryHtml += "<br><strong>Map Errors:</strong><ul>";
+                    result.maps_errors.forEach(err => {
+                        summaryHtml += `<li>${err.error} (Data: ${JSON.stringify(err.data)})</li>`;
+                    });
+                    summaryHtml += "</ul>";
+                }
+                if (result.resource_mapping_errors && result.resource_mapping_errors.length > 0) {
+                    hasErrors = true;
+                    summaryHtml += "<br><strong>Resource Mapping Errors:</strong><ul>";
+                    result.resource_mapping_errors.forEach(err => {
+                        summaryHtml += `<li>${err.error} (Data: ${JSON.stringify(err.data)})</li>`;
+                    });
+                    summaryHtml += "</ul>";
+                }
+
+                if (hasErrors) {
+                    if (statusDiv) showError(statusDiv, summaryHtml); // Show detailed summary with errors
+                } else {
+                    if (statusDiv) showSuccess(statusDiv, summaryHtml); // Show detailed success summary
+                }
+
+                // Refresh map list and potentially resource mapping UI if it's visible
+                // These functions are expected to be defined in the global scope or within admin_maps.html script tag
+                if (typeof fetchAndDisplayMaps === 'function') {
+                    fetchAndDisplayMaps();
+                }
+                const defineAreasSection = document.getElementById('define-areas-section');
+                if (defineAreasSection && defineAreasSection.style.display !== 'none') {
+                    const currentMapId = document.getElementById('selected-floor-map-id') ? document.getElementById('selected-floor-map-id').value : null;
+                    if (currentMapId) {
+                        if (typeof populateResourcesForMapping === 'function') await populateResourcesForMapping(currentMapId);
+                        if (typeof fetchAndDrawExistingMapAreas === 'function') await fetchAndDrawExistingMapAreas(currentMapId);
+                    }
+                }
+
+            } catch (error) {
+                // If apiCall itself throws an error not caught by its internal messaging (e.g. network error)
+                if (statusDiv && !statusDiv.classList.contains('error')) { // Check if apiCall already set an error
+                    showError(statusDiv, `Error during map configuration import: ${error.message}`);
+                }
+                console.error('Map configuration import error:', error);
+            } finally {
+                importMapConfigFile.value = ''; // Reset file input
+            }
+        });
+    }
 });

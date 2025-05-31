@@ -249,20 +249,18 @@ async function updateAuthLink() {
 
             // Sidebar and body class management based on admin status
             if (data.user.is_admin) {
-                if (sidebar) sidebar.style.display = ''; // Or 'block' or 'flex'
-                if (sidebarToggleBtn) sidebarToggleBtn.style.display = '';
-                document.body.classList.remove('no-sidebar');
-                // Ensure sidebar-collapsed state is consistent if sidebar was previously hidden
-                if (sidebar && !sidebar.classList.contains('collapsed')) {
-                    document.body.classList.remove('sidebar-collapsed');
-                } else if (sidebar && sidebar.classList.contains('collapsed')) {
-                    document.body.classList.add('sidebar-collapsed');
+                if (sidebar) {
+                    sidebar.style.display = ''; // Show sidebar (revert to CSS default display)
+                    sidebar.classList.remove('collapsed');
                 }
+                if (sidebarToggleBtn) sidebarToggleBtn.style.display = 'none'; // Hide toggle for admin
+                document.body.classList.remove('no-sidebar');
+                document.body.classList.remove('sidebar-collapsed');
             } else { // Non-admin user
                 if (sidebar) sidebar.style.display = 'none';
                 if (sidebarToggleBtn) sidebarToggleBtn.style.display = 'none';
                 document.body.classList.add('no-sidebar');
-                document.body.classList.remove('sidebar-collapsed');
+                document.body.classList.remove('sidebar-collapsed'); // Ensure this is also removed for non-admins
             }
 
             if (logoutLinkDropdown) {
