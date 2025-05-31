@@ -90,16 +90,31 @@ nav ul li a:focus {
 
 /* Icons and text handling for sidebar menu */
 #sidebar li .menu-icon {
-    display: inline-block;
+    display: none; /* hide icons when expanded */
     width: 1.2em;
     text-align: center;
     margin-right: 0.5em;
 }
+#sidebar.collapsed li .menu-icon {
+    display: inline-block; /* show only icons when collapsed */
+    margin-right: 0; /* no gap when centered */
+}
+#sidebar li .menu-text {
+    display: inline-block;
+}
 #sidebar.collapsed .menu-text {
-    display: none;
+    display: none; /* hide text when collapsed */
 }
 #sidebar.collapsed li {
     text-align: center;
+}
+#sidebar.collapsed li a {
+    display: flex;
+    justify-content: center; /* center icons horizontally */
+}
+#sidebar.collapsed summary {
+    display: flex;
+    justify-content: center;
 }
 
 /* Compact accessibility controls at top */
@@ -124,10 +139,9 @@ nav ul li a:focus {
 }
 
 main {
-    width: calc(100% - 220px);
-    margin-left: 220px;
-    max-width: 1200px; /* Max width for large screens */
-    margin: 30px auto; /* Keep vertical centering */
+    width: 100%;
+    max-width: none; /* use full available width */
+    margin: 30px auto; /* center content vertically and horizontally */
     background-color: var(--background-color-light);
     padding: 25px; /* Increased padding */
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08); /* Softer, more modern shadow */

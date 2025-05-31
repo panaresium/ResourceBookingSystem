@@ -32,7 +32,7 @@
             {# Container for Admin Maps link - shown by JS if admin #}
         <li id="admin-menu-item" style="display:none;">
             <details id="admin-section">
-                <summary>Admin</summary>
+                <summary><span class="menu-icon" aria-hidden="true">⚙️</span><span class="menu-text">{{ _('Admin') }}</span></summary>
                 <ul class="admin-menu">
                 <li id="admin-maps-nav-link" style="display: none;">
                     <a href="{{ url_for('serve_admin_maps') }}">{{ _('Admin Maps') }}</a>
