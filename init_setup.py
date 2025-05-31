@@ -18,12 +18,7 @@ from app import (
 from werkzeug.security import generate_password_hash
 from datetime import datetime, date, timedelta, time
 from add_resource_tags_column import add_tags_column
-from json_config import (
-    load_config,
-    save_config,
-    import_admin_data,
-    export_admin_data,
-)
+from json_config import load_config, save_config
 
 
 AZURE_PRIMARY_STORAGE = bool(os.environ.get("AZURE_PRIMARY_STORAGE"))
@@ -355,6 +350,10 @@ def init_db(force=False):
         app.logger.info("Creating database tables (if they don't exist)...")
         db.create_all()
         app.logger.info("Database tables creation/verification step completed.")
+
+        # Populate from JSON configuration if database is empty
+        from json_config import import_admin_config
+        import_admin_config()
 
         if not force:
             existing = any(
