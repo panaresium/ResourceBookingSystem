@@ -71,6 +71,16 @@ To run the application:
 4.  Open your web browser and navigate to `http://127.0.0.1:5000/`.
     You should see the application's home page.
 
+When deploying to platforms like Azure App Service, the host and port are
+typically provided via environment variables. The application now reads `PORT`
+and `HOST` so you can run:
+
+```bash
+HOST=0.0.0.0 PORT=8000 python app.py
+```
+
+or configure these variables in your hosting environment.
+
 ### Initializing the Database
 
 The application uses an SQLite database to store resource information. If you haven't already, initialize the database and create the necessary tables (this also adds sample resources):
