@@ -40,7 +40,9 @@ DATA_DIR_NAME = "data"
 STATIC_DIR_NAME = "static"
 FLOOR_MAP_UPLOADS_DIR_NAME = os.path.join(STATIC_DIR_NAME, "floor_map_uploads")
 RESOURCE_UPLOADS_DIR_NAME = os.path.join(STATIC_DIR_NAME, "resource_uploads")
-DB_PATH = os.path.join(os.path.abspath(os.path.dirname(__file__)), DATA_DIR_NAME, 'site.db')
+DB_PATH = os.path.join(
+    os.path.abspath(os.path.dirname(__file__)), DATA_DIR_NAME, "site.db"
+)
 
 if AZURE_PRIMARY_STORAGE:
     print("Downloading database from Azure storage...")
@@ -48,6 +50,7 @@ if AZURE_PRIMARY_STORAGE:
         download_database()
     except Exception as exc:
         print(f"Failed to download database from Azure: {exc}")
+
 
 def check_python_version():
     """Checks if the current Python version meets the minimum requirement."""
@@ -58,8 +61,11 @@ def check_python_version():
             f" This project requires Python {MIN_PYTHON_VERSION[0]}.{MIN_PYTHON_VERSION[1]} or higher."
         )
         sys.exit(1)
-    print(f"Python version {sys.version_info.major}.{sys.version_info.minor} is sufficient.")
+    print(
+        f"Python version {sys.version_info.major}.{sys.version_info.minor} is sufficient."
+    )
     return True
+
 
 def create_required_directories():
     """Creates the data directory and floor map uploads directory if they don't exist."""
@@ -85,12 +91,14 @@ def create_required_directories():
         except OSError as e:
             print(f"Error: Could not create '{static_dir}' directory: {e}")
             # Decide if this is fatal, for now, we'll let it pass if data_dir was created
-            # sys.exit(1) 
+            # sys.exit(1)
     else:
         print(f"'{static_dir}' directory already exists (good).")
-       
+
     # Create floor map uploads directory
-    floor_map_uploads_dir = pathlib.Path(__file__).resolve().parent / FLOOR_MAP_UPLOADS_DIR_NAME
+    floor_map_uploads_dir = (
+        pathlib.Path(__file__).resolve().parent / FLOOR_MAP_UPLOADS_DIR_NAME
+    )
     print(f"Checking for '{FLOOR_MAP_UPLOADS_DIR_NAME}' directory...")
     if not floor_map_uploads_dir.exists():
         try:
@@ -99,11 +107,13 @@ def create_required_directories():
         except OSError as e:
             print(f"Error: Could not create '{floor_map_uploads_dir}' directory: {e}")
             # Decide if this is fatal
-            # sys.exit(1) 
+            # sys.exit(1)
     else:
         print(f"'{floor_map_uploads_dir}' directory already exists.")
 
-    resource_uploads_dir = pathlib.Path(__file__).resolve().parent / RESOURCE_UPLOADS_DIR_NAME
+    resource_uploads_dir = (
+        pathlib.Path(__file__).resolve().parent / RESOURCE_UPLOADS_DIR_NAME
+    )
     print(f"Checking for '{RESOURCE_UPLOADS_DIR_NAME}' directory...")
     if not resource_uploads_dir.exists():
         try:
@@ -124,6 +134,7 @@ def create_required_directories():
 
     return True
 
+
 def ensure_tags_column():
     """Ensure the 'tags' column exists in the resource table."""
     if not os.path.exists(DB_PATH):
@@ -135,6 +146,7 @@ def ensure_tags_column():
     except Exception as exc:
         print(f"Failed to ensure 'tags' column exists: {exc}")
 
+
 def ensure_resource_image_column():
     """Ensure the 'image_filename' column exists in the resource table."""
     if not os.path.exists(DB_PATH):
@@ -142,14 +154,17 @@ def ensure_resource_image_column():
         return
 
     import sqlite3
+
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("PRAGMA table_info(resource)")
         columns = [info[1] for info in cursor.fetchall()]
-        if 'image_filename' not in columns:
+        if "image_filename" not in columns:
             print("Adding 'image_filename' column to 'resource' table...")
-            cursor.execute("ALTER TABLE resource ADD COLUMN image_filename VARCHAR(255)")
+            cursor.execute(
+                "ALTER TABLE resource ADD COLUMN image_filename VARCHAR(255)"
+            )
             conn.commit()
             print("'image_filename' column added.")
         else:
@@ -157,8 +172,9 @@ def ensure_resource_image_column():
     except Exception as exc:
         print(f"Failed to ensure 'image_filename' column exists: {exc}")
     finally:
-        if 'conn' in locals():
+        if "conn" in locals():
             conn.close()
+
 
 def ensure_floor_map_columns():
     """Ensure the 'location' and 'floor' columns exist in the floor_map table."""
@@ -167,6 +183,7 @@ def ensure_floor_map_columns():
         return
 
     import sqlite3
+
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -174,14 +191,14 @@ def ensure_floor_map_columns():
         columns = [info[1] for info in cursor.fetchall()]
         to_commit = False
 
-        if 'location' not in columns:
+        if "location" not in columns:
             print("Adding 'location' column to 'floor_map' table...")
             cursor.execute("ALTER TABLE floor_map ADD COLUMN location VARCHAR(100)")
             to_commit = True
         else:
             print("'location' column already exists. No action taken for this column.")
 
-        if 'floor' not in columns:
+        if "floor" not in columns:
             print("Adding 'floor' column to 'floor_map' table...")
             cursor.execute("ALTER TABLE floor_map ADD COLUMN floor VARCHAR(50)")
             to_commit = True
@@ -194,8 +211,9 @@ def ensure_floor_map_columns():
     except Exception as exc:
         print(f"Failed to ensure floor_map columns exist: {exc}")
     finally:
-        if 'conn' in locals():
+        if "conn" in locals():
             conn.close()
+
 
 def ensure_scheduled_status_columns():
     """Ensure the 'scheduled_status' and 'scheduled_status_at' columns exist in the resource table."""
@@ -204,6 +222,7 @@ def ensure_scheduled_status_columns():
         return
 
     import sqlite3
+
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -211,19 +230,27 @@ def ensure_scheduled_status_columns():
         columns = [info[1] for info in cursor.fetchall()]
         to_commit = False
 
-        if 'scheduled_status' not in columns:
+        if "scheduled_status" not in columns:
             print("Adding 'scheduled_status' column to 'resource' table...")
-            cursor.execute("ALTER TABLE resource ADD COLUMN scheduled_status VARCHAR(50)")
+            cursor.execute(
+                "ALTER TABLE resource ADD COLUMN scheduled_status VARCHAR(50)"
+            )
             to_commit = True
         else:
-            print("'scheduled_status' column already exists. No action taken for this column.")
+            print(
+                "'scheduled_status' column already exists. No action taken for this column."
+            )
 
-        if 'scheduled_status_at' not in columns:
+        if "scheduled_status_at" not in columns:
             print("Adding 'scheduled_status_at' column to 'resource' table...")
-            cursor.execute("ALTER TABLE resource ADD COLUMN scheduled_status_at DATETIME")
+            cursor.execute(
+                "ALTER TABLE resource ADD COLUMN scheduled_status_at DATETIME"
+            )
             to_commit = True
         else:
-            print("'scheduled_status_at' column already exists. No action taken for this column.")
+            print(
+                "'scheduled_status_at' column already exists. No action taken for this column."
+            )
 
         if to_commit:
             conn.commit()
@@ -231,8 +258,9 @@ def ensure_scheduled_status_columns():
     except Exception as exc:
         print(f"Failed to ensure scheduled status columns exist: {exc}")
     finally:
-        if 'conn' in locals():
+        if "conn" in locals():
             conn.close()
+
 
 def verify_db_schema():
     """Check if the existing database has the expected tables and columns."""
@@ -242,33 +270,52 @@ def verify_db_schema():
     import sqlite3
 
     expected_schema = {
-        'user': {
-            'id', 'username', 'email', 'password_hash', 'is_admin',
-            'google_id', 'google_email'
+        "user": {
+            "id",
+            "username",
+            "email",
+            "password_hash",
+            "is_admin",
+            "google_id",
+            "google_email",
         },
-        'role': {
-            'id', 'name', 'description', 'permissions'
+        "role": {"id", "name", "description", "permissions"},
+        "user_roles": {"user_id", "role_id"},
+        "floor_map": {"id", "name", "image_filename", "location", "floor"},
+        "resource": {
+            "id",
+            "name",
+            "capacity",
+            "equipment",
+            "tags",
+            "booking_restriction",
+            "status",
+            "published_at",
+            "allowed_user_ids",
+            "image_filename",
+            "is_under_maintenance",
+            "maintenance_until",
+            "max_recurrence_count",
+            "scheduled_status",
+            "scheduled_status_at",
+            "floor_map_id",
+            "map_coordinates",
         },
-        'user_roles': {'user_id', 'role_id'},
-        'floor_map': {
-            'id', 'name', 'image_filename', 'location', 'floor'
+        "resource_roles": {"resource_id", "role_id"},
+        "booking": {
+            "id",
+            "resource_id",
+            "user_name",
+            "start_time",
+            "end_time",
+            "title",
+            "checked_in_at",
+            "checked_out_at",
+            "status",
+            "recurrence_rule",
         },
-        'resource': {
-            'id', 'name', 'capacity', 'equipment', 'tags',
-            'booking_restriction', 'status', 'published_at',
-            'allowed_user_ids', 'image_filename', 'is_under_maintenance',
-            'maintenance_until', 'max_recurrence_count',
-            'scheduled_status', 'scheduled_status_at',
-            'floor_map_id', 'map_coordinates'
-        },
-        'resource_roles': {'resource_id', 'role_id'},
-        'booking': {
-            'id', 'resource_id', 'user_name', 'start_time',
-            'end_time', 'title', 'checked_in_at', 'checked_out_at',
-            'status', 'recurrence_rule'
-        },
-        'waitlist_entry': {'id', 'resource_id', 'user_id', 'timestamp'},
-        'audit_log': {'id', 'timestamp', 'user_id', 'username', 'action', 'details'}
+        "waitlist_entry": {"id", "resource_id", "user_id", "timestamp"},
+        "audit_log": {"id", "timestamp", "user_id", "username", "action", "details"},
     }
 
     try:
@@ -290,7 +337,7 @@ def verify_db_schema():
         print(f"Error verifying database schema: {exc}")
         return False
     finally:
-        if 'conn' in locals():
+        if "conn" in locals():
             conn.close()
 
 
@@ -304,12 +351,14 @@ def init_db(force=False):
         app.logger.info("Database tables creation/verification step completed.")
 
         if not force:
-            existing = any([
-                db.session.query(User.id).first(),
-                db.session.query(Resource.id).first(),
-                db.session.query(Role.id).first(),
-                db.session.query(Booking.id).first(),
-            ])
+            existing = any(
+                [
+                    db.session.query(User.id).first(),
+                    db.session.query(Resource.id).first(),
+                    db.session.query(Role.id).first(),
+                    db.session.query(Booking.id).first(),
+                ]
+            )
             if existing:
                 app.logger.warning(
                     "init_db aborted: existing data detected. "
@@ -358,161 +407,16 @@ def init_db(force=False):
             db.session.rollback()
             app.logger.exception("Error committing deletions during DB initialization:")
 
-        app.logger.info("Adding default users (admin/admin, user/userpass)...")
+        app.logger.info("Loading admin configuration from JSON...")
         try:
-            default_users = [
-                User(
-                    username='admin',
-                    email='admin@example.com',
-                    password_hash=generate_password_hash('admin', method='pbkdf2:sha256'),
-                    is_admin=True,
-                ),
-                User(
-                    username='user',
-                    email='user@example.com',
-                    password_hash=generate_password_hash('userpass', method='pbkdf2:sha256'),
-                    is_admin=False,
-                ),
-            ]
-            db.session.bulk_save_objects(default_users)
-            db.session.commit()
-            app.logger.info(f"Successfully added {len(default_users)} default users.")
+            from json_config import load_config, import_admin_config
+
+            cfg = load_config()
+            import_admin_config(db.session, cfg)
+            app.logger.info("Admin configuration imported from JSON file.")
         except Exception as e:
             db.session.rollback()
-            app.logger.exception("Error adding default users during DB initialization:")
-
-        app.logger.info("Adding default roles...")
-        try:
-            admin_role = Role(
-                name="Administrator",
-                description="Full system access",
-                permissions="all_permissions,view_analytics",
-            )
-            standard_role = Role(
-                name="StandardUser",
-                description="Can make bookings and view resources",
-                permissions="make_bookings,view_resources",
-            )
-            db.session.add_all([admin_role, standard_role])
-            db.session.commit()
-            app.logger.info("Successfully added default roles.")
-        except Exception as e:
-            db.session.rollback()
-            app.logger.exception("Error adding default roles during DB initialization:")
-            # Ensure admin_role and standard_role are None if creation failed, to prevent errors below
-            admin_role = None
-            standard_role = None
-
-        app.logger.info("Assigning roles to default users...")
-        admin_user = User.query.filter_by(username='admin').first()
-        standard_user = User.query.filter_by(username='user').first()
-
-        # Fetch roles again in case of session issues or if they were not committed properly
-        if not admin_role:
-            admin_role = Role.query.filter_by(name="Administrator").first()
-        if not standard_role:
-            standard_role = Role.query.filter_by(name="StandardUser").first()
-
-        if admin_user and admin_role:
-            admin_user.roles.append(admin_role)
-        if standard_user and standard_role:
-            standard_user.roles.append(standard_role)
-
-        try:
-            db.session.commit()
-            app.logger.info("Successfully assigned roles to default users.")
-        except Exception as e:
-            db.session.rollback()
-            app.logger.exception("Error assigning roles to default users:")
-
-        admin_user_for_perms = User.query.filter_by(username='admin').first()
-        standard_user_for_perms = User.query.filter_by(username='user').first()
-
-        admin_user_id_str = str(admin_user_for_perms.id) if admin_user_for_perms else "1"
-        standard_user_id_str = str(standard_user_for_perms.id) if standard_user_for_perms else "2"
-
-        # Fetch roles for sample data assignment
-        admin_role_for_resource = Role.query.filter_by(name="Administrator").first()
-        standard_role_for_resource = Role.query.filter_by(name="StandardUser").first()
-
-        app.logger.info("Adding sample resources...")
-        try:
-            res_alpha = Resource(
-                name="Conference Room Alpha",
-                capacity=10,
-                equipment="Projector,Whiteboard,Teleconference",
-                tags="large,video",
-                booking_restriction=None,
-                status='published',
-                published_at=datetime.utcnow(),
-                allowed_user_ids=None,
-            )  # No specific user IDs, open to roles
-            if standard_role_for_resource:
-                res_alpha.roles.append(standard_role_for_resource)
-            if admin_role_for_resource:  # Admins can also book
-                res_alpha.roles.append(admin_role_for_resource)
-
-            res_beta = Resource(
-                name="Meeting Room Beta",
-                capacity=6,
-                equipment="Teleconference,Whiteboard",
-                tags="medium",
-                booking_restriction='all_users',
-                status='published',
-                published_at=datetime.utcnow(),  # 'all_users' might be redundant now
-                allowed_user_ids=f"{standard_user_id_str},{admin_user_id_str}",
-            )  # Can keep user_ids for specific overrides
-            # No specific roles assigned to Beta, relies on allowed_user_ids or booking_restriction logic
-
-            res_gamma = Resource(
-                name="Focus Room Gamma",
-                capacity=2,
-                equipment="Whiteboard",
-                tags="quiet",
-                booking_restriction='admin_only',
-                status='draft',
-                published_at=None,  # admin_only might be redundant
-                allowed_user_ids=None,
-            )
-            if admin_role_for_resource:
-                res_gamma.roles.append(admin_role_for_resource)
-
-            res_delta = Resource(
-                name="Quiet Pod Delta",
-                capacity=1,
-                equipment=None,
-                tags="quiet,small",
-                booking_restriction=None,
-                status='draft',
-                published_at=None,
-                allowed_user_ids=None,
-            )
-            if standard_role_for_resource:
-                res_delta.roles.append(standard_role_for_resource)
-            # If admin should also have access by default to standard_user resources, add admin_role too.
-            # Or rely on a global admin override in permission checking logic.
-
-            res_omega = Resource(
-                name="Archived Room Omega",
-                capacity=5,
-                equipment="Old Projector",
-                tags="archived",
-                booking_restriction=None,
-                status='archived',
-                published_at=datetime.utcnow() - timedelta(days=30),
-                allowed_user_ids=None,
-            )
-            # Typically archived resources don't need role assignments unless there's a use case.
-
-            sample_resources_list = [res_alpha, res_beta, res_gamma, res_delta, res_omega]
-            db.session.add_all(sample_resources_list)
-            db.session.commit()
-            app.logger.info(
-                f"Successfully added {len(sample_resources_list)} sample resources with roles."
-            )
-        except Exception as e:
-            db.session.rollback()
-            app.logger.exception("Error adding sample resources during DB initialization:")
+            app.logger.exception("Error importing admin configuration from JSON:")
 
         app.logger.info("Adding sample bookings...")
         resource_alpha = Resource.query.filter_by(name="Conference Room Alpha").first()
@@ -539,8 +443,12 @@ def init_db(force=False):
                         resource_id=resource_alpha.id,
                         user_name="user1",
                         title="Project Update Alpha",
-                        start_time=datetime.combine(date.today() + timedelta(days=1), time(14, 0)),
-                        end_time=datetime.combine(date.today() + timedelta(days=1), time(15, 0)),
+                        start_time=datetime.combine(
+                            date.today() + timedelta(days=1), time(14, 0)
+                        ),
+                        end_time=datetime.combine(
+                            date.today() + timedelta(days=1), time(15, 0)
+                        ),
                     ),
                     Booking(
                         resource_id=resource_beta.id,
@@ -572,6 +480,9 @@ def init_db(force=False):
                 "Could not find sample resources 'Conference Room Alpha' or 'Meeting Room Beta' to create bookings for. Skipping sample booking addition."
             )
 
+        from json_config import export_admin_config
+
+        export_admin_config(db.session)
         app.logger.info("Database initialization script completed.")
 
         if AZURE_PRIMARY_STORAGE:
@@ -579,20 +490,15 @@ def init_db(force=False):
             try:
                 upload_database(versioned=False)
                 upload_media()
-                try:
-                    from app import export_admin_config
-                    export_admin_config()
-                except Exception as exc:
-                    print(f"Failed to export admin config: {exc}")
-
                 upload_config()
             except Exception as exc:
                 print(f"Failed to upload data to Azure: {exc}")
 
+
 def main():
     """Main function to run setup checks and tasks."""
     print("Starting project initialization...")
-    
+
     check_python_version()
     print("-" * 30)
     create_required_directories()
@@ -625,7 +531,9 @@ def main():
             print(f"Failed to export admin config: {exc}")
     except Exception as e:
         print(f"An error occurred during database initialization: {e}")
-        print("Please check the output from init_db for more details, or run this script again if issues persist.")
+        print(
+            "Please check the output from init_db for more details, or run this script again if issues persist."
+        )
         sys.exit(1)  # Exit if DB initialization fails
 
     print("-" * 30)
@@ -634,6 +542,7 @@ def main():
     print("Next steps (if applicable):")
     print("  - Install dependencies: pip install -r requirements.txt")
     print("  - Run the application (see README.md for details)")
+
 
 if __name__ == "__main__":
     main()
