@@ -898,6 +898,12 @@ document.addEventListener('DOMContentLoaded', function() {
         // 1. Initial Setup: DOM Elements & Variables
         const availabilityDateInput = document.getElementById('availability-date'); // Date picker for this view
         const resourceLoadingStatusDiv = document.getElementById('resource-loading-status');
+        const filterCapacityInput = document.getElementById('resource-filter-capacity');
+        const filterEquipmentInput = document.getElementById('resource-filter-equipment');
+        const filterTagsInput = document.getElementById('resource-filter-tags');
+        const applyFiltersBtn = document.getElementById('resource-apply-filters-btn');
+        const clearFiltersBtn = document.getElementById('resource-clear-filters-btn');
+        let currentFilters = {};
 
         // Modal elements (rpbm- prefix)
         const bookingModal = document.getElementById('resource-page-booking-modal');
@@ -991,16 +997,22 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         // 2. fetchAndRenderResources() function
-        async function fetchAndRenderResources() {
+        async function fetchAndRenderResources(filters = {}) {
             // Ensure resourceLoadingStatusDiv is defined in this scope or passed.
             // const resourceLoadingStatusDiv = document.getElementById('resource-loading-status'); 
             if (resourceLoadingStatusDiv) showLoading(resourceLoadingStatusDiv, "Loading resources and maps...");
             else console.warn("resourceLoadingStatusDiv not found for fetchAndRenderResources initial loading message.");
 
             try {
+                const params = new URLSearchParams();
+                if (filters.capacity) params.append('capacity', filters.capacity);
+                if (filters.equipment) params.append('equipment', filters.equipment);
+                if (filters.tags) params.append('tags', filters.tags);
+                const query = params.toString() ? `?${params.toString()}` : '';
+
                 const [resourcesResponse, mapsResponse] = await Promise.all([
-                    apiCall('/api/resources', {}, resourceLoadingStatusDiv),
-                    apiCall('/api/maps', {}, resourceLoadingStatusDiv) 
+                    apiCall(`/api/resources${query}`, {}, resourceLoadingStatusDiv),
+                    apiCall('/api/maps', {}, resourceLoadingStatusDiv)
                 ]);
 
                 allFetchedResources = resourcesResponse || []; 
@@ -1582,7 +1594,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 // resetRpbmModal(); // Modal will be reset when next opened
             }
         });
-        
+
+        if (applyFiltersBtn) {
+            applyFiltersBtn.addEventListener('click', () => {
+                currentFilters = {
+                    capacity: filterCapacityInput.value,
+                    equipment: filterEquipmentInput.value.trim(),
+                    tags: filterTagsInput.value.trim()
+                };
+                fetchAndRenderResources(currentFilters);
+            });
+        }
+
+        if (clearFiltersBtn) {
+            clearFiltersBtn.addEventListener('click', () => {
+                if (filterCapacityInput) filterCapacityInput.value = '';
+                if (filterEquipmentInput) filterEquipmentInput.value = '';
+                if (filterTagsInput) filterTagsInput.value = '';
+                currentFilters = {};
+                fetchAndRenderResources(currentFilters);
+            });
+        }
+
         // Initial call to fetch and render resources and their button states
         fetchAndRenderResources();
         console.log("Initial fetchAndRenderResources called.");
