@@ -177,7 +177,6 @@ body {
     color: var(--text-color-light);
     overflow-y: auto;
     overflow-x: hidden;
-    transition: width 0.3s;
     z-index: 1020;
     box-shadow: 2px 0 5px rgba(0,0,0,0.1);
     padding: 0; /* Removed 1em padding, li items will have padding */
@@ -292,7 +291,6 @@ body {
     padding: 20px;
     height: calc(100vh - var(--header-height) - var(--footer-height));
     overflow-y: auto;
-    transition: margin-left 0.3s ease-in-out;
     background-color: var(--background-color-light);
     /* flex-grow: 1; REMOVED */
 }
@@ -548,6 +546,13 @@ body.high-contrast .app-header #welcome-message-container,
 body.high-contrast .app-header #user-dropdown-button {
     color: #ffffff !important;
 }
+
+/* Ensure all links in header are white in high contrast, overriding general high-contrast link styles */
+body.high-contrast .app-header a,
+body.high-contrast .app-header a:visited {
+    color: #ffffff !important;
+}
+
 body.high-contrast .app-header #user-dropdown-menu {
     background-color: #000000 !important;
     border: 2px solid #ffffff !important;
