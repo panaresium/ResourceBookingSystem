@@ -20,6 +20,8 @@ from flask import abort # For permission_required decorator
 from flask import g  # For storing current locale
 from flask_wtf.csrf import CSRFProtect # For CSRF protection
 from flask_socketio import SocketIO
+from sqlalchemy import event
+from json_config import export_admin_config
 
 
 try:
@@ -235,6 +237,14 @@ def get_google_flow():
     )
 
 db = SQLAlchemy(app)
+
+
+@event.listens_for(db.session, "after_commit")
+def _sync_config_after_commit(session):
+    try:
+        export_admin_config()
+    except Exception:
+        app.logger.exception("Failed to export admin configuration after commit")
 
 
 # Configure SQLite pragmas (e.g., WAL mode) on the first request

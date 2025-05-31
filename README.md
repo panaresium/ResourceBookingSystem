@@ -205,11 +205,11 @@ Run the script with:
 ```bash
 python azure_backup.py
 ```
-All floor map and resource images from `static/` along with `data/site.db` will be uploaded. The script stores hashes of previous uploads so unchanged files are skipped on subsequent runs. During the process, log messages indicate whether `site.db` was uploaded or skipped because it did not change.
+All floor map and resource images from `static/` along with `data/site.db` and `data/admin_config.json` will be uploaded. The script stores hashes of previous uploads so unchanged files are skipped on subsequent runs. During the process, log messages indicate whether each file was uploaded or skipped because it did not change.
 
 ### Automatic Backups
 
-When the app runs, it will attempt to restore `site.db` and uploaded images from the configured Azure File Shares.  A background job then backs up the database and media files at regular intervals.
+When the app runs, it will attempt to restore `site.db`, `data/admin_config.json` and uploaded images from the configured Azure File Shares.  A background job then backs up the database, configuration file and media files at regular intervals.
 
 Configure the interval via the `AZURE_BACKUP_INTERVAL_MINUTES` environment variable (default `60`).  Files are only uploaded when their content changes.
 
