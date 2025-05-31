@@ -468,4 +468,172 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    const exportMapConfigBtn = document.getElementById('export-map-config-btn');
+    if (exportMapConfigBtn) {
+        exportMapConfigBtn.addEventListener('click', async () => {
+            const statusDiv = document.getElementById('admin-maps-list-status'); // Or any other relevant status div on admin_maps.html
+            if (statusDiv) showLoading(statusDiv, 'Exporting map configuration...');
+            try {
+                // Assuming apiCall is globally available and handles CSRF
+                const response = await fetch('/api/admin/maps/export_configuration');
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = 'map_configuration_export.json'; // Default filename
+                if (contentDisposition) {
+                    const filenameMatch = contentDisposition.match(/filename="?(.+?)"?$/);
+                    if (filenameMatch && filenameMatch.length > 1) {
+                        filename = filenameMatch[1];
+                    }
+                }
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                if (statusDiv) showSuccess(statusDiv, 'Map configuration exported successfully.');
+
+            } catch (error) {
+                if (statusDiv) showError(statusDiv, `Error exporting map configuration: ${error.message}`);
+                console.error('Error exporting map configuration:', error);
+            }
+        });
+    }
+
+    const exportMapConfigBtn = document.getElementById('export-map-config-btn');
+    if (exportMapConfigBtn) {
+        exportMapConfigBtn.addEventListener('click', async () => {
+            const statusDiv = document.getElementById('admin-maps-list-status'); // Use a relevant status div
+            if (statusDiv) showLoading(statusDiv, 'Exporting map configuration...');
+            try {
+                const response = await fetch('/api/admin/maps/export_configuration');
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = 'map_configuration_export.json'; // Default filename
+                if (contentDisposition) {
+                    const filenameMatch = contentDisposition.match(/filename="?(.+?)"?$/);
+                    if (filenameMatch && filenameMatch.length > 1) {
+                        filename = filenameMatch[1];
+                    }
+                }
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                if (statusDiv) showSuccess(statusDiv, 'Map configuration exported successfully.');
+            } catch (error) {
+                if (statusDiv) showError(statusDiv, `Error exporting map configuration: ${error.message}`);
+                console.error('Error exporting map configuration:', error);
+            }
+        });
+    }
+
+    const importMapConfigFile = document.getElementById('import-map-config-file');
+    const importMapConfigBtn = document.getElementById('import-map-config-btn');
+
+    if (importMapConfigBtn && importMapConfigFile) {
+        importMapConfigBtn.addEventListener('click', () => {
+            importMapConfigFile.click(); // Trigger file input
+        });
+
+        importMapConfigFile.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file) {
+                showError(document.getElementById('admin-maps-list-status'), 'No file selected for map configuration import.');
+                return;
+            }
+            if (file.type !== 'application/json') {
+                showError(document.getElementById('admin-maps-list-status'), 'Please select a valid JSON file for map configuration.');
+                return;
+            }
+
+            const statusDiv = document.getElementById('admin-maps-list-status');
+            showLoading(statusDiv, 'Importing map configuration...');
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                // apiCall should handle CSRF if set up globally (e.g., in script.js)
+                const result = await apiCall('/api/admin/maps/import_configuration', {
+                    method: 'POST',
+                    body: formData,
+                    // 'Content-Type': 'multipart/form-data' is automatically set by browser with FormData
+                }, statusDiv); // Pass statusDiv for messages
+
+                // The apiCall function itself should handle showing success/error from result.message
+                // But we might want to format a more detailed summary here.
+                let summaryMessage = result.message || "Import process completed.";
+                if (result.maps_created) summaryMessage += ` Maps Created: ${result.maps_created}.`;
+                if (result.maps_updated) summaryMessage += ` Maps Updated: ${result.maps_updated}.`;
+                if (result.resource_mappings_updated) summaryMessage += ` Resource Mappings Updated: ${result.resource_mappings_updated}.`;
+
+                if (result.image_reminders && result.image_reminders.length > 0) {
+                    summaryMessage += "<br><strong>Important Reminders:</strong><ul>";
+                    result.image_reminders.forEach(reminder => {
+                        summaryMessage += `<li>${reminder}</li>`;
+                    });
+                    summaryMessage += "</ul>";
+                }
+
+                if ((result.maps_errors && result.maps_errors.length > 0) || (result.resource_mapping_errors && result.resource_mapping_errors.length > 0)) {
+                    summaryMessage += "<br><strong>Errors Encountered:</strong><ul>";
+                    if (result.maps_errors) {
+                        result.maps_errors.forEach(err => {
+                            summaryMessage += `<li>Map Error: ${err.error} (Data: ${JSON.stringify(err.data)})</li>`;
+                        });
+                    }
+                    if (result.resource_mapping_errors) {
+                        result.resource_mapping_errors.forEach(err => {
+                            summaryMessage += `<li>Resource Mapping Error: ${err.error} (Data: ${JSON.stringify(err.data)})</li>`;
+                        });
+                    }
+                    summaryMessage += "</ul>";
+                    showError(statusDiv, summaryMessage); // Use showError for multi-status like display with errors
+                } else {
+                    showSuccess(statusDiv, summaryMessage);
+                }
+
+                // Refresh map list and potentially resource mapping UI if it's visible
+                if (typeof window.fetchAndDisplayMaps === 'function') { // Assuming fetchAndDisplayMaps is global from admin_maps.html's own script part
+                    window.fetchAndDisplayMaps();
+                }
+                // If the "Define Areas" section is visible and a map is selected, refresh its data too
+                const defineAreasSection = document.getElementById('define-areas-section');
+                if (defineAreasSection && defineAreasSection.style.display !== 'none') {
+                    const currentMapId = document.getElementById('selected-floor-map-id') ? document.getElementById('selected-floor-map-id').value : null;
+                    if (currentMapId && typeof window.populateResourcesForMapping === 'function' && typeof window.fetchAndDrawExistingMapAreas === 'function') {
+                        await window.populateResourcesForMapping(currentMapId);
+                        await window.fetchAndDrawExistingMapAreas(currentMapId);
+                    }
+                }
+
+            } catch (error) {
+                // apiCall should have shown the error in statusDiv, but catch any other JS errors
+                showError(statusDiv, `Error during map configuration import: ${error.message}`);
+                console.error('Map configuration import error:', error);
+            } finally {
+                importMapConfigFile.value = ''; // Reset file input
+            }
+        });
+    }
 });

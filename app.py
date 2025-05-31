@@ -1109,6 +1109,215 @@ def get_floor_maps():
         app.logger.exception("Error fetching floor maps:")
         return jsonify({'error': 'Failed to fetch maps due to a server error.'}), 500
 
+@app.route('/api/admin/maps/export_configuration', methods=['GET'])
+@login_required
+@permission_required('manage_floor_maps') # Or a new, more specific permission if desired
+def export_map_configuration():
+    try:
+        floor_maps = FloorMap.query.all()
+        floor_maps_data = []
+        for fm in floor_maps:
+            floor_maps_data.append({
+                'id': fm.id,
+                'name': fm.name,
+                'image_filename': fm.image_filename,
+                'location': fm.location,
+                'floor': fm.floor
+            })
+
+        mapped_resources = Resource.query.filter(Resource.floor_map_id.isnot(None)).all()
+        mapped_resources_data = []
+        for r in mapped_resources:
+            mapped_resources_data.append({
+                'id': r.id,
+                'name': r.name,
+                'floor_map_id': r.floor_map_id,
+                'map_coordinates': json.loads(r.map_coordinates) if r.map_coordinates else None,
+                'booking_restriction': r.booking_restriction,
+                'allowed_user_ids': r.allowed_user_ids,
+                'role_ids': [role.id for role in r.roles] # Exporting as a list of role IDs
+            })
+
+        export_data = {
+            'floor_maps': floor_maps_data,
+            'mapped_resources': mapped_resources_data
+        }
+
+        response = jsonify(export_data)
+        response.headers['Content-Disposition'] = 'attachment; filename=map_configuration_export.json'
+        response.mimetype = 'application/json'
+
+        app.logger.info(f"User {current_user.username} exported map configuration.")
+        add_audit_log(action="EXPORT_MAP_CONFIGURATION", details=f"User {current_user.username} exported map configuration.")
+        return response
+
+    except Exception as e:
+        app.logger.exception("Error exporting map configuration:")
+        add_audit_log(action="EXPORT_MAP_CONFIGURATION_FAILED", details=f"User {current_user.username} failed to export map configuration. Error: {str(e)}")
+        return jsonify({'error': 'Failed to export map configuration due to a server error.'}), 500
+
+@app.route('/api/admin/maps/import_configuration', methods=['POST'])
+@login_required
+@permission_required('manage_floor_maps') # Or a new, more specific permission
+def import_map_configuration():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part in the request.'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file.'}), 400
+    if not file.filename.endswith('.json'):
+        return jsonify({'error': 'File must be a JSON file.'}), 400
+
+    try:
+        config_data = json.load(file)
+    except json.JSONDecodeError:
+        return jsonify({'error': 'Invalid JSON file.'}), 400
+
+    if not isinstance(config_data, dict) or 'floor_maps' not in config_data or 'mapped_resources' not in config_data:
+        return jsonify({'error': 'Invalid configuration format. Expected "floor_maps" and "mapped_resources" keys.'}), 400
+
+    maps_created = 0
+    maps_updated = 0
+    maps_errors = []
+    resource_updates = 0
+    resource_errors = []
+
+    image_reminders = []
+
+    # Import Floor Maps
+    if isinstance(config_data['floor_maps'], list):
+        for fm_data in config_data['floor_maps']:
+            try:
+                fm = None
+                if fm_data.get('id') is not None:
+                    fm = FloorMap.query.get(fm_data['id'])
+
+                if not fm and fm_data.get('name'):
+                    fm = FloorMap.query.filter_by(name=fm_data['name']).first()
+
+                action = "UPDATE_FLOOR_MAP_VIA_IMPORT"
+                if not fm:
+                    fm = FloorMap()
+                    action = "CREATE_FLOOR_MAP_VIA_IMPORT"
+                    if not fm_data.get('name') or not fm_data.get('image_filename'):
+                        maps_errors.append({'error': 'Missing name or image_filename for new map.', 'data': fm_data})
+                        continue
+
+                fm.name = fm_data.get('name', fm.name)
+                fm.image_filename = fm_data.get('image_filename', fm.image_filename)
+                fm.location = fm_data.get('location', fm.location)
+                fm.floor = fm_data.get('floor', fm.floor)
+
+                if fm.image_filename and not os.path.exists(os.path.join(app.config['UPLOAD_FOLDER'], fm.image_filename)):
+                    image_reminders.append(f"Ensure image '{fm.image_filename}' for map '{fm.name}' exists in 'static/floor_map_uploads/'.")
+
+                if action == "CREATE_FLOOR_MAP_VIA_IMPORT":
+                    db.session.add(fm)
+                    maps_created += 1
+                else:
+                    maps_updated += 1
+
+                db.session.commit() # Commit each map to get ID for resources if it's new
+                fm_data['processed_id'] = fm.id # Store processed ID for resource mapping
+                add_audit_log(action=action, details=f"FloorMap '{fm.name}' (ID: {fm.id}) processed by import by {current_user.username}.")
+
+            except Exception as e:
+                db.session.rollback()
+                maps_errors.append({'error': f"Error processing floor map '{fm_data.get('name', 'N/A')}': {str(e)}", 'data': fm_data})
+
+    # Import Mapped Resource configurations
+    if isinstance(config_data['mapped_resources'], list):
+        for res_map_data in config_data['mapped_resources']:
+            try:
+                resource = None
+                if res_map_data.get('id') is not None:
+                    resource = Resource.query.get(res_map_data['id'])
+
+                if not resource and res_map_data.get('name'): # Fallback to name if ID not found or not provided
+                    resource = Resource.query.filter_by(name=res_map_data['name']).first()
+
+                if not resource:
+                    resource_errors.append({'error': f"Resource not found by ID or name: '{res_map_data.get('name') or res_map_data.get('id', 'N/A')}'", 'data': res_map_data})
+                    continue
+
+                # Update resource fields related to mapping
+                imported_floor_map_id = res_map_data.get('floor_map_id')
+                target_floor_map = None
+
+                # Try to find the map by its original ID from the import file
+                if imported_floor_map_id is not None:
+                    # Check if this map was processed in the current import (maps_data might have 'processed_id')
+                    processed_map_entry = next((m for m in config_data['floor_maps'] if m.get('id') == imported_floor_map_id and 'processed_id' in m), None)
+                    if processed_map_entry:
+                        target_floor_map = FloorMap.query.get(processed_map_entry['processed_id'])
+                    else: # Fallback to querying by the ID directly (if it's an existing map not in this import's map list)
+                        target_floor_map = FloorMap.query.get(imported_floor_map_id)
+
+                if target_floor_map:
+                    resource.floor_map_id = target_floor_map.id
+                elif imported_floor_map_id is not None: # If an ID was given but map not found
+                    resource_errors.append({'error': f"FloorMap ID '{imported_floor_map_id}' not found for resource '{resource.name}'.", 'data': res_map_data})
+                    # Decide if you want to skip mapping or nullify, here we skip.
+                    # continue
+                # If imported_floor_map_id is null, it means unmapping, which is fine.
+                # If it's not provided at all in res_map_data, floor_map_id won't be changed.
+
+                if 'map_coordinates' in res_map_data:
+                    resource.map_coordinates = json.dumps(res_map_data['map_coordinates']) if res_map_data['map_coordinates'] else None
+
+                if 'booking_restriction' in res_map_data:
+                    resource.booking_restriction = res_map_data['booking_restriction']
+
+                if 'allowed_user_ids' in res_map_data: # Expects a string of comma-separated IDs or null/empty
+                    resource.allowed_user_ids = res_map_data['allowed_user_ids']
+
+                if 'role_ids' in res_map_data and isinstance(res_map_data['role_ids'], list):
+                    new_roles = []
+                    for r_id in res_map_data['role_ids']:
+                        role = Role.query.get(r_id)
+                        if role:
+                            new_roles.append(role)
+                        else:
+                             resource_errors.append({'error': f"Role ID '{r_id}' not found for resource '{resource.name}'.", 'data': res_map_data})
+                    resource.roles = new_roles
+
+                resource_updates +=1
+                add_audit_log(action="UPDATE_RESOURCE_MAP_INFO_VIA_IMPORT", details=f"Resource '{resource.name}' (ID: {resource.id}) map info updated by import by {current_user.username}.")
+
+            except Exception as e:
+                db.session.rollback() # Rollback per resource mapping attempt
+                resource_errors.append({'error': f"Error processing resource mapping for '{res_map_data.get('name', 'N/A')}': {str(e)}", 'data': res_map_data})
+
+        try:
+            db.session.commit() # Commit all resource mapping changes
+        except Exception as e_commit_res:
+            db.session.rollback()
+            # This is a general commit error for resources, might need more specific error handling
+            resource_errors.append({'error': f"General DB error committing resource mappings: {str(e_commit_res)}"})
+
+
+    summary = {
+        'message': "Map configuration import processed.",
+        'maps_created': maps_created,
+        'maps_updated': maps_updated,
+        'maps_errors': maps_errors,
+        'resource_mappings_updated': resource_updates, # "Updated" as we only update existing resources' map info
+        'resource_mapping_errors': resource_errors,
+        'image_reminders': image_reminders
+    }
+
+    status_code = 200
+    if maps_errors or resource_errors:
+        status_code = 207 # Multi-Status if there were errors
+        summary['message'] += " Some entries had errors."
+        app.logger.warning(f"Map configuration import by {current_user.username} completed with errors/reminders. Summary: {summary}")
+    else:
+        app.logger.info(f"Map configuration import by {current_user.username} successful. Summary: {summary}")
+
+    add_audit_log(action="IMPORT_MAP_CONFIGURATION_COMPLETED", details=f"User {current_user.username} completed map configuration import. Summary: {str(summary)}")
+    return jsonify(summary), status_code
+
+
 @app.route('/api/admin/resources/<int:resource_id>/map_info', methods=['PUT'])
 @login_required 
 def update_resource_map_info(resource_id):
@@ -1520,6 +1729,153 @@ def get_all_resources():
     except Exception as e:
         app.logger.exception("Error fetching all resources:")
         return jsonify({'error': 'Failed to fetch resources due to a server error.'}), 500
+
+@app.route('/api/admin/resources/export', methods=['GET'])
+@login_required
+@permission_required('manage_resources')
+def export_all_resources():
+    try:
+        resources = Resource.query.all()
+        resources_list = [resource_to_dict(r) for r in resources]
+
+        # Create a JSON response that prompts a file download
+        response = jsonify(resources_list)
+        response.headers['Content-Disposition'] = 'attachment; filename=resources_export.json'
+        response.mimetype = 'application/json'
+
+        app.logger.info(f"User {current_user.username} exported all resources.")
+        add_audit_log(action="EXPORT_ALL_RESOURCES", details=f"User {current_user.username} exported all resources.")
+        return response
+    except Exception as e:
+        app.logger.exception("Error exporting all resources:")
+        add_audit_log(action="EXPORT_ALL_RESOURCES_FAILED", details=f"User {current_user.username} failed to export all resources. Error: {str(e)}")
+        return jsonify({'error': 'Failed to export resources due to a server error.'}), 500
+
+@app.route('/api/admin/resources/import', methods=['POST'])
+@login_required
+@permission_required('manage_resources')
+def import_resources():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part in the request.'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file.'}), 400
+    if not file.filename.endswith('.json'):
+        return jsonify({'error': 'File must be a JSON file.'}), 400
+
+    try:
+        resources_data = json.load(file)
+    except json.JSONDecodeError:
+        return jsonify({'error': 'Invalid JSON file.'}), 400
+
+    if not isinstance(resources_data, list):
+        return jsonify({'error': 'JSON data must be a list of resource objects.'}), 400
+
+    created_count = 0
+    updated_count = 0
+    errors = []
+
+    for res_data in resources_data:
+        try:
+            resource = None
+            if 'id' in res_data and res_data['id'] is not None:
+                resource = Resource.query.get(res_data['id'])
+
+            if not resource and 'name' in res_data: # If not found by ID, try by name
+                resource = Resource.query.filter_by(name=res_data['name']).first()
+
+            if resource: # Update existing resource
+                action = "UPDATE_RESOURCE_VIA_IMPORT"
+            else: # Create new resource
+                resource = Resource()
+                action = "CREATE_RESOURCE_VIA_IMPORT"
+                if 'name' not in res_data or not res_data['name']:
+                    errors.append({'error': 'Missing name for new resource.', 'data': res_data})
+                    continue
+                # Check for duplicate name before creating a new one explicitly
+                if Resource.query.filter_by(name=res_data['name']).first():
+                    errors.append({'error': f"Resource with name '{res_data['name']}' already exists.", 'data': res_data})
+                    continue
+
+
+            for key, value in res_data.items():
+                if key == 'id': # ID is used for lookup, not set directly unless creating
+                    if action == "CREATE_RESOURCE_VIA_IMPORT" and value is not None:
+                        # We could allow setting ID if it's unique, but it's safer to let DB assign.
+                        # For now, we ignore ID from payload if creating, unless specific logic allows it.
+                        # If `id` is part of res_data and it's a new resource, this field is skipped by setattr
+                        pass
+                    continue
+                elif key == 'image_url': # image_url is derived, image_filename is stored
+                    continue # Skip direct assignment of image_url
+                elif key == 'published_at' and value:
+                    resource.published_at = datetime.fromisoformat(value.replace('Z', '+00:00')) if isinstance(value, str) else None
+                elif key == 'maintenance_until' and value:
+                    resource.maintenance_until = datetime.fromisoformat(value.replace('Z', '+00:00')) if isinstance(value, str) else None
+                elif key == 'scheduled_status_at' and value:
+                    resource.scheduled_status_at = datetime.fromisoformat(value.replace('Z', '+00:00')) if isinstance(value, str) else None
+                elif key == 'map_coordinates' and value:
+                    resource.map_coordinates = json.dumps(value) if value else None
+                elif key == 'roles':
+                    if isinstance(value, list):
+                        new_roles = []
+                        for role_info in value:
+                            role_id = role_info.get('id')
+                            role_name = role_info.get('name')
+                            role = None
+                            if role_id is not None:
+                                role = Role.query.get(role_id)
+                            elif role_name:
+                                role = Role.query.filter_by(name=role_name).first()
+
+                            if role:
+                                new_roles.append(role)
+                            else:
+                                errors.append({'error': f"Role not found: id={role_id}, name={role_name}", 'resource_name': res_data.get('name')})
+                        resource.roles = new_roles
+                    else:
+                        errors.append({'error': "Invalid format for roles, expected a list.", 'resource_name': res_data.get('name')})
+
+                elif hasattr(resource, key):
+                    setattr(resource, key, value)
+                # else:
+                #     app.logger.warning(f"Resource import: Unknown key '{key}' for resource '{res_data.get('name', 'N/A')}'")
+
+
+            if action == "CREATE_RESOURCE_VIA_IMPORT":
+                db.session.add(resource)
+                created_count += 1
+            else: # Update
+                updated_count += 1
+
+            # Commit each resource individually to isolate errors, or commit all at once at the end.
+            # Committing individually might be slower but gives more granular error feedback if needed.
+            # For now, let's try committing after each resource.
+            try:
+                db.session.commit()
+                add_audit_log(action=action, details=f"Resource '{resource.name}' (ID: {resource.id}) processed via import by {current_user.username}.")
+            except Exception as e_commit:
+                db.session.rollback()
+                errors.append({'error': f"DB error for resource '{res_data.get('name')}': {str(e_commit)}", 'data': res_data})
+                if action == "CREATE_RESOURCE_VIA_IMPORT": created_count -=1
+                else: updated_count -=1
+
+
+        except Exception as e_outer:
+            db.session.rollback() # Ensure rollback if an error occurs during processing a single resource
+            errors.append({'error': f"Error processing resource '{res_data.get('name', 'Unknown')}': {str(e_outer)}", 'data': res_data})
+
+    final_message = f"Import completed. Created: {created_count}, Updated: {updated_count}."
+    if errors:
+        final_message += f" Errors: {len(errors)}."
+        app.logger.warning(f"Resource import by {current_user.username} completed with errors. Created: {created_count}, Updated: {updated_count}, Errors: {len(errors)}. Details: {errors}")
+        add_audit_log(action="IMPORT_RESOURCES_WITH_ERRORS", details=final_message + f" Error details: {str(errors[:5])}") # Log first 5 errors
+        return jsonify({'message': final_message, 'created': created_count, 'updated': updated_count, 'errors': errors}), 207 # Multi-Status
+    else:
+        app.logger.info(f"Resource import by {current_user.username} successful. Created: {created_count}, Updated: {updated_count}.")
+        add_audit_log(action="IMPORT_RESOURCES_SUCCESS", details=final_message)
+        return jsonify({'message': final_message, 'created': created_count, 'updated': updated_count, 'errors': errors}), 200
+
 
 @app.route('/api/admin/resources', methods=['POST'])
 @login_required
