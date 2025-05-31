@@ -99,6 +99,10 @@ Pass `force=True` if you want to **reset and wipe** existing data:
    ```
 **Important:** You only need to run `init_db()` once in a fresh environment. Omitting `force=True` will keep existing records intact.
 
+When initialization completes, an administrator account is created automatically.
+The default credentials are **admin/admin**. Log in with this account and change
+the password immediately in a production deployment.
+
 ### Updating Existing Databases
 
 If you upgrade and encounter database errors, run `python init_setup.py` again.
