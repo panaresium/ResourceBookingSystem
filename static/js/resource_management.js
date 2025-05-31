@@ -157,23 +157,18 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     document.querySelectorAll('.close-modal-btn[data-modal-id]').forEach(btn => {
-        const modal = document.getElementById(btn.dataset.modalId);
-        if (modal) {
-            btn.addEventListener('click', () => { modal.style.display = 'none'; });
-        }
+
+        btn.addEventListener('click', () => {
+            const modal = document.getElementById(btn.dataset.modalId);
+            if (modal) modal.style.display = 'none';
+        });
     });
 
-    window.addEventListener('click', e => { if (e.target === resourceFormModal) resourceFormModal.style.display = 'none'; });
-    window.addEventListener('click', e => { if (e.target === bulkModal) bulkModal.style.display = 'none'; });
-    window.addEventListener('click', e => { if (e.target === bulkEditModal) bulkEditModal.style.display = 'none'; });
-
-    const bulkEditCloseBtn = bulkEditModal ? bulkEditModal.querySelector('.close-modal-btn') : null;
-    bulkEditCloseBtn && bulkEditCloseBtn.addEventListener('click', () => bulkEditModal.style.display = 'none');
-    window.addEventListener('click', e => { if (e.target === bulkEditModal) bulkEditModal.style.display = 'none'; });
-
-    const bulkEditCloseBtn = bulkEditModal ? bulkEditModal.querySelector('.close-modal-btn') : null;
-    bulkEditCloseBtn && bulkEditCloseBtn.addEventListener('click', () => bulkEditModal.style.display = 'none');
-    window.addEventListener('click', e => { if (e.target === bulkEditModal) bulkEditModal.style.display = 'none'; });
+    document.querySelectorAll('.modal').forEach(modal => {
+        window.addEventListener('click', e => {
+            if (e.target === modal) modal.style.display = 'none';
+        });
+    });
 
     bulkEditBtn && bulkEditBtn.addEventListener('click', () => {
         const ids = getSelectedResourceIds();
