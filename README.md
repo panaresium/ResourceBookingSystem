@@ -166,6 +166,16 @@ results:
 
 These filters can be combined. Only resources with `status='published'` are returned.
 
+## Bulk User Management
+
+Admins can manage many users at once from the **User Management** screen.
+
+- **Export Users** – `GET /api/admin/users/export` returns a JSON payload containing all users and roles.
+- **Import Users** – `POST /api/admin/users/import` accepts the same structure to create or update users in bulk.
+- **Bulk Delete** – `DELETE /api/admin/users/bulk` removes multiple users by ID.
+
+These actions are also accessible via buttons on the User Management page.
+
 ## Deploying to Azure Web App
 
 This project includes a GitHub Actions workflow that can publish the application to Azure Web App. Configure these secrets in your repository settings:
@@ -192,7 +202,7 @@ Run the script with:
 ```bash
 python azure_backup.py
 ```
-All floor map and resource images from `static/` along with `data/site.db` will be uploaded.
+All floor map and resource images from `static/` along with `data/site.db` will be uploaded. The script stores hashes of previous uploads so unchanged files are skipped on subsequent runs.
 
 ### Automatic Backups
 
@@ -213,5 +223,6 @@ Click **Import Users** to upload a previously exported JSON file or POST the sam
 
 ### Bulk Delete
 Select users in the table and press **Delete Selected** or send a DELETE request to `/api/admin/users/bulk` with a JSON payload of `{ "ids": [1,2,3] }`.
+
 
 
