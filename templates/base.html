@@ -78,6 +78,7 @@
             {# Example: {% if current_user.is_admin %}<li><a href="{{ url_for('serve_admin_dashboard') }}">{{ _('Admin') }}</a></li>{% endif %} #}
         </ul>
     </nav>
+    <div id="manual-backup-status" class="status-message" style="display:none; margin: 10px;"></div>
     <div id="main-content">
     <main>
         {% with messages = get_flashed_messages(with_categories=true) %}
