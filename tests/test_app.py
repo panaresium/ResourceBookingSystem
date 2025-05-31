@@ -1353,6 +1353,8 @@ class TestHomePage(AppTests):
         content = response.data.decode('utf-8')
         self.assertIn('<h2>Upcoming Bookings</h2>', content)
         self.assertIn('No upcoming bookings.', content) # Or translated equivalent
+        self.assertNotIn('Quick Actions', content)
+        self.assertNotIn('Book a Room', content)
 
     def test_home_page_authenticated_with_bookings(self):
         """Test home page when user is authenticated and has upcoming bookings."""
@@ -1395,6 +1397,9 @@ class TestHomePage(AppTests):
         if self.resource2: # resource2 might be None if setup failed, though unlikely here
              self.assertNotIn(self.resource2.name, content)
         # We don't need to check for past_booking times as the title/resource name absence is sufficient
+
+        self.assertNotIn('Quick Actions', content)
+        self.assertNotIn('Book a Room', content)
 
 
 if __name__ == '__main__':
