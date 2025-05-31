@@ -387,7 +387,6 @@ def init_db(force=False):
             db.session.rollback()
             app.logger.exception("Error creating default roles or users:")
 
-
         admin_user_for_perms = User.query.filter_by(username='admin').first()
         standard_user_for_perms = User.query.filter_by(username='user').first()
 
