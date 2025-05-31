@@ -8,8 +8,9 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     {% block head_extra %}{% endblock %}
 </head>
-<body>
-    <nav>
+<body class="with-sidebar sidebar-collapsed">
+    <nav id="sidebar" class="collapsed">
+        <button id="sidebar-toggle" aria-label="{{ _('Toggle menu') }}">&#9776;</button>
         <ul>
             <li><a href="{{ url_for('serve_index') }}">{{ _('Home') }}</a></li>
             <li><a href="{{ url_for('serve_new_booking') }}">{{ _('New Booking') }}</a></li>
@@ -29,24 +30,31 @@
             </li>
             
             {# Container for Admin Maps link - shown by JS if admin #}
-            <li id="admin-maps-nav-link" style="display: none;">
-                <a href="{{ url_for('serve_admin_maps') }}">{{ _('Admin Maps') }}</a>
-            </li>
-            <li id="resource-management-nav-link" style="display: none;">
-                <a href="{{ url_for('serve_resource_management_page') }}">{{ _('Resource Management') }}</a>
-            </li>
-
-
-            {# Additional admin links - shown by JS if admin #}
-            <li id="user-management-nav-link" style="display: none;">
-                <a href="{{ url_for('serve_user_management_page') }}">{{ _('User Management') }}</a>
-            </li>
-            <li id="log-nav-link" style="display: none;">
-                <a href="{{ url_for('serve_audit_log_page') }}">{{ _('Audit Logs') }}</a>
-            </li>
-            <li id="analytics-nav-link" style="display: none;">
-                <a href="{{ url_for('analytics.analytics_dashboard') }}">{{ _('Analytics') }}</a>
-            </li>
+        <li id="admin-menu-item" style="display:none;">
+            <details id="admin-section">
+                <summary>Admin</summary>
+                <ul class="admin-menu">
+                <li id="admin-maps-nav-link" style="display: none;">
+                    <a href="{{ url_for('serve_admin_maps') }}">{{ _('Admin Maps') }}</a>
+                </li>
+                <li id="resource-management-nav-link" style="display: none;">
+                    <a href="{{ url_for('serve_resource_management_page') }}">{{ _('Resource Management') }}</a>
+                </li>
+                <li id="user-management-nav-link" style="display: none;">
+                    <a href="{{ url_for('serve_user_management_page') }}">{{ _('User Management') }}</a>
+                </li>
+                <li id="log-nav-link" style="display: none;">
+                    <a href="{{ url_for('serve_audit_log_page') }}">{{ _('Audit Logs') }}</a>
+                </li>
+                <li id="analytics-nav-link" style="display: none;">
+                    <a href="{{ url_for('analytics.analytics_dashboard') }}">{{ _('Analytics') }}</a>
+                </li>
+                <li id="manual-backup-nav-link" style="display:none;">
+                    <button class="button" id="manual-backup-btn" type="button">{{ _('Manual Sync') }}</button>
+                </li>
+                </ul>
+            </details>
+        </li>
 
             <li>
                 <button id="theme-toggle" type="button">{{ _('Toggle Theme') }}</button>
@@ -70,7 +78,7 @@
             {# Example: {% if current_user.is_admin %}<li><a href="{{ url_for('serve_admin_dashboard') }}">{{ _('Admin') }}</a></li>{% endif %} #}
         </ul>
     </nav>
-    <hr>
+    <div id="main-content">
     <main>
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -83,7 +91,6 @@
         {% endwith %}
         {% block content %}{% endblock %}
     </main>
-    <hr>
     <footer>
         <p>{{ _('&copy; 2024 Smart Resource Booking') }}</p>
         <form id="language-form" method="get" style="margin-top:5px;">
@@ -96,6 +103,7 @@
         </form>
         {% block footer_extra %}{% endblock %}
     </footer>
+    </div>
 
     {% block scripts %}
     <!-- <script src="/socket.io/socket.io.js"></script> -->

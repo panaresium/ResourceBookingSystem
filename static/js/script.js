@@ -146,6 +146,9 @@ async function updateAuthLink() {
     const adminMapsNavLink = document.getElementById('admin-maps-nav-link');
     const resourceManagementNavLink = document.getElementById('resource-management-nav-link');
     const userManagementNavLink = document.getElementById('user-management-nav-link');
+    const adminMenuItem = document.getElementById('admin-menu-item');
+    const manualBackupNavLink = document.getElementById('manual-backup-nav-link');
+    const manualBackupBtn = document.getElementById('manual-backup-btn');
     const welcomeMessageContainer = document.getElementById('welcome-message-container');
     const userDropdownContainer = document.getElementById('user-dropdown-container');
     const userDropdownButton = document.getElementById('user-dropdown-button');
@@ -175,6 +178,8 @@ async function updateAuthLink() {
         if (adminMapsNavLink) adminMapsNavLink.style.display = 'none';
         if (resourceManagementNavLink) resourceManagementNavLink.style.display = 'none';
         if (userManagementNavLink) userManagementNavLink.style.display = 'none';
+        if (adminMenuItem) adminMenuItem.style.display = 'none';
+        if (manualBackupNavLink) manualBackupNavLink.style.display = 'none';
         if (myBookingsNavLink) myBookingsNavLink.style.display = 'none'; 
         if (analyticsNavLink) analyticsNavLink.style.display = 'none';
     }
@@ -214,6 +219,12 @@ async function updateAuthLink() {
             }
             if (userManagementNavLink) {
                 userManagementNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
+            }
+            if (adminMenuItem) {
+                adminMenuItem.style.display = data.user.is_admin ? 'list-item' : 'none';
+            }
+            if (manualBackupNavLink) {
+                manualBackupNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
             }
             if (myBookingsNavLink) { 
                 myBookingsNavLink.style.display = 'list-item'; 
@@ -376,6 +387,15 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
 document.addEventListener('DOMContentLoaded', function() {
     document.body.dataset.loginUrl = document.getElementById('login-form') ? "#" : "/login";
     updateAuthLink();
+
+    const sidebar = document.getElementById('sidebar');
+    const sidebarToggle = document.getElementById('sidebar-toggle');
+    if (sidebar && sidebarToggle) {
+        sidebarToggle.addEventListener('click', function() {
+            sidebar.classList.toggle('collapsed');
+            document.body.classList.toggle('sidebar-collapsed');
+        });
+    }
 
     const bookingForm = document.getElementById('booking-form');
     const bookingResultsDiv = document.getElementById('booking-results');
@@ -2686,6 +2706,20 @@ document.addEventListener('DOMContentLoaded', function() {
     if (increaseFontSizeBtn) increaseFontSizeBtn.addEventListener('click', increaseFontSize);
     if (decreaseFontSizeBtn) decreaseFontSizeBtn.addEventListener('click', decreaseFontSize);
     if (resetFontSizeBtn) resetFontSizeBtn.addEventListener('click', resetFontSize);
+
+    if (manualBackupBtn) {
+        manualBackupBtn.addEventListener('click', async () => {
+            try {
+                manualBackupBtn.disabled = true;
+                await apiCall('/api/admin/manual_backup', { method: 'POST' });
+                alert('Backup completed');
+            } catch (e) {
+                alert('Manual backup failed');
+            } finally {
+                manualBackupBtn.disabled = false;
+            }
+        });
+    }
 
     loadHighContrastPreference(); loadFontSizePreference(); loadThemePreference();
 
