@@ -29,8 +29,6 @@ except Exception:
     backup_if_changed = None
     restore_from_share = None
 
-
-
 # Attempt to import APScheduler; provide a basic fallback if unavailable
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -188,6 +186,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
     'AZURE_SQL_CONNECTION_STRING',
     os.environ.get('DATABASE_URL', 'sqlite:///' + os.path.join(DATA_DIR, 'site.db'))
 )
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # silence the warning
 
 # Flask-Mail configuration (defaults can be overridden with environment variables)

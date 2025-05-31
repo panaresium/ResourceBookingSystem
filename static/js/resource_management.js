@@ -157,6 +157,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     document.querySelectorAll('.close-modal-btn[data-modal-id]').forEach(btn => {
+
         btn.addEventListener('click', () => {
             const modal = document.getElementById(btn.dataset.modalId);
             if (modal) modal.style.display = 'none';
