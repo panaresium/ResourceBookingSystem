@@ -14,6 +14,12 @@
     --unavailable-color: #bdc3c7; /* Light grey for unavailable slots */
     --font-family-modern: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 
+    /* Layout Heights & Widths */
+    --header-height: 60px;
+    --footer-height: 50px;
+    --sidebar-width: 200px;
+    --sidebar-collapsed-width: 50px;
+
     /* Base font size for rem calculations */
     font-size: 16px;
 }
@@ -34,309 +40,405 @@ body {
     color: var(--text-color-dark);
     line-height: 1.6;
     font-size: 1rem; /* Ensure body font size is relative */
+    /* display: flex; REMOVED for new layout */
 }
 
-nav.sidebar {
-    background-color: var(--background-color-dark);
-    color: var(--text-color-light);
-    padding: 1em;
-    width: 200px;
-    min-height: 100vh;
+/* Header Styling */
+.app-header {
     position: fixed;
     top: 0;
     left: 0;
-}
-
-nav.sidebar ul {
-    list-style-type: none;
-    padding: 0;
-    margin: 0;
-}
-
-body.with-sidebar nav ul {
-    display: flex;
-    flex-direction: column;
-}
-
-nav ul li {
-    margin: 0;
-
-}
-
-nav ul li a {
+    width: 100%;
+    height: var(--header-height);
+    background-color: var(--background-color-dark);
     color: var(--text-color-light);
-    text-decoration: none;
-    font-weight: bold;
-    padding: 0.5em 0; /* Added padding for better clickability */
+    padding: 0 1em;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 1030;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-nav ul li a:hover,
-nav ul li a:focus {
-    text-decoration: underline;
-    color: var(--text-color-light); /* Ensure hover color is light on dark background */
+.header-content {
+    display: flex;
+    align-items: center;
+    gap: 15px;
 }
 
-/* Align login link and user menu to the right */
-#auth-link-container,
-#user-dropdown-container {
+.app-header #user-dropdown-container { /* Specific to header context */
     margin-left: auto;
+    position: relative; /* Needed for dropdown positioning */
 }
 
-/* Style for the small user icon used in the dropdown button */
-.user-icon {
+.app-header #user-dropdown-button { /* Copied from existing #user-dropdown-button and adapted */
+    display: flex;
+    align-items: center;
+    background: none;
+    border: none;
+    color: var(--text-color-light); /* Ensure color from header */
+    font-size: 1em; /* Or inherit */
+    cursor: pointer;
+    padding: 10px; /* Adjust as needed */
+    font-weight: bold;
+}
+.app-header .user-icon { /* Copied from existing .user-icon */
     font-size: 1.2em;
     margin-right: 2px;
 }
+.app-header .dropdown-arrow { /* Ensure it's visible if needed */
+    margin-left: 5px;
+}
+
+
+.app-header #user-dropdown-menu {
+    top: 100%;
+    right: 0;
+    left: auto;
+    background-color: #333; /* Or use CSS variables from :root or body.dark-theme */
+    border: 1px solid #555;
+    /* Copied from existing .dropdown-menu in base.html and adapted */
+    display: none; /* Initially hidden, JS handles display */
+    position: absolute;
+    min-width: 160px;
+    z-index: 1000; /* Ensure it's above other header items if they overlap */
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+.app-header #user-dropdown-menu a.dropdown-item { /* Copied from base.html */
+    display: block;
+    padding: 10px 15px;
+    text-decoration: none;
+    color: white; /* Or var(--text-color-light) */
+}
+.app-header #user-dropdown-menu a.dropdown-item:hover {
+    background-color: #555; /* Example hover */
+}
+
+
+.app-header #auth-link-container a,
+.app-header #welcome-message-container {
+    color: var(--text-color-light);
+    text-decoration: none;
+    display: flex; /* To align icon and text if icons are used in #auth-link-container */
+    align-items: center;
+}
+.app-header #auth-link-container .menu-icon {
+    margin-right: 5px; /* Space between icon and text for login link */
+}
+
+
+/* Sidebar Styling */
+#sidebar {
+    position: fixed;
+    top: var(--header-height);
+    left: 0;
+    width: var(--sidebar-width);
+    height: calc(100vh - var(--header-height) - var(--footer-height));
+    background-color: var(--background-color-dark);
+    color: var(--text-color-light);
+    overflow-y: auto;
+    overflow-x: hidden;
+    transition: width 0.3s;
+    z-index: 1020;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+    padding: 0; /* Removed 1em padding, li items will have padding */
+    /* min-height: 100vh; REMOVED */
+    /* flex-shrink: 0; REMOVED (not a flex item anymore) */
+}
+
+#sidebar.collapsed {
+    width: var(--sidebar-collapsed-width);
+}
+
+#sidebar ul {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+    display: block; /* Was: display: flex; flex-direction: column; */
+}
+
+#sidebar ul li {
+    padding: 0.75em 1em;
+    white-space: nowrap;
+    /* margin: 0; (already there) */
+    font-size: 0.9rem; /* from existing #sidebar ul li */
+}
+
+#sidebar ul li a {
+    color: var(--text-color-light);
+    text-decoration: none;
+    font-weight: bold; /* from existing nav ul li a */
+    display: block; /* from existing #sidebar ul li a */
+    /* padding: 0.5em 0; (padding is now on li) */
+}
+
+#sidebar ul li a:hover,
+#sidebar ul li a:focus {
+    text-decoration: underline;
+    color: var(--text-color-light);
+}
+
+/* Sidebar button styling (e.g. theme toggle, manual sync if it stays in sidebar) */
+#sidebar ul li button {
+    background: none;
+    border: none;
+    color: var(--text-color-light);
+    cursor: pointer;
+    width: 100%;
+    padding: 0.75em 0; /* Consistent with li padding */
+    text-align: left;
+    font-weight: bold;
+    font-size: inherit; /* Inherit from li */
+    display: flex; /* To align icon and text */
+    align-items: center;
+}
+#sidebar ul li button:hover {
+    text-decoration: underline;
+}
+
 
 /* Icons and text handling for sidebar menu */
 #sidebar li .menu-icon {
-    display: none; /* hide icons when expanded */
-    width: 1.2em;
-    text-align: center;
-    margin-right: 0.5em;
+    /* display: none; Should be handled by collapsed state */
+    width: 1.2em; /* from existing */
+    text-align: center; /* from existing */
+    margin-right: 0.5em; /* from existing */
+    display: inline-block; /* Default state: icon visible */
 }
 #sidebar.collapsed li .menu-icon {
-    display: inline-block; /* show only icons when collapsed */
-    margin-right: 0; /* no gap when centered */
+    display: inline-block;
+    margin-right: 0;
 }
 #sidebar li .menu-text {
     display: inline-block;
 }
 #sidebar.collapsed .menu-text {
-    display: none; /* hide text when collapsed */
-
-}
-#sidebar.collapsed #welcome-message-container {
-    display: none !important;
-
-}
-#sidebar.collapsed li {
-    text-align: center;
-}
-#sidebar.collapsed li a {
-    display: flex;
-    justify-content: center; /* center icons horizontally */
-}
-
-#sidebar.collapsed li button {
-    display: flex;
-    justify-content: center;
-}
-#sidebar.collapsed #theme-toggle {
-    display: flex;
-    justify-content: center;
-}
-
-#sidebar.collapsed summary {
-    display: flex;
-    justify-content: center;
-}
-
-/* Compact accessibility controls at top */
-.accessibility-top {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 0.25rem;
-    font-size: 0.85rem;
-    margin-bottom: 0.5rem;
-}
-
-.accessibility-top button {
-    font-size: 0.75rem;
-    padding: 2px 4px;
-}
-
-/* Keep icon and arrow vertically centered */
-#user-dropdown-button {
-    display: flex;
-    align-items: center;
-}
-#sidebar.collapsed #user-dropdown-button {
-    justify-content: center;
-}
-#sidebar.collapsed .dropdown-arrow {
     display: none;
 }
 
-main {
-    width: 100%;
-    max-width: none; /* use full available width */
-    margin: 30px auto; /* center content vertically and horizontally */
-    background-color: var(--background-color-light);
-    padding: 25px; /* Increased padding */
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08); /* Softer, more modern shadow */
-    border-radius: 8px; /* Rounded corners for main content */
+#sidebar.collapsed li {
+    text-align: center;
+}
+#sidebar.collapsed li a,
+#sidebar.collapsed li button { /* Apply to buttons as well */
+    display: flex;
+    justify-content: center;
+}
+#sidebar.collapsed summary { /* For admin dropdown */
+    display: flex;
+    justify-content: center;
+}
+/* Removed #sidebar.collapsed #welcome-message-container as it's moved to header */
+/* Removed #sidebar.collapsed #user-dropdown-button and .dropdown-arrow as it's moved */
+/* Removed #sidebar.collapsed #theme-toggle as it's moved to footer */
+
+#sidebar button#sidebar-toggle { /* Copied from existing */
+    background: none;
+    border: none;
+    color: var(--text-color-light);
+    cursor: pointer;
+    font-size: 1em;
+    margin: 0.5em auto;
+    display: flex;
+    justify-content: center;
+    padding: 0.5em; /* Added some padding */
 }
 
-h1, h2, h3, h4, h5, h6 { /* Applied to all heading levels */
+
+/* Main Content Styling */
+#main-content {
+    margin-top: var(--header-height);
+    margin-left: var(--sidebar-width);
+    margin-bottom: var(--footer-height);
+    padding: 20px;
+    height: calc(100vh - var(--header-height) - var(--footer-height));
+    overflow-y: auto;
+    transition: margin-left 0.3s;
+    background-color: var(--background-color-light);
+    /* flex-grow: 1; REMOVED */
+}
+
+/* Adjust margin-left when sidebar is collapsed */
+body.sidebar-collapsed #main-content {
+    margin-left: var(--sidebar-collapsed-width);
+}
+
+main { /* The <main> tag inside #main-content */
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto; /* Center <main> if using max-width */
+    /* padding: 25px; Padding is now on #main-content */
+    /* box-shadow, border-radius from existing main can stay if desired, or be removed/adjusted */
+    background-color: var(--background-color-light); /* Already on #main-content, but can be explicit */
+    /* box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08); */ /* Optional: keep or remove */
+    /* border-radius: 8px; */ /* Optional: keep or remove */
+}
+
+
+/* Footer Styling */
+footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: var(--footer-height);
+    background-color: var(--background-color-dark);
+    color: var(--text-color-light);
+    padding: 0 1em;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 1030;
+    box-shadow: 0 -2px 4px rgba(0,0,0,0.1);
+    /* text-align: center; REMOVED, using flex now */
+    /* margin-top: 30px; REMOVED, fixed position */
+}
+
+.footer-accessibility-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.footer-accessibility-controls button {
+    background: none;
+    border: 1px solid var(--text-color-light);
+    color: var(--text-color-light);
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex; /* For icon and text alignment */
+    align-items: center;
+}
+.footer-accessibility-controls button:hover {
+    background-color: var(--secondary-color);
+    border-color: var(--secondary-color); /* Ensure border color changes too */
+}
+
+.footer-accessibility-controls .menu-icon {
+    display: inline-block;
+    margin-right: 5px;
+}
+.footer-accessibility-controls .menu-text {
+    display: inline-block;
+}
+
+footer #language-form {
+    margin-top: 0;
+    margin-left: 10px; /* Add some space if next to accessibility controls */
+}
+footer #language-selector {
+    /* Style as needed for footer context */
+    padding: 5px;
+    border-radius: 4px;
+    border: 1px solid var(--text-color-light);
+    background-color: var(--background-color-dark); /* Match footer */
+    color: var(--text-color-light); /* Match footer text */
+}
+footer #language-selector option {
+    background-color: var(--background-color-light); /* Or a neutral color */
+    color: var(--text-color-dark);
+}
+footer p { /* Copyright text */
+    margin: 0;
+}
+
+
+/* General Styles (keep existing, review for conflicts) */
+
+h1, h2, h3, h4, h5, h6 {
     color: var(--text-color-dark);
     margin-top: 1.5em;
     margin-bottom: 0.8em;
-    line-height: 1.2; /* Added for heading line height */
+    line-height: 1.2;
 }
+h1 { color: var(--primary-color); font-size: 2rem; }
+h2 { font-size: 1.75rem; }
+h3 { font-size: 1.5rem; }
+h4 { font-size: 1.25rem; }
+h5 { font-size: 1.1rem; }
+h6 { font-size: 1rem; }
 
-h1 {
-    color: var(--primary-color); /* Main headings can use primary color */
-    font-size: 2rem; /* Example relative size */
-}
-
-h2 {
-    font-size: 1.75rem; /* Example relative size */
-}
-
-h3 {
-    font-size: 1.5rem; /* Example relative size */
-}
-
-h4 {
-    font-size: 1.25rem; /* Example relative size */
-}
-
-h5 {
-    font-size: 1.1rem; /* Example relative size */
-}
-
-h6 {
-    font-size: 1rem; /* Example relative size */
-}
-
-
-a {
-    color: var(--primary-color);
-    text-decoration: none;
-}
-
-a:hover, a:focus {
-    text-decoration: underline;
-    color: var(--secondary-color);
-}
+a { color: var(--primary-color); text-decoration: none; }
+a:hover, a:focus { text-decoration: underline; color: var(--secondary-color); }
 
 button,
 input[type="submit"],
-input[type="button"] { /* Added input[type="button"] for consistency */
+input[type="button"] {
     background-color: var(--primary-color);
     color: var(--text-color-light);
     border: none;
-    padding: 12px 20px; /* Increased padding */
+    padding: 12px 20px;
     text-align: center;
     text-decoration: none;
     display: inline-block;
-    font-size: 1rem; /* Changed from 16px */
-    margin: 5px 2px; /* Adjusted margin */
+    font-size: 1rem;
+    margin: 5px 2px;
     cursor: pointer;
-    border-radius: 5px; /* Softer border-radius */
-    transition: background-color 0.3s ease; /* Smooth transition */
+    border-radius: 5px;
+    transition: background-color 0.3s ease;
 }
-
 button:hover,
 input[type="submit"]:hover,
 input[type="button"]:hover {
-    background-color: var(--secondary-color); /* Darker shade on hover */
+    background-color: var(--secondary-color);
 }
-
 button:focus,
 input[type="submit"]:focus,
 input[type="button"]:focus {
-    outline: 2px solid var(--accent-color); /* Accessibility focus ring */
+    outline: 2px solid var(--accent-color);
     outline-offset: 2px;
 }
 
-footer {
-    text-align: center;
-    padding: 25px 0; /* Increased padding */
-    margin-top: 30px; /* Increased margin */
-    background-color: var(--background-color-dark);
-    color: var(--text-color-light);
-    box-shadow: 0 -2px 5px rgba(0,0,0,0.1); /* Shadow on top of footer */
-}
-
 #upcoming-bookings, #quick-actions {
-    margin-top: 25px; /* Increased margin */
-    padding: 15px; /* Increased padding */
+    margin-top: 25px;
+    padding: 15px;
     border: 1px solid var(--border-color);
-    border-radius: 8px; /* Consistent rounded corners */
-    background-color: #f9f9f9; /* Slight off-white for these sections */
+    border-radius: 8px;
+    background-color: #f9f9f9;
 }
 
 /* Calendar Styles */
 #calendar-table {
     width: 100%;
     border-collapse: collapse;
-    margin-top: 25px; /* Increased margin */
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05); /* Subtle shadow for table */
+    margin-top: 25px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
 }
-
 #calendar-table th, #calendar-table td {
     border: 1px solid var(--border-color);
-    padding: 0.625rem; /* 10px -> 0.625rem */
+    padding: 0.625rem;
     text-align: center;
 }
-
 #calendar-table th {
     background-color: #f0f0f0;
     color: var(--text-color-dark);
     font-weight: bold;
 }
-
-.available {
-    background-color: #e6f7ff; 
-    color: var(--primary-color); 
-    font-weight: bold;
-}
-
-.available:hover {
-    background-color: #d0effa; 
-}
-
-.booked {
-    background-color: #ffe0e0; 
-    color: var(--error-color); 
-    font-weight: bold;
-}
-
-.unavailable { 
-    background-color: var(--unavailable-color);
-    color: #555; 
-    font-style: italic;
-}
-
-.error-slot { 
-    background-color: #e0e0e0; 
-    color: var(--text-color-dark);
-    font-style: italic;
-    font-weight: bold;
-}
-
+.available { background-color: #e6f7ff; color: var(--primary-color); font-weight: bold; }
+.available:hover { background-color: #d0effa; }
+.booked { background-color: #ffe0e0; color: var(--error-color); font-weight: bold; }
+.unavailable { background-color: var(--unavailable-color); color: #555; font-style: italic; }
+.error-slot { background-color: #e0e0e0; color: var(--text-color-dark); font-style: italic; font-weight: bold; }
 
 /* Room Selector Styles */
 #room-select {
-    padding: 0.625rem; /* 10px -> 0.625rem */
-    margin-bottom: 1.25rem; /* 20px -> 1.25rem */
+    padding: 0.625rem;
+    margin-bottom: 1.25rem;
     border-radius: 5px;
     border: 1px solid var(--border-color);
     width: 100%; 
     box-sizing: border-box;
-    font-size: 1rem; /* Ensure form elements scale */
+    font-size: 1rem;
 }
-
-#room-select:focus {
-    border-color: var(--primary-color);
-    outline: 1px solid var(--primary-color); 
-}
+#room-select:focus { border-color: var(--primary-color); outline: 1px solid var(--primary-color); }
 
 /* Booking Form Styles */
-#booking-form div, #login-form div {
-    margin-bottom: 1.25rem; /* 20px -> 1.25rem */
-}
-
-#booking-form label, #login-form label {
-    display: block;
-    margin-bottom: 0.5rem; /* 8px -> 0.5rem */
-    font-weight: bold;
-    color: var(--text-color-dark);
-}
-
+#booking-form div, #login-form div { margin-bottom: 1.25rem; }
+#booking-form label, #login-form label { display: block; margin-bottom: 0.5rem; font-weight: bold; color: var(--text-color-dark); }
 #booking-form input[type="date"],
 #booking-form input[type="time"],
 #booking-form input[type="number"],
@@ -346,14 +448,13 @@ footer {
 #login-form input[type="text"],
 #login-form input[type="password"] {
     width: 100%;
-    padding: 0.625rem; /* 10px -> 0.625rem */
+    padding: 0.625rem;
     border: 1px solid var(--border-color);
     border-radius: 5px;
     box-sizing: border-box;
     transition: border-color 0.3s ease;
-    font-size: 1rem; /* Ensure form elements scale */
+    font-size: 1rem;
 }
-
 #booking-form input[type="date"]:focus,
 #booking-form input[type="time"]:focus,
 #booking-form input[type="number"]:focus,
@@ -362,155 +463,92 @@ footer {
 #booking-form select:focus,
 #login-form input[type="text"]:focus,
 #login-form input[type="password"]:focus {
-    border-color: var(--primary-color);
-    outline: 1px solid var(--primary-color); 
+    border-color: var(--primary-color); outline: 1px solid var(--primary-color);
 }
-
-#booking-form fieldset {
-    border: 1px solid var(--border-color);
-    border-radius: 5px;
-    padding: 0.9375rem; /* 15px -> 0.9375rem */
-    margin-bottom: 1.25rem; /* 20px -> 1.25rem */
-}
-
-#booking-form legend {
-    font-weight: bold;
-    padding: 0 0.5rem; /* 8px -> 0.5rem */
-    color: var(--primary-color);
-    font-size: 1.1rem; /* Ensure legend scales */
-}
-
-#booking-form fieldset div {
-    margin-bottom: 0.625rem; /* 10px -> 0.625rem */
-}
-
-#booking-form input[type="checkbox"] {
-    margin-right: 0.5rem; /* 8px -> 0.5rem */
-    vertical-align: middle;
-    accent-color: var(--primary-color); 
-}
-
-#booking-form label[for^="equipment-"] {
-    display: inline;
-    font-weight: normal;
-    margin-bottom: 0;
-}
-
+#booking-form fieldset { border: 1px solid var(--border-color); border-radius: 5px; padding: 0.9375rem; margin-bottom: 1.25rem; }
+#booking-form legend { font-weight: bold; padding: 0 0.5rem; color: var(--primary-color); font-size: 1.1rem; }
+#booking-form fieldset div { margin-bottom: 0.625rem; }
+#booking-form input[type="checkbox"] { margin-right: 0.5rem; vertical-align: middle; accent-color: var(--primary-color); }
+#booking-form label[for^="equipment-"] { display: inline; font-weight: normal; margin-bottom: 0; }
 #booking-form button[type="submit"],
-#login-form button[type="submit"] {
-    width: 100%;
-    padding: 0.75rem; /* 12px -> 0.75rem */
-    font-size: 1.125rem; /* Changed from 18px */
-}
+#login-form button[type="submit"] { width: 100%; padding: 0.75rem; font-size: 1.125rem; }
 
 /* Booking Results Styles */
-#booking-results {
-    margin-top: 1.5625rem; /* 25px -> 1.5625rem */
-    padding: 0.9375rem; /* 15px -> 0.9375rem */
-    border-radius: 5px;
-}
+#booking-results { margin-top: 1.5625rem; padding: 0.9375rem; border-radius: 5px; }
+#booking-results p { margin: 0 0 0.625rem 0; }
+#booking-results ul { list-style-type: disc; margin-left: 1.5625rem; }
 
-#booking-results p {
-    margin: 0 0 0.625rem 0; /* 10px -> 0.625rem */
-}
+.success { color: var(--success-color); background-color: var(--success-bg-color); border: 1px solid var(--success-color); padding: 0.75rem; border-radius: 5px; margin-bottom: 0.9375rem; }
+.error { color: var(--error-color); background-color: var(--error-bg-color); border: 1px solid var(--error-color); padding: 0.75rem; border-radius: 5px; margin-bottom: 0.9375rem; }
 
-#booking-results ul {
-    list-style-type: disc;
-    margin-left: 1.5625rem; /* 25px -> 1.5625rem */
-}
+#login-message { margin-top: 1.25rem; }
 
-.success {
-    color: var(--success-color);
-    background-color: var(--success-bg-color);
-    border: 1px solid var(--success-color); /* Simplified border */
-    padding: 0.75rem; /* 12px -> 0.75rem */
-    border-radius: 5px;
-    margin-bottom: 0.9375rem; /* 15px -> 0.9375rem */
-}
+/* REMOVED Auth Link Styles in Nav as it's moved to header */
+/* #auth-link-container span { margin-right: 0.625rem; } */
 
-.error {
-    color: var(--error-color);
-    background-color: var(--error-bg-color);
-    border: 1px solid var(--error-color); /* Simplified border */
-    padding: 0.75rem; /* 12px -> 0.75rem */
-    border-radius: 5px;
-    margin-bottom: 0.9375rem; /* 15px -> 0.9375rem */
-}
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
-/* Login Form Styles are largely covered by general form styles now */
-#login-message {
-    margin-top: 1.25rem; /* 20px -> 1.25rem */
-}
-
-/* Auth Link Styles in Nav */
-#auth-link-container span {
-    margin-right: 0.625rem; /* 10px -> 0.625rem */
-}
-
-/* Utility class for visually hidden elements (for accessibility) */
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-/* High Contrast Mode Styles */
+/* High Contrast Mode Styles - Review for conflicts with new layout */
 body.high-contrast {
     background-color: #ffffff !important;
     color: #000000 !important;
-    font-size: 1rem; /* Ensure base font size is respected */
+    font-size: 1rem;
 }
 
-body.high-contrast nav.sidebar {
+/* High contrast header */
+body.high-contrast .app-header {
     background-color: #000000 !important;
     color: #ffffff !important;
-    box-shadow: 0 2px 5px rgba(255,255,255,0.2) !important; /* Light shadow on dark bg */
-    text-align: left !important;
+    border-bottom: 2px solid #ffffff !important; /* Ensure separation */
 }
-
-body.high-contrast nav.sidebar ul li a {
+body.high-contrast .app-header #auth-link-container a,
+body.high-contrast .app-header #welcome-message-container,
+body.high-contrast .app-header #user-dropdown-button {
     color: #ffffff !important;
 }
-
-body.high-contrast nav.sidebar ul li a:hover,
-body.high-contrast nav.sidebar ul li a:focus {
-    color: #ffff00 !important; /* Yellow for hover/focus in high contrast */
-    text-decoration: underline !important;
+body.high-contrast .app-header #user-dropdown-menu {
+    background-color: #000000 !important;
+    border: 2px solid #ffffff !important;
+}
+body.high-contrast .app-header #user-dropdown-menu a.dropdown-item {
+    color: #ffffff !important;
+}
+body.high-contrast .app-header #user-dropdown-menu a.dropdown-item:hover {
+    background-color: #333333 !important;
+    color: #ffff00 !important;
 }
 
+
+body.high-contrast #sidebar { /* Was nav.sidebar */
+    background-color: #000000 !important;
+    color: #ffffff !important;
+    box-shadow: 2px 0 5px rgba(255,255,255,0.2) !important;
+    text-align: left !important;
+    border-right: 2px solid #ffffff !important; /* Ensure separation */
+}
+body.high-contrast #sidebar ul li a { color: #ffffff !important; }
+body.high-contrast #sidebar ul li a:hover,
+body.high-contrast #sidebar ul li a:focus { color: #ffff00 !important; text-decoration: underline !important; }
+body.high-contrast #sidebar ul li button { color: #ffffff !important; }
+body.high-contrast #sidebar ul li button:hover,
+body.high-contrast #sidebar ul li button:focus { color: #ffff00 !important; text-decoration: underline !important; }
+
+
+body.high-contrast #main-content { /* Added */
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    /* margin adjustments are handled by non-high-contrast rules */
+}
 body.high-contrast main {
     background-color: #ffffff !important;
-    border: 2px solid #000000 !important; /* Add border to main content for better separation */
-    box-shadow: none !important; /* Remove existing shadow */
+    border: 2px solid #000000 !important;
+    box-shadow: none !important;
 }
 
-body.high-contrast h1, 
-body.high-contrast h2, 
-body.high-contrast h3, 
-body.high-contrast h4, 
-body.high-contrast h5, 
-body.high-contrast h6 {
-    color: #000000 !important;
-}
-
-body.high-contrast h1 {
-    color: #000000 !important; /* Override primary color for h1 */
-}
-
-body.high-contrast a {
-    color: #0000ff !important; /* Standard blue for links */
-    text-decoration: underline !important; /* Ensure links are always underlined */
-}
-
-body.high-contrast a:visited {
-    color: #551a8b !important; /* Standard purple for visited links */
-}
+body.high-contrast h1, body.high-contrast h2, body.high-contrast h3, body.high-contrast h4, body.high-contrast h5, body.high-contrast h6 { color: #000000 !important; }
+body.high-contrast h1 { color: #000000 !important; }
+body.high-contrast a { color: #0000ff !important; text-decoration: underline !important; }
+body.high-contrast a:visited { color: #551a8b !important; }
 
 body.high-contrast button,
 body.high-contrast input[type="submit"],
@@ -518,534 +556,325 @@ body.high-contrast input[type="button"] {
     background-color: #000000 !important;
     color: #ffffff !important;
     border: 2px solid #ffffff !important;
-    box-shadow: 0 0 0 2px #000000 !important; /* Create a "border" effect with box-shadow for buttons */
+    box-shadow: 0 0 0 2px #000000 !important;
 }
-
 body.high-contrast button:hover,
 body.high-contrast input[type="submit"]:hover,
 body.high-contrast input[type="button"]:hover {
-    background-color: #333333 !important; /* Slightly lighter black for hover */
-    color: #ffff00 !important; /* Yellow text on hover */
+    background-color: #333333 !important;
+    color: #ffff00 !important;
 }
-
 body.high-contrast button:focus,
 body.high-contrast input[type="submit"]:focus,
 body.high-contrast input[type="button"]:focus {
-    outline: 3px solid #ffff00 !important; /* Bright yellow focus outline */
+    outline: 3px solid #ffff00 !important;
     outline-offset: 1px;
+    box-shadow: 0 0 0 3px #ffff00 !important; /* Keep this if it's for focus */
 }
 
+/* High contrast footer */
 body.high-contrast footer {
     background-color: #000000 !important;
     color: #ffffff !important;
-    box-shadow: 0 -2px 5px rgba(255,255,255,0.2) !important; /* Light shadow on dark bg */
+    box-shadow: 0 -2px 5px rgba(255,255,255,0.2) !important;
+    border-top: 2px solid #ffffff !important; /* Ensure separation */
 }
-
-body.high-contrast #upcoming-bookings, 
-body.high-contrast #quick-actions {
-    background-color: #f0f0f0 !important; /* Light grey background */
-    border: 2px solid #000000 !important;
+body.high-contrast .footer-accessibility-controls button {
+    background-color: #000000 !important;
+    color: #ffffff !important;
+    border: 2px solid #ffffff !important;
+}
+body.high-contrast .footer-accessibility-controls button:hover {
+    background-color: #333333 !important;
+    color: #ffff00 !important;
+}
+body.high-contrast footer #language-selector {
+    background-color: #000000 !important;
+    color: #ffffff !important;
+    border: 2px solid #ffffff !important;
+}
+body.high-contrast footer #language-selector option {
+    background-color: #ffffff !important; /* Or a neutral color */
     color: #000000 !important;
 }
 
-body.high-contrast #calendar-table {
-    box-shadow: none !important;
-}
 
-body.high-contrast #calendar-table th, 
-body.high-contrast #calendar-table td {
-    border: 2px solid #000000 !important;
-    color: #000000 !important;
-}
+body.high-contrast #upcoming-bookings, body.high-contrast #quick-actions { background-color: #f0f0f0 !important; border: 2px solid #000000 !important; color: #000000 !important; }
+body.high-contrast #calendar-table { box-shadow: none !important; }
+body.high-contrast #calendar-table th, body.high-contrast #calendar-table td { border: 2px solid #000000 !important; color: #000000 !important; }
+body.high-contrast #calendar-table th { background-color: #cccccc !important; }
+body.high-contrast .available { background-color: #cceeff !important; color: #000000 !important; font-weight: bold; }
+body.high-contrast .available:hover { background-color: #99ddff !important; }
+body.high-contrast .booked { background-color: #ffcccc !important; color: #000000 !important; font-weight: bold; }
+body.high-contrast .unavailable { background-color: #dddddd !important; color: #000000 !important; font-style: normal !important; }
+body.high-contrast .error-slot { background-color: #bbbbbb !important; color: #000000 !important; font-style: italic; font-weight: bold; }
 
-body.high-contrast #calendar-table th {
-    background-color: #cccccc !important; /* Grey background for table headers */
+body.high-contrast input, body.high-contrast select, body.high-contrast textarea, body.high-contrast #room-select {
+    background-color: #ffffff !important; color: #000000 !important; border: 2px solid #000000 !important; box-shadow: none !important;
 }
-
-body.high-contrast .available {
-    background-color: #cceeff !important; /* Light blue background */
-    color: #000000 !important; /* Black text */
-    font-weight: bold;
+body.high-contrast input:focus, body.high-contrast select:focus, body.high-contrast textarea:focus, body.high-contrast #room-select:focus {
+    outline: 3px solid #0000ff !important; outline-offset: 0px; border-color: #0000ff !important;
 }
+body.high-contrast #booking-form fieldset { border: 2px solid #000000 !important; }
+body.high-contrast #booking-form legend { color: #000000 !important; font-weight: bold; }
+body.high-contrast #booking-form input[type="checkbox"] { accent-color: #000000 !important; border: 1px solid #ffffff; outline: 1px solid #000000; }
+body.high-contrast .success { background-color: #ffffcc !important; color: #000000 !important; border: 2px solid #000000 !important; }
+body.high-contrast .error { background-color: #ffdddd !important; color: #000000 !important; border: 2px solid #000000 !important; }
+body.high-contrast #booking-form label, body.high-contrast #login-form label { color: #000000 !important; }
+body.high-contrast input, body.high-contrast select, body.high-contrast textarea { transition: none !important; }
 
-body.high-contrast .available:hover {
-    background-color: #99ddff !important; /* Darker light blue */
-}
-
-body.high-contrast .booked {
-    background-color: #ffcccc !important; /* Light red background */
-    color: #000000 !important; /* Black text */
-    font-weight: bold;
-}
-
-body.high-contrast .unavailable {
-    background-color: #dddddd !important; /* Grey background */
-    color: #000000 !important; /* Black text */
-    font-style: normal !important;
-}
-
-body.high-contrast .error-slot {
-    background-color: #bbbbbb !important; /* Darker grey */
-    color: #000000 !important;
-    font-style: italic;
-    font-weight: bold;
-}
-
-body.high-contrast input, 
-body.high-contrast select, 
-body.high-contrast textarea,
-body.high-contrast #room-select { /* Ensure room select is also covered */
-    background-color: #ffffff !important;
-    color: #000000 !important;
-    border: 2px solid #000000 !important;
-    box-shadow: none !important;
-}
-
-body.high-contrast input:focus, 
-body.high-contrast select:focus, 
-body.high-contrast textarea:focus,
-body.high-contrast #room-select:focus {
-    outline: 3px solid #0000ff !important; /* Blue outline for focused inputs */
-    outline-offset: 0px;
-    border-color: #0000ff !important;
-}
-
-body.high-contrast #booking-form fieldset {
-    border: 2px solid #000000 !important;
-}
-
-body.high-contrast #booking-form legend {
-    color: #000000 !important;
-    font-weight: bold;
-}
-
-body.high-contrast #booking-form input[type="checkbox"] {
-    accent-color: #000000 !important; /* Black checkbox */
-    border: 1px solid #ffffff; /* Add a border to make it visible on dark items if any underneath */
-    outline: 1px solid #000000; /* Outline for the checkbox itself */
-}
-
-body.high-contrast .success {
-    background-color: #ffffcc !important; /* Light yellow background */
-    color: #000000 !important; /* Black text */
-    border: 2px solid #000000 !important; /* Black border */
-}
-
-body.high-contrast .error {
-    background-color: #ffdddd !important; /* Light pink/red background */
-    color: #000000 !important; /* Black text */
-    border: 2px solid #000000 !important; /* Black border */
-}
-
-/* Ensure specific text colors that might have been variables are overridden */
-body.high-contrast #booking-form label,
-body.high-contrast #login-form label {
-    color: #000000 !important;
-}
-
-/* Remove box-sizing transition for high contrast inputs to avoid visual glitches with borders */
-body.high-contrast input,
-body.high-contrast select,
-body.high-contrast textarea {
-    transition: none !important;
-}
-
-/* Ensure all box-shadows are removed unless explicitly set for high-contrast */
+/* Aggressive shadow removal for high contrast, then re-apply essentials */
 body.high-contrast *, body.high-contrast *::before, body.high-contrast *::after {
-    box-shadow: none !important; /* Aggressive shadow removal */
+    box-shadow: none !important;
 }
-
-/* Re-apply necessary shadows for high contrast if any - e.g. for focus states, or specific elements if needed */
 body.high-contrast button:focus,
 body.high-contrast input[type="submit"]:focus,
 body.high-contrast input[type="button"]:focus {
-    box-shadow: 0 0 0 3px #ffff00 !important; /* Example: re-apply focus shadow if needed, or use outline */
+    box-shadow: 0 0 0 3px #ffff00 !important;
 }
-body.high-contrast nav.sidebar {
-    box-shadow: 0 2px 5px rgba(255,255,255,0.2) !important;
-    text-align: left !important;
+body.high-contrast .app-header { /* Re-apply essential shadows */
+    box-shadow: 0 2px 4px rgba(255,255,255,0.1) !important; /* Lighter shadow for dark bg */
+}
+body.high-contrast #sidebar {
+    box-shadow: 2px 0 5px rgba(255,255,255,0.2) !important;
 }
 body.high-contrast footer {
     box-shadow: 0 -2px 5px rgba(255,255,255,0.2) !important;
 }
 
-/* Final check on calendar text colors */
-body.high-contrast #calendar-table th, 
-body.high-contrast #calendar-table td,
-body.high-contrast .available,
-body.high-contrast .booked,
-body.high-contrast .unavailable,
-body.high-contrast .error-slot {
-    color: #000000 !important; /* Ensure all calendar text is black */
-}
-body.high-contrast .available {
-    background-color: #cceeff !important; 
-}
-body.high-contrast .booked {
-    background-color: #ffcccc !important; 
-}
-body.high-contrast .unavailable {
-    background-color: #dddddd !important; 
-}
-body.high-contrast #calendar-table th {
-    background-color: #cccccc !important;
-}
-
-/* Ensure button text remains white */
-body.high-contrast button,
-body.high-contrast input[type="submit"],
-body.high-contrast input[type="button"] {
-    color: #ffffff !important;
-}
-body.high-contrast button:hover,
-body.high-contrast input[type="submit"]:hover,
-body.high-contrast input[type="button"]:hover {
-    color: #ffff00 !important; /* Yellow text on hover for buttons */
-}
 
 /* Responsive adjustments for smaller screens */
-@media (max-width: 600px) {
-    nav.sidebar ul {
-        flex-direction: column;
-        align-items: flex-start;
+@media (max-width: 768px) { /* Adjusted breakpoint for more common tablet/mobile changes */
+    :root { /* Smaller header/footer for mobile */
+        --header-height: 50px;
+        --footer-height: 40px;
+        --sidebar-width: 180px; /* Slightly smaller full sidebar */
+        --sidebar-collapsed-width: 0; /* Sidebar fully hidden, or very minimal */
     }
-    nav.sidebar ul li {
-        margin: 10px 0;
+
+    #sidebar {
+        /* Optionally hide sidebar by default on very small screens, toggle with button in header */
+        /* Or make it overlay instead of pushing content */
+        /* For now, let's assume it collapses to 0 width */
+        transition: width 0.2s; /* Faster transition for mobile */
+    }
+    #sidebar.collapsed {
+        width: 0;
+        overflow: hidden; /* Ensure no content peeks out */
+    }
+
+    body.sidebar-collapsed #main-content,
+    #main-content { /* When sidebar is 0 width, main content takes full width */
+        margin-left: var(--sidebar-collapsed-width); /* which is 0 if collapsed */
+    }
+    /* If sidebar is not collapsed on mobile, main content still needs its margin */
+    #main-content {
+         margin-left: var(--sidebar-width);
+    }
+     body.sidebar-collapsed #main-content {
+        margin-left: var(--sidebar-collapsed-width);
+    }
+
+
+    .app-header {
+        padding: 0 0.5em; /* Less padding on mobile header */
+    }
+    .header-content {
+        gap: 10px; /* Less gap on mobile */
+    }
+    .app-header #user-dropdown-button {
+        padding: 8px; /* Smaller button padding */
+    }
+    .app-header .user-icon {
+        font-size: 1em;
+    }
+
+    footer {
+        padding: 0 0.5em; /* Less padding on mobile footer */
+        flex-direction: column; /* Stack footer items */
+        height: auto; /* Adjust height for multi-line */
+        padding-top: 5px;
+        padding-bottom: 5px;
+        --footer-height: 70px; /* Example if stacking makes it taller */
+    }
+    .footer-accessibility-controls {
+        gap: 5px;
+        margin-bottom: 5px; /* Space between controls and other footer items */
+    }
+    .footer-accessibility-controls button {
+        padding: 4px 8px;
+        font-size: 0.9em;
+    }
+    footer #language-form {
+        margin-top: 5px;
+    }
+    footer p { /* Copyright text */
+        font-size: 0.8em;
+    }
+
+
+    #main-content {
+        padding: 10px; /* Less padding on mobile */
     }
     main {
-        width: 95%;
-        margin: 20px auto;
-        padding: 15px;
+        padding: 10px 0; /* Remove side padding from main, rely on #main-content */
     }
-    .resource-buttons-grid {
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); /* Smaller buttons on mobile */
-        gap: 10px;
+
+    /* Example: Hide text for sidebar items, show only icons if sidebar is not fully collapsed to 0 */
+    /* This would apply if --sidebar-collapsed-width was > 0 on mobile */
+    /* #sidebar:not(.collapsed) li .menu-text { display: none; }
+       #sidebar:not(.collapsed) li .menu-icon { margin-right: 0; }
+       #sidebar:not(.collapsed) li { text-align: center; }
+    */
+
+    /* Responsive map container */
+    #map-container, #new-booking-map-container {
+        width: 100%; /* Full width on mobile */
+        height: 400px; /* Adjust height or use aspect ratio */
     }
 }
 
-/* Styles copied from map_view.html */
-#map-container, #new-booking-map-container { /* Applied to both map containers */
+@media (max-width: 480px) { /* Even smaller screens */
+    :root {
+        --sidebar-width: 100%; /* Sidebar could be full width if it overlays */
+    }
+    /* Further adjustments for very small screens if needed */
+    .footer-accessibility-controls {
+        flex-wrap: wrap; /* Allow accessibility buttons to wrap */
+        justify-content: center;
+    }
+     .footer-accessibility-controls button {
+        flex-basis: calc(50% - 5px); /* Two buttons per row */
+    }
+}
+
+
+/* Styles copied from map_view.html - Generally keep as is, ensure responsiveness */
+#map-container, #new-booking-map-container {
     position: relative;
-    width: 800px;
-    height: 600px;
+    /* width: 800px; REMOVED - will be 100% of parent or handled by responsive */
+    max-width: 800px; /* Added max-width */
+    width: 100%; /* Make it responsive */
+    height: 600px; /* Will be adjusted by @media if needed */
     background-size: contain;
     background-repeat: no-repeat;
     background-position: center center;
-    border: 1px solid #ccc;
-    margin-bottom: 20px;
+    border: 1px solid var(--border-color);
+    margin: 20px auto; /* Center the map */
 }
 .resource-area {
-    position: absolute;
-    border: 2px solid blue;
-    background-color: rgba(0, 0, 255, 0.3);
-    box-sizing: border-box;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    overflow: hidden;
-    color: #000;
-    font-size: 12px;
+    position: absolute; border: 2px solid blue; background-color: rgba(0, 0, 255, 0.3);
+    box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+    text-align: center; overflow: hidden; color: #000; font-size: 12px;
 }
-.resource-area-available {
-    background-color: rgba(0, 255, 0, 0.2);
-    border-color: darkgreen;
-}
-.resource-area-partially-booked {
-    background-color: rgba(255, 255, 0, 0.5);
-    border-color: #cca300;
-}
-.resource-area-fully-booked {
-    background-color: rgba(255, 0, 0, 0.2);
-    border-color: darkred;
-}
-.resource-area-unknown {
-    background-color: rgba(128, 128, 128, 0.3);
-    border-color: #555;
-}
-.map-area-clickable:hover {
-    cursor: pointer;
-    filter: brightness(110%);
-}
-.modal {
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    overflow: auto;
-    background-color: rgba(0,0,0,0.4);
-}
-.modal-content {
-    background-color: #fefefe;
-    margin: 10% auto;
-    padding: 20px;
-    border: 1px solid #888;
-    width: 80%;
-    max-width: 500px;
-    border-radius: 8px;
-    position: relative;
-}
-.close-modal-btn {
-    color: #aaa;
-    float: right;
-    font-size: 28px;
-    font-weight: bold;
-}
-.close-modal-btn:hover,
-.close-modal-btn:focus {
-    color: black;
-    text-decoration: none;
-    cursor: pointer;
-}
-.time-slots-container {
-    margin-top: 15px;
-    margin-bottom: 15px;
-    max-height: 200px;
-    overflow-y: auto;
-    border: 1px solid #eee;
-    padding: 10px;
-}
-.time-slot-item {
-    padding: 8px;
-    margin-bottom: 5px;
-    border-radius: 4px;
-}
-.time-slot-available {
-    background-color: #e7f7e7;
-    border: 1px solid #c8e6c9;
-    cursor: pointer;
-}
+.resource-area-available { background-color: rgba(0, 255, 0, 0.2); border-color: darkgreen; }
+.resource-area-partially-booked { background-color: rgba(255, 255, 0, 0.5); border-color: #cca300; }
+.resource-area-fully-booked { background-color: rgba(255, 0, 0, 0.2); border-color: darkred; }
+.resource-area-unknown { background-color: rgba(128, 128, 128, 0.3); border-color: #555; }
+.map-area-clickable:hover { cursor: pointer; filter: brightness(110%); }
+
+.modal { position: fixed; z-index: 1050; /* Higher than header/sidebar */ left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
+.modal-content { background-color: var(--background-color-light); margin: 10% auto; padding: 20px; border: 1px solid var(--border-color); width: 80%; max-width: 500px; border-radius: 8px; position: relative; }
+.close-modal-btn { color: #aaa; float: right; font-size: 28px; font-weight: bold; }
+.close-modal-btn:hover, .close-modal-btn:focus { color: var(--text-color-dark); text-decoration: none; cursor: pointer; }
+.time-slots-container { margin-top: 15px; margin-bottom: 15px; max-height: 200px; overflow-y: auto; border: 1px solid #eee; padding: 10px; }
+.time-slot-item { padding: 8px; margin-bottom: 5px; border-radius: 4px; }
+.time-slot-available { background-color: #e7f7e7; border: 1px solid #c8e6c9; cursor: pointer; }
 .time-slot-available:hover { background-color: #d0f0d0; }
-.time-slot-booked {
-    background-color: #fde0e0;
-    border: 1px solid #f9c0c0;
-    color: #777;
-    cursor: not-allowed;
-}
-.time-slot-selected {
-    background-color: #c8e6c9;
-    font-weight: bold;
-}
+.time-slot-booked { background-color: #fde0e0; border: 1px solid #f9c0c0; color: #777; cursor: not-allowed; }
+.time-slot-selected { background-color: #c8e6c9; font-weight: bold; }
 
-/* Styles for map controls, can be shared or specific */
-.map-controls div {
-    margin-bottom: 10px;
-}
-.map-controls label {
-    margin-right: 5px;
-}
-
-/* Style for highlighting a resource area selected via the main form */
-.resource-area-form-selected {
-    outline: 3px solid #ffc107; /* A distinct yellow outline */
-    outline-offset: 2px;
-    filter: brightness(120%); /* Slightly brighter */
-}
-/* End of styles copied from map_view.html */
+.map-controls div { margin-bottom: 10px; }
+.map-controls label { margin-right: 5px; }
+.resource-area-form-selected { outline: 3px solid #ffc107; outline-offset: 2px; filter: brightness(120%); }
 
 /* Styles for the /resources page resource buttons */
-.resource-buttons-grid {
-    display: flex;         /* Use Flexbox for internal layout */
-    flex-wrap: wrap;       /* Allow buttons to wrap to the next line */
-    gap: 10px;             /* Spacing between buttons (both row and column) */
-    width: 100%;           /* Keep it full width */
-    padding: 10px 0;       /* Retain existing vertical padding, or adjust as needed */
-    /* Remove any leftover grid-specific properties if they weren't already */
-}
-
+.resource-buttons-grid { display: flex; flex-wrap: wrap; gap: 10px; width: 100%; padding: 10px 0; }
 .resource-availability-button {
-    flex: 1 0 calc(20% - 10px); /* Allow grow, basis is 1/5th minus gap. */
-    box-sizing: border-box;    /* Crucial for width calculation to include padding/border */
-    min-height: 50px;          /* Or your preferred height */
-    padding: 10px 5px;         /* Adjust padding */
-    /* display: block; and width: 100%; are overridden/irrelevant due to flex */
-    margin: 0; /* Grid gap will handle spacing, so explicit margin on button is 0 */
-    border: 1px solid #ccc; /* Keep existing border */
-    border-radius: 5px;
-    background-color: #f0f0f0; /* Default background */
-    color: #333; /* Default text color */
-    text-align: center;        /* Ensure text is centered */
-    cursor: pointer;
-    font-size: 0.9rem;
-    line-height: 1.3;
-    transition: background-color 0.3s ease, transform 0.1s ease; /* Smooth transitions */
-    /* Ensure other .button styles (background-color, color for different states) are applied */
+    flex: 1 0 calc(20% - 10px); box-sizing: border-box; min-height: 50px; padding: 10px 5px;
+    margin: 0; border: 1px solid #ccc; border-radius: 5px; background-color: #f0f0f0;
+    color: #333; text-align: center; cursor: pointer; font-size: 0.9rem; line-height: 1.3;
+    transition: background-color 0.3s ease, transform 0.1s ease;
 }
-.resource-availability-button:hover {
-    background-color: #e0e0e0; /* Slight hover effect */
-    transform: translateY(-1px); /* Slight lift effect */
-}
-.resource-availability-button:active {
-    transform: translateY(0px);
-}
-
-.resource-availability-button.available {
-    background-color: var(--success-bg-color); /* Light green */
-    color: var(--success-color);
-    border-color: #388E3C;
-}
-.resource-availability-button.available:hover {
-    background-color: #d3f0d9;
-}
-
-.resource-availability-button.partial {
-    background-color: #ffc107; /* Yellow */
-    color: #333; /* Darker text for yellow */
-    border-color: #f59c00;
-}
-.resource-availability-button.partial:hover {
-    background-color: #f5b300;
-}
-
-.resource-availability-button.unavailable {
-    background-color: var(--error-bg-color); /* Light red */
-    color: var(--error-color);
-    border-color: #d32f2f;
-}
-.resource-availability-button.unavailable:hover {
-    background-color: #f2c2bd;
-}
-
-.resource-availability-button.error {
-    background-color: #757575; /* Grey */
-    color: white;
-    border-color: #616161;
-    cursor: not-allowed;
-}
-.resource-availability-button.error:hover {
-    background-color: #6a6a6a;
-}
-/* End of /resources page button styles */
+.resource-availability-button:hover { background-color: #e0e0e0; transform: translateY(-1px); }
+.resource-availability-button:active { transform: translateY(0px); }
+.resource-availability-button.available { background-color: var(--success-bg-color); color: var(--success-color); border-color: #388E3C; }
+.resource-availability-button.available:hover { background-color: #d3f0d9; }
+.resource-availability-button.partial { background-color: #ffc107; color: #333; border-color: #f59c00; }
+.resource-availability-button.partial:hover { background-color: #f5b300; }
+.resource-availability-button.unavailable { background-color: var(--error-bg-color); color: var(--error-color); border-color: #d32f2f; }
+.resource-availability-button.unavailable:hover { background-color: #f2c2bd; }
+.resource-availability-button.error { background-color: #757575; color: white; border-color: #616161; cursor: not-allowed; }
+.resource-availability-button.error:hover { background-color: #6a6a6a; }
 
 /* Styles for time slot buttons within the resource-page-booking-modal (rpbm) */
 #rpbm-slot-options .time-slot-btn.unavailable,
 #rpbm-slot-options .time-slot-btn.booked,
 #rpbm-slot-options .time-slot-btn:disabled {
-    background-color: var(--error-bg-color); /* Light red for unavailable */
-    color: var(--error-color);
-    cursor: not-allowed;
-    opacity: 0.7; /* Slightly faded */
-    border-color: #d32f2f; /* Optional: darker border */
+    background-color: var(--error-bg-color); color: var(--error-color); cursor: not-allowed; opacity: 0.7; border-color: #d32f2f;
 }
-
-/* Ensure no confusing hover effects on disabled/unavailable slot buttons in rpbm */
 #rpbm-slot-options .time-slot-btn.unavailable:hover,
 #rpbm-slot-options .time-slot-btn.booked:hover,
 #rpbm-slot-options .time-slot-btn:disabled:hover {
-    background-color: #d32f2f; /* Maintain or slightly darken the unavailable color */
-    transform: none; /* Remove any lift effect if present on general .time-slot-btn */
-    box-shadow: none; /* Remove any hover shadow if present */
+    background-color: #d32f2f; transform: none; box-shadow: none;
 }
-
-/* Styling for available slot buttons in the rpbm, if different from general .time-slot-btn or .button */
-/* This ensures they have a clear "available" state distinct from general buttons if needed */
-#rpbm-slot-options .time-slot-btn.available {
-    background-color: var(--success-bg-color); /* Light green for available */
-    color: var(--success-color);
-    border-color: #388E3C; /* Optional: darker border for available */
-    opacity: 1; /* Ensure full opacity for available buttons */
-}
-#rpbm-slot-options .time-slot-btn.available:hover {
-    background-color: #d3f0d9; /* Slightly darker green on hover */
-}
+#rpbm-slot-options .time-slot-btn.available { background-color: var(--success-bg-color); color: var(--success-color); border-color: #388E3C; opacity: 1; }
+#rpbm-slot-options .time-slot-btn.available:hover { background-color: #d3f0d9; }
 
 /* Styling for Floor Map Groupings on Resources Page */
-.map-group-heading {
-    margin-top: 25px;
-    margin-bottom: 10px; /* Adjusted */
-    font-size: 1.2em; /* Reduced */
-    color: #333; /* Or match your theme's heading color */
-    border-bottom: 2px solid #eee; /* A light separator */
-    padding-bottom: 5px;
-}
+.map-group-heading { margin-top: 25px; margin-bottom: 10px; font-size: 1.2em; color: #333; border-bottom: 2px solid #eee; padding-bottom: 5px; }
+.map-specific-grid { margin-top: 15px; margin-bottom: 20px; }
+.unassigned-grid { margin-top: 15px; }
 
-.map-specific-grid {
-    /* If the default .resource-buttons-grid already has good spacing, 
-       you might not need much here. This is a placeholder. */
-    /* Example: add some padding if grids are too close to headings */
-    margin-top: 15px; /* Changed from padding-top */
-    margin-bottom: 20px; /* Space before the next map group heading */
-}
+/* REMOVED old sidebar layout rules like body.with-sidebar, #sidebar flex properties etc. as they are replaced by new fixed layout rules. */
 
-.unassigned-grid {
-    /* Similar to map-specific-grid, if needed */
-    margin-top: 15px; /* Changed from padding-top */
-}
+/* Final check to remove any specific old layout selectors that might conflict */
+/* e.g. body.with-sidebar nav ul, body.with-sidebar #main-content */
+/* These have been addressed by replacing or removing them in the sections above. */
 
-/* Ensure the main container still allows for these new elements */
-#resource-buttons-container {
-    /* Existing styles should be fine, but if it was a strict grid itself, 
-       it might need adjustment. Assuming it's a block container. */
-}
-
-/* Sidebar Layout */
-body.with-sidebar {
-    display: flex;
-    min-height: 100vh;
-}
-
-#sidebar {
-    background-color: var(--background-color-dark);
-    color: var(--text-color-light);
-    width: 200px;
-    transition: width 0.3s;
-    flex-shrink: 0;
-    overflow: hidden;
-    box-shadow: 2px 0 5px rgba(0,0,0,0.1);
-}
-
-#sidebar.collapsed {
-    width: 50px;
-}
-
-#sidebar button#sidebar-toggle {
-    background: none;
-    border: none;
-    color: var(--text-color-light);
+/* Ensure admin dropdown in sidebar still looks okay */
+#sidebar details summary {
     cursor: pointer;
-    font-size: 1em;
-    margin: 0.5em auto;
+    padding: 0.75em 1em; /* Match li padding */
     display: flex;
+    align-items: center;
+}
+#sidebar details summary .menu-icon { /* Already handled by general #sidebar li .menu-icon */
+    /* margin-right: 0.5em; */
+}
+#sidebar.collapsed details summary .menu-text {
+    display: none;
+}
+#sidebar.collapsed details summary {
     justify-content: center;
 }
-
-#sidebar ul {
+#sidebar details ul.admin-menu {
     list-style-type: none;
-    padding: 0;
-    margin: 0;
+    padding-left: 1em; /* Indent admin submenu items */
+}
+#sidebar details ul.admin-menu li {
+    padding: 0.5em 1em; /* Slightly less padding for submenu items */
+    font-size: 0.85rem; /* Slightly smaller font for submenu */
+}
+#sidebar.collapsed details ul.admin-menu {
+    display: none; /* Hide submenu when sidebar is collapsed */
 }
 
-#sidebar ul li {
-    padding: 0.5em 1em;
-    white-space: nowrap;
-    font-size: 0.9rem;
+/* Compact accessibility controls at top - this class was in old CSS, might be unused or need review */
+/* For now, keeping it commented out as new accessibility controls are in footer */
+/*
+.accessibility-top {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
 }
+.accessibility-top button {
+    font-size: 0.75rem;
+    padding: 2px 4px;
+}
+*/
 
-#sidebar ul li a {
-    color: var(--text-color-light);
-    text-decoration: none;
-    display: block;
-}
-#sidebar ul li button {
-    background: none;
-    border: none;
-    color: var(--text-color-light);
-    cursor: pointer;
-    width: 100%;
-    padding: 0.5em 0;
-    text-align: left;
-    font-weight: bold;
-    font-size: inherit;
-}
-
-body.with-sidebar #main-content {
-    flex-grow: 1;
-    margin-left: 200px;
-    transition: margin-left 0.3s;
-}
-
-body.with-sidebar.sidebar-collapsed #main-content {
-    margin-left: 50px;
-}
+```

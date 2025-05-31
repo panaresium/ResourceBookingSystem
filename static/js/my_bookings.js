@@ -90,11 +90,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 titleSpan.dataset.originalTitle = booking.title || ''; // Store original title
 
                 const startTimeSpan = bookingItemClone.querySelector('.start-time');
-                startTimeSpan.textContent = new Date(booking.start_time).toLocaleString();
+                startTimeSpan.textContent = new Date(booking.start_time).toUTCString();
                 startTimeSpan.dataset.originalStartTime = booking.start_time;
 
                 const endTimeSpan = bookingItemClone.querySelector('.end-time');
-                endTimeSpan.textContent = new Date(booking.end_time).toLocaleString();
+                endTimeSpan.textContent = new Date(booking.end_time).toUTCString();
                 endTimeSpan.dataset.originalEndTime = booking.end_time;
                 
                 bookingItemClone.querySelector('.recurrence-rule').textContent = booking.recurrence_rule || '';
@@ -283,11 +283,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 titleSpan.dataset.originalTitle = updatedBooking.title;
 
                 const startTimeSpan = bookingItemDiv.querySelector('.start-time');
-                startTimeSpan.textContent = new Date(updatedBooking.start_time).toLocaleString();
+                startTimeSpan.textContent = new Date(updatedBooking.start_time).toUTCString();
                 bookingItemDiv.dataset.startTime = updatedBooking.start_time; // Update stored full start time
 
                 const endTimeSpan = bookingItemDiv.querySelector('.end-time');
-                endTimeSpan.textContent = new Date(updatedBooking.end_time).toLocaleString();
+                endTimeSpan.textContent = new Date(updatedBooking.end_time).toUTCString();
                 bookingItemDiv.dataset.endTime = updatedBooking.end_time; // Update stored full end time
             }
             

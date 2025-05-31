@@ -82,6 +82,8 @@ except ImportError:  # pragma: no cover - fallback for environments without Flas
             self.recipients = recipients or []
             self.body = body
 
+mail = Mail() # Define global mail object
+
 # Base directory of the app - project root
 basedir = os.path.abspath(os.path.dirname(__file__))
 DATA_DIR = os.path.join(basedir, 'data')
@@ -197,6 +199,10 @@ app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'false').lower() in 
 app.config['MAIL_USE_SSL'] = os.environ.get('MAIL_USE_SSL', 'false').lower() in ['true', '1', 'yes']
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', app.config['MAIL_USERNAME'] or 'noreply@example.com')
 
+# Initialize Flask-Mail if available
+if mail_available:
+    mail.init_app(app)
+
 # Booking check-in configuration
 app.config['CHECK_IN_GRACE_MINUTES'] = int(os.environ.get('CHECK_IN_GRACE_MINUTES', '15'))
 app.config['AUTO_CANCEL_CHECK_INTERVAL_MINUTES'] = int(os.environ.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', '5'))
@@ -213,24 +219,22 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(mes
 # However, if you were to use it, this is how you might define its path:
 # CLIENT_SECRET_FILE = os.path.join(pathlib.Path(__file__).parent, 'client_secret.json') 
 
-# Ensure this URL is exactly as registered in your Google Cloud Console Authorized redirect URIs
-REDIRECT_URI = 'http://127.0.0.1:5000/login/google/callback' # Or https if using https
-
 # OAuth Scopes, request email and profile
 SCOPES = ['openid', 'https://www.googleapis.com/auth/userinfo.email', 'https://www.googleapis.com/auth/userinfo.profile']
 
 def get_google_flow():
+    redirect_uri_dynamic = url_for('login_google_callback', _external=True)
     return Flow.from_client_config(
         client_config={'web': {
             'client_id': app.config['GOOGLE_CLIENT_ID'],
             'client_secret': app.config['GOOGLE_CLIENT_SECRET'],
             'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
             'token_uri': 'https://oauth2.googleapis.com/token',
-            'redirect_uris': [REDIRECT_URI], # Must match exactly what's in Google Cloud Console
-            'javascript_origins': ['http://127.0.0.1:5000'] # Or your app's origin
+            'redirect_uris': [redirect_uri_dynamic], # Use dynamic URI
+            'javascript_origins': ['http://127.0.0.1:5000'] # Or your app's origin - this might also need to be dynamic in a real-world scenario
         }},
         scopes=SCOPES,
-        redirect_uri=REDIRECT_URI
+        redirect_uri=redirect_uri_dynamic # Use dynamic URI
     )
 
 db = SQLAlchemy(app)
@@ -525,7 +529,23 @@ def send_email(to_address: str, subject: str, body: str):
         'timestamp': datetime.utcnow().isoformat(),
     }
     email_log.append(email_entry)
-    app.logger.info(f"Email queued to {to_address}: {subject}")
+    app.logger.info(f"Email queued to {to_address}: {subject}") # This log remains for all cases
+
+    if mail_available:
+        try:
+            msg = Message(
+                subject=subject,
+                recipients=[to_address],
+                body=body,
+                sender=app.config.get('MAIL_DEFAULT_SENDER')
+            )
+            mail.send(msg)
+            app.logger.info(f"Email successfully sent to {to_address} via Flask-Mail.")
+        except Exception as e:
+            app.logger.error(f"Failed to send email to {to_address} via Flask-Mail: {e}", exc_info=True)
+    elif not mail_available:
+        app.logger.info("Flask-Mail not available, email not sent via external server.")
+
 
 def send_slack_notification(text: str):
     """Record a slack notification in the log (placeholder)."""
@@ -568,14 +588,15 @@ def parse_simple_rrule(rule_str: str):
     return freq, max(1, count)
 
 @app.route("/")
-@login_required
 def serve_index():
-    return render_template("index.html")
-
-@app.route("/new_booking")
-@login_required
-def serve_new_booking():
-    return render_template("new_booking.html")
+    if current_user.is_authenticated:
+        upcoming_bookings = Booking.query.filter(
+            Booking.user_name == current_user.username, # Assuming bookings are linked by username
+            Booking.start_time > datetime.utcnow()
+        ).order_by(Booking.start_time.asc()).all()
+        return render_template("index.html", upcoming_bookings=upcoming_bookings)
+    else:
+        return render_template("login.html")
 
 @app.route("/resources")
 def serve_resources():
@@ -688,6 +709,42 @@ def serve_admin_maps():
 def serve_resource_management_page():
     app.logger.info(f"Admin user {current_user.username} accessed Resource Management page.")
     return render_template("resource_management.html")
+
+@app.route('/admin/bookings')
+@login_required
+@permission_required('manage_bookings')
+def serve_admin_bookings_page():
+    app.logger.info(f"User {current_user.username} accessed Admin Bookings page.")
+    try:
+        bookings_query = db.session.query(
+            Booking.id,
+            Booking.title,
+            Booking.start_time,
+            Booking.end_time,
+            Booking.status,
+            User.username.label('user_username'),
+            Resource.name.label('resource_name')
+        ).join(Resource, Booking.resource_id == Resource.id)\
+         .join(User, Booking.user_name == User.username)
+
+        all_bookings = bookings_query.order_by(Booking.start_time.desc()).all()
+
+        bookings_list = []
+        for booking_row in all_bookings:
+            bookings_list.append({
+                'id': booking_row.id,
+                'title': booking_row.title,
+                'start_time': booking_row.start_time,
+                'end_time': booking_row.end_time,
+                'status': booking_row.status,
+                'user_username': booking_row.user_username,
+                'resource_name': booking_row.resource_name
+            })
+
+        return render_template("admin_bookings.html", bookings=bookings_list)
+    except Exception as e:
+        app.logger.error(f"Error fetching bookings for admin page: {e}", exc_info=True)
+        return render_template("admin_bookings.html", bookings=[], error="Could not load bookings.")
 
 # --- Analytics Routes ---
 @analytics_bp.route('/')
@@ -2421,6 +2478,7 @@ def get_map_details(map_id):
         app.logger.exception(f"Error fetching map details for map_id {map_id}:")
         return jsonify({'error': 'Failed to fetch map details due to a server error.'}), 500
 
+@csrf.exempt # Login endpoint should be exempt from CSRF
 @app.route('/api/auth/login', methods=['POST'])
 def api_login():
     data = request.get_json()
@@ -2752,6 +2810,55 @@ def bookings_calendar():
         app.logger.exception("Error fetching calendar bookings:")
         return jsonify({'error': 'Failed to fetch bookings.'}), 500
 
+@app.route('/api/admin/bookings/<int:booking_id>/cancel', methods=['POST'])
+@login_required
+@permission_required('manage_bookings')
+def admin_cancel_booking(booking_id):
+    app.logger.info(f"Admin user {current_user.username} attempting to cancel booking ID: {booking_id}")
+    try:
+        booking = Booking.query.get(booking_id)
+
+        if not booking:
+            app.logger.warning(f"Admin cancel attempt: Booking ID {booking_id} not found.")
+            return jsonify({'error': 'Booking not found.'}), 404
+
+        # Define terminal states where a booking cannot be cancelled
+        terminal_statuses = ['cancelled', 'rejected', 'completed', 'checked_out']
+        if booking.status and booking.status.lower() in terminal_statuses:
+            app.logger.warning(f"Admin cancel attempt: Booking ID {booking_id} is already in a terminal state: '{booking.status}'.")
+            return jsonify({'error': f'Booking is already in a terminal state ({booking.status}) and cannot be cancelled.'}), 400
+
+        original_status = booking.status
+        booking.status = 'cancelled'
+
+        resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
+        booking_title = booking.title or "N/A"
+
+        audit_details = (
+            f"Admin '{current_user.username}' cancelled booking ID {booking.id}. "
+            f"Original status: '{original_status}'. "
+            f"Booked by: '{booking.user_name}'. "
+            f"Resource: '{resource_name}' (ID: {booking.resource_id}). "
+            f"Title: '{booking_title}'."
+        )
+
+        db.session.commit()
+        add_audit_log(action="ADMIN_CANCEL_BOOKING", details=audit_details)
+        socketio.emit('booking_updated', {'action': 'cancelled_admin', 'booking_id': booking_id, 'resource_id': booking.resource_id, 'new_status': 'cancelled'})
+
+
+        app.logger.info(f"Admin user {current_user.username} successfully cancelled booking ID: {booking_id}.")
+        return jsonify({'message': 'Booking cancelled successfully.', 'booking_id': booking_id, 'new_status': 'cancelled'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception(f"Error during admin cancellation of booking ID {booking_id}:")
+        add_audit_log(
+            action="ADMIN_CANCEL_BOOKING_FAILED",
+            details=f"Admin '{current_user.username}' failed to cancel booking ID {booking_id}. Error: {str(e)}"
+        )
+        return jsonify({'error': 'Failed to cancel booking due to a server error.'}), 500
+
 @app.route('/api/bookings/my_booked_resources', methods=['GET'])
 @login_required
 def get_my_booked_resources():
@@ -3000,7 +3107,7 @@ def update_booking_by_user(booking_id):
         # Send update email if times changed
         if mail_available and current_user.email and any("time from" in change for change in change_details_list):
             try:
-                msg = Message(
+                msg = Message( # This will now use the global mail object's Message class if mail_available is True
                     subject="Booking Updated",
                     recipients=[current_user.email],
                     body=(
@@ -3008,11 +3115,13 @@ def update_booking_by_user(booking_id):
                         f"New Title: {booking.title}\n"
                         f"New Start Time: {booking.start_time.strftime('%Y-%m-%d %H:%M')}\n"
                         f"New End Time: {booking.end_time.strftime('%Y-%m-%d %H:%M')}\n"
-                    )
+                    ),
+                    sender=app.config.get('MAIL_DEFAULT_SENDER') # Added sender
                 )
-                mail.send(msg)
+                mail.send(msg) # This will use the global mail object
+                app.logger.info(f"Booking update email sent to {current_user.email} via Flask-Mail.")
             except Exception as mail_e: # Use different variable name for mail exception
-                app.logger.exception(f"[API PUT /api/bookings/{booking_id}] Failed to send booking update email to {current_user.email}: {mail_e}")
+                app.logger.exception(f"[API PUT /api/bookings/{booking_id}] Failed to send booking update email to {current_user.email} via Flask-Mail: {mail_e}")
         
         change_summary_text = '; '.join(change_details_list)
         add_audit_log(
@@ -3256,7 +3365,10 @@ if __name__ == "__main__":
         app.logger.exception("Failed to start background scheduler")
     # Avoid using _() here because no request context exists at startup
     app.logger.info(translator.gettext("Flask app starting...", translator.default_locale))
-    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", 5000))
+    debug = os.environ.get("FLASK_DEBUG", "False").lower() in ("1", "true", "yes")
+    socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
 
 @app.route('/api/resources/<int:resource_id>/all_bookings', methods=['GET'])
 @login_required

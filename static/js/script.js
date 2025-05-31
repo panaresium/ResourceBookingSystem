@@ -155,6 +155,7 @@ async function updateAuthLink() {
     const logoutLinkDropdown = document.getElementById('logout-link-dropdown');
     const myBookingsNavLink = document.getElementById('my-bookings-nav-link'); 
     const analyticsNavLink = document.getElementById('analytics-nav-link');
+    const adminBookingsNavLink = document.getElementById('admin-bookings-nav-link');
 
     const loginUrl = document.body.dataset.loginUrl || '/login';
 
@@ -181,6 +182,7 @@ async function updateAuthLink() {
         if (manualBackupNavLink) manualBackupNavLink.style.display = 'none';
         if (myBookingsNavLink) myBookingsNavLink.style.display = 'none'; 
         if (analyticsNavLink) analyticsNavLink.style.display = 'none';
+        if (adminBookingsNavLink) adminBookingsNavLink.style.display = 'none';
     }
 
     try {
@@ -230,6 +232,9 @@ async function updateAuthLink() {
             }
             if (analyticsNavLink) {
                 analyticsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
+            }
+            if (adminBookingsNavLink) {
+                adminBookingsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
             }
 
             if (logoutLinkDropdown) {
@@ -2650,12 +2655,33 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Accessibility Controls ---
     // ... (Keep existing accessibility controls logic as is) ...
-    const toggleHighContrastBtn = document.getElementById('toggle-high-contrast');
+    // Theme Toggle (now in footer)
     const themeToggleBtn = document.getElementById('theme-toggle');
-    const increaseFontSizeBtn = document.getElementById('increase-font-size');
-    const decreaseFontSizeBtn = document.getElementById('decrease-font-size');
-    const resetFontSizeBtn = document.getElementById('reset-font-size');
+    if (themeToggleBtn) themeToggleBtn.addEventListener('click', toggleTheme);
 
+    // High Contrast Toggle (new button in footer)
+    const toggleHighContrastBtnNew = document.getElementById('toggle-high-contrast');
+    if (toggleHighContrastBtnNew) {
+        toggleHighContrastBtnNew.addEventListener('click', toggleHighContrast);
+    }
+
+    // Font Size Buttons (new buttons in footer)
+    const increaseFontSizeBtnNew = document.getElementById('increase-font-size');
+    if (increaseFontSizeBtnNew) {
+        increaseFontSizeBtnNew.addEventListener('click', increaseFontSize);
+    }
+
+    const decreaseFontSizeBtnNew = document.getElementById('decrease-font-size');
+    if (decreaseFontSizeBtnNew) {
+        decreaseFontSizeBtnNew.addEventListener('click', decreaseFontSize);
+    }
+
+    const resetFontSizeBtnNew = document.getElementById('reset-font-size');
+    if (resetFontSizeBtnNew) {
+        resetFontSizeBtnNew.addEventListener('click', resetFontSize);
+    }
+
+    // Keep existing functions for these controls
     function toggleHighContrast() {
         document.body.classList.toggle('high-contrast');
         localStorage.setItem('highContrastEnabled', document.body.classList.contains('high-contrast'));
@@ -2663,7 +2689,6 @@ document.addEventListener('DOMContentLoaded', function() {
     function loadHighContrastPreference() {
         if (localStorage.getItem('highContrastEnabled') === 'true') document.body.classList.add('high-contrast');
     }
-    if (toggleHighContrastBtn) toggleHighContrastBtn.addEventListener('click', toggleHighContrast);
 
     function applyTheme(theme) {
         if (theme === 'dark') document.body.classList.add('dark-theme');
@@ -2676,7 +2701,6 @@ document.addEventListener('DOMContentLoaded', function() {
     function loadThemePreference() {
         if (localStorage.getItem('theme') === 'dark') applyTheme('dark');
     }
-    if (themeToggleBtn) themeToggleBtn.addEventListener('click', toggleTheme);
     
     const BASE_FONT_SIZE_REM = 1.0, FONT_SIZE_STEP_REM = 0.1, MAX_FONT_SIZE_REM = 2.0, MIN_FONT_SIZE_REM = 0.7;
     function getCurrentRootFontSizeRem() {
@@ -2684,7 +2708,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (currentSizeStyle && currentSizeStyle.endsWith('rem')) return parseFloat(currentSizeStyle);
         const computedRootFontSize = getComputedStyle(document.documentElement).fontSize;
         if (computedRootFontSize && computedRootFontSize.endsWith('px')) {
-            const rootBasePxFromCSS = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-size').trim().replace('px','')) || 16;
+            const rootBasePxFromCSS = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-size').trim().replace('px','')) || 16; // Ensure :root --font-size is read if set in px
             return parseFloat(computedRootFontSize) / rootBasePxFromCSS;
         }
         return BASE_FONT_SIZE_REM;
@@ -2703,9 +2727,7 @@ document.addEventListener('DOMContentLoaded', function() {
             document.documentElement.style.fontSize = savedFontSize;
         } else localStorage.removeItem('rootFontSize');
     }
-    if (increaseFontSizeBtn) increaseFontSizeBtn.addEventListener('click', increaseFontSize);
-    if (decreaseFontSizeBtn) decreaseFontSizeBtn.addEventListener('click', decreaseFontSize);
-    if (resetFontSizeBtn) resetFontSizeBtn.addEventListener('click', resetFontSize);
+    // Event listeners for new font size buttons are already added above.
 
     if (manualBackupBtn) {
         const manualBackupStatusDiv = document.getElementById('manual-backup-status');
