@@ -171,6 +171,10 @@ document.addEventListener('DOMContentLoaded', function() {
     bulkEditCloseBtn && bulkEditCloseBtn.addEventListener('click', () => bulkEditModal.style.display = 'none');
     window.addEventListener('click', e => { if (e.target === bulkEditModal) bulkEditModal.style.display = 'none'; });
 
+    const bulkEditCloseBtn = bulkEditModal ? bulkEditModal.querySelector('.close-modal-btn') : null;
+    bulkEditCloseBtn && bulkEditCloseBtn.addEventListener('click', () => bulkEditModal.style.display = 'none');
+    window.addEventListener('click', e => { if (e.target === bulkEditModal) bulkEditModal.style.display = 'none'; });
+
     bulkEditBtn && bulkEditBtn.addEventListener('click', () => {
         const ids = getSelectedResourceIds();
         if (ids.length === 0) {
