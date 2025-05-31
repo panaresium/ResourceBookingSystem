@@ -20,7 +20,7 @@
             {# General links visible to all - JavaScript will manage the display of login/logout and user info #}
 
             {# Container for 'My Bookings' - shown by JS when logged in #}
-            <li id="my-bookings-nav-link" style="display: none;">
+            <li>
                  <a href="{{ url_for('serve_my_bookings_page') }}"><span class="menu-icon" aria-hidden="true">📖</span><span class="menu-text">{{ _('My Bookings') }}</span></a>
             </li>
             
