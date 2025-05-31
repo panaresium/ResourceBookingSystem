@@ -206,6 +206,7 @@ Run the script with:
 python azure_backup.py
 ```
 All floor map and resource images from `static/` along with `data/site.db` will be uploaded. The script stores hashes of previous uploads so unchanged files are skipped on subsequent runs. During the process, log messages indicate whether `site.db` was uploaded or skipped because it did not change.
+The admin configuration stored in `data/admin_config.json` is backed up together with the images so changes to users or roles are preserved.
 
 ### Automatic Backups
 
