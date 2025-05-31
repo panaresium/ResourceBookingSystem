@@ -515,7 +515,7 @@ def init_db(force=False):
         app.logger.info("Database initialization script completed.")
         # Export current admin configuration to JSON
         try:
-            export_admin_config(db, User, Role, FloorMap, Resource)
+#            export_admin_config(db, User, Role, FloorMap, Resource)
             app.logger.info("Exported admin configuration to JSON.")
         except Exception as e:
             app.logger.exception("Error exporting admin config after initialization:")
@@ -537,8 +537,8 @@ def main():
     print("-" * 30)
     create_required_directories()
     # Ensure configuration JSON exists
-    cfg = load_config()
-    save_config(cfg)
+#    cfg = load_config()
+#    save_config(cfg)
     print("-" * 30)
 
     if os.path.exists(DB_PATH):
