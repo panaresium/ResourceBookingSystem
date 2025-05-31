@@ -1129,5 +1129,51 @@ class TestBulkResourceEditDelete(AppTests):
         self.assertIsNone(Resource.query.get(r2.id))
 
 
+class TestUserImportExport(AppTests):
+    def test_export_users(self):
+        admin = User(username='exportadmin', email='export@example.com', is_admin=True)
+        admin.set_password('adminpass')
+        db.session.add(admin)
+        db.session.commit()
+        self.login('exportadmin', 'adminpass')
+
+        user = User(username='exportuser', email='exportuser@example.com', is_admin=False)
+        user.set_password('pass')
+        db.session.add(user)
+        db.session.commit()
+
+        resp = self.client.get('/api/admin/users/export')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        usernames = [u['username'] for u in data['users']]
+        self.assertIn('exportuser', usernames)
+
+    def test_import_users_and_bulk_delete(self):
+        admin = User(username='importadmin', email='import@example.com', is_admin=True)
+        admin.set_password('adminpass')
+        db.session.add(admin)
+        db.session.commit()
+        self.login('importadmin', 'adminpass')
+
+        payload = {
+            'users': [
+                {'username': 'imp1', 'email': 'imp1@example.com', 'password': 'p1'},
+                {'username': 'imp2', 'email': 'imp2@example.com', 'password': 'p2'}
+            ]
+        }
+        resp = self.client.post('/api/admin/users/import', json=payload)
+        self.assertEqual(resp.status_code, 200)
+        u1 = User.query.filter_by(username='imp1').first()
+        u2 = User.query.filter_by(username='imp2').first()
+        self.assertIsNotNone(u1)
+        self.assertIsNotNone(u2)
+
+        del_payload = {'ids': [u1.id, u2.id]}
+        del_resp = self.client.delete('/api/admin/users/bulk', json=del_payload)
+        self.assertEqual(del_resp.status_code, 200)
+        self.assertIsNone(User.query.get(u1.id))
+        self.assertIsNone(User.query.get(u2.id))
+
+
 if __name__ == '__main__':
     unittest.main()

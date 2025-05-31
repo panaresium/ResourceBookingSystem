@@ -166,6 +166,18 @@ results:
 
 These filters can be combined. Only resources with `status='published'` are returned.
 
+## Bulk User Management
+
+Administrators can manage users in bulk from the **User Management** page. The interface provides buttons to export the current users to a JSON file and to import updates from a JSON file. You can also select multiple users and delete them in a single action.
+
+The backing API endpoints are:
+
+- `POST /api/admin/users/import` – create or update users from JSON data
+- `GET /api/admin/users/export` – download all users and roles as JSON
+- `DELETE /api/admin/users/bulk` – remove several users at once
+
+Exported JSON contains an array of users with their assigned roles. The import endpoint accepts the same structure, allowing you to add new users or update existing ones by ID.
+
 ## Deploying to Azure Web App
 
 This project includes a GitHub Actions workflow that can publish the application to Azure Web App. Configure these secrets in your repository settings:
@@ -192,11 +204,12 @@ Run the script with:
 ```bash
 python azure_backup.py
 ```
-All floor map and resource images from `static/` along with `data/site.db` will be uploaded.
+All floor map and resource images from `static/` along with `data/site.db` will be uploaded. The script stores hashes of previous uploads so unchanged files are skipped on subsequent runs.
 
 ### Automatic Backups
 
 When the app runs, it will attempt to restore `site.db` and uploaded images from the configured Azure File Shares.  A background job then backs up the database and media files at regular intervals.
 
 Configure the interval via the `AZURE_BACKUP_INTERVAL_MINUTES` environment variable (default `60`).  Files are only uploaded when their content changes.
+The hashing logic keeps a small `backup_hashes.json` file in `data/` to track the last uploaded state.
 
