@@ -872,7 +872,7 @@ body.high-contrast footer {
 
 /* Ensure admin dropdown in sidebar still looks okay */
 #sidebar details summary {
-    cursor: pointer;
+    /* cursor: pointer; Removed to make it less interactive for always-open admin menu */
     padding: 0.75em 1em; /* Match li padding */
     display: flex;
     align-items: center;
