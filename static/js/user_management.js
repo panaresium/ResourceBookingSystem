@@ -13,6 +13,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const userFormModalStatusDiv = document.getElementById('user-form-modal-status');
     const closeModalBtn = userFormModal ? userFormModal.querySelector('.close-modal-btn') : null;
 
+    const exportUsersBtn = document.getElementById('export-users-btn');
+    const importUsersBtn = document.getElementById('import-users-btn');
+    const importUsersFile = document.getElementById('import-users-file');
+    const deleteSelectedUsersBtn = document.getElementById('delete-selected-users-btn');
+    const selectAllUsersCheckbox = document.getElementById('select-all-users');
+
     const userIdInput = document.getElementById('user-id');
     const usernameInput = document.getElementById('username');
     const emailInput = document.getElementById('email');
@@ -63,6 +69,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (users && users.length > 0) {
                 users.forEach(user => {
                     const row = usersTableBody.insertRow();
+                    const selectCell = row.insertCell();
+                    selectCell.innerHTML = `<input type="checkbox" class="select-user-checkbox" data-user-id="${user.id}">`;
                     row.insertCell().textContent = user.id;
                     row.insertCell().textContent = user.username;
                     row.insertCell().textContent = user.email;
@@ -81,7 +89,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 hideMessage(userManagementStatusDiv);
             } else {
-                usersTableBody.innerHTML = '<tr><td colspan="6">No users found.</td></tr>';
+                usersTableBody.innerHTML = '<tr><td colspan="7">No users found.</td></tr>';
                 showSuccess(userManagementStatusDiv, 'No users to display.');
             }
         } catch (error) {
@@ -104,6 +112,77 @@ document.addEventListener('DOMContentLoaded', function() {
             if (userFilterAdminSelect) userFilterAdminSelect.value = '';
             currentFilters = {};
             fetchAndDisplayUsers(currentFilters);
+        });
+    }
+
+    if (exportUsersBtn) {
+        exportUsersBtn.addEventListener('click', async () => {
+            showLoading(userManagementStatusDiv, 'Exporting users...');
+            try {
+                const data = await apiCall('/api/admin/users/export');
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'users_export.json';
+                a.click();
+                URL.revokeObjectURL(url);
+                showSuccess(userManagementStatusDiv, 'Export complete.');
+            } catch (err) {
+                console.error(err);
+            }
+        });
+    }
+
+    if (importUsersBtn && importUsersFile) {
+        importUsersBtn.addEventListener('click', () => importUsersFile.click());
+        importUsersFile.addEventListener('change', async () => {
+            const file = importUsersFile.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const json = JSON.parse(text);
+                showLoading(userManagementStatusDiv, 'Importing users...');
+                await apiCall('/api/admin/users/import', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(json)
+                }, userManagementStatusDiv);
+                fetchAndDisplayUsers(currentFilters);
+            } catch (e) {
+                console.error(e);
+                showError(userManagementStatusDiv, 'Import failed.');
+            } finally {
+                importUsersFile.value = '';
+            }
+        });
+    }
+
+    if (selectAllUsersCheckbox) {
+        selectAllUsersCheckbox.addEventListener('change', () => {
+            const checkboxes = usersTableBody.querySelectorAll('.select-user-checkbox');
+            checkboxes.forEach(cb => cb.checked = selectAllUsersCheckbox.checked);
+        });
+    }
+
+    if (deleteSelectedUsersBtn) {
+        deleteSelectedUsersBtn.addEventListener('click', async () => {
+            const ids = Array.from(usersTableBody.querySelectorAll('.select-user-checkbox:checked')).map(cb => parseInt(cb.dataset.userId, 10));
+            if (ids.length === 0) {
+                showError(userManagementStatusDiv, 'No users selected.');
+                return;
+            }
+            if (!confirm(`Are you sure you want to delete ${ids.length} selected users?`)) return;
+            showLoading(userManagementStatusDiv, 'Deleting users...');
+            try {
+                await apiCall('/api/admin/users/bulk', {
+                    method: 'DELETE',
+                    body: JSON.stringify({ ids })
+                }, userManagementStatusDiv);
+                fetchAndDisplayUsers(currentFilters);
+            } catch (err) {
+                console.error(err);
+            }
         });
     }
 
