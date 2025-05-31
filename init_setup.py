@@ -579,6 +579,12 @@ def init_db(force=False):
             try:
                 upload_database(versioned=False)
                 upload_media()
+                try:
+                    from app import export_admin_config
+                    export_admin_config()
+                except Exception as exc:
+                    print(f"Failed to export admin config: {exc}")
+
                 upload_config()
             except Exception as exc:
                 print(f"Failed to upload data to Azure: {exc}")
@@ -612,6 +618,11 @@ def main():
     try:
         init_db()
         print("Database initialization process completed.")
+        try:
+            from app import export_admin_config
+            export_admin_config()
+        except Exception as exc:
+            print(f"Failed to export admin config: {exc}")
     except Exception as e:
         print(f"An error occurred during database initialization: {e}")
         print("Please check the output from init_db for more details, or run this script again if issues persist.")
