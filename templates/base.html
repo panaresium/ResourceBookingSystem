@@ -36,17 +36,8 @@
     <nav id="sidebar" class="collapsed">
         <button id="sidebar-toggle" aria-label="{{ _('Toggle menu') }}">&#9776;</button>
         <ul>
-
-            <li><a href="{{ url_for('serve_index') }}"><span class="menu-icon" aria-hidden="true">🏠</span><span class="menu-text">{{ _('Home') }}</span></a></li>
-            <li><a href="{{ url_for('serve_resources') }}"><span class="menu-icon" aria-hidden="true">📁</span><span class="menu-text">{{ _('View Resources') }}</span></a></li>
-            <li><a href="{{ url_for('serve_calendar') }}"><span class="menu-icon" aria-hidden="true">📅</span><span class="menu-text">{{ _('Calendar') }}</span></a></li>
-            
-            {# General links visible to all - JavaScript will manage the display of login/logout and user info #}
-
-            {# Container for 'My Bookings' - shown by JS when logged in #}
-            <li>
-                 <a href="{{ url_for('serve_my_bookings_page') }}"><span class="menu-icon" aria-hidden="true">📖</span><span class="menu-text">{{ _('My Bookings') }}</span></a>
-            </li>
+            {# General navigation links (Home, View Resources, Calendar, My Bookings) are now in the header only. #}
+            {# The sidebar, when visible for admins, should only contain admin-specific links. #}
             
             {# Container for Admin Maps link - shown by JS if admin #}
 
