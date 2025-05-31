@@ -200,8 +200,10 @@ def restore_from_share():
 
 
 def main():
+
     backup_if_changed()
     print('Backup completed.')
+
 
 
 
