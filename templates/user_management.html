@@ -5,6 +5,10 @@
 {% block content %}
     <h1>{{ _('User Management') }}</h1>
     <button id="add-new-user-btn" class="button">{{ _('Add New User') }}</button>
+    <button id="export-users-btn" class="button">{{ _('Export Users') }}</button>
+    <button id="import-users-btn" class="button">{{ _('Import Users') }}</button>
+    <input type="file" id="import-users-file" accept="application/json" style="display:none;">
+    <button id="delete-selected-users-btn" class="button danger">{{ _('Delete Selected') }}</button>
     <div class="filters-section" style="margin-top:15px;">
         <h3>{{ _('Filters') }}</h3>
         <label for="user-filter-username">{{ _('Username:') }}</label>
@@ -26,6 +30,7 @@
     <table id="users-table" class="styled-table" style="margin-top: 15px;">
         <thead>
             <tr>
+                <th><input type="checkbox" id="select-all-users"></th>
                 <th>{{ _('ID') }}</th>
                 <th>{{ _('Username') }}</th>
                 <th>{{ _('Email') }}</th>
