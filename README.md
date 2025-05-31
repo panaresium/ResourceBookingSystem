@@ -90,6 +90,7 @@ The database is excluded from version control, but the `azure_backup.py` script
 automatically uploads `data/site.db` to Azure File Share whenever its contents
 change.
 You should see messages indicating success.
+The initialization also creates `data/admin_config.json` containing example users, roles and resources. If this file already exists, it will be loaded and used to populate the database. Any changes made to admin records are written back to this JSON file so it can be easily backed up or edited.
 Pass `force=True` if you want to **reset and wipe** existing data:
    ```python
    >>> init_db(force=True)
@@ -194,7 +195,7 @@ Make sure the database is initialized by running `python init_setup.py` locally 
 
 ## Backing Up Data to Azure File Share
 
-Use `azure_backup.py` to upload the SQLite database and uploaded images to an Azure File Share. The script reads these environment variables:
+Use `azure_backup.py` to upload the SQLite database, uploaded images, and the admin configuration JSON (`data/admin_config.json`) to an Azure File Share. The script reads these environment variables:
 
 - `AZURE_STORAGE_CONNECTION_STRING` – connection string to your storage account
 - `AZURE_DB_SHARE` – file share name for database backups (default `db-backups`)
@@ -206,6 +207,7 @@ Run the script with:
 python azure_backup.py
 ```
 All floor map and resource images from `static/` along with `data/site.db` will be uploaded. The script stores hashes of previous uploads so unchanged files are skipped on subsequent runs. During the process, log messages indicate whether `site.db` was uploaded or skipped because it did not change.
+`data/admin_config.json` is included in these backups so any configuration changes are preserved.
 
 ### Automatic Backups
 
