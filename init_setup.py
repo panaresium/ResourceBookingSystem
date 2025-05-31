@@ -354,6 +354,39 @@ def init_db(force=False):
             db.session.rollback()
             app.logger.exception("Error committing deletions during DB initialization:")
 
+        app.logger.info("Creating default roles and users...")
+        try:
+            admin_role = Role(
+                name="Administrator",
+                description="Full system access",
+                permissions="all_permissions,view_analytics",
+            )
+            standard_role = Role(
+                name="StandardUser",
+                description="Can make bookings and view resources",
+                permissions="make_bookings,view_resources",
+            )
+            admin_user = User(
+                username="admin",
+                email="admin@example.com",
+                password_hash=generate_password_hash("admin", method="pbkdf2:sha256"),
+                is_admin=True,
+            )
+            standard_user = User(
+                username="user",
+                email="user@example.com",
+                password_hash=generate_password_hash("userpass", method="pbkdf2:sha256"),
+                is_admin=False,
+            )
+            admin_user.roles.append(admin_role)
+            standard_user.roles.append(standard_role)
+            db.session.add_all([admin_role, standard_role, admin_user, standard_user])
+            db.session.commit()
+            app.logger.info("Default roles and users created.")
+        except Exception:
+            db.session.rollback()
+            app.logger.exception("Error creating default roles or users:")
+
 
         admin_user_for_perms = User.query.filter_by(username='admin').first()
         standard_user_for_perms = User.query.filter_by(username='user').first()
