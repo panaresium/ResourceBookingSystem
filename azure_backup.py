@@ -20,6 +20,7 @@ STATIC_DIR = os.path.join(BASE_DIR, 'static')
 FLOOR_MAP_UPLOADS = os.path.join(STATIC_DIR, 'floor_map_uploads')
 RESOURCE_UPLOADS = os.path.join(STATIC_DIR, 'resource_uploads')
 HASH_FILE = os.path.join(DATA_DIR, 'backup_hashes.json')
+CONFIG_JSON = os.path.join(DATA_DIR, 'admin_config.json')
 
 # Module-level logger used for backup operations
 logger = logging.getLogger(__name__)
@@ -200,6 +201,15 @@ def backup_if_changed():
                 hashes[rel] = f_hash
                 logger.info("Uploaded media file '%s' to share '%s'", rel, media_share)
 
+    # Admin configuration JSON backup
+    if os.path.exists(CONFIG_JSON):
+        cfg_hash = _hash_file(CONFIG_JSON)
+        cfg_rel = os.path.basename(CONFIG_JSON)
+        if hashes.get(cfg_rel) != cfg_hash:
+            upload_file(media_client, CONFIG_JSON, cfg_rel)
+            hashes[cfg_rel] = cfg_hash
+            logger.info("Uploaded config '%s' to share '%s'", cfg_rel, media_share)
+
     _save_hashes(hashes)
 
 
@@ -223,6 +233,8 @@ def restore_from_share():
                 file_path = f"{prefix}/{item['name']}"
                 dest = os.path.join(STATIC_DIR, prefix, item['name'])
                 download_file(media_client, file_path, dest)
+        # Admin configuration JSON
+        download_file(media_client, os.path.basename(CONFIG_JSON), CONFIG_JSON)
 
 
 def main():
