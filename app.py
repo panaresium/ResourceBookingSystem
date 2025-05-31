@@ -2076,19 +2076,6 @@ def import_users():
         app.logger.exception("Error importing users:")
         return jsonify({'error': 'Failed to import users due to a server error.'}), 500
 
-@app.route('/api/admin/manual_backup', methods=['POST'])
-@login_required
-def manual_backup():
-    if not current_user.is_admin:
-        return jsonify({'error': 'Permission denied.'}), 403
-    if not backup_if_changed:
-        return jsonify({'error': 'Backup service unavailable.'}), 500
-    try:
-        backup_if_changed()
-        return jsonify({'message': 'Backup completed.'}), 200
-    except Exception:
-        app.logger.exception('Manual backup failed:')
-        return jsonify({'error': 'Manual backup failed.'}), 500
 
 # --- Waitlist Management APIs ---
 @app.route('/api/admin/waitlist', methods=['GET'])

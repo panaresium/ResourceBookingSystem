@@ -1175,23 +1175,5 @@ class TestUserImportExport(AppTests):
         self.assertIsNone(User.query.get(u2.id))
 
 
-class TestManualBackup(AppTests):
-    @unittest.mock.patch('app.backup_if_changed')
-    def test_manual_backup_endpoint(self, mock_backup):
-        admin = User(username='backupadmin', email='b@example.com', is_admin=True)
-        admin.set_password('pass')
-        db.session.add(admin)
-        db.session.commit()
-        self.login('backupadmin', 'pass')
-
-        resp = self.client.post('/api/admin/manual_backup')
-        self.assertEqual(resp.status_code, 200)
-        self.assertTrue(mock_backup.called)
-        self.logout()
-
-        self.login('testuser', 'password')
-        resp2 = self.client.post('/api/admin/manual_backup')
-        self.assertEqual(resp2.status_code, 403)
-
 if __name__ == '__main__':
     unittest.main()

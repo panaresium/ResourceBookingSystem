@@ -51,12 +51,16 @@ nav.sidebar ul {
     list-style-type: none;
     padding: 0;
     margin: 0;
+}
+
+body.with-sidebar nav ul {
     display: flex;
     flex-direction: column;
 }
 
-nav.sidebar ul li {
-    margin: 10px 0;
+nav ul li {
+    margin: 0;
+
 }
 
 nav ul li a {
@@ -910,4 +914,60 @@ body.high-contrast input[type="button"]:hover {
 #resource-buttons-container {
     /* Existing styles should be fine, but if it was a strict grid itself, 
        it might need adjustment. Assuming it's a block container. */
+}
+
+/* Sidebar Layout */
+body.with-sidebar {
+    display: flex;
+    min-height: 100vh;
+}
+
+#sidebar {
+    background-color: var(--background-color-dark);
+    color: var(--text-color-light);
+    width: 200px;
+    transition: width 0.3s;
+    flex-shrink: 0;
+    overflow: hidden;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+}
+
+#sidebar.collapsed {
+    width: 50px;
+}
+
+#sidebar button#sidebar-toggle {
+    background: none;
+    border: none;
+    color: var(--text-color-light);
+    cursor: pointer;
+    font-size: 1.2em;
+    margin: 0 0.5em 0.5em;
+}
+
+#sidebar ul {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+
+#sidebar ul li {
+    padding: 0.5em 1em;
+    white-space: nowrap;
+}
+
+#sidebar ul li a {
+    color: var(--text-color-light);
+    text-decoration: none;
+    display: block;
+}
+
+body.with-sidebar #main-content {
+    flex-grow: 1;
+    margin-left: 200px;
+    transition: margin-left 0.3s;
+}
+
+body.with-sidebar.sidebar-collapsed #main-content {
+    margin-left: 50px;
 }
