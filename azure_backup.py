@@ -89,7 +89,10 @@ def upload_file(share_client, source_path, file_path):
     file_client = share_client.get_file_client(file_path)
     with open(source_path, 'rb') as f:
         data = f.read()
-    file_client.upload_file(data, overwrite=True)
+    # ShareFileClient.upload_file does not support an 'overwrite' parameter.
+    # Passing it causes a TypeError when the request is sent. Simply uploading
+    # the data will overwrite the file if it already exists.
+    file_client.upload_file(data)
 
 
 def download_file(share_client, file_path, dest_path):
@@ -147,7 +150,13 @@ def backup_media():
 
 
 def backup_if_changed():
-    """Backup DB and media files only if their hashes changed."""
+    """Backup the SQLite database and media files only when their hashes change.
+
+    The database file lives in ``data/site.db`` and is not committed to the
+    repository. This function uploads that file along with any images under
+    ``static/floor_map_uploads`` and ``static/resource_uploads`` to the
+    configured Azure File Shares.
+    """
     hashes = _load_hashes()
     service_client = _get_service_client()
 

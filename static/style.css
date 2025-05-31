@@ -104,9 +104,11 @@ nav ul li a:focus {
 }
 #sidebar.collapsed .menu-text {
     display: none; /* hide text when collapsed */
+
 }
 #sidebar.collapsed #welcome-message-container {
     display: none !important;
+
 }
 #sidebar.collapsed li {
     text-align: center;
@@ -115,6 +117,7 @@ nav ul li a:focus {
     display: flex;
     justify-content: center; /* center icons horizontally */
 }
+
 #sidebar.collapsed li button {
     display: flex;
     justify-content: center;
@@ -123,6 +126,7 @@ nav ul li a:focus {
     display: flex;
     justify-content: center;
 }
+
 #sidebar.collapsed summary {
     display: flex;
     justify-content: center;
