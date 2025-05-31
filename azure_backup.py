@@ -150,7 +150,13 @@ def backup_media():
 
 
 def backup_if_changed():
-    """Backup DB and media files only if their hashes changed."""
+    """Backup the SQLite database and media files only when their hashes change.
+
+    The database file lives in ``data/site.db`` and is not committed to the
+    repository. This function uploads that file along with any images under
+    ``static/floor_map_uploads`` and ``static/resource_uploads`` to the
+    configured Azure File Shares.
+    """
     hashes = _load_hashes()
     service_client = _get_service_client()
 

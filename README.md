@@ -85,9 +85,12 @@ The application uses an SQLite database to store resource information. If you ha
    >>> from init_setup import init_db
    >>> init_db()  # Creates tables and adds sample data if the database is empty
    ```
-   This will create a `site.db` file in the `data/` directory and set up the tables.
-   You should see messages indicating success.
-   Pass `force=True` if you want to **reset and wipe** existing data:
+This will create a `site.db` file in the `data/` directory and set up the tables.
+The database is excluded from version control, but the `azure_backup.py` script
+automatically uploads `data/site.db` to Azure File Share whenever its contents
+change.
+You should see messages indicating success.
+Pass `force=True` if you want to **reset and wipe** existing data:
    ```python
    >>> init_db(force=True)
    ```
