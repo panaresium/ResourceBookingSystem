@@ -18,6 +18,7 @@ from app import (
 from werkzeug.security import generate_password_hash
 from datetime import datetime, date, timedelta, time
 from add_resource_tags_column import add_tags_column
+from json_config import load_config, save_config, import_admin_data, export_admin_config
 
 AZURE_PRIMARY_STORAGE = bool(os.environ.get("AZURE_PRIMARY_STORAGE"))
 if AZURE_PRIMARY_STORAGE:
@@ -25,8 +26,10 @@ if AZURE_PRIMARY_STORAGE:
         from azure_storage import (
             download_database,
             download_media,
+            download_config,
             upload_database,
             upload_media,
+            upload_config,
         )
     except Exception as exc:  # pragma: no cover - optional
         print(f"Warning: Azure storage unavailable: {exc}")
@@ -115,6 +118,7 @@ def create_required_directories():
         print("Downloading media from Azure storage...")
         try:
             download_media()
+            download_config()
         except Exception as exc:
             print(f"Failed to download media from Azure: {exc}")
 
@@ -354,72 +358,13 @@ def init_db(force=False):
             db.session.rollback()
             app.logger.exception("Error committing deletions during DB initialization:")
 
-        app.logger.info("Adding default users (admin/admin, user/userpass)...")
+        # Populate admin configuration from JSON
         try:
-            default_users = [
-                User(
-                    username='admin',
-                    email='admin@example.com',
-                    password_hash=generate_password_hash('admin', method='pbkdf2:sha256'),
-                    is_admin=True,
-                ),
-                User(
-                    username='user',
-                    email='user@example.com',
-                    password_hash=generate_password_hash('userpass', method='pbkdf2:sha256'),
-                    is_admin=False,
-                ),
-            ]
-            db.session.bulk_save_objects(default_users)
-            db.session.commit()
-            app.logger.info(f"Successfully added {len(default_users)} default users.")
+            import_admin_data(db, User, Role, FloorMap, Resource)
+            app.logger.info("Imported admin configuration from JSON.")
         except Exception as e:
             db.session.rollback()
-            app.logger.exception("Error adding default users during DB initialization:")
-
-        app.logger.info("Adding default roles...")
-        try:
-            admin_role = Role(
-                name="Administrator",
-                description="Full system access",
-                permissions="all_permissions,view_analytics",
-            )
-            standard_role = Role(
-                name="StandardUser",
-                description="Can make bookings and view resources",
-                permissions="make_bookings,view_resources",
-            )
-            db.session.add_all([admin_role, standard_role])
-            db.session.commit()
-            app.logger.info("Successfully added default roles.")
-        except Exception as e:
-            db.session.rollback()
-            app.logger.exception("Error adding default roles during DB initialization:")
-            # Ensure admin_role and standard_role are None if creation failed, to prevent errors below
-            admin_role = None
-            standard_role = None
-
-        app.logger.info("Assigning roles to default users...")
-        admin_user = User.query.filter_by(username='admin').first()
-        standard_user = User.query.filter_by(username='user').first()
-
-        # Fetch roles again in case of session issues or if they were not committed properly
-        if not admin_role:
-            admin_role = Role.query.filter_by(name="Administrator").first()
-        if not standard_role:
-            standard_role = Role.query.filter_by(name="StandardUser").first()
-
-        if admin_user and admin_role:
-            admin_user.roles.append(admin_role)
-        if standard_user and standard_role:
-            standard_user.roles.append(standard_role)
-
-        try:
-            db.session.commit()
-            app.logger.info("Successfully assigned roles to default users.")
-        except Exception as e:
-            db.session.rollback()
-            app.logger.exception("Error assigning roles to default users:")
+            app.logger.exception("Error importing admin config during DB initialization:")
 
         admin_user_for_perms = User.query.filter_by(username='admin').first()
         standard_user_for_perms = User.query.filter_by(username='user').first()
@@ -569,12 +514,19 @@ def init_db(force=False):
             )
 
         app.logger.info("Database initialization script completed.")
+        # Export current admin configuration to JSON
+        try:
+            export_admin_config(db, User, Role, FloorMap, Resource)
+            app.logger.info("Exported admin configuration to JSON.")
+        except Exception as e:
+            app.logger.exception("Error exporting admin config after initialization:")
 
         if AZURE_PRIMARY_STORAGE:
             print("Uploading database and media to Azure storage...")
             try:
                 upload_database(versioned=False)
                 upload_media()
+                upload_config()
             except Exception as exc:
                 print(f"Failed to upload data to Azure: {exc}")
 
@@ -585,7 +537,10 @@ def main():
     check_python_version()
     print("-" * 30)
     create_required_directories()
-    print("-" * 30) 
+    # Ensure configuration JSON exists
+    cfg = load_config()
+    save_config(cfg)
+    print("-" * 30)
 
     if os.path.exists(DB_PATH):
         print(f"Existing database found at {DB_PATH}. Verifying structure...")
