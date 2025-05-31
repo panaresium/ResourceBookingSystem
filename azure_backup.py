@@ -7,8 +7,10 @@ from azure.core.exceptions import ResourceNotFoundError
 
 try:
     from azure.storage.fileshare import ShareServiceClient
+    from azure.core.exceptions import ResourceNotFoundError
 except ImportError:  # pragma: no cover - azure sdk optional
     ShareServiceClient = None
+    ResourceNotFoundError = Exception
 
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -29,6 +31,7 @@ def _get_service_client():
 
 
 def _client_exists(client):
+
     """Return True if the given Share/File/Directory client exists."""
     if hasattr(client, 'exists'):
         return client.exists()
@@ -49,7 +52,6 @@ def _client_exists(client):
         except Exception:
             continue
     return False
-
 
 def _load_hashes():
     if os.path.exists(HASH_FILE):
@@ -207,6 +209,7 @@ def main():
     """Run an incremental backup when executed as a script."""
     backup_if_changed()
     print('Backup completed.')
+
 
 
 

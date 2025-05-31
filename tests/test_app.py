@@ -1193,6 +1193,5 @@ class TestManualBackup(AppTests):
         resp2 = self.client.post('/api/admin/manual_backup')
         self.assertEqual(resp2.status_code, 403)
 
-
 if __name__ == '__main__':
     unittest.main()

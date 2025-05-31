@@ -202,7 +202,7 @@ Run the script with:
 ```bash
 python azure_backup.py
 ```
-All floor map and resource images from `static/` along with `data/site.db` will be uploaded.
+All floor map and resource images from `static/` along with `data/site.db` will be uploaded. The script stores hashes of previous uploads so unchanged files are skipped on subsequent runs.
 
 ### Automatic Backups
 
@@ -211,4 +211,5 @@ When the app runs, it will attempt to restore `site.db` and uploaded images from
 Configure the interval via the `AZURE_BACKUP_INTERVAL_MINUTES` environment variable (default `60`).  Files are only uploaded when their content changes.
 
 Admins can trigger a backup on demand from the UI's **Manual Sync** button (or send a `POST` request to `/api/admin/manual_backup`).
+
 

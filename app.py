@@ -2076,7 +2076,6 @@ def import_users():
         app.logger.exception("Error importing users:")
         return jsonify({'error': 'Failed to import users due to a server error.'}), 500
 
-
 @app.route('/api/admin/manual_backup', methods=['POST'])
 @login_required
 def manual_backup():
