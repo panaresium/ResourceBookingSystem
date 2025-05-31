@@ -168,15 +168,20 @@ These filters can be combined. Only resources with `status='published'` are retu
 
 ## Bulk User Management
 
-Administrators can manage users in bulk from the **User Management** page. The interface provides buttons to export the current users to a JSON file and to import updates from a JSON file. You can also select multiple users and delete them in a single action.
+Admins can manage many users at once from the Users page.
 
-The backing API endpoints are:
+- **Export Users** – Download a JSON file describing all users and their roles.
+- **Import Users** – Upload a JSON file (same structure as the export) to create
+  new users or update existing ones. Missing required fields for new users are
+  reported and existing usernames/emails are validated.
+- **Delete Selected** – Select multiple users in the table and remove them in one
+  request.
 
-- `POST /api/admin/users/import` – create or update users from JSON data
-- `GET /api/admin/users/export` – download all users and roles as JSON
-- `DELETE /api/admin/users/bulk` – remove several users at once
+Corresponding API endpoints:
 
-Exported JSON contains an array of users with their assigned roles. The import endpoint accepts the same structure, allowing you to add new users or update existing ones by ID.
+- `GET /api/admin/users/export`
+- `POST /api/admin/users/import`
+- `DELETE /api/admin/users/bulk` with body `{ "ids": [1,2,3] }`
 
 ## Deploying to Azure Web App
 
@@ -211,5 +216,8 @@ All floor map and resource images from `static/` along with `data/site.db` will 
 When the app runs, it will attempt to restore `site.db` and uploaded images from the configured Azure File Shares.  A background job then backs up the database and media files at regular intervals.
 
 Configure the interval via the `AZURE_BACKUP_INTERVAL_MINUTES` environment variable (default `60`).  Files are only uploaded when their content changes.
-The hashing logic keeps a small `backup_hashes.json` file in `data/` to track the last uploaded state.
+
+Running `python azure_backup.py` performs the same check using cached file hashes
+so unchanged files are skipped during manual backups as well.
+
 
