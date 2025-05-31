@@ -22,7 +22,6 @@ DEFAULT_CONFIG = {
     "resources": [],
     "users": [],
     "permissions": []
-}
 
 def get_config_path():
     return CONFIG_FILE
@@ -34,12 +33,14 @@ def load_config():
         return DEFAULT_CONFIG.copy()
     try:
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+
             data = json.load(f)
     except Exception:
         return DEFAULT_CONFIG.copy()
     for key, value in DEFAULT_CONFIG.items():
         data.setdefault(key, value.copy() if isinstance(value, list) else value)
     return data
+
 
 
 def save_config(data):
