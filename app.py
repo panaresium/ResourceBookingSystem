@@ -181,6 +181,7 @@ db_uri = os.environ.get('AZURE_SQL_CONNECTION_STRING') or \
     os.environ.get('DATABASE_URL') or \
     'sqlite:///' + os.path.join(DATA_DIR, 'site.db')
 app.config['SQLALCHEMY_DATABASE_URI'] = db_uri
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # silence the warning
 
 # Flask-Mail configuration (defaults can be overridden with environment variables)
