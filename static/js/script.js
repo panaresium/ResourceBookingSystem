@@ -3112,4 +3112,23 @@ document.addEventListener('DOMContentLoaded', function() {
         logoutLinkDropdownGlobal.addEventListener('click', handleLogout);
     }
 
+    // --- Mobile Menu Toggle Logic ---
+    const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
+    const sidebarNav = document.getElementById('sidebar'); // nav#sidebar
+
+    if (mobileMenuToggle && sidebarNav) {
+        mobileMenuToggle.addEventListener('click', function() {
+            sidebarNav.classList.toggle('sidebar-open');
+            const isExpanded = sidebarNav.classList.contains('sidebar-open');
+            this.setAttribute('aria-expanded', isExpanded);
+            // Optional: Change hamburger to X icon
+            if (isExpanded) {
+                this.innerHTML = '<span>&times;</span>'; // Simple X
+                this.style.fontSize = '2rem'; // Adjust X size if needed
+            } else {
+                this.innerHTML = '<span></span><span></span><span></span>'; // Hamburger bars
+                this.style.fontSize = '1.5rem'; // Reset to original hamburger size
+            }
+        });
+    }
 });

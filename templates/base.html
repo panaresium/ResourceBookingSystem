@@ -11,6 +11,11 @@
 <body class="{{ 'no-sidebar' if not (current_user and current_user.is_authenticated and current_user.is_admin) else '' }}">
     <header class="app-header">
         <div class="header-content">
+            <button id="mobile-menu-toggle" class="hamburger-icon" aria-label="{{ _('Toggle mobile menu') }}" aria-expanded="false" aria-controls="sidebar">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
             <a href="{{ url_for('serve_index') }}"><span class="menu-icon" aria-hidden="true">🏠</span><span class="menu-text">{{ _('Home') }}</span></a>
             <a href="{{ url_for('serve_resources') }}"><span class="menu-icon" aria-hidden="true">📁</span><span class="menu-text">{{ _('View Resources') }}</span></a>
             <a href="{{ url_for('serve_calendar') }}"><span class="menu-icon" aria-hidden="true">📅</span><span class="menu-text">{{ _('Calendar') }}</span></a>
