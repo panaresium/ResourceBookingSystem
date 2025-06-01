@@ -1127,26 +1127,39 @@ nav#sidebar {
 }
 */
 
-/* Ensure event content in month view does not overflow */
+/* Styling for FullCalendar event content container */
+/* Properties like display and position are kept for basic layout. */
+/* Text wrapping, overflow, and max-height are removed as JS now handles truncation. */
 .fc-daygrid-event .fc-event-main-frame {
-    overflow-y: auto;   /* Enable vertical scrollbar if content overflows */
-    max-height: 3.6em;  /* Adjust as needed, allows approx 2-3 lines */
-    position: relative; /* For text-overflow to work correctly with children */
-    white-space: normal; /* Ensure text wrapping for all content */
-    /* overflow: visible; was here, replaced by overflow-y: auto */
+    display: block;
+    position: relative;
+    /* white-space: normal !important; */ /* Removed */
+    /* overflow-wrap: break-word !important; */ /* Removed */
+    /* word-wrap: break-word !important; */ /* Removed */
+    /* max-height: 3.6em !important; */ /* Removed */
+    /* overflow-y: auto !important; */ /* Removed */
+    /* FullCalendar's default overflow behavior will apply (usually hidden for event segments) */
 }
 
-.fc-daygrid-event .fc-event-main-frame b { /* Targeting the title */
-    display: block; /* Make it a block to control overflow */
-    white-space: normal; /* Allow text to wrap */
-    /* overflow: hidden; */ /* Not needed here, parent will clip */
-    /* text-overflow: ellipsis; */ /* Not needed if wrapping - text will wrap due to parent */
-    max-width: 100%; /* Ensure it respects container width */
+/* Styling for FullCalendar event titles */
+/* Text wrapping properties removed. */
+.fc-daygrid-event .fc-event-title { /* Common class for event titles */
+    display: block; /* Kept, as titles often benefit from block display */
+    /* white-space: normal !important; */ /* Removed */
+    /* overflow-wrap: break-word !important; */ /* Removed */
+    /* word-wrap: break-word !important; */ /* Removed */
 }
 
-/* For the time part, allow wrapping or also truncate if necessary */
-/* This part is trickier as it's a text node after a <br>. */
-/* We might rely on the parent's overflow:hidden for the time part,
-   or if it becomes an issue, wrap the time in a span within eventContent. */
-/* For now, let's assume the title is the primary concern for truncation. */
+/* Styling for the bold tag used for the title in calendar.js */
+/* Text wrapping properties removed. Max-width and display are kept. */
+.fc-daygrid-event .fc-event-main-frame b {
+    display: block;
+    max-width: 100%; /* Can be useful to prevent breaking out of cell if FC doesn't handle it */
+    /* white-space: normal !important; */ /* Removed */
+    /* overflow-wrap: break-word !important; */ /* Removed */
+    /* word-wrap: break-word !important; */ /* Removed */
+}
+
+/* Time part (text node) will inherit default text handling. */
+/* JavaScript truncation now manages its length. */
 ```

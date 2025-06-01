@@ -350,7 +350,16 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         eventContent: function(arg) {
             if (arg.view.type === 'dayGridMonth') {
-                let eventHtml = `<b>${arg.event.title}</b>`;
+                const MAX_TITLE_LENGTH = 20;
+                const MAX_TIME_LENGTH = 18; // Max length for "HH:MM - HH:MM UTC"
+
+                let displayTitle = arg.event.title;
+                if (arg.event.title.length > MAX_TITLE_LENGTH) {
+                    displayTitle = arg.event.title.substring(0, MAX_TITLE_LENGTH - 3) + "...";
+                }
+
+                let eventHtml = `<b>${displayTitle}</b>`;
+
                 if (arg.event.start) {
                     const startHours = arg.event.start.getUTCHours().toString().padStart(2, '0');
                     const startMinutes = arg.event.start.getUTCMinutes().toString().padStart(2, '0');
@@ -363,19 +372,36 @@ document.addEventListener('DOMContentLoaded', () => {
                         endTimeUTC = `${endHours}:${endMinutes}`;
                     }
 
-                    // Show time if not an all-day event or if time is not midnight
+                    let fullTimeString = '';
+                    // Construct the time string only if it's not an all-day event or if time is not midnight
                     if (!arg.event.allDay || (startTimeUTC !== '00:00' || (endTimeUTC && endTimeUTC !== '00:00'))) {
-                        eventHtml += `<br>${startTimeUTC}`;
+                        fullTimeString = startTimeUTC;
                         if (endTimeUTC && endTimeUTC !== startTimeUTC) {
-                            eventHtml += ` - ${endTimeUTC}`;
+                            fullTimeString += ` - ${endTimeUTC}`;
                         }
-                        eventHtml += ' UTC'; // Append UTC label
+                        fullTimeString += ' UTC';
+                    }
+
+                    if (fullTimeString) {
+                        let displayTime = fullTimeString;
+                        if (fullTimeString.length > MAX_TIME_LENGTH) {
+                            displayTime = fullTimeString.substring(0, MAX_TIME_LENGTH - 3) + "...";
+                        }
+                        eventHtml += `<br>${displayTime}`;
                     }
                 }
                 return { html: eventHtml };
             }
             // For other views, retain original behavior (bold title, FC handles time)
-            return { html: `<b>${arg.event.title}</b>` }; 
+            // Consider applying similar truncation for title here if needed for consistency
+            let displayTitleOtherView = arg.event.title;
+            // const MAX_TITLE_LENGTH_OTHER_VIEW = 30; // Example for other views
+            // if (arg.event.title.length > MAX_TITLE_LENGTH_OTHER_VIEW) {
+            //     displayTitleOtherView = arg.event.title.substring(0, MAX_TITLE_LENGTH_OTHER_VIEW - 3) + "...";
+            // }
+            // return { html: `<b>${displayTitleOtherView}</b>` };
+            // For now, keeping it as it was for other views, only month view is in scope
+            return { html: `<b>${arg.event.title}</b>` };
         }
     });
 
