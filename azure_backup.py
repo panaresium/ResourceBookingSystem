@@ -1126,15 +1126,15 @@ def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
     logger.info(f"{log_prefix}Attempting to delete backup set for timestamp: {timestamp_str}")
     _emit_progress(socketio_instance, task_id, event_name, f"Starting deletion for backup set: {timestamp_str}")
 
-    overall_success = True  # Assume success, set to False on specific failures
-    critical_component_deleted_or_not_found = False # Tracks if at least one critical item was handled
+    overall_success = True
+    critical_component_processed = False # Tracks if critical components (DB, Manifest) were processed (deleted or confirmed not found)
 
     try:
         service_client = _get_service_client()
 
-        # Component deletion logic encapsulated for clarity
-        def _delete_file_if_exists(share_client, file_path, component_name, share_name_for_log):
-            nonlocal overall_success, critical_component_deleted_or_not_found
+        # --- Helper: Delete File ---
+        def _delete_file_if_exists(share_client, file_path, component_name, share_name_for_log, is_critical=False):
+            nonlocal overall_success, critical_component_processed
             _emit_progress(socketio_instance, task_id, event_name, f"Checking for {component_name}...", file_path)
             file_client = share_client.get_file_client(file_path)
             if _client_exists(file_client):
@@ -1142,50 +1142,91 @@ def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
                     file_client.delete_file()
                     logger.info(f"{log_prefix}Successfully deleted {component_name} '{file_path}' from share '{share_name_for_log}'.")
                     _emit_progress(socketio_instance, task_id, event_name, f"{component_name} deleted.", "SUCCESS")
-                    if component_name == "Database Backup" or component_name == "Backup Manifest": # Mark as critical
-                        critical_component_deleted_or_not_found = True
+                    if is_critical: critical_component_processed = True
+                    return True
                 except Exception as e:
                     logger.error(f"{log_prefix}Failed to delete {component_name} '{file_path}' from share '{share_name_for_log}'. Exception: {type(e).__name__}, Details: {str(e)}", exc_info=True)
                     _emit_progress(socketio_instance, task_id, event_name, f"Failed to delete {component_name} ({type(e).__name__})", f"ERROR: {str(e)}")
-                    overall_success = False # Any failure during deletion of an existing file is a problem
+                    if is_critical: overall_success = False # Failure to delete an existing critical file is a failure
+                    return False
             else:
                 logger.info(f"{log_prefix}{component_name} file '{file_path}' not found on share '{share_name_for_log}'. Skipping deletion.")
                 _emit_progress(socketio_instance, task_id, event_name, f"{component_name} not found, skipping.", "INFO")
-                if component_name == "Database Backup" or component_name == "Backup Manifest":
-                     critical_component_deleted_or_not_found = True # Still counts as handled if not found
+                if is_critical: critical_component_processed = True
+                return True # Not finding an optional or even critical file isn't a failure of the delete *operation*
 
-        def _delete_directory_if_exists(share_client, dir_path, component_name, share_name_for_log):
-            nonlocal overall_success
+        # --- Helper: Delete Directory ---
+        def _delete_directory_if_exists(share_client, dir_path, component_name, share_name_for_log, is_critical=False):
+            nonlocal overall_success # `critical_component_processed` not used here as directories are media, not critical for this flag
             _emit_progress(socketio_instance, task_id, event_name, f"Checking for {component_name} directory...", dir_path)
             dir_client = share_client.get_directory_client(dir_path)
+            dir_path_for_emit = dir_path # Used for emit messages, as dir_path might be modified by loop
+
             if _client_exists(dir_client):
                 try:
-                    dir_client.delete_directory() # This deletes the directory and its contents
+                    # List and delete files within the directory first
+                    items_in_dir = list(dir_client.list_directories_and_files())
+                    logger.info(f"{log_prefix}Found {len(items_in_dir)} items in directory '{dir_path}'.")
+                    _emit_progress(socketio_instance, task_id, event_name, f"Found {len(items_in_dir)} items in {component_name} directory '{dir_path_for_emit}'. Attempting to delete contents.")
+
+                    for item in items_in_dir:
+                        item_name_for_log = item['name']
+                        if item['is_directory']:
+                            # Note: Current backup structure does not create sub-directories within these media backup dirs.
+                            # If it did, recursive deletion would be needed here.
+                            # For now, log a warning if a sub-directory is unexpectedly found.
+                            logger.warning(f"{log_prefix}Unexpected sub-directory '{item_name_for_log}' found in '{dir_path}'. This structure is not standard. Skipping this sub-directory.")
+                            _emit_progress(socketio_instance, task_id, event_name, f"Skipping unexpected sub-directory '{item_name_for_log}' in '{dir_path_for_emit}'.", "WARNING")
+                            continue # Skip to next item
+
+                        # It's a file, attempt to delete it
+                        file_in_dir_client = dir_client.get_file_client(item_name_for_log)
+                        try:
+                            logger.info(f"{log_prefix}Attempting to delete file '{item_name_for_log}' in directory '{dir_path}'.")
+                            _emit_progress(socketio_instance, task_id, event_name, f"Deleting file {item_name_for_log} in {dir_path_for_emit} for {component_name}")
+                            file_in_dir_client.delete_file()
+                            logger.info(f"{log_prefix}Successfully deleted file '{item_name_for_log}' in directory '{dir_path}'.")
+                            _emit_progress(socketio_instance, task_id, event_name, f"Deleted file {item_name_for_log} in {dir_path_for_emit}", "SUCCESS")
+                        except Exception as e_file:
+                            logger.error(f"{log_prefix}Failed to delete file '{item_name_for_log}' in directory '{dir_path}'. Exception: {type(e_file).__name__}, Details: {str(e_file)}", exc_info=True)
+                            _emit_progress(socketio_instance, task_id, event_name, f"Error deleting file {item_name_for_log} in {dir_path_for_emit}", f"ERROR: {str(e_file)}")
+                            overall_success = False # Failure to delete a file within directory means directory delete will fail
+                            return False # Critical failure for this helper's operation
+
+                    # All contents attempted to be deleted, now delete the main directory
+                    logger.info(f"{log_prefix}Attempting to delete main directory '{dir_path}' for {component_name}.")
+                    dir_client.delete_directory()
                     logger.info(f"{log_prefix}Successfully deleted {component_name} directory '{dir_path}' from share '{share_name_for_log}'.")
-                    _emit_progress(socketio_instance, task_id, event_name, f"{component_name} directory deleted.", "SUCCESS")
-                except Exception as e:
-                    logger.error(f"{log_prefix}Failed to delete {component_name} directory '{dir_path}' from share '{share_name_for_log}'. Exception: {type(e).__name__}, Details: {str(e)}", exc_info=True)
+                    _emit_progress(socketio_instance, task_id, event_name, f"{component_name} directory and its contents deleted.", "SUCCESS")
+                    return True
+                except Exception as e: # Catch error during list_directories_and_files or final delete_directory
+                    logger.error(f"{log_prefix}Failed to delete {component_name} directory '{dir_path}' or its contents from share '{share_name_for_log}'. Exception: {type(e).__name__}, Details: {str(e)}", exc_info=True)
                     _emit_progress(socketio_instance, task_id, event_name, f"Failed to delete {component_name} directory ({type(e).__name__})", f"ERROR: {str(e)}")
                     overall_success = False
+                    return False
             else:
                 logger.info(f"{log_prefix}{component_name} directory '{dir_path}' not found on share '{share_name_for_log}'. Skipping deletion.")
                 _emit_progress(socketio_instance, task_id, event_name, f"{component_name} directory not found, skipping.", "INFO")
+                return True # Not finding directory is not a failure of delete operation
 
-        # Delete Database Backup and Manifest
+        # --- Main Deletion Logic ---
         db_share_name = os.environ.get('AZURE_DB_SHARE', 'db-backups')
         db_share_client = service_client.get_share_client(db_share_name)
         if _client_exists(db_share_client):
             db_backup_filename = f"{DB_FILENAME_PREFIX}{timestamp_str}.db"
             db_backup_path = f"{DB_BACKUPS_DIR}/{db_backup_filename}"
-            _delete_file_if_exists(db_share_client, db_backup_path, "Database Backup", db_share_name)
+            if not _delete_file_if_exists(db_share_client, db_backup_path, "Database Backup", db_share_name, is_critical=True):
+                overall_success = False
 
             manifest_filename = f"backup_manifest_{timestamp_str}.json"
             manifest_path = f"{DB_BACKUPS_DIR}/{manifest_filename}"
-            _delete_file_if_exists(db_share_client, manifest_path, "Backup Manifest", db_share_name)
+            if not _delete_file_if_exists(db_share_client, manifest_path, "Backup Manifest", db_share_name, is_critical=True):
+                overall_success = False
         else:
             logger.warning(f"{log_prefix}Database backup share '{db_share_name}' not found. Skipping DB and Manifest backup deletion for set {timestamp_str}.")
             _emit_progress(socketio_instance, task_id, event_name, f"Database share '{db_share_name}' not found. Skipping DB & Manifest.", "WARNING")
             overall_success = False # If DB share is missing, it's a significant issue
+            critical_component_processed = False # Explicitly mark critical components as not processed
 
         # Delete Map Configuration JSON Backup
         config_share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
@@ -1193,35 +1234,41 @@ def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
         if _client_exists(config_share_client):
             config_backup_filename = f"{MAP_CONFIG_FILENAME_PREFIX}{timestamp_str}.json"
             config_backup_path = f"{CONFIG_BACKUPS_DIR}/{config_backup_filename}"
-            _delete_file_if_exists(config_share_client, config_backup_path, "Map Configuration Backup", config_share_name)
+            if not _delete_file_if_exists(config_share_client, config_backup_path, "Map Configuration Backup", config_share_name):
+                # Not critical enough to set overall_success = False, but good to note if needed
+                pass
         else:
-            logger.warning(f"{log_prefix}Config backup share '{config_share_name}' not found. Skipping config backup deletion for set {timestamp_str}.")
-            _emit_progress(socketio_instance, task_id, event_name, f"Config share '{config_share_name}' not found. Skipping map config.", "WARNING")
-            # Not setting overall_success = False, as map config might be optional
+            logger.info(f"{log_prefix}Config backup share '{config_share_name}' not found. Skipping config backup deletion for set {timestamp_str}.")
+            _emit_progress(socketio_instance, task_id, event_name, f"Config share '{config_share_name}' not found. Skipping map config.", "INFO")
 
         # Delete Media Backups
         media_share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media')
         media_share_client = service_client.get_share_client(media_share_name)
         if _client_exists(media_share_client):
             remote_floor_map_dir = f"{MEDIA_BACKUPS_DIR_BASE}/floor_map_uploads_{timestamp_str}"
-            _delete_directory_if_exists(media_share_client, remote_floor_map_dir, "Floor Map Backup", media_share_name)
+            if not _delete_directory_if_exists(media_share_client, remote_floor_map_dir, "Floor Map Backup", media_share_name):
+                overall_success = False # If directory existed and failed to delete, consider it a failure for overall
 
             remote_resource_uploads_dir = f"{MEDIA_BACKUPS_DIR_BASE}/resource_uploads_{timestamp_str}"
-            _delete_directory_if_exists(media_share_client, remote_resource_uploads_dir, "Resource Uploads Backup", media_share_name)
+            if not _delete_directory_if_exists(media_share_client, remote_resource_uploads_dir, "Resource Uploads Backup", media_share_name):
+                overall_success = False # If directory existed and failed to delete, consider it a failure for overall
         else:
-            logger.warning(f"{log_prefix}Media backup share '{media_share_name}' not found. Skipping media backup deletion for set {timestamp_str}.")
-            _emit_progress(socketio_instance, task_id, event_name, f"Media share '{media_share_name}' not found. Skipping media.", "WARNING")
-            # Not setting overall_success = False, as media might be optional for some definitions of success
+            logger.info(f"{log_prefix}Media backup share '{media_share_name}' not found. Skipping media backup deletion for set {timestamp_str}.")
+            _emit_progress(socketio_instance, task_id, event_name, f"Media share '{media_share_name}' not found. Skipping media.", "INFO")
 
-        if not critical_component_deleted_or_not_found and not _client_exists(db_share_client) :
-             # If DB share didn't exist, then critical components weren't even attempted.
-             # This is a more severe case than just a file not being found.
-            overall_success = False
+        # Final check on critical component processing
+        if not critical_component_processed and not _client_exists(db_share_client):
+            # This condition confirms if DB share was missing AND thus critical components were never attempted.
+            # overall_success is already False from the DB share check, this is an additional log.
             logger.error(f"{log_prefix}Critical backup components (DB or Manifest on DB Share) could not be processed because the share '{db_share_name}' was missing.")
             _emit_progress(socketio_instance, task_id, event_name, "Critical components could not be processed due to missing DB share.", "ERROR")
+        elif not critical_component_processed and _client_exists(db_share_client):
+            # This case implies DB share existed, but both DB and Manifest files were not found.
+            # This is not necessarily an error for the delete operation itself.
+            logger.info(f"{log_prefix}Critical components (DB and Manifest) were not found on share '{db_share_name}', but share exists. Assuming already deleted or not part of this backup.")
 
 
-        final_status_detail = "SUCCESS" if overall_success else "FAILURE"
+        final_status_detail = "SUCCESS" if overall_success else "FAILURE" # FAILURE if any part of deletion of existing items failed OR critical share missing
         logger.info(f"{log_prefix}Deletion process for backup set {timestamp_str} completed. Overall success: {overall_success}")
         _emit_progress(socketio_instance, task_id, event_name, "Backup set deletion process finished.", final_status_detail)
         return overall_success
