@@ -4,14 +4,19 @@ import logging
 import sqlite3
 import json
 from datetime import datetime
-from azure.core.exceptions import ResourceNotFoundError
+from azure.core.exceptions import ResourceNotFoundError, HttpResponseError # Added HttpResponseError
 
 try:
     from azure.storage.fileshare import ShareServiceClient
-    from azure.core.exceptions import ResourceNotFoundError
+    # ResourceNotFoundError and HttpResponseError are already imported above if SDK is present
 except ImportError:  # pragma: no cover - azure sdk optional
     ShareServiceClient = None
-    ResourceNotFoundError = Exception
+    # Define ResourceNotFoundError and HttpResponseError as base Exception if SDK not present,
+    # so try-except blocks later don't cause NameError.
+    if 'ResourceNotFoundError' not in globals(): # Ensure it's not already defined
+        ResourceNotFoundError = Exception
+    if 'HttpResponseError' not in globals(): # Ensure it's not already defined
+        HttpResponseError = Exception
 
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -162,10 +167,32 @@ def download_file(share_client, file_path, dest_path):
     if not _client_exists(file_client):
         return False
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-    with open(dest_path, 'wb') as f:
+    try:
         downloader = file_client.download_file()
-        f.write(downloader.readall())
-    return True
+        # The primary way SDK signals critical issues is via exceptions during download_file() or readall().
+
+        content = downloader.readall() # This might raise HttpResponseError for 4xx/5xx
+
+        with open(dest_path, 'wb') as f:
+            f.write(content)
+
+        # After a successful download and write, explicitly log success for this file.
+        logger.info(f"Successfully downloaded '{file_path}' to '{dest_path}'.")
+        return True
+
+    except HttpResponseError as hre:
+        # This will catch HTTP errors like 404 (ResourceNotFound, though _client_exists should catch this first),
+        # 403 (Forbidden), 416 (InvalidRange), etc., that occur during download_file() or readall().
+        logger.error(f"Failed to download file '{file_path}' from share '{share_client.share_name}'. "
+                     f"Azure HTTP Error: {type(hre).__name__}, Status: {hre.status_code if hasattr(hre, 'status_code') else 'N/A'}, Details: {str(hre)}",
+                     exc_info=True) # Log with full traceback
+        return False
+    except Exception as e:
+        # Catch any other unexpected errors during download or file writing.
+        logger.error(f"An unexpected error occurred downloading file '{file_path}' from share '{share_client.share_name}'. "
+                     f"Exception: {type(e).__name__}, Details: {str(e)}",
+                     exc_info=True) # Log with full traceback
+        return False
 
 
 def backup_database():
