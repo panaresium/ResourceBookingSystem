@@ -122,7 +122,6 @@ def _ensure_directory_exists(share_client, directory_path):
             logger.info(f"Created directory '{directory_path}' on share '{share_client.share_name}'.")
         except Exception as e:
             logger.error(f"Failed to create directory '{directory_path}' on share '{share_client.share_name}': {e}")
-            # Depending on requirements, might re-raise or handle more gracefully
             raise
 
 
@@ -131,7 +130,13 @@ def upload_file(share_client, source_path, file_path):
     if directory_path:
         directory_client = share_client.get_directory_client(directory_path)
         if not _client_exists(directory_client):
-            directory_client.create_directory()
+            try:
+                logger.info(f"Attempting to create directory '{directory_path}' in share '{share_client.share_name}' from within upload_file.")
+                directory_client.create_directory()
+                logger.info(f"Successfully created directory '{directory_path}' in share '{share_client.share_name}'.")
+            except Exception as e:
+                logger.error(f"Failed to create directory '{directory_path}' in share '{share_client.share_name}' from within upload_file: {e}")
+                raise RuntimeError(f"Failed to create parent directory '{directory_path}' for file '{file_path}'. Original error: {e}")
     file_client = share_client.get_file_client(file_path)
     with open(source_path, 'rb') as f:
         data = f.read()
@@ -305,6 +310,7 @@ def create_full_backup(timestamp_str, map_config_data=None, socketio_instance=No
 
     if os.path.exists(local_db_path):
         try:
+            logger.info(f"Attempting database backup: Share='{db_share_client.share_name}', Path='{remote_db_path}', LocalSource='{local_db_path}'")
             upload_file(db_share_client, local_db_path, remote_db_path)
             logger.info(f"Successfully backed up database to '{db_share_name}/{remote_db_path}'.")
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'Database backup complete.')
@@ -337,6 +343,7 @@ def create_full_backup(timestamp_str, map_config_data=None, socketio_instance=No
             # Parent dir of remote_config_path is CONFIG_BACKUPS_DIR, which is already ensured.
             file_client = config_share_client.get_file_client(remote_config_path)
             config_json_bytes = json.dumps(map_config_data, indent=2).encode('utf-8')
+            logger.info(f"Attempting map configuration backup: Share='{config_share_client.share_name}', Path='{remote_config_path}'")
             file_client.upload_file(data=config_json_bytes, overwrite=True)
             logger.info(f"Successfully backed up map configuration to '{config_share_name}/{remote_config_path}'.")
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'Map configuration backup complete.')
@@ -365,6 +372,7 @@ def create_full_backup(timestamp_str, map_config_data=None, socketio_instance=No
                 remote_file_path = f"{remote_floor_map_dir}/{filename}"
                 _emit_progress(socketio_instance, task_id, 'backup_progress', f'Backing up floor map: {filename}', local_file_path)
                 try:
+                    logger.info(f"Attempting floor map backup: Share='{media_share_client.share_name}', Path='{remote_file_path}', LocalSource='{local_file_path}'")
                     upload_file(media_share_client, local_file_path, remote_file_path)
                     logger.info(f"Successfully backed up media file to '{media_share_name}/{remote_file_path}'.")
                 except Exception as e:
@@ -385,6 +393,7 @@ def create_full_backup(timestamp_str, map_config_data=None, socketio_instance=No
                 remote_file_path = f"{remote_resource_uploads_dir}/{filename}"
                 _emit_progress(socketio_instance, task_id, 'backup_progress', f'Backing up resource file: {filename}', local_file_path)
                 try:
+                    logger.info(f"Attempting resource image backup: Share='{media_share_client.share_name}', Path='{remote_file_path}', LocalSource='{local_file_path}'")
                     upload_file(media_share_client, local_file_path, remote_file_path)
                     logger.info(f"Successfully backed up media file to '{media_share_name}/{remote_file_path}'.")
                 except Exception as e:
@@ -506,6 +515,7 @@ def create_full_backup(timestamp_str, map_config_data=None, socketio_instance=No
             manifest_json_bytes = json.dumps(manifest_data, indent=2).encode('utf-8')
             # db_share_client is already defined and initialized
             manifest_file_client = db_share_client.get_file_client(remote_manifest_path)
+            logger.info(f"Attempting manifest upload: Share='{db_share_client.share_name}', Path='{remote_manifest_path}'")
             manifest_file_client.upload_file(data=manifest_json_bytes, overwrite=True)
             logger.info(f"Successfully uploaded backup manifest to '{db_share_name}/{remote_manifest_path}'.")
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backup manifest uploaded successfully.')
