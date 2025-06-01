@@ -14,6 +14,7 @@ from app import (
     FloorMap,
     resource_roles_table,
     user_roles_table,
+    BackupScheduleConfig, # Added import
 )
 from werkzeug.security import generate_password_hash
 from datetime import datetime, date, timedelta, time
@@ -314,7 +315,7 @@ def init_db(force=False):
                 return
 
         app.logger.info("Attempting to delete existing data in corrected order...")
-        # Corrected Deletion Order: AuditLog -> Booking -> resource_roles_table -> Resource -> FloorMap -> user_roles_table -> User -> Role
+        # Corrected Deletion Order: AuditLog -> Booking -> resource_roles_table -> Resource -> FloorMap -> user_roles_table -> User -> Role -> BackupScheduleConfig
         app.logger.info("Deleting existing AuditLog entries...")
         num_audit_logs_deleted = db.session.query(AuditLog).delete()
         app.logger.info(f"Deleted {num_audit_logs_deleted} AuditLog entries.")
@@ -347,6 +348,10 @@ def init_db(force=False):
         num_roles_deleted = db.session.query(Role).delete()
         app.logger.info(f"Deleted {num_roles_deleted} Roles.")
 
+        app.logger.info("Deleting existing BackupScheduleConfig entries...")
+        num_backup_configs_deleted = db.session.query(BackupScheduleConfig).delete()
+        app.logger.info(f"Deleted {num_backup_configs_deleted} BackupScheduleConfig entries.")
+
         try:
             db.session.commit()
             app.logger.info("Successfully committed deletions of existing data.")
@@ -359,7 +364,7 @@ def init_db(force=False):
             admin_role = Role(
                 name="Administrator",
                 description="Full system access",
-                permissions="all_permissions,view_analytics,manage_bookings",
+                permissions="all_permissions,view_analytics,manage_bookings,manage_system",
             )
             standard_role = Role(
                 name="StandardUser",
@@ -392,6 +397,24 @@ def init_db(force=False):
         except Exception:
             db.session.rollback()
             app.logger.exception("Error creating default roles or users:")
+
+        app.logger.info("Creating default backup schedule configuration...")
+        try:
+            if not db.session.query(BackupScheduleConfig).first():
+                default_schedule = BackupScheduleConfig(
+                    is_enabled=False,
+                    schedule_type='daily',
+                    time_of_day=time(2, 0),  # Default to 2:00 AM
+                    last_run_date=None      # Initialize new field
+                )
+                db.session.add(default_schedule)
+                db.session.commit()
+                app.logger.info("Created default backup schedule configuration (disabled).")
+            else:
+                app.logger.info("Backup schedule configuration already exists.")
+        except Exception as e:
+            db.session.rollback()
+            app.logger.exception("Error creating default backup schedule configuration:")
 
         admin_user_for_perms = User.query.filter_by(username='admin').first()
         standard_user_for_perms = User.query.filter_by(username='user').first()
