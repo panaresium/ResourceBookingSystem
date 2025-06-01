@@ -63,8 +63,8 @@
                 <li id="admin-bookings-nav-link" style="display: none;">
                     <a href="{{ url_for('serve_admin_bookings_page') }}">{{ _('Admin Bookings') }}</a>
                 </li>
-                <li id="manual-backup-nav-link" style="display:none;">
-                    <button class="button" id="manual-backup-btn" type="button">{{ _('Manual Sync') }}</button>
+                <li id="backup-restore-nav-link" style="display: none;">
+                    <a href="{{ url_for('serve_backup_restore_page') }}">{{ _('Backup & Restore') }}</a>
                 </li>
                 </ul>
             </details>
@@ -72,6 +72,7 @@
         </ul>
     </nav>
     {% endif %}
+    {# The manual-backup-status div seems related to the removed button, might be removed or repurposed later if not needed #}
     <div id="manual-backup-status" class="status-message" style="display:none; margin: 10px;"></div>
     <div id="main-content">
     <main>
