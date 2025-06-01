@@ -31,7 +31,8 @@ try:
         create_full_backup,       # Added
         list_available_backups,   # Added
         restore_full_backup,      # Added
-        verify_backup_set         # Added for health checks
+        verify_backup_set,        # Added for health checks
+        delete_backup_set         # Added for deleting backup sets
     )
     import azure_backup # Import the module itself to access constants like FLOOR_MAP_UPLOADS
 except Exception:
@@ -42,6 +43,7 @@ except Exception:
     list_available_backups = None # Added fallback
     restore_full_backup = None    # Added fallback
     verify_backup_set = None      # Added fallback
+    delete_backup_set = None      # Added fallback for delete_backup_set
     azure_backup = None           # Added fallback for the module itself
 
 # Attempt to import APScheduler; provide a basic fallback if unavailable
@@ -4639,9 +4641,64 @@ if __name__ == "__main__":
     debug = os.environ.get("FLASK_DEBUG", "False").lower() in ("1", "true", "yes")
     socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
 
-@app.route('/api/resources/<int:resource_id>/all_bookings', methods=['GET'])
+
+@app.route('/api/admin/delete_backup/<string:backup_timestamp>', methods=['POST'])
 @login_required
-def get_all_bookings_for_resource(resource_id):
+@permission_required('manage_system')
+def api_delete_backup_set(backup_timestamp):
+    """
+    Deletes a specific backup set identified by its timestamp.
+    """
+    task_id = uuid.uuid4().hex # Generate a unique ID for this operation for logging/tracking
+    app.logger.info(f"[Task {task_id}] User {current_user.username} initiated DELETE BACKUP for timestamp: {backup_timestamp}.")
+
+    if not delete_backup_set:
+        error_message = "Backup deletion function (delete_backup_set) is not available. Check system configuration."
+        app.logger.error(f"[Task {task_id}] {error_message}")
+        add_audit_log(action="DELETE_BACKUP_SET_UNAVAILABLE", details=f"Task {task_id}: Attempted to delete backup {backup_timestamp}, but function is missing.")
+        if socketio:
+            socketio.emit('backup_delete_progress', {'task_id': task_id, 'status': error_message, 'detail': 'ERROR'})
+        return jsonify({'success': False, 'message': error_message, 'task_id': task_id}), 500
+
+    try:
+        if socketio:
+            socketio.emit('backup_delete_progress', {
+                'task_id': task_id,
+                'status': 'Deletion process starting...',
+                'detail': f'Target timestamp: {backup_timestamp}'
+            })
+
+        success = delete_backup_set(
+            backup_timestamp,
+            socketio_instance=socketio,
+            task_id=task_id
+        )
+
+        if success:
+            message = f"Backup set '{backup_timestamp}' deleted successfully."
+            app.logger.info(f"[Task {task_id}] {message}")
+            add_audit_log(action="DELETE_BACKUP_SET_SUCCESS", details=f"Task {task_id}: {message} User: {current_user.username}.")
+            if socketio:
+                socketio.emit('backup_delete_progress', {'task_id': task_id, 'status': message, 'detail': 'SUCCESS'})
+            return jsonify({'success': True, 'message': message, 'task_id': task_id}), 200
+        else:
+            # delete_backup_set is expected to log specifics and emit socketio messages for detailed errors.
+            message = f"Failed to delete backup set '{backup_timestamp}'. See logs for details."
+            app.logger.warning(f"[Task {task_id}] {message} (as reported by delete_backup_set). User: {current_user.username}.")
+            # Audit log already added by delete_backup_set for specific failure reasons if any.
+            # Adding a general one here if not.
+            add_audit_log(action="DELETE_BACKUP_SET_FAILED", details=f"Task {task_id}: {message} User: {current_user.username}.")
+            # SocketIO message should have been sent by delete_backup_set
+            return jsonify({'success': False, 'message': message, 'task_id': task_id}), 500
+
+    except Exception as e:
+        error_message = f"An unexpected error occurred while attempting to delete backup set '{backup_timestamp}': {str(e)}"
+        app.logger.exception(f"[Task {task_id}] {error_message} User: {current_user.username}.")
+        add_audit_log(action="DELETE_BACKUP_SET_ERROR", details=f"Task {task_id}: {error_message} User: {current_user.username}.")
+        if socketio:
+            socketio.emit('backup_delete_progress', {'task_id': task_id, 'status': error_message, 'detail': 'CRITICAL_ERROR'})
+        return jsonify({'success': False, 'message': error_message, 'task_id': task_id}), 500
+
     """
     Fetches all bookings for a specific resource within a given date range,
     formatted for FullCalendar.
