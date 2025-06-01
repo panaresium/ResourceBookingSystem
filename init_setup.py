@@ -3,6 +3,7 @@
 import sys
 import os
 import pathlib
+import json # Added
 from app import (
     app,
     db,
@@ -14,7 +15,7 @@ from app import (
     FloorMap,
     resource_roles_table,
     user_roles_table,
-    BackupScheduleConfig, # Added import
+    # BackupScheduleConfig, # Removed
 )
 from werkzeug.security import generate_password_hash
 from datetime import datetime, date, timedelta, time
@@ -266,6 +267,7 @@ def verify_db_schema():
         },
         'waitlist_entry': {'id', 'resource_id', 'user_id', 'timestamp'},
         'audit_log': {'id', 'timestamp', 'user_id', 'username', 'action', 'details'}
+        # 'backup_schedule_config': {'id', 'is_enabled', 'schedule_type', 'day_of_week', 'time_of_day', 'last_run_date'}
     }
 
     try:
@@ -294,6 +296,7 @@ def verify_db_schema():
 # Moved from app.py
 def init_db(force=False):
     with app.app_context():
+        app.logger.info(f"Database URI used by init_db: {app.config.get('SQLALCHEMY_DATABASE_URI')}") # New line
         app.logger.info("Starting database initialization...")
 
         app.logger.info("Creating database tables (if they don't exist)...")
@@ -348,10 +351,6 @@ def init_db(force=False):
         num_roles_deleted = db.session.query(Role).delete()
         app.logger.info(f"Deleted {num_roles_deleted} Roles.")
 
-        app.logger.info("Deleting existing BackupScheduleConfig entries...")
-        num_backup_configs_deleted = db.session.query(BackupScheduleConfig).delete()
-        app.logger.info(f"Deleted {num_backup_configs_deleted} BackupScheduleConfig entries.")
-
         try:
             db.session.commit()
             app.logger.info("Successfully committed deletions of existing data.")
@@ -397,24 +396,6 @@ def init_db(force=False):
         except Exception:
             db.session.rollback()
             app.logger.exception("Error creating default roles or users:")
-
-        app.logger.info("Creating default backup schedule configuration...")
-        try:
-            if not db.session.query(BackupScheduleConfig).first():
-                default_schedule = BackupScheduleConfig(
-                    is_enabled=False,
-                    schedule_type='daily',
-                    time_of_day=time(2, 0),  # Default to 2:00 AM
-                    last_run_date=None      # Initialize new field
-                )
-                db.session.add(default_schedule)
-                db.session.commit()
-                app.logger.info("Created default backup schedule configuration (disabled).")
-            else:
-                app.logger.info("Backup schedule configuration already exists.")
-        except Exception as e:
-            db.session.rollback()
-            app.logger.exception("Error creating default backup schedule configuration:")
 
         admin_user_for_perms = User.query.filter_by(username='admin').first()
         standard_user_for_perms = User.query.filter_by(username='user').first()
@@ -564,6 +545,35 @@ def init_db(force=False):
             )
 
         app.logger.info("Database initialization script completed.")
+
+        app.logger.info("Ensuring default backup schedule JSON file exists...")
+        # Define path and defaults locally for init_setup.py
+        # DATA_DIR is already defined in init_setup.py as os.path.join(basedir, 'data')
+        # basedir is os.path.abspath(os.path.dirname(__file__))
+        # So, we need to ensure DATA_DIR is correctly defined in this scope.
+        # Assuming DATA_DIR_NAME = "data" is defined and used to create data_dir path earlier.
+        # Let's use the DB_PATH's directory as DATA_DIR for robustness here.
+        current_script_basedir = os.path.abspath(os.path.dirname(__file__))
+        data_dir_for_json = os.path.join(current_script_basedir, DATA_DIR_NAME) # DATA_DIR_NAME is "data"
+        schedule_config_file_path = os.path.join(data_dir_for_json, 'backup_schedule.json')
+
+        default_schedule_data_for_json = {
+            "is_enabled": False,
+            "schedule_type": "daily",
+            "day_of_week": None,
+            "time_of_day": "02:00"
+        }
+        if not os.path.exists(schedule_config_file_path):
+            try:
+                # Ensure data directory exists (it should from create_required_directories)
+                os.makedirs(data_dir_for_json, exist_ok=True)
+                with open(schedule_config_file_path, 'w', encoding='utf-8') as f:
+                    json.dump(default_schedule_data_for_json, f, indent=4)
+                app.logger.info(f"Created default backup schedule file: {schedule_config_file_path}")
+            except IOError as e:
+                app.logger.error(f"Error creating default backup schedule JSON file '{schedule_config_file_path}': {e}")
+        else:
+            app.logger.info(f"Backup schedule JSON file already exists: {schedule_config_file_path}")
 
         if AZURE_PRIMARY_STORAGE:
             print("Uploading database and media to Azure storage...")
