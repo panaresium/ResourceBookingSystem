@@ -650,6 +650,201 @@ def _get_map_configuration_data() -> dict:
         'mapped_resources': mapped_resources_data
     }
 
+def _get_resource_configurations_data() -> list:
+    """Helper function to generate resource configurations data for backup."""
+    try:
+        resources = Resource.query.all()
+        resources_data = []
+        for r in resources:
+            # Ensure datetime objects are handled correctly (ISO format)
+            published_at_iso = r.published_at.isoformat() if r.published_at else None
+            maintenance_until_iso = r.maintenance_until.isoformat() if r.maintenance_until else None
+            scheduled_status_at_iso = r.scheduled_status_at.isoformat() if r.scheduled_status_at else None
+
+            # map_coordinates should already be a JSON string or None
+            # allowed_user_ids should already be a comma-separated string or None
+
+            resources_data.append({
+                'id': r.id,
+                'name': r.name,
+                'capacity': r.capacity,
+                'equipment': r.equipment,
+                'tags': r.tags,
+                'status': r.status,
+                'published_at': published_at_iso,
+                'booking_restriction': r.booking_restriction,
+                'allowed_user_ids': r.allowed_user_ids, # Stored as Text (string)
+                'image_filename': r.image_filename,
+                'is_under_maintenance': r.is_under_maintenance,
+                'maintenance_until': maintenance_until_iso,
+                'max_recurrence_count': r.max_recurrence_count,
+                'scheduled_status': r.scheduled_status,
+                'scheduled_status_at': scheduled_status_at_iso,
+                'floor_map_id': r.floor_map_id,
+                'map_coordinates': r.map_coordinates, # Stored as Text (JSON string)
+                'role_ids': [role.id for role in r.roles]
+            })
+        app.logger.info(f"Successfully gathered configuration data for {len(resources_data)} resources.")
+        return resources_data
+    except Exception as e:
+        app.logger.exception("Error in _get_resource_configurations_data:")
+        return [] # Return empty list on error to prevent backup failure
+
+def _get_user_configurations_data() -> dict:
+    """Helper function to generate user and role configurations data for backup."""
+    final_data = {'roles': [], 'users': []}
+    try:
+        # Gather Roles
+        roles = Role.query.all()
+        roles_data = []
+        for r in roles:
+            roles_data.append({
+                'id': r.id,
+                'name': r.name,
+                'description': r.description,
+                'permissions': r.permissions
+            })
+        final_data['roles'] = roles_data
+        app.logger.info(f"Successfully gathered configuration data for {len(roles_data)} roles.")
+
+        # Gather Users
+        users = User.query.all()
+        users_data = []
+        for u in users:
+            users_data.append({
+                'id': u.id,
+                'username': u.username,
+                'email': u.email,
+                'password_hash': u.password_hash, # Exporting the stored hash
+                'is_admin': u.is_admin,
+                'google_id': u.google_id,
+                'google_email': u.google_email,
+                'role_ids': [role.id for role in u.roles]
+            })
+        final_data['users'] = users_data
+        app.logger.info(f"Successfully gathered configuration data for {len(users_data)} users.")
+
+        return final_data
+    except Exception as e:
+        app.logger.exception("Error in _get_user_configurations_data:")
+        # Return partially gathered data or empty structure on error to prevent total backup failure
+        # Ensuring keys exist even if empty.
+        if 'roles' not in final_data: final_data['roles'] = []
+        if 'users' not in final_data: final_data['users'] = []
+        return final_data
+
+def _import_resource_configurations_data(resources_data_list: list, db_instance) -> tuple[int, int, list]:
+    """
+    Imports resource configuration data into the database.
+    Overrides existing resources based on ID or name.
+
+    Args:
+        resources_data_list (list): A list of resource data dictionaries from the backup.
+        db_instance: The SQLAlchemy db object.
+
+    Returns:
+        tuple: (created_count, updated_count, errors_list)
+    """
+    created_count = 0
+    updated_count = 0
+    errors = []
+
+    # Get all existing role IDs once to avoid repeated DB queries for roles
+    existing_role_ids = {role.id for role in db_instance.session.query(Role.id).all()}
+
+    for res_data in resources_data_list:
+        resource = None
+        original_resource_name_for_log = res_data.get('name', 'UnknownResource') # For logging before potential name change
+        try:
+            # Try to find by ID first
+            if 'id' in res_data and res_data['id'] is not None:
+                resource = db_instance.session.query(Resource).get(res_data['id'])
+
+            # If not found by ID, and a name is provided, try to find by name
+            if not resource and 'name' in res_data and res_data['name']:
+                resource = db_instance.session.query(Resource).filter_by(name=res_data['name']).first()
+
+            action_taken = ""
+            if resource: # Update existing
+                action_taken = "UPDATE_RESOURCE_VIA_RESTORE"
+                updated_count += 1
+                app.logger.info(f"Updating existing resource ID: {resource.id}, Name: '{original_resource_name_for_log}' from backup.")
+            else: # Create new
+                action_taken = "CREATE_RESOURCE_VIA_RESTORE"
+                resource = Resource() # Create a new instance
+                # If ID was in res_data and we want to preserve it (and it's unique):
+                # This assumes IDs from backup should be preserved if possible.
+                # However, letting the DB assign new IDs for new resources is safer unless IDs are managed externally.
+                # For "always override", if an ID from backup collides with an *existing different* resource's ID,
+                # the `get(res_data['id'])` above would have found it. If it's a new resource, assign ID if present.
+                if 'id' in res_data and res_data['id'] is not None:
+                     # Check if this ID is truly new or if it might conflict with an existing one if we didn't find it above.
+                     # This check is more for safety if the initial lookup strategy changes.
+                     # With current lookup, this new resource instance means the ID is not in use or name is new.
+                     resource.id = res_data['id']
+                created_count += 1
+                app.logger.info(f"Creating new resource from backup data for '{original_resource_name_for_log}'.")
+
+            # Assign fields from res_data
+            resource.name = res_data.get('name', resource.name) # Keep old name if new one not provided (shouldn't happen for new)
+            resource.capacity = res_data.get('capacity', resource.capacity)
+            resource.equipment = res_data.get('equipment', resource.equipment)
+            resource.tags = res_data.get('tags', resource.tags)
+            resource.status = res_data.get('status', resource.status)
+
+            published_at_str = res_data.get('published_at')
+            resource.published_at = datetime.fromisoformat(published_at_str) if published_at_str else None
+
+            resource.booking_restriction = res_data.get('booking_restriction', resource.booking_restriction)
+            resource.allowed_user_ids = res_data.get('allowed_user_ids', resource.allowed_user_ids) # Already a string
+            resource.image_filename = res_data.get('image_filename', resource.image_filename)
+            resource.is_under_maintenance = res_data.get('is_under_maintenance', resource.is_under_maintenance)
+
+            maintenance_until_str = res_data.get('maintenance_until')
+            resource.maintenance_until = datetime.fromisoformat(maintenance_until_str) if maintenance_until_str else None
+
+            resource.max_recurrence_count = res_data.get('max_recurrence_count', resource.max_recurrence_count)
+            resource.scheduled_status = res_data.get('scheduled_status', resource.scheduled_status)
+
+            scheduled_status_at_str = res_data.get('scheduled_status_at')
+            resource.scheduled_status_at = datetime.fromisoformat(scheduled_status_at_str) if scheduled_status_at_str else None
+
+            resource.floor_map_id = res_data.get('floor_map_id', resource.floor_map_id)
+            resource.map_coordinates = res_data.get('map_coordinates', resource.map_coordinates) # Already a JSON string
+
+            # Handle roles
+            if 'role_ids' in res_data and isinstance(res_data['role_ids'], list):
+                valid_roles_for_resource = []
+                for role_id in res_data['role_ids']:
+                    if role_id in existing_role_ids:
+                        # Fetch the actual Role object. This is inefficient if done per user per role.
+                        # Consider fetching all roles once outside the loop if performance becomes an issue.
+                        # For now, direct fetch for simplicity.
+                        role_obj = db_instance.session.query(Role).get(role_id)
+                        if role_obj: # Should exist based on existing_role_ids check
+                            valid_roles_for_resource.append(role_obj)
+                        else: # Should not happen if existing_role_ids is up-to-date
+                            errors.append({'resource_name': original_resource_name_for_log, 'id': res_data.get('id'), 'error': f"Role ID {role_id} marked as existing but not found."})
+                    else:
+                         errors.append({'resource_name': original_resource_name_for_log, 'id': res_data.get('id'), 'error': f"Role ID {role_id} for resource does not exist in roles table."})
+                resource.roles = valid_roles_for_resource
+
+            if action_taken == "CREATE_RESOURCE_VIA_RESTORE":
+                db_instance.session.add(resource)
+
+            db_instance.session.commit() # Commit each resource
+            add_audit_log(action=action_taken, details=f"Resource '{resource.name}' (ID: {resource.id}) processed from backup by system.")
+
+        except Exception as e:
+            db_instance.session.rollback()
+            error_detail = f"Error processing resource '{original_resource_name_for_log}' (ID from backup: {res_data.get('id')}): {str(e)}"
+            app.logger.error(error_detail, exc_info=True)
+            errors.append({'resource_name': original_resource_name_for_log, 'id': res_data.get('id'), 'error': str(e)})
+            if action_taken == "CREATE_RESOURCE_VIA_RESTORE": created_count -=1 # Decrement if add failed
+            elif action_taken == "UPDATE_RESOURCE_VIA_RESTORE": updated_count -=1 # Decrement if update failed
+
+    return created_count, updated_count, errors
+
 # Helper function to import map configuration data
 def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
     """Helper function to process imported map configuration data."""
@@ -4211,7 +4406,7 @@ def api_one_click_restore():
         if socketio:
             socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore process starting...', 'detail': f'Timestamp: {backup_timestamp}'})
 
-        restored_db_path, map_config_json_path, _ = restore_full_backup(
+        restored_db_path, map_config_json_path, resource_configs_json_path, user_configs_json_path, _ = restore_full_backup(
             backup_timestamp,
             socketio_instance=socketio,
             task_id=task_id
@@ -4256,9 +4451,86 @@ def api_one_click_restore():
             if socketio:
                  socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Map configuration import skipped (no file).'})
 
-        final_message = f"Restore (task {task_id}) from {backup_timestamp} file ops completed. DB restored. {map_import_summary_msg} Restart app."
-        app.logger.info(final_message)
-        add_audit_log(action="ONE_CLICK_RESTORE_COMPLETED", details=final_message)
+    resource_import_summary_msg = "Resource configurations file was not part of this backup or was not downloaded."
+    if resource_configs_json_path and os.path.exists(resource_configs_json_path):
+        app.logger.info(f"Resource configs JSON {resource_configs_json_path} (task {task_id}) downloaded for {backup_timestamp}.")
+        if socketio:
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Importing resource configurations...', 'detail': resource_configs_json_path})
+        try:
+            with open(resource_configs_json_path, 'r', encoding='utf-8') as f:
+                resource_configs_to_import = json.load(f)
+
+            # Call the new import function (ensure db object is correctly passed, likely 'db' from global app scope)
+            # _import_resource_configurations_data returns: created_count, updated_count, errors_list
+            res_created, res_updated, res_errors = _import_resource_configurations_data(resource_configs_to_import, db)
+
+            resource_import_summary_msg = f"Resource config import: {res_created} created, {res_updated} updated."
+            if res_errors:
+                resource_import_summary_msg += f" Errors: {len(res_errors)} (see logs for details)."
+                app.logger.error(f"Errors during resource config import (task {task_id}): {res_errors}")
+
+            if socketio:
+                socketio.emit('restore_progress', {'task_id': task_id, 'status': f'Resource configurations import status: {resource_import_summary_msg}', 'detail': 'Completed processing resource_configs.json'})
+            app.logger.info(f"Resource configurations import (task {task_id}) summary: {resource_import_summary_msg}")
+        except Exception as res_import_exc:
+            resource_import_summary_msg = f"Error processing resource_configs file {resource_configs_json_path} (task {task_id}): {str(res_import_exc)}"
+            app.logger.exception(resource_import_summary_msg)
+            if socketio:
+                socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Error during resource configurations import.', 'detail': str(res_import_exc)})
+        finally:
+            try:
+                os.remove(resource_configs_json_path)
+            except OSError as e_remove:
+                app.logger.error(f"Error removing temp resource_configs file {resource_configs_json_path} (task {task_id}): {e_remove}")
+    else:
+        app.logger.info(f"No resource_configs.json file for {backup_timestamp} (task {task_id}). Skipping resource configurations import.")
+        if socketio:
+             socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Resource configurations import skipped (no file).'})
+
+    user_import_summary_msg = "User/role configurations file was not part of this backup or was not downloaded."
+    if user_configs_json_path and os.path.exists(user_configs_json_path):
+        app.logger.info(f"User/role configs JSON {user_configs_json_path} (task {task_id}) downloaded for {backup_timestamp}.")
+        if socketio:
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Importing user/role configurations...', 'detail': user_configs_json_path})
+        try:
+            with open(user_configs_json_path, 'r', encoding='utf-8') as f:
+                user_configs_to_import = json.load(f)
+
+            # Call the new import function
+            # _import_user_configurations_data returns: roles_created, roles_updated, users_created, users_updated, errors_list
+            r_created, r_updated, u_created, u_updated, u_errors = _import_user_configurations_data(user_configs_to_import, db)
+
+            user_import_summary_msg = f"User/Role config import: Roles ({r_created} created, {r_updated} updated), Users ({u_created} created, {u_updated} updated)."
+            if u_errors:
+                user_import_summary_msg += f" Errors: {len(u_errors)} (see logs for details)."
+                app.logger.error(f"Errors during user/role config import (task {task_id}): {u_errors}")
+
+            if socketio:
+                socketio.emit('restore_progress', {'task_id': task_id, 'status': f'User/role configurations import status: {user_import_summary_msg}', 'detail': 'Completed processing user_configs.json'})
+            app.logger.info(f"User/role configurations import (task {task_id}) summary: {user_import_summary_msg}")
+        except Exception as user_import_exc:
+            user_import_summary_msg = f"Error processing user_configs file {user_configs_json_path} (task {task_id}): {str(user_import_exc)}"
+            app.logger.exception(user_import_summary_msg)
+            if socketio:
+                socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Error during user/role configurations import.', 'detail': str(user_import_exc)})
+        finally:
+            try:
+                os.remove(user_configs_json_path)
+            except OSError as e_remove:
+                app.logger.error(f"Error removing temp user_configs file {user_configs_json_path} (task {task_id}): {e_remove}")
+    else:
+        app.logger.info(f"No user_configs.json file for {backup_timestamp} (task {task_id}). Skipping user/role configurations import.")
+        if socketio:
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'User/role configurations import skipped (no file).'})
+
+    # Update the final_message to include summaries from new imports
+    final_message = (
+        f"Restore (task {task_id}) from {backup_timestamp} file ops completed. "
+        f"DB restored. {map_import_summary_msg} {resource_import_summary_msg} {user_import_summary_msg} "
+        f"Restart app."
+    )
+    app.logger.info(final_message)
+    add_audit_log(action="ONE_CLICK_RESTORE_COMPLETED", details=final_message)
         if socketio:
             socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore process fully completed. Please restart application.', 'detail': 'SUCCESS'})
         return jsonify({'success': True, 'message': 'Restore process initiated. See live logs.', 'task_id': task_id}), 200
