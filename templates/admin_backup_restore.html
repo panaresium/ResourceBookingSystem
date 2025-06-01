@@ -641,14 +641,16 @@
         });
 
         // Modal Close Button
-        closeModalBtn.onclick = function() {
-            selectiveRestoreModal.style.display = 'none';
+        if (closeModalBtn) {
+            closeModalBtn.addEventListener('click', function() {
+                selectiveRestoreModal.style.display = 'none';
+            });
         }
-        window.onclick = function(event) { // Close if clicked outside modal content
+        window.addEventListener('click', function(event) { // Close if clicked outside modal content
             if (event.target == selectiveRestoreModal) {
                 selectiveRestoreModal.style.display = 'none';
             }
-        }
+        });
 
         // "ALL COMPONENTS" checkbox logic
         componentAllCheckbox.addEventListener('change', function() {
