@@ -323,13 +323,15 @@ def main():
     print('Backup completed.')
 
 
-def create_full_backup(timestamp_str, map_config_data=None, socketio_instance=None, task_id=None):
+def create_full_backup(timestamp_str, map_config_data=None, resource_configs_data=None, user_configs_data=None, socketio_instance=None, task_id=None):
     """
     Creates a full backup of the database, map configuration, and media files.
 
     Args:
         timestamp_str (str): The timestamp string in "YYYYMMDD_HHMMSS" format.
         map_config_data (dict, optional): Actual map configuration data to back up.
+        resource_configs_data (list, optional): Resource configurations data.
+        user_configs_data (dict, optional): User and Role configurations data.
         socketio_instance: Optional SocketIO instance for progress emitting.
         task_id: Optional task ID for SocketIO progress emitting.
     """
@@ -398,6 +400,46 @@ def create_full_backup(timestamp_str, map_config_data=None, socketio_instance=No
     else:
         logger.warning(f"No map_config_data provided for timestamp {timestamp_str}. Skipping map configuration backup.")
         _emit_progress(socketio_instance, task_id, 'backup_progress', 'Map configuration backup skipped (no data provided).')
+
+    # Resource Configurations Backup
+    remote_resource_configs_filename = f"resource_configs_{timestamp_str}.json"
+    remote_resource_configs_path = f"{CONFIG_BACKUPS_DIR}/{remote_resource_configs_filename}"
+    _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backing up resource configurations...', f'To {config_share_name}/{remote_resource_configs_path}')
+    if resource_configs_data: # resource_configs_data is the list passed to the function
+        try:
+            resource_configs_json_bytes = json.dumps(resource_configs_data, indent=2).encode('utf-8')
+            # config_share_client is already initialized from map config backup section
+            file_client_rc = config_share_client.get_file_client(remote_resource_configs_path)
+            logger.info(f"Attempting resource configurations backup: Share='{config_share_client.share_name}', Path='{remote_resource_configs_path}'")
+            file_client_rc.upload_file(data=resource_configs_json_bytes) # No overwrite=True
+            logger.info(f"Successfully backed up resource configurations to '{config_share_name}/{remote_resource_configs_path}'.")
+            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Resource configurations backup complete.')
+        except Exception as e:
+            logger.error(f"Failed to backup resource configurations to '{config_share_name}/{remote_resource_configs_path}': {e}")
+            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Resource configurations backup failed.', str(e))
+            # Not necessarily setting overall_success = False, depends on criticality
+    else:
+        logger.warning(f"No resource_configs_data provided for timestamp {timestamp_str}. Skipping resource configurations backup.")
+        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Resource configurations backup skipped (no data).')
+
+    # User and Role Configurations Backup
+    remote_user_configs_filename = f"user_configs_{timestamp_str}.json"
+    remote_user_configs_path = f"{CONFIG_BACKUPS_DIR}/{remote_user_configs_filename}"
+    _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backing up user/role configurations...', f'To {config_share_name}/{remote_user_configs_path}')
+    if user_configs_data: # user_configs_data is the dict {'users': [...], 'roles': [...]}
+        try:
+            user_configs_json_bytes = json.dumps(user_configs_data, indent=2).encode('utf-8')
+            file_client_uc = config_share_client.get_file_client(remote_user_configs_path)
+            logger.info(f"Attempting user/role configurations backup: Share='{config_share_client.share_name}', Path='{remote_user_configs_path}'")
+            file_client_uc.upload_file(data=user_configs_json_bytes) # No overwrite=True
+            logger.info(f"Successfully backed up user/role configurations to '{config_share_name}/{remote_user_configs_path}'.")
+            _emit_progress(socketio_instance, task_id, 'backup_progress', 'User/role configurations backup complete.')
+        except Exception as e:
+            logger.error(f"Failed to backup user/role configurations to '{config_share_name}/{remote_user_configs_path}': {e}")
+            _emit_progress(socketio_instance, task_id, 'backup_progress', 'User/role configurations backup failed.', str(e))
+    else:
+        logger.warning(f"No user_configs_data provided for timestamp {timestamp_str}. Skipping user/role configurations backup.")
+        _emit_progress(socketio_instance, task_id, 'backup_progress', 'User/role configurations backup skipped (no data).')
 
     # Media Backup (Floor Maps & Resource Uploads)
     media_share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media')
@@ -547,6 +589,37 @@ def create_full_backup(timestamp_str, map_config_data=None, socketio_instance=No
             except Exception as e:
                 logger.error(f"Failed to hash map configuration for manifest: {e}")
                 _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing map_config for manifest.', str(e))
+
+        # Resource Configurations entry in manifest
+        if resource_configs_data: # Check if data was provided and presumably uploaded
+            try:
+                # Re-serialize to get bytes for hash, or use stored bytes if available
+                rc_bytes_for_hash = json.dumps(resource_configs_data, indent=2).encode('utf-8')
+                rc_hash = hashlib.sha256(rc_bytes_for_hash).hexdigest()
+                manifest_data['files'].append({
+                    'path': remote_resource_configs_path, # Defined earlier in the function
+                    'type': 'resource_configs',
+                    'sha256': rc_hash,
+                    'share': config_share_name # Defined earlier
+                })
+            except Exception as e:
+                logger.error(f"Failed to hash resource_configs for manifest: {e}")
+                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing resource_configs for manifest.', str(e))
+
+        # User Configurations entry in manifest
+        if user_configs_data: # Check if data was provided and presumably uploaded
+            try:
+                uc_bytes_for_hash = json.dumps(user_configs_data, indent=2).encode('utf-8')
+                uc_hash = hashlib.sha256(uc_bytes_for_hash).hexdigest()
+                manifest_data['files'].append({
+                    'path': remote_user_configs_path, # Defined earlier
+                    'type': 'user_configs',
+                    'sha256': uc_hash,
+                    'share': config_share_name # Defined earlier
+                })
+            except Exception as e:
+                logger.error(f"Failed to hash user_configs for manifest: {e}")
+                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing user_configs for manifest.', str(e))
 
         # Media Directories entries in manifest
         if os.path.isdir(FLOOR_MAP_UPLOADS):
@@ -882,6 +955,112 @@ def download_map_config_component(timestamp_str, config_share_client, dry_run=Fa
             return True, warn_msg, actions, None # Non-critical failure, return True
 
 
+def download_resource_configs_component(timestamp_str, config_share_client, dry_run=False, socketio_instance=None, task_id=None):
+    """
+    Downloads the resource configurations JSON from a backup.
+
+    Returns:
+        tuple: (success_bool, message_str, actions_list, downloaded_config_path_or_placeholder_str)
+    """
+    actions = []
+    dry_run_prefix = "DRY RUN: " if dry_run else ""
+    component_name = "Resource Configurations"
+    downloaded_config_path = None
+
+    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {component_name} download component...', f'Timestamp: {timestamp_str}')
+
+    remote_config_filename = f"resource_configs_{timestamp_str}.json" # Changed filename
+    azure_config_path = f"{CONFIG_BACKUPS_DIR}/{remote_config_filename}"
+    local_config_target_path = os.path.join(DATA_DIR, remote_config_filename) # DATA_DIR is global
+
+    config_file_client = config_share_client.get_file_client(azure_config_path)
+
+    if not _client_exists(config_file_client):
+        warn_msg = f"{dry_run_prefix}{component_name} backup file '{azure_config_path}' not found on share '{config_share_client.share_name}'. Skipping."
+        logger.warning(warn_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, azure_config_path)
+        if dry_run: actions.append(warn_msg)
+        return True, warn_msg, actions, None # Not critical failure
+
+    if dry_run:
+        action_msg = f"DRY RUN: Would download {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'."
+        actions.append(action_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg)
+        logger.info(action_msg)
+        downloaded_config_path = "DRY_RUN_RESOURCE_CONFIGS_PATH_PLACEHOLDER" # Placeholder
+        success_msg = f"DRY RUN: {component_name} component finished (simulated download)."
+        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg)
+        logger.info(success_msg)
+        return True, success_msg, actions, downloaded_config_path
+    else:
+        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Downloading {component_name}...', f'{azure_config_path} to {local_config_target_path}')
+        logger.info(f"Downloading {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'.")
+        if download_file(config_share_client, azure_config_path, local_config_target_path):
+            success_msg = f"{component_name} JSON downloaded successfully."
+            logger.info(success_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', f'{component_name} download complete.')
+            downloaded_config_path = local_config_target_path
+            return True, success_msg, actions, downloaded_config_path
+        else:
+            warn_msg = f"{component_name} JSON download failed from '{azure_config_path}'." # Non-critical
+            logger.warning(warn_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, "WARNING")
+            return True, warn_msg, actions, None
+
+
+def download_user_configs_component(timestamp_str, config_share_client, dry_run=False, socketio_instance=None, task_id=None):
+    """
+    Downloads the user and role configurations JSON from a backup.
+
+    Returns:
+        tuple: (success_bool, message_str, actions_list, downloaded_config_path_or_placeholder_str)
+    """
+    actions = []
+    dry_run_prefix = "DRY RUN: " if dry_run else ""
+    component_name = "User/Role Configurations" # Changed component name
+    downloaded_config_path = None
+
+    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {component_name} download component...', f'Timestamp: {timestamp_str}')
+
+    remote_config_filename = f"user_configs_{timestamp_str}.json" # Changed filename
+    azure_config_path = f"{CONFIG_BACKUPS_DIR}/{remote_config_filename}"
+    local_config_target_path = os.path.join(DATA_DIR, remote_config_filename)
+
+    config_file_client = config_share_client.get_file_client(azure_config_path)
+
+    if not _client_exists(config_file_client):
+        warn_msg = f"{dry_run_prefix}{component_name} backup file '{azure_config_path}' not found on share '{config_share_client.share_name}'. Skipping."
+        logger.warning(warn_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, azure_config_path)
+        if dry_run: actions.append(warn_msg)
+        return True, warn_msg, actions, None
+
+    if dry_run:
+        action_msg = f"DRY RUN: Would download {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'."
+        actions.append(action_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg)
+        logger.info(action_msg)
+        downloaded_config_path = "DRY_RUN_USER_CONFIGS_PATH_PLACEHOLDER" # Placeholder
+        success_msg = f"DRY RUN: {component_name} component finished (simulated download)."
+        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg)
+        logger.info(success_msg)
+        return True, success_msg, actions, downloaded_config_path
+    else:
+        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Downloading {component_name}...', f'{azure_config_path} to {local_config_target_path}')
+        logger.info(f"Downloading {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'.")
+        if download_file(config_share_client, azure_config_path, local_config_target_path):
+            success_msg = f"{component_name} JSON downloaded successfully."
+            logger.info(success_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', f'{component_name} download complete.')
+            downloaded_config_path = local_config_target_path
+            return True, success_msg, actions, downloaded_config_path
+        else:
+            warn_msg = f"{component_name} JSON download failed from '{azure_config_path}'."
+            logger.warning(warn_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, "WARNING")
+            return True, warn_msg, actions, None
+
+
 def restore_media_component(timestamp_str, media_type_name, local_target_dir, remote_media_subdir_base, media_share_client, dry_run=False, socketio_instance=None, task_id=None):
     """
     Restores a specific type of media files (e.g., FloorMaps, ResourceUploads).
@@ -1047,14 +1226,16 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
         task_id: Optional task ID for SocketIO progress emitting.
 
     Returns:
-        tuple: (path_to_restored_db_or_None, path_to_downloaded_map_config_or_None, actions_list)
-               Returns (None, None, actions_list) if critical (DB) restoration fails.
+        tuple: (path_to_restored_db_or_None, path_to_downloaded_map_config_or_None, path_to_downloaded_resource_configs_or_None, path_to_downloaded_user_configs_or_None, actions_list)
+               Returns (None, None, None, None, actions_list) if critical (DB) restoration fails.
                actions_list contains strings describing operations if dry_run is True.
     """
     overall_actions_list = []
     dry_run_prefix = "DRY RUN: " if dry_run else ""
     final_restored_db_path = None
     final_downloaded_map_config_path = None
+    final_downloaded_resource_configs_path = None
+    final_downloaded_user_configs_path = None
 
     logger.info(f"{dry_run_prefix}Starting full restore for timestamp: {timestamp_str}")
     _emit_progress(socketio_instance, task_id, 'restore_progress', f"{dry_run_prefix}Starting full restore processing...", f'Timestamp: {timestamp_str}')
@@ -1082,7 +1263,7 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
         if not db_success: # Critical failure if DB component fails
             logger.error(f"{dry_run_prefix}Database restore component failed: {db_message}. Aborting full restore.")
             _emit_progress(socketio_instance, task_id, 'restore_progress', f"{dry_run_prefix}Database restore failed. Full restore aborted.", "ERROR")
-            return None, None, overall_actions_list # Return None for paths, include actions gathered so far
+            return None, None, None, None, overall_actions_list # Return None for paths, include actions gathered so far
 
         # --- Map Configuration Download Component ---
         config_share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
@@ -1101,6 +1282,26 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
             logger.warning(warn_msg)
             _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg)
             if dry_run: overall_actions_list.append(warn_msg)
+
+        # --- Resource Configurations Download Component ---
+        if _client_exists(config_share_client): # Check if config share itself exists
+            rc_success, rc_message, rc_actions, rc_output_path = download_resource_configs_component(
+                timestamp_str, config_share_client, dry_run, socketio_instance, task_id
+            )
+            if dry_run: overall_actions_list.extend(rc_actions)
+            final_downloaded_resource_configs_path = rc_output_path
+            if not rc_success: logger.warning(f"{dry_run_prefix}Resource configs download component reported issues: {rc_message}")
+        # No else here, as config_share_client existence is checked above for map_config already.
+
+        # --- User Configurations Download Component ---
+        if _client_exists(config_share_client):
+            uc_success, uc_message, uc_actions, uc_output_path = download_user_configs_component(
+                timestamp_str, config_share_client, dry_run, socketio_instance, task_id
+            )
+            if dry_run: overall_actions_list.extend(uc_actions)
+            final_downloaded_user_configs_path = uc_output_path
+            if not uc_success: logger.warning(f"{dry_run_prefix}User configs download component reported issues: {uc_message}")
+        # No else here, as config_share_client existence is checked above for map_config already.
 
         # --- Media Restore Components ---
         media_share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media')
@@ -1130,14 +1331,14 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
 
         logger.info(f"{dry_run_prefix}Full restore process completed for timestamp: {timestamp_str}")
         _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Full restore operations finished.')
-        return final_restored_db_path, final_downloaded_map_config_path, overall_actions_list
+        return final_restored_db_path, final_downloaded_map_config_path, final_downloaded_resource_configs_path, final_downloaded_user_configs_path, overall_actions_list
 
     except Exception as e:
         err_msg_final = f"{dry_run_prefix}Critical error during full restore orchestration for timestamp {timestamp_str}: {e}"
         logger.error(err_msg_final, exc_info=True)
         _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg_final, "ERROR")
         if dry_run: overall_actions_list.append(err_msg_final)
-        return None, None, overall_actions_list
+        return None, None, None, None, overall_actions_list
 
 
 def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
