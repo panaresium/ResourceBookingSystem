@@ -18,6 +18,32 @@
 </div>
 
 <div id="calendar"></div>
+
+<div id="calendar-edit-booking-modal" class="modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="cebm-title">
+    <div class="modal-content">
+        <span id="cebm-close-modal-btn" class="close-modal-btn" role="button" aria-label="{{ _('Close modal') }}">&times;</span>
+        <h3 id="cebm-title">{{ _('Edit Booking') }}</h3>
+        <p>{{ _('Resource:') }} <strong id="cebm-resource-name">N/A</strong></p>
+        <input type="hidden" id="cebm-booking-id">
+        <input type="hidden" id="cebm-resource-id">
+        <div>
+            <label for="cebm-booking-title">{{ _('Booking Title:') }}</label>
+            <input type="text" id="cebm-booking-title" name="booking_title" class="form-control">
+        </div>
+       <div>
+           <label for="cebm-booking-date">{{ _('Date:') }}</label>
+           <input type="date" id="cebm-booking-date" name="booking_date" class="form-control">
+       </div>
+       <div>
+           <label for="cebm-available-slots-select">{{ _('Available Time Slots:') }}</label>
+           <select id="cebm-available-slots-select" name="available_slots" class="form-select">
+               <option value="">-- {{ _('Select a time slot') }} --</option>
+           </select>
+       </div>
+        <button id="cebm-save-changes-btn" class="button" style="margin-top: 15px;">{{ _('Save Changes') }}</button>
+        <div id="cebm-status-message" class="status-message" style="margin-top:10px;"></div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

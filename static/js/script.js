@@ -1227,79 +1227,127 @@ document.addEventListener('DOMContentLoaded', function() {
                                 if (modalConfirmBtn) modalConfirmBtn.dataset.resourceId = resourceId;
         
                                 const cacheKey = resourceId + '_' + selectedDate;
-                                let bookings = currentResourceBookingsCache[cacheKey]; 
-                                if (!bookings) {
+                                let resourceBookings = currentResourceBookingsCache[cacheKey];
+                                if (!resourceBookings) {
                                     try {
-                                        bookings = await apiCall(`/api/resources/${resourceId}/availability?date=${selectedDate}`, {}, modalStatusMsg);
-                                        currentResourceBookingsCache[cacheKey] = bookings;
+                                        resourceBookings = await apiCall(`/api/resources/${resourceId}/availability?date=${selectedDate}`, {}, modalStatusMsg);
+                                        currentResourceBookingsCache[cacheKey] = resourceBookings;
                                     } catch (error) {
                                         showError(modalStatusMsg, `Could not load availability for ${resourceName}.`);
-                                        if (bookingModal) bookingModal.style.display = 'block'; 
+                                        if (bookingModal) bookingModal.style.display = 'block';
                                         return;
                                     }
                                 }
+
+                                let userBookings = [];
+                                const loggedInUserId = sessionStorage.getItem('loggedInUserId'); // Check if user is logged in
+                                if (loggedInUserId) {
+                                    try {
+                                        userBookings = await apiCall(`/api/bookings/my_bookings_for_date?date=${selectedDate}`, {}, null); // No specific message div for this background fetch
+                                    } catch (error) {
+                                        console.warn(`Could not fetch user's other bookings for ${selectedDate}:`, error.message);
+                                        // Proceed even if this fails, userBookings will be empty.
+                                    }
+                                }
                                 
-                                const firstHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="first_half"]');
-                                const secondHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]');
-                                const fullDayBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]');
+                                const slotButtons = [
+                                    modalSlotOptionsContainer.querySelector('[data-slot-type="first_half"]'),
+                                    modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]'),
+                                    modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]')
+                                ].filter(btn => btn); // Filter out nulls if any button not found
+
+                                const definedSlots = {
+                                    first_half: { name: 'First Half-Day', start: 8 * 60, end: 12 * 60, startTimeStr: "08:00:00", endTimeStr: "12:00:00" },
+                                    second_half: { name: 'Second Half-Day', start: 13 * 60, end: 17 * 60, startTimeStr: "13:00:00", endTimeStr: "17:00:00" },
+                                    full_day: { name: 'Full Day', start: 8 * 60, end: 17 * 60, startTimeStr: "08:00:00", endTimeStr: "17:00:00" }
+                                };
+
+                                function parseTimeHHMMSS(timeStr) { // e.g., "08:00:00"
+                                    const parts = timeStr.split(':');
+                                    return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+                                }
         
-                                if (firstHalfBtn && secondHalfBtn && fullDayBtn) {
-                                    [firstHalfBtn, secondHalfBtn, fullDayBtn].forEach(btn => {
-                                        btn.disabled = false;
-                                        btn.classList.remove('unavailable', 'booked', 'selected', 'partial');
-                                        btn.classList.add('available');
-                                        const baseText = btn.textContent.split(" (")[0];
-                                        btn.textContent = baseText;
-                                    });
-        
-                                    let isFirstHalfBooked = false;
-                                    let isSecondHalfBooked = false;
-                                    const firstHalfSlotStartStr = "08:00:00";
-                                    const firstHalfSlotEndStr = "12:00:00";
-                                    const secondHalfSlotStartStr = "13:00:00";
-                                    const secondHalfSlotEndStr = "17:00:00";
-        
-                                    if (bookings && bookings.length > 0) {
-                                        for (const booking of bookings) {
-                                            if (booking.start_time < firstHalfSlotEndStr && booking.end_time > firstHalfSlotStartStr) {
-                                                isFirstHalfBooked = true;
-                                            }
-                                            if (booking.start_time < secondHalfSlotEndStr && booking.end_time > secondHalfSlotStartStr) {
-                                                isSecondHalfBooked = true;
+                                slotButtons.forEach(btn => {
+                                    const slotType = btn.dataset.slotType;
+                                    const definedSlot = definedSlots[slotType];
+                                    if (!definedSlot) return;
+
+                                    btn.disabled = false;
+                                    btn.classList.remove('slot-available', 'slot-booked-resource', 'slot-user-busy', 'selected', 'unavailable', 'booked', 'partial'); // Clear all relevant classes
+                                    const baseText = btn.textContent.split(" (")[0]; // Get original button text like "First Half-Day"
+
+                                    let isResourceBookedForSlot = false;
+                                    if (resourceBookings && resourceBookings.length > 0) {
+                                        for (const booking of resourceBookings) {
+                                            const bookingStartMinutes = parseTimeHHMMSS(booking.start_time);
+                                            const bookingEndMinutes = parseTimeHHMMSS(booking.end_time);
+                                            if (Math.max(definedSlot.start, bookingStartMinutes) < Math.min(definedSlot.end, bookingEndMinutes)) {
+                                                isResourceBookedForSlot = true;
+                                                break;
                                             }
                                         }
                                     }
-        
-                                    if (isFirstHalfBooked) {
-                                        firstHalfBtn.disabled = true;
-                                        firstHalfBtn.classList.add('unavailable', 'booked');
-                                        firstHalfBtn.classList.remove('available');
-                                        firstHalfBtn.textContent = firstHalfBtn.textContent.split(" (")[0] + " (Booked)";
+
+                                    if (isResourceBookedForSlot) {
+                                        btn.disabled = true;
+                                        btn.classList.add('slot-booked-resource');
+                                        btn.textContent = baseText + " (Booked)";
+                                    } else {
+                                        let isUserBusyElsewhere = false;
+                                        if (userBookings && userBookings.length > 0) {
+                                            for (const userBooking of userBookings) {
+                                                // Ensure it's a booking on a DIFFERENT resource
+                                                if (String(userBooking.resource_id) !== String(resourceId)) {
+                                                    const userBookingStartMinutes = parseTimeHHMMSS(userBooking.start_time);
+                                                    const userBookingEndMinutes = parseTimeHHMMSS(userBooking.end_time);
+                                                    if (Math.max(definedSlot.start, userBookingStartMinutes) < Math.min(definedSlot.end, userBookingEndMinutes)) {
+                                                        isUserBusyElsewhere = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if (isUserBusyElsewhere) {
+                                            btn.classList.add('slot-user-busy');
+                                            btn.textContent = baseText + " (User Busy)";
+                                            // Button remains enabled
+                                        } else {
+                                            btn.classList.add('slot-available');
+                                            btn.textContent = baseText; // Or baseText + " (Available)"
+                                        }
                                     }
-                                    if (isSecondHalfBooked) {
-                                        secondHalfBtn.disabled = true;
-                                        secondHalfBtn.classList.add('unavailable', 'booked');
-                                        secondHalfBtn.classList.remove('available');
-                                        secondHalfBtn.textContent = secondHalfBtn.textContent.split(" (")[0] + " (Booked)";
-                                    }
-                                    if (isFirstHalfBooked || isSecondHalfBooked) {
+                                });
+
+                                // Special handling for full_day if half-days are affected
+                                const firstHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="first_half"]');
+                                const secondHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]');
+                                const fullDayBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]');
+
+                                if (fullDayBtn && !fullDayBtn.classList.contains('slot-booked-resource')) { // Only if not already booked on this resource
+                                    const firstHalfBookedOnResource = firstHalfBtn && firstHalfBtn.classList.contains('slot-booked-resource');
+                                    const secondHalfBookedOnResource = secondHalfBtn && secondHalfBtn.classList.contains('slot-booked-resource');
+
+                                    if (firstHalfBookedOnResource || secondHalfBookedOnResource) {
                                         fullDayBtn.disabled = true;
-                                        fullDayBtn.classList.add('unavailable', 'booked');
-                                        fullDayBtn.classList.remove('available');
-                                        let fullDayBaseText = fullDayBtn.textContent.split(" (")[0];
-                                        fullDayBtn.textContent = fullDayBaseText + ((isFirstHalfBooked && isSecondHalfBooked) ? " (Booked)" : " (Unavailable)");
+                                        fullDayBtn.classList.remove('slot-available', 'slot-user-busy');
+                                        fullDayBtn.classList.add('slot-booked-resource'); // Treat as resource booked for simplicity
+                                        fullDayBtn.textContent = fullDayBtn.textContent.split(" (")[0] + " (Unavailable)";
                                     }
+                                    // If user is busy in one half, full day might still be "User Busy" or "Available" depending on exact overlap logic desired.
+                                    // Current logic marks slot by slot. Full day being "User Busy" if one half is "User Busy" is an enhancement.
+                                    // For now, if any part of full day makes it "User Busy", it will be marked as such if not resource-booked.
                                 }
         
                                 if (bookingModal) bookingModal.style.display = 'block';
-                                console.log("Booking modal displayed for resource from group.");
+                                console.log("Booking modal displayed.");
                             });
-                            mapGroupGrid.appendChild(button);
+                            mapGroupGrid.appendChild(button); // This was for the first loop example, ensure it's in the correct place
                         });
                     }
-                });
+                }); // End of allMaps.forEach
 
-                if (groupedResources.unassigned.length > 0) {
+                if (groupedResources.unassigned.length > 0) { // Repeat for unassigned resources
                     resourcesRenderedInAnyGroup = true;
                     const unassignedHeading = document.createElement('h3');
                     unassignedHeading.textContent = 'Other Resources';
@@ -1321,7 +1369,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         button.dataset.allowedUserIds = resource.allowed_user_ids || "";
                         button.dataset.roleIds = (resource.roles || []).map(r => r.id).join(',');
 
-                        button.addEventListener('click', async function() {
+                        button.addEventListener('click', async function() { // Duplicated logic - consider refactoring to a common function
                             console.log(`Resource button clicked: ${this.dataset.resourceName} (ID: ${this.dataset.resourceId})`);
                             const clickedButton = this; 
                             const resourceId = clickedButton.dataset.resourceId;
@@ -1339,54 +1387,114 @@ document.addEventListener('DOMContentLoaded', function() {
                                 }
                             }
                             if (modalConfirmBtn) modalConfirmBtn.dataset.resourceId = resourceId;
+
+                            // START of new availability logic for unassigned resources
                             const cacheKey = resourceId + '_' + selectedDate;
-                            let bookings = currentResourceBookingsCache[cacheKey];
-                            if (!bookings) {
+                            let resourceBookings = currentResourceBookingsCache[cacheKey];
+                            if (!resourceBookings) {
                                 try {
-                                    bookings = await apiCall(`/api/resources/${resourceId}/availability?date=${selectedDate}`, {}, modalStatusMsg);
-                                    currentResourceBookingsCache[cacheKey] = bookings;
+                                    resourceBookings = await apiCall(`/api/resources/${resourceId}/availability?date=${selectedDate}`, {}, modalStatusMsg);
+                                    currentResourceBookingsCache[cacheKey] = resourceBookings;
                                 } catch (error) {
                                     showError(modalStatusMsg, `Could not load availability for ${resourceName}.`);
                                     if (bookingModal) bookingModal.style.display = 'block'; return;
                                 }
                             }
+
+                            let userBookings = [];
+                            const loggedInUserId = sessionStorage.getItem('loggedInUserId');
+                            if (loggedInUserId) {
+                                try {
+                                    userBookings = await apiCall(`/api/bookings/my_bookings_for_date?date=${selectedDate}`, {}, null);
+                                } catch (error) {
+                                    console.warn(`Could not fetch user's other bookings for ${selectedDate}:`, error.message);
+                                }
+                            }
+
+                            const slotButtons = [
+                                modalSlotOptionsContainer.querySelector('[data-slot-type="first_half"]'),
+                                modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]'),
+                                modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]')
+                            ].filter(btn => btn);
+
+                            const definedSlots = {
+                                first_half: { name: 'First Half-Day', start: 8 * 60, end: 12 * 60, startTimeStr: "08:00:00", endTimeStr: "12:00:00" },
+                                second_half: { name: 'Second Half-Day', start: 13 * 60, end: 17 * 60, startTimeStr: "13:00:00", endTimeStr: "17:00:00" },
+                                full_day: { name: 'Full Day', start: 8 * 60, end: 17 * 60, startTimeStr: "08:00:00", endTimeStr: "17:00:00" }
+                            };
+
+                            function parseTimeHHMMSS(timeStr) {
+                                const parts = timeStr.split(':');
+                                return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+                            }
+
+                            slotButtons.forEach(btn => {
+                                const slotType = btn.dataset.slotType;
+                                const definedSlot = definedSlots[slotType];
+                                if (!definedSlot) return;
+
+                                btn.disabled = false;
+                                btn.classList.remove('slot-available', 'slot-booked-resource', 'slot-user-busy', 'selected', 'unavailable', 'booked', 'partial');
+                                const baseText = btn.textContent.split(" (")[0];
+
+                                let isResourceBookedForSlot = false;
+                                if (resourceBookings && resourceBookings.length > 0) {
+                                    for (const booking of resourceBookings) {
+                                        const bookingStartMinutes = parseTimeHHMMSS(booking.start_time);
+                                        const bookingEndMinutes = parseTimeHHMMSS(booking.end_time);
+                                        if (Math.max(definedSlot.start, bookingStartMinutes) < Math.min(definedSlot.end, bookingEndMinutes)) {
+                                            isResourceBookedForSlot = true;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if (isResourceBookedForSlot) {
+                                    btn.disabled = true;
+                                    btn.classList.add('slot-booked-resource');
+                                    btn.textContent = baseText + " (Booked)";
+                                } else {
+                                    let isUserBusyElsewhere = false;
+                                    if (userBookings && userBookings.length > 0) {
+                                        for (const userBooking of userBookings) {
+                                            if (String(userBooking.resource_id) !== String(resourceId)) {
+                                                const userBookingStartMinutes = parseTimeHHMMSS(userBooking.start_time);
+                                                const userBookingEndMinutes = parseTimeHHMMSS(userBooking.end_time);
+                                                if (Math.max(definedSlot.start, userBookingStartMinutes) < Math.min(definedSlot.end, userBookingEndMinutes)) {
+                                                    isUserBusyElsewhere = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if (isUserBusyElsewhere) {
+                                        btn.classList.add('slot-user-busy');
+                                        btn.textContent = baseText + " (User Busy)";
+                                    } else {
+                                        btn.classList.add('slot-available');
+                                        btn.textContent = baseText;
+                                    }
+                                }
+                            });
+
                             const firstHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="first_half"]');
                             const secondHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]');
                             const fullDayBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]');
-                            if (firstHalfBtn && secondHalfBtn && fullDayBtn) {
-                                [firstHalfBtn, secondHalfBtn, fullDayBtn].forEach(btn => {
-                                    btn.disabled = false; btn.classList.remove('unavailable', 'booked', 'selected', 'partial');
-                                    btn.classList.add('available');
-                                    const baseText = btn.textContent.split(" (")[0]; btn.textContent = baseText;
-                                });
-                                let isFirstHalfBooked = false, isSecondHalfBooked = false;
-                                const firstHalfSlotStartStr = "08:00:00", firstHalfSlotEndStr = "12:00:00";
-                                const secondHalfSlotStartStr = "13:00:00", secondHalfSlotEndStr = "17:00:00";
-                                if (bookings && bookings.length > 0) {
-                                    for (const booking of bookings) {
-                                        if (booking.start_time < firstHalfSlotEndStr && booking.end_time > firstHalfSlotStartStr) isFirstHalfBooked = true;
-                                        if (booking.start_time < secondHalfSlotEndStr && booking.end_time > secondHalfSlotStartStr) isSecondHalfBooked = true;
-                                    }
-                                }
-                                if (isFirstHalfBooked) {
-                                    firstHalfBtn.disabled = true; firstHalfBtn.classList.add('unavailable', 'booked');
-                                    firstHalfBtn.classList.remove('available');
-                                    firstHalfBtn.textContent = firstHalfBtn.textContent.split(" (")[0] + " (Booked)";
-                                }
-                                if (isSecondHalfBooked) {
-                                    secondHalfBtn.disabled = true; secondHalfBtn.classList.add('unavailable', 'booked');
-                                    secondHalfBtn.classList.remove('available');
-                                    secondHalfBtn.textContent = secondHalfBtn.textContent.split(" (")[0] + " (Booked)";
-                                }
-                                if (isFirstHalfBooked || isSecondHalfBooked) {
-                                    fullDayBtn.disabled = true; fullDayBtn.classList.add('unavailable', 'booked');
-                                    fullDayBtn.classList.remove('available');
-                                    let fullDayBaseText = fullDayBtn.textContent.split(" (")[0];
-                                    fullDayBtn.textContent = fullDayBaseText + ((isFirstHalfBooked && isSecondHalfBooked) ? " (Booked)" : " (Unavailable)");
+
+                            if (fullDayBtn && !fullDayBtn.classList.contains('slot-booked-resource')) {
+                                const firstHalfBookedOnResource = firstHalfBtn && firstHalfBtn.classList.contains('slot-booked-resource');
+                                const secondHalfBookedOnResource = secondHalfBtn && secondHalfBtn.classList.contains('slot-booked-resource');
+
+                                if (firstHalfBookedOnResource || secondHalfBookedOnResource) {
+                                    fullDayBtn.disabled = true;
+                                    fullDayBtn.classList.remove('slot-available', 'slot-user-busy');
+                                    fullDayBtn.classList.add('slot-booked-resource');
+                                    fullDayBtn.textContent = fullDayBtn.textContent.split(" (")[0] + " (Unavailable)";
                                 }
                             }
+                            // END of new availability logic for unassigned resources
                             if (bookingModal) bookingModal.style.display = 'block';
-                            console.log("Booking modal displayed for unassigned resource.");
                         });
                         unassignedGroupGrid.appendChild(button);
                     });
@@ -3004,4 +3112,23 @@ document.addEventListener('DOMContentLoaded', function() {
         logoutLinkDropdownGlobal.addEventListener('click', handleLogout);
     }
 
+    // --- Mobile Menu Toggle Logic ---
+    const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
+    const sidebarNav = document.getElementById('sidebar'); // nav#sidebar
+
+    if (mobileMenuToggle && sidebarNav) {
+        mobileMenuToggle.addEventListener('click', function() {
+            sidebarNav.classList.toggle('sidebar-open');
+            const isExpanded = sidebarNav.classList.contains('sidebar-open');
+            this.setAttribute('aria-expanded', isExpanded);
+            // Optional: Change hamburger to X icon
+            if (isExpanded) {
+                this.innerHTML = '<span>&times;</span>'; // Simple X
+                this.style.fontSize = '2rem'; // Adjust X size if needed
+            } else {
+                this.innerHTML = '<span></span><span></span><span></span>'; // Hamburger bars
+                this.style.fontSize = '1.5rem'; // Reset to original hamburger size
+            }
+        });
+    }
 });

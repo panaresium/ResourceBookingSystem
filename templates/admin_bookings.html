@@ -59,11 +59,77 @@
 </div>
 
 <script>
-// Basic script placeholder if needed, though actual cancel logic might be in a site-wide JS file.
-// For now, this is just to acknowledge the potential for JS interaction with the status div.
 document.addEventListener('DOMContentLoaded', function() {
     const statusDiv = document.getElementById('admin-booking-status');
-    // Example: if (statusDiv) { statusDiv.textContent = 'Page loaded.'; }
+    const cancelButtons = document.querySelectorAll('.cancel-booking-btn');
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+    cancelButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const bookingId = this.dataset.bookingId;
+            const row = this.closest('tr'); // Get the table row
+
+            if (!bookingId) {
+                console.error('Booking ID not found on button');
+                return;
+            }
+
+            if (!csrfToken) {
+                console.error('CSRF token not found');
+                statusDiv.textContent = 'Error: CSRF token not found. Please refresh the page.';
+                statusDiv.style.color = 'red';
+                return;
+            }
+
+            // Optimistically disable the button
+            this.disabled = true;
+            this.textContent = 'Processing...';
+
+            fetch(`/api/admin/bookings/${bookingId}/cancel`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                // body: JSON.stringify({}) // No body needed for this request as per typical cancel actions
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.json();
+                } else {
+                    return response.json().then(err => Promise.reject(err));
+                }
+            })
+            .then(data => {
+                statusDiv.textContent = data.message || 'Booking cancelled successfully.';
+                statusDiv.style.color = 'green';
+
+                // Update booking status in the table
+                const statusCell = row.querySelector('td:nth-child(7) span'); // 7th cell for status
+                if (statusCell) {
+                    statusCell.textContent = 'Cancelled';
+                    statusCell.className = 'status-badge status-cancelled';
+                }
+
+                // Update button state
+                this.textContent = 'Cancelled';
+                this.disabled = true; // Keep it disabled
+            })
+            .catch(error => {
+                const errorMessage = error.message || error.error || 'An unknown error occurred.';
+                statusDiv.textContent = `Error: ${errorMessage}`;
+                statusDiv.style.color = 'red';
+
+                // Re-enable the button if the operation failed, unless it was a 404 or similar
+                if (error.status !== 404) {
+                     this.disabled = false;
+                     this.textContent = 'Cancel';
+                } else {
+                    this.textContent = 'Error'; // Or some other indication that it failed terminally
+                }
+            });
+        });
+    });
 });
 </script>
 
