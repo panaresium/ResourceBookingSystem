@@ -1135,9 +1135,9 @@ nav#sidebar {
 
 .fc-daygrid-event .fc-event-main-frame b { /* Targeting the title */
     display: block; /* Make it a block to control overflow */
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal; /* Allow text to wrap */
+    /* overflow: hidden; */ /* Not needed here, parent will clip */
+    /* text-overflow: ellipsis; */ /* Not needed if wrapping */
     max-width: 100%; /* Ensure it respects container width */
 }
 

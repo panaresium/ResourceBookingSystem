@@ -43,26 +43,50 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const availableSlots = await apiCall(`/api/resources/${resourceId}/available_slots?date=${dateStr}`);
 
-            slotsSelect.innerHTML = '<option value="">Select a time slot</option>'; // Reset
+            // Reset the select element
+            slotsSelect.innerHTML = '<option value="">-- Select a time slot --</option>'; // Reset
 
-            if (availableSlots && availableSlots.length > 0) {
-                availableSlots.forEach(slot => {
-                    const optionValue = `${slot.start_time},${slot.end_time}`; // e.g., "09:00,09:30"
-                    const optionText = `${slot.start_time} - ${slot.end_time} UTC`; // e.g., "09:00 - 09:30 UTC"
-                    const option = new Option(optionText, optionValue);
+            // Define the predefined slots
+            const predefinedSlots = [
+                { text: "08:00 - 12:00 UTC", value: "08:00,12:00" },
+                { text: "13:00 - 17:00 UTC", value: "13:00,17:00" },
+                { text: "08:00 - 17:00 UTC", value: "08:00,17:00" }
+            ];
 
-                    if (selectedStartTimeStr && slot.start_time === selectedStartTimeStr) {
-                        option.selected = true;
-                    }
-                    slotsSelect.add(option);
-                });
-                slotsSelect.disabled = false;
-            } else {
-                slotsSelect.innerHTML = '<option value="">No available slots</option>';
+            // Populate the select element with predefined slots
+            predefinedSlots.forEach(slot => {
+                const option = new Option(slot.text, slot.value);
+                slotsSelect.add(option);
+            });
+            slotsSelect.disabled = false;
+
+            // The original logic for handling empty or error states for availableSlots can be kept
+            // or adapted if the API call itself is still meaningful for other purposes (e.g. general availability check)
+            if (!availableSlots) { // Example: if API call failed or indicated resource is generally unavailable
+                 console.warn('API call for slots succeeded but returned no data, or resource might be unavailable. Proceeding with predefined slots.');
             }
-            if (statusMessage) statusMessage.textContent = '';
+            // if (availableSlots && availableSlots.length > 0) { // This block is replaced
+            //     availableSlots.forEach(slot => {
+            //         const optionValue = `${slot.start_time},${slot.end_time}`;
+            //         const optionText = `${slot.start_time} - ${slot.end_time} UTC`;
+            //         const option = new Option(optionText, optionValue);
+            //
+            //         if (selectedStartTimeStr && slot.start_time === selectedStartTimeStr) {
+            //             option.selected = true;
+            //         }
+            //         slotsSelect.add(option);
+            //     });
+            //     slotsSelect.disabled = false;
+            // } else { // This logic might need adjustment if API call result is still used
+            //     slotsSelect.innerHTML = '<option value="">No available slots (using predefined)</option>';
+            //     // Populate with predefined even if API says no specific slots, or handle as error.
+            //     // For now, predefined slots are added regardless of API's slot list.
+            // }
+            if (statusMessage) statusMessage.textContent = ''; // Clear loading/previous status
         } catch (error) {
             console.error('Error fetching available slots:', error);
+            // Even if API fails, we might still want to show predefined slots,
+            // or show an error and not show slots. For now, let's assume error means no slots.
             slotsSelect.innerHTML = '<option value="">Error loading slots</option>';
             if (statusMessage) {
                 statusMessage.textContent = error.message || 'Failed to load available slots.';
