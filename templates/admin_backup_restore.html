@@ -249,8 +249,7 @@
             backupStatusMessageEl.className = `alert alert-${messageType === 'error' ? 'danger' : (messageType === 'success' ? 'success' : 'info')}`;
 
 
-            const lowerStatus = data.status.toLowerCase();
-            if (lowerStatus.includes("completed successfully") || lowerStatus.includes("failed") || lowerStatus.includes("finished")) {
+            if (data.status === "Backup Completed Successfully." || data.status === "Backup Failed. Check server logs for details.") {
                 // backupButton.disabled = false; // Re-enable all relevant buttons
                 document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
                 console.log('Final backup status displayed:', backupStatusMessageEl.textContent);
