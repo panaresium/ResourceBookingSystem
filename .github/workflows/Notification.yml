@@ -2,7 +2,7 @@
 
 on:
   workflow_run:
-    workflows: ["ResourceBookingSystem"]
+    workflows: ["Build and deploy Python app to Azure Web App - resourcebooking"]
     types:
       - completed
 
