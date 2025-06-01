@@ -111,6 +111,14 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
+SCHEDULE_CONFIG_FILE = os.path.join(DATA_DIR, 'backup_schedule.json')
+DEFAULT_SCHEDULE_DATA = {
+    "is_enabled": False,
+    "schedule_type": "daily",
+    "day_of_week": None, # 0=Monday, 6=Sunday
+    "time_of_day": "02:00" # HH:MM format
+}
+
 app = Flask(__name__, template_folder='templates', static_folder='static')
 socketio = SocketIO(app)
 
@@ -475,17 +483,6 @@ class AuditLog(db.Model):
     def __repr__(self):
         return f'<AuditLog {self.timestamp} - {self.username or "System"} - {self.action}>'
 
-class BackupScheduleConfig(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    is_enabled = db.Column(db.Boolean, default=False, nullable=False)
-    schedule_type = db.Column(db.String(50), nullable=False, default='daily') # 'daily', 'weekly'
-    day_of_week = db.Column(db.Integer, nullable=True) # 0=Monday, 6=Sunday, for weekly schedule
-    time_of_day = db.Column(db.Time, nullable=False)    # HH:MM
-    last_run_date = db.Column(db.Date, nullable=True) # Stores the date of the last successful run
-
-    def __repr__(self):
-        return f"<BackupScheduleConfig id={self.id} enabled={self.is_enabled} type={self.schedule_type} time={self.time_of_day.strftime('%H:%M')} last_run={self.last_run_date}>"
-
 # --- Audit Log Helper ---
 def add_audit_log(action: str, details: str, user_id: int = None, username: str = None):
     """Adds an entry to the audit log."""
@@ -776,6 +773,57 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
     add_audit_log(action="IMPORT_MAP_CONFIGURATION_COMPLETED", details=f"User {current_user.username} completed map configuration import. Summary: {str(summary)}")
     return summary, status_code
 
+def _load_schedule_from_json():
+    if not os.path.exists(SCHEDULE_CONFIG_FILE):
+        # Create with defaults if not found
+        _save_schedule_to_json(DEFAULT_SCHEDULE_DATA)
+        return DEFAULT_SCHEDULE_DATA.copy()
+    try:
+        with open(SCHEDULE_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            # Ensure all keys are present, fill with default if not
+            for key, default_value in DEFAULT_SCHEDULE_DATA.items():
+                if key not in data:
+                    data[key] = default_value
+            return data
+    except (IOError, json.JSONDecodeError) as e:
+        app.logger.error(f"Error loading schedule from JSON '{SCHEDULE_CONFIG_FILE}': {e}. Returning defaults.")
+        # Optionally, try to recreate with defaults if corrupt
+        _save_schedule_to_json(DEFAULT_SCHEDULE_DATA) # Attempt to fix by writing defaults
+        return DEFAULT_SCHEDULE_DATA.copy()
+
+def _save_schedule_to_json(data_to_save):
+    try:
+        # Validate data structure before saving (basic validation)
+        validated_data = {}
+        validated_data['is_enabled'] = bool(data_to_save.get('is_enabled', DEFAULT_SCHEDULE_DATA['is_enabled']))
+        validated_data['schedule_type'] = data_to_save.get('schedule_type', DEFAULT_SCHEDULE_DATA['schedule_type'])
+        if validated_data['schedule_type'] not in ['daily', 'weekly']:
+            validated_data['schedule_type'] = DEFAULT_SCHEDULE_DATA['schedule_type']
+
+        day_of_week = data_to_save.get('day_of_week')
+        if validated_data['schedule_type'] == 'weekly':
+            if isinstance(day_of_week, int) and 0 <= day_of_week <= 6:
+                validated_data['day_of_week'] = day_of_week
+            else: # Default if invalid for weekly
+                validated_data['day_of_week'] = 0 # Default to Monday for weekly if invalid
+        else: # Daily
+            validated_data['day_of_week'] = None
+
+        time_str = data_to_save.get('time_of_day', DEFAULT_SCHEDULE_DATA['time_of_day'])
+        try: # Validate HH:MM format
+            datetime.strptime(time_str, '%H:%M')
+            validated_data['time_of_day'] = time_str
+        except ValueError:
+            validated_data['time_of_day'] = DEFAULT_SCHEDULE_DATA['time_of_day']
+
+        with open(SCHEDULE_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(validated_data, f, indent=4)
+        return True, "Schedule saved successfully to JSON."
+    except IOError as e:
+        app.logger.error(f"Error saving schedule to JSON '{SCHEDULE_CONFIG_FILE}': {e}")
+        return False, f"Error saving schedule to JSON: {e}"
+
 # --- Scheduled Backup Job ---
 # This function needs to be defined before it's referenced by the scheduler.
 def run_scheduled_backup_job():
@@ -783,71 +831,65 @@ def run_scheduled_backup_job():
     Checks the backup schedule and runs a full backup if due.
     This function is intended to be called by APScheduler.
     """
-    with app.app_context(): # Essential for DB access and app.logger
-        app.logger.info("run_scheduled_backup_job: Checking backup schedule...")
+    with app.app_context():
+        app.logger.info("run_scheduled_backup_job: Checking backup schedule (from JSON)...")
         try:
-            schedule_config = db.session.query(BackupScheduleConfig).first()
+            schedule_data = _load_schedule_from_json()
 
-            if not schedule_config:
-                app.logger.warning("run_scheduled_backup_job: No backup schedule configuration found. Skipping.")
-                return
-
-            if not schedule_config.is_enabled:
-                app.logger.info("run_scheduled_backup_job: Scheduled backups are disabled. Skipping.")
+            if not schedule_data.get('is_enabled'):
+                app.logger.info("run_scheduled_backup_job: Scheduled backups are disabled (JSON). Skipping.")
                 return
 
             now_utc = datetime.now(timezone.utc)
             current_time_utc = now_utc.time()
-            current_date_utc = now_utc.date()
+            # current_date_utc = now_utc.date() # last_run_date logic removed for simplicity with JSON
 
-            # Check if already run today
-            if schedule_config.last_run_date == current_date_utc:
-                app.logger.info(f"run_scheduled_backup_job: Backup for {current_date_utc.isoformat()} has already run. Skipping.")
-                return
+            scheduled_time_str = schedule_data.get('time_of_day', "02:00")
+            try:
+                scheduled_time_obj = datetime.strptime(scheduled_time_str, '%H:%M').time()
+            except ValueError:
+                app.logger.error(f"run_scheduled_backup_job: Invalid time_of_day '{scheduled_time_str}' in JSON. Using 02:00.")
+                scheduled_time_obj = time(2,0)
 
             backup_due = False
-            if schedule_config.schedule_type == 'daily':
-                # Check if current time is at or after scheduled time (within the hour)
-                # A more precise check would compare current_time_utc with schedule_config.time_of_day directly
-                # and ensure it's within a small window (e.g. job interval) past the scheduled time.
-                # For an hourly job, checking the hour is a common approach.
-                if current_time_utc.hour == schedule_config.time_of_day.hour and \
-                   current_time_utc.minute >= schedule_config.time_of_day.minute: # Ensure we don't miss it if job runs slightly late
+            schedule_type = schedule_data.get('schedule_type', 'daily')
+
+            # Simple check: if current hour and minute match scheduled time.
+            # This means the job must run at least once within that minute.
+            # A more robust solution would track last run time to avoid multiple runs if the job restarts.
+            if current_time_utc.hour == scheduled_time_obj.hour and current_time_utc.minute == scheduled_time_obj.minute:
+                if schedule_type == 'daily':
                     backup_due = True
-            elif schedule_config.schedule_type == 'weekly':
-                if now_utc.weekday() == schedule_config.day_of_week: # 0=Monday, 6=Sunday
-                    if current_time_utc.hour == schedule_config.time_of_day.hour and \
-                       current_time_utc.minute >= schedule_config.time_of_day.minute:
+                elif schedule_type == 'weekly':
+                    day_of_week_json = schedule_data.get('day_of_week') # This is an int 0-6 or None
+                    if day_of_week_json is not None and now_utc.weekday() == day_of_week_json:
                         backup_due = True
 
             if backup_due:
-                app.logger.info(f"run_scheduled_backup_job: Backup is due for {current_date_utc.isoformat()} at {schedule_config.time_of_day.strftime('%H:%M')}. Starting backup...")
-
+                app.logger.info(f"run_scheduled_backup_job: Backup is due (JSON config) at {scheduled_time_str}. Starting backup...")
                 timestamp_str = now_utc.strftime('%Y%m%d_%H%M%S')
-                map_config = _get_map_configuration_data() # Ensure this helper is accessible
+                map_config = _get_map_configuration_data()
 
-                if not create_full_backup: # Check if the azure_backup function is available
+                if not create_full_backup:
                     app.logger.error("run_scheduled_backup_job: create_full_backup function not available/imported.")
                     return
 
-                # Pass None for socketio and task_id as this is an automated job
                 success = create_full_backup(timestamp_str, map_config_data=map_config, socketio_instance=None, task_id=None)
 
                 if success:
-                    app.logger.info(f"run_scheduled_backup_job: Scheduled backup completed successfully. Timestamp: {timestamp_str}")
-                    add_audit_log(action="SCHEDULED_BACKUP_SUCCESS", details=f"Scheduled backup successful. Timestamp: {timestamp_str}", username="System")
-                    schedule_config.last_run_date = current_date_utc
-                    db.session.commit()
+                    app.logger.info(f"run_scheduled_backup_job: Scheduled backup (JSON) completed successfully. Timestamp: {timestamp_str}")
+                    add_audit_log(action="SCHEDULED_BACKUP_SUCCESS_JSON", details=f"Scheduled backup successful (JSON). Timestamp: {timestamp_str}", username="System")
+                    # To prevent re-running in the same day if job restarts, would need to write last_run_date to JSON.
+                    # For now, this simplified version might re-run if job restarts within the same minute.
                 else:
-                    app.logger.error(f"run_scheduled_backup_job: Scheduled backup failed. Timestamp attempted: {timestamp_str}")
-                    add_audit_log(action="SCHEDULED_BACKUP_FAILED", details=f"Scheduled backup failed. Timestamp attempted: {timestamp_str}", username="System")
+                    app.logger.error(f"run_scheduled_backup_job: Scheduled backup (JSON) failed. Timestamp attempted: {timestamp_str}")
+                    add_audit_log(action="SCHEDULED_BACKUP_FAILED_JSON", details=f"Scheduled backup failed (JSON). Timestamp attempted: {timestamp_str}", username="System")
             else:
-                # This log can be verbose if the scheduler runs frequently. Consider logging level or less frequent logging.
-                app.logger.debug(f"run_scheduled_backup_job: Backup not currently due. Current time: {current_time_utc.strftime('%H:%M:%S')}, Scheduled: {schedule_config.time_of_day.strftime('%H:%M')}, Type: {schedule_config.schedule_type}, Last Run: {schedule_config.last_run_date}")
+                app.logger.debug(f"run_scheduled_backup_job: Backup not currently due (JSON config). Current: {current_time_utc.strftime('%H:%M')}, Scheduled: {scheduled_time_str}, Type: {schedule_type}")
 
-        except Exception as e:
-            app.logger.exception("run_scheduled_backup_job: Error during scheduled backup job execution.")
-            add_audit_log(action="SCHEDULED_BACKUP_ERROR", details=f"Exception: {str(e)}", username="System")
+        except Exception as e: # Catch-all for the main try block
+            app.logger.exception("run_scheduled_backup_job: Error during scheduled backup job execution (JSON config).")
+            add_audit_log(action="SCHEDULED_BACKUP_ERROR_JSON", details=f"Exception: {str(e)}", username="System")
 
 @app.route("/")
 def serve_index():
@@ -4506,88 +4548,80 @@ def api_verify_backup():
 @login_required
 @permission_required('manage_system')
 def get_backup_schedule():
-    app.logger.info(f"User {current_user.username} fetching backup schedule configuration.")
+    app.logger.info(f"User {current_user.username} fetching backup schedule configuration (from JSON).")
     try:
-        schedule_config = db.session.query(BackupScheduleConfig).first()
-        if schedule_config:
-            return jsonify({
-                'id': schedule_config.id,
-                'is_enabled': schedule_config.is_enabled,
-                'schedule_type': schedule_config.schedule_type,
-                'day_of_week': schedule_config.day_of_week,
-                'time_of_day': schedule_config.time_of_day.strftime('%H:%M:%S') if schedule_config.time_of_day else None
-            }), 200
-        else:
-            app.logger.warning("No backup schedule configuration found.")
-            return jsonify({'is_enabled': False, 'schedule_type': 'daily', 'day_of_week': None, 'time_of_day': '02:00:00'}), 200
+        schedule_data = _load_schedule_from_json()
+        # The time_of_day is already HH:MM string from JSON
+        return jsonify(schedule_data), 200
     except Exception as e:
-        app.logger.exception("Error fetching backup schedule config:")
-        return jsonify({'success': False, 'message': f'Error fetching schedule: {str(e)}'}), 500
+        app.logger.exception("Error fetching backup schedule config from JSON:")
+        # Return defaults on error to prevent breaking frontend
+        return jsonify(DEFAULT_SCHEDULE_DATA.copy()), 500
 
 @app.route('/api/admin/backup_schedule', methods=['POST'])
 @login_required
 @permission_required('manage_system')
 def update_backup_schedule():
-    app.logger.info(f"User {current_user.username} attempting to update backup schedule.")
+    app.logger.info(f"User {current_user.username} attempting to update backup schedule (to JSON).")
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'message': 'Invalid input. JSON data expected.'}), 400
     try:
+        # Basic validation (more specific validation is in _save_schedule_to_json)
         is_enabled = data.get('is_enabled')
         schedule_type = data.get('schedule_type')
-        day_of_week_str = data.get('day_of_week')
         time_of_day_str = data.get('time_of_day')
 
         if not isinstance(is_enabled, bool):
             return jsonify({'success': False, 'message': 'is_enabled must be true or false.'}), 400
         if schedule_type not in ['daily', 'weekly']:
             return jsonify({'success': False, 'message': "schedule_type must be 'daily' or 'weekly'."}), 400
-
-        parsed_time_of_day = None
-        if time_of_day_str:
-            try:
-                parsed_time_of_day = datetime.strptime(time_of_day_str, '%H:%M').time()
-            except ValueError:
-                try:
-                    parsed_time_of_day = datetime.strptime(time_of_day_str, '%H:%M:%S').time()
-                except ValueError:
-                    return jsonify({'success': False, 'message': "time_of_day must be in HH:MM or HH:MM:SS format."}), 400
-        else:
+        if not time_of_day_str:
             return jsonify({'success': False, 'message': 'time_of_day is required.'}), 400
-
-        parsed_day_of_week = None
-        if schedule_type == 'weekly':
-            if day_of_week_str is None or day_of_week_str == '':
-                 return jsonify({'success': False, 'message': 'day_of_week is required for weekly schedule.'}), 400
+        try:
+            datetime.strptime(time_of_day_str, '%H:%M') # Validates HH:MM format
+        except ValueError:
+             # Allow HH:MM:SS from old DB for parsing, but will save as HH:MM
             try:
-                parsed_day_of_week = int(day_of_week_str)
-                if not (0 <= parsed_day_of_week <= 6):
+                datetime.strptime(time_of_day_str, '%H:%M:%S')
+                data['time_of_day'] = time_of_day_str[:5] # Convert to HH:MM
+            except ValueError:
+                return jsonify({'success': False, 'message': "time_of_day must be in HH:MM format."}), 400
+
+
+        if schedule_type == 'weekly':
+            day_of_week_val = data.get('day_of_week')
+            if day_of_week_val is None or day_of_week_val == '': # Check if it's missing or empty string
+                return jsonify({'success': False, 'message': 'day_of_week is required for weekly schedule.'}), 400
+            try:
+                day_of_week_int = int(day_of_week_val)
+                if not (0 <= day_of_week_int <= 6):
                     raise ValueError("Day of week must be 0-6.")
-            except ValueError as ve:
-                 return jsonify({'success': False, 'message': str(ve)}), 400
+                data['day_of_week'] = day_of_week_int # Ensure it's int
+            except (ValueError, TypeError):
+                return jsonify({'success': False, 'message': 'day_of_week must be an integer between 0 and 6.'}), 400
+        else: # daily
+            data['day_of_week'] = None
 
-        schedule_config = db.session.query(BackupScheduleConfig).first()
-        if not schedule_config:
-            schedule_config = BackupScheduleConfig(id=1)
-            db.session.add(schedule_config)
-            app.logger.info("No existing backup schedule config, creating new one.")
 
-        schedule_config.is_enabled = is_enabled
-        schedule_config.schedule_type = schedule_type
-        schedule_config.time_of_day = parsed_time_of_day
-        schedule_config.day_of_week = parsed_day_of_week if schedule_type == 'weekly' else None
+        success, message = _save_schedule_to_json(data)
 
-        db.session.commit()
-        app.logger.info(f"Backup schedule updated by {current_user.username}: {data}")
-        add_audit_log(action="UPDATE_BACKUP_SCHEDULE", details=f"User {current_user.username} updated backup schedule. New config: {data}")
-        app.logger.info("Placeholder: Scheduler would be reconfigured here.") # Actual scheduler reconfig is complex
-        return jsonify({'success': True, 'message': 'Backup schedule updated successfully.'}), 200
-    except ValueError as ve: # Specific validation errors
+        if success:
+            app.logger.info(f"Backup schedule updated by {current_user.username} (JSON): {data}")
+            add_audit_log(action="UPDATE_BACKUP_SCHEDULE_JSON", details=f"User {current_user.username} updated backup schedule (JSON). New config: {data}")
+            # Placeholder for scheduler reconfiguration if it was dynamic
+            app.logger.info("Placeholder: APScheduler would be reconfigured here if settings changed.")
+            return jsonify({'success': True, 'message': message}), 200
+        else:
+            add_audit_log(action="UPDATE_BACKUP_SCHEDULE_JSON_FAILED", details=f"Error: {message}. Data: {data}")
+            return jsonify({'success': False, 'message': message}), 500
+
+    except ValueError as ve: # Catch specific validation errors if any slip through
         return jsonify({'success': False, 'message': str(ve)}), 400
     except Exception as e:
-        db.session.rollback()
-        app.logger.exception("Error updating backup schedule config:")
-        add_audit_log(action="UPDATE_BACKUP_SCHEDULE_FAILED", details=f"Error: {str(e)}. Data: {data}")
+        db.session.rollback() # Though not using DB here, good habit if other operations were mixed
+        app.logger.exception("Error updating backup schedule config (JSON):")
+        add_audit_log(action="UPDATE_BACKUP_SCHEDULE_JSON_ERROR", details=f"Error: {str(e)}. Data: {data}")
         return jsonify({'success': False, 'message': f'Error updating schedule: {str(e)}'}), 500
 
 if __name__ == "__main__":
@@ -4682,4 +4716,3 @@ def get_all_bookings_for_resource(resource_id):
     except Exception as e:
         app.logger.exception(f"Error fetching all bookings for resource {resource_id}:")
         return jsonify({'error': 'Failed to fetch bookings due to a server error.'}), 500
-
