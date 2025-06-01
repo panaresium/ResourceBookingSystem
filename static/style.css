@@ -1127,6 +1127,14 @@ nav#sidebar {
 }
 */
 
+/* Ensure the main event anchor tag behaves as a block */
+a.fc-daygrid-event.fc-event { /* Targeting the <a> tag specifically */
+    display: block;
+    width: 100%; /* Ensure it takes full width of its cell container */
+    /* Note: FullCalendar's own CSS might have padding or other box model properties.
+       This change focuses on making the anchor itself a block-level element. */
+}
+
 /* Styling for FullCalendar event content container */
 /* Properties like display and position are kept for basic layout. */
 /* Text wrapping, overflow, and max-height are removed as JS now handles truncation. */
@@ -1145,6 +1153,7 @@ nav#sidebar {
 /* Text wrapping properties removed. */
 .fc-daygrid-event .fc-event-title { /* Common class for event titles */
     display: block; /* Kept, as titles often benefit from block display */
+    width: 100%; /* Ensure it takes full width to push subsequent content to a new line */
     /* white-space: normal !important; */ /* Removed */
     /* overflow-wrap: break-word !important; */ /* Removed */
     /* word-wrap: break-word !important; */ /* Removed */
@@ -1154,6 +1163,7 @@ nav#sidebar {
 /* Text wrapping properties removed. Max-width and display are kept. */
 .fc-daygrid-event .fc-event-main-frame b {
     display: block;
+    width: 100%; /* Ensure it takes full width to push subsequent content to a new line */
     max-width: 100%; /* Can be useful to prevent breaking out of cell if FC doesn't handle it */
     /* white-space: normal !important; */ /* Removed */
     /* overflow-wrap: break-word !important; */ /* Removed */
