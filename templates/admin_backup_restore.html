@@ -75,6 +75,7 @@
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        const socket = io(); // Initialize SocketIO
 
         const backupButton = document.getElementById('one-click-backup-btn');
         const backupStatusMessage = document.getElementById('backup-status-message');
@@ -94,12 +95,67 @@
         const saveScheduleButton = document.getElementById('save-schedule-btn');
         const scheduleStatusMessage = document.getElementById('schedule-status-message');
 
+        let currentBackupTaskId = null;
+        let currentRestoreTaskId = null;
+
+        // Keep-alive function
+        function keepAlive() {
+            fetch('/ping', {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    console.warn('Keep-alive ping failed. Status:', response.status);
+                } else {
+                    // console.log('Keep-alive ping successful.'); // Optional: for debugging
+                }
+            })
+            .catch(error => console.error('Keep-alive ping error:', error));
+        }
+
+        // Set interval for keep-alive (e.g., every 5 minutes)
+        setInterval(keepAlive, 5 * 60 * 1000); // 300,000 milliseconds
+
+        // SocketIO listeners
+        socket.on('backup_progress', function(data) {
+            console.log('Backup progress event:', data);
+            if (data.task_id === currentBackupTaskId) {
+                let detailMessage = data.detail ? ` (${data.detail})` : '';
+                backupStatusMessage.textContent = `{{ _('Backup progress:') }} ${data.status}${detailMessage}`;
+                if (data.detail && data.detail.toUpperCase() === 'ERROR') {
+                    backupStatusMessage.className = 'alert alert-danger';
+                } else if (data.detail && data.detail.toUpperCase() === 'SUCCESS') {
+                    backupStatusMessage.className = 'alert alert-success';
+                    loadAvailableBackups(); // Refresh backup list on success
+                } else {
+                    backupStatusMessage.className = 'alert alert-info';
+                }
+            }
+        });
+
+        socket.on('restore_progress', function(data) {
+            console.log('Restore progress event:', data);
+            if (data.task_id === currentRestoreTaskId) {
+                let detailMessage = data.detail ? ` (${data.detail})` : '';
+                restoreStatusMessage.textContent = `{{ _('Restore progress:') }} ${data.status}${detailMessage}`;
+                 if (data.detail && data.detail.toUpperCase() === 'ERROR') {
+                    restoreStatusMessage.className = 'alert alert-danger';
+                } else if (data.detail && data.detail.toUpperCase() === 'SUCCESS') {
+                    restoreStatusMessage.className = 'alert alert-success';
+                } else {
+                    restoreStatusMessage.className = 'alert alert-info';
+                }
+            }
+        });
+
 
         // One Click Backup
         backupButton.addEventListener('click', function () {
             backupButton.disabled = true;
-            backupStatusMessage.textContent = "{{ _('Starting backup...') }}";
+            backupStatusMessage.textContent = "{{ _('Initiating backup...') }}";
             backupStatusMessage.className = 'alert alert-info';
+            currentBackupTaskId = null; // Reset task ID
 
             fetch('/api/admin/one_click_backup', {
                 method: 'POST',
@@ -110,21 +166,25 @@
             })
             .then(response => response.json())
             .then(data => {
-                if (data.success) {
-                    backupStatusMessage.textContent = "{{ _('Backup successful:') }} " + data.message;
-                    backupStatusMessage.className = 'alert alert-success';
-                    loadAvailableBackups(); // Refresh the list of backups
-                } else {
-                    backupStatusMessage.textContent = "{{ _('Backup failed:') }} " + (data.message || "{{ _('Unknown error.') }}");
-                    backupStatusMessage.className = 'alert alert-danger';
+                if (data.task_id) {
+                    currentBackupTaskId = data.task_id;
                 }
+                if (data.success) {
+                    // Message is now primarily handled by SocketIO events
+                    backupStatusMessage.textContent = data.message || "{{ _('Backup process started. See live updates.') }}";
+                    backupStatusMessage.className = 'alert alert-info'; // Initial info, SocketIO will update
+                } else {
+                    backupStatusMessage.textContent = "{{ _('Backup initiation failed:') }} " + (data.message || "{{ _('Unknown error.') }}");
+                    backupStatusMessage.className = 'alert alert-danger';
+                    backupButton.disabled = false;
+                }
+                // Do not re-enable button here if success, SocketIO will indicate completion
+                if (!data.success) backupButton.disabled = false;
             })
             .catch(error => {
                 console.error('Backup error:', error);
                 backupStatusMessage.textContent = "{{ _('Backup request failed:') }} " + error.toString();
                 backupStatusMessage.className = 'alert alert-danger';
-            })
-            .finally(() => {
                 backupButton.disabled = false;
             });
         });
@@ -139,20 +199,16 @@
                 method: 'GET',
                 headers: {
                     'Accept': 'application/json'
-                    // CSRF not typically needed for GET, but include if server expects it for all API routes
                 }
             })
             .then(response => response.json())
             .then(data => {
-                availableBackupsTbody.innerHTML = ''; // Clear loading or old rows
+                availableBackupsTbody.innerHTML = '';
                 if (data.success && data.backups && data.backups.length > 0) {
                     data.backups.forEach(timestamp => {
                         const row = availableBackupsTbody.insertRow();
                         const cellTimestamp = row.insertCell();
                         const cellAction = row.insertCell();
-
-                        // Format timestamp for better readability if needed
-                        // Assuming timestamp is YYYYMMDD_HHMMSS
                         let displayTimestamp = timestamp;
                         try {
                             const year = timestamp.substring(0,4);
@@ -162,10 +218,9 @@
                             const minute = timestamp.substring(11,13);
                             const second = timestamp.substring(13,15);
                             displayTimestamp = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
-                        } catch (e) { /* ignore, use raw timestamp */ }
+                        } catch (e) { /* ignore */ }
 
                         cellTimestamp.textContent = displayTimestamp;
-
                         const restoreButton = document.createElement('button');
                         restoreButton.textContent = "{{ _('Restore') }}";
                         restoreButton.className = 'btn btn-sm btn-warning restore-btn';
@@ -192,15 +247,12 @@
             });
         }
 
-        // Event listener for "Refresh Available Backups"
         listBackupsButton.addEventListener('click', loadAvailableBackups);
 
-        // Delegated event listener for "Restore" buttons
         availableBackupsTable.addEventListener('click', function (event) {
             if (event.target.classList.contains('restore-btn')) {
                 const timestamp = event.target.getAttribute('data-timestamp');
-                const rawTimestamp = timestamp; // For messages
-                 let displayTimestamp = timestamp;
+                let displayTimestamp = timestamp;
                  try {
                     const year = timestamp.substring(0,4);
                     const month = timestamp.substring(4,6);
@@ -209,17 +261,17 @@
                     const minute = timestamp.substring(11,13);
                     const second = timestamp.substring(13,15);
                     displayTimestamp = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
-                } catch (e) { /* ignore, use raw timestamp for confirm */ }
-
+                } catch (e) { /* ignore */ }
 
                 if (!confirm("{{ _('Are you sure you want to restore from backup') }} " + displayTimestamp + "? {{ _('This will overwrite current data and may require an application restart.') }}")) {
                     return;
                 }
 
-                // Disable all restore buttons
                 document.querySelectorAll('.restore-btn').forEach(btn => btn.disabled = true);
-                restoreStatusMessage.textContent = `{{ _('Starting restore from') }} ${displayTimestamp}... {{ _('This may take a while. Please do not navigate away.') }}`;
+                backupButton.disabled = true; // Disable backup button during restore
+                restoreStatusMessage.textContent = `{{ _('Initiating restore from') }} ${displayTimestamp}... {{ _('This may take a while. Please do not navigate away.') }}`;
                 restoreStatusMessage.className = 'alert alert-info';
+                currentRestoreTaskId = null; // Reset task ID
 
                 fetch('/api/admin/one_click_restore', {
                     method: 'POST',
@@ -228,36 +280,39 @@
                         'X-CSRFToken': csrfToken,
                         'Accept': 'application/json'
                     },
-                    body: JSON.stringify({ backup_timestamp: rawTimestamp })
+                    body: JSON.stringify({ backup_timestamp: timestamp })
                 })
                 .then(response => response.json())
                 .then(data => {
-                    if (data.success) {
-                        restoreStatusMessage.textContent = `{{ _('Restore from ${displayTimestamp} successful:') }} ${data.message} {{ _('It is highly recommended to restart the application now.') }}`;
-                        restoreStatusMessage.className = 'alert alert-success';
-                    } else {
-                        restoreStatusMessage.textContent = `{{ _('Restore from ${displayTimestamp} failed:') }} ${data.message || '{{ _("Unknown error.") }}'}`;
-                        restoreStatusMessage.className = 'alert alert-danger';
+                    if(data.task_id) {
+                        currentRestoreTaskId = data.task_id;
                     }
+                    if (data.success) {
+                        restoreStatusMessage.textContent = data.message || `{{ _('Restore from ${displayTimestamp} process started. See live updates.') }}`;
+                        restoreStatusMessage.className = 'alert alert-info'; // SocketIO will update final status
+                    } else {
+                        restoreStatusMessage.textContent = `{{ _('Restore initiation for ${displayTimestamp} failed:') }} ${data.message || '{{ _("Unknown error.") }}'}`;
+                        restoreStatusMessage.className = 'alert alert-danger';
+                        document.querySelectorAll('.restore-btn').forEach(btn => btn.disabled = false);
+                        backupButton.disabled = false;
+                    }
+                    // Do not re-enable buttons here if success, SocketIO will indicate completion
+                     if (!data.success) {
+                        document.querySelectorAll('.restore-btn').forEach(btn => btn.disabled = false);
+                        backupButton.disabled = false;
+                     }
                 })
                 .catch(error => {
                     console.error('Restore error:', error);
                     restoreStatusMessage.textContent = `{{ _('Restore request for ${displayTimestamp} failed:') }} ${error.toString()}`;
                     restoreStatusMessage.className = 'alert alert-danger';
-                })
-                .finally(() => {
-                    // Re-enable buttons after operation (or user can refresh)
                     document.querySelectorAll('.restore-btn').forEach(btn => btn.disabled = false);
-                    // Optionally, refresh backup list automatically
-                    // loadAvailableBackups();
+                    backupButton.disabled = false;
                 });
             }
         });
 
-        // Initial load of backups
         loadAvailableBackups();
-
-        // --- Scheduled Backups Logic ---
 
         function toggleDayOfWeekVisibility() {
             if (scheduleTypeSelect.value === 'weekly') {
@@ -277,12 +332,12 @@
                 method: 'GET',
                 headers: {
                     'Accept': 'application/json',
-                    'X-CSRFToken': csrfToken // Include CSRF if needed for GET by your setup
+                    'X-CSRFToken': csrfToken
                 }
             })
             .then(response => response.json())
             .then(data => {
-                if (data.message && !data.is_enabled && !data.schedule_type) { // Heuristic for error or uninitialized
+                if (data.message && !data.is_enabled && !data.schedule_type) {
                     scheduleStatusMessage.textContent = "{{ _('Could not load schedule:') }} " + data.message;
                     scheduleStatusMessage.className = 'alert alert-danger';
                     return;
@@ -292,15 +347,14 @@
                 if (data.day_of_week !== null && data.day_of_week !== undefined) {
                     scheduleDayOfWeekSelect.value = data.day_of_week;
                 } else {
-                    scheduleDayOfWeekSelect.value = "0"; // Default to Monday if not set
+                    scheduleDayOfWeekSelect.value = "0";
                 }
                 if (data.time_of_day) {
-                     // Ensure time is in HH:MM format for the input[type=time]
                     scheduleTimeOfDayInput.value = data.time_of_day.substring(0, 5);
                 } else {
-                    scheduleTimeOfDayInput.value = "02:00"; // Default
+                    scheduleTimeOfDayInput.value = "02:00";
                 }
-                toggleDayOfWeekVisibility(); // Update visibility based on loaded type
+                toggleDayOfWeekVisibility();
                 scheduleStatusMessage.textContent = "{{ _('Schedule loaded.') }}";
                 scheduleStatusMessage.className = 'alert alert-success';
             })
@@ -320,13 +374,13 @@
             const payload = {
                 is_enabled: scheduleEnabledCheckbox.checked,
                 schedule_type: scheduleTypeSelect.value,
-                time_of_day: scheduleTimeOfDayInput.value // Format HH:MM
+                time_of_day: scheduleTimeOfDayInput.value
             };
 
             if (payload.schedule_type === 'weekly') {
                 payload.day_of_week = parseInt(scheduleDayOfWeekSelect.value, 10);
             } else {
-                payload.day_of_week = null; // Explicitly set to null for daily
+                payload.day_of_week = null;
             }
 
             fetch('/api/admin/backup_schedule', {
@@ -358,7 +412,6 @@
             });
         });
 
-        // Initial load of schedule configuration
         loadBackupSchedule();
 
     });

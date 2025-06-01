@@ -21,6 +21,7 @@ from flask import abort # For permission_required decorator
 from flask import g  # For storing current locale
 from flask_wtf.csrf import CSRFProtect, CSRFError # For CSRF protection
 from flask_socketio import SocketIO
+# import urllib # Not strictly needed for the simplified list_routes
 
 try:
     from azure_backup import (
@@ -614,6 +615,236 @@ def parse_simple_rrule(rule_str: str):
         return None, 1
     return freq, max(1, count)
 
+# Helper function to get map configuration data
+def _get_map_configuration_data() -> dict:
+    """Helper function to generate map configuration data."""
+    floor_maps = FloorMap.query.all()
+    floor_maps_data = []
+    for fm in floor_maps:
+        floor_maps_data.append({
+            'id': fm.id,
+            'name': fm.name,
+            'image_filename': fm.image_filename,
+            'location': fm.location,
+            'floor': fm.floor
+        })
+
+    mapped_resources = Resource.query.filter(Resource.floor_map_id.isnot(None)).all()
+    mapped_resources_data = []
+    for r in mapped_resources:
+        mapped_resources_data.append({
+            'id': r.id,
+            'name': r.name,
+            'floor_map_id': r.floor_map_id,
+            'map_coordinates': json.loads(r.map_coordinates) if r.map_coordinates else None,
+            'booking_restriction': r.booking_restriction,
+            'allowed_user_ids': r.allowed_user_ids,
+            'role_ids': [role.id for role in r.roles] # Exporting as a list of role IDs
+        })
+
+    return {
+        'floor_maps': floor_maps_data,
+        'mapped_resources': mapped_resources_data
+    }
+
+# Helper function to import map configuration data
+def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
+    """Helper function to process imported map configuration data."""
+    if not isinstance(config_data, dict) or 'floor_maps' not in config_data or 'mapped_resources' not in config_data:
+        return {'error': 'Invalid configuration format. Expected "floor_maps" and "mapped_resources" keys.'}, 400
+
+    maps_created = 0
+    maps_updated = 0
+    maps_errors = []
+    resource_updates = 0
+    resource_errors = []
+    image_reminders = []
+
+    # Import Floor Maps
+    if isinstance(config_data.get('floor_maps'), list):
+        for fm_data in config_data['floor_maps']:
+            try:
+                fm = None
+                if fm_data.get('id') is not None:
+                    fm = FloorMap.query.get(fm_data['id'])
+
+                if not fm and fm_data.get('name'):
+                    fm = FloorMap.query.filter_by(name=fm_data['name']).first()
+
+                action = "UPDATE_FLOOR_MAP_VIA_IMPORT"
+                if not fm:
+                    fm = FloorMap()
+                    action = "CREATE_FLOOR_MAP_VIA_IMPORT"
+                    if not fm_data.get('name') or not fm_data.get('image_filename'):
+                        maps_errors.append({'error': 'Missing name or image_filename for new map.', 'data': fm_data})
+                        continue
+
+                fm.name = fm_data.get('name', fm.name)
+                fm.image_filename = fm_data.get('image_filename', fm.image_filename)
+                fm.location = fm_data.get('location', fm.location)
+                fm.floor = fm_data.get('floor', fm.floor)
+
+                if fm.image_filename and not os.path.exists(os.path.join(app.config['UPLOAD_FOLDER'], fm.image_filename)):
+                    image_reminders.append(f"Ensure image '{fm.image_filename}' for map '{fm.name}' exists in 'static/floor_map_uploads/'.")
+
+                if action == "CREATE_FLOOR_MAP_VIA_IMPORT":
+                    db.session.add(fm)
+                    maps_created += 1
+                else:
+                    maps_updated += 1
+
+                db.session.commit() # Commit each map to get ID for resources if it's new
+                fm_data['processed_id'] = fm.id # Store processed ID for resource mapping
+                add_audit_log(action=action, details=f"FloorMap '{fm.name}' (ID: {fm.id}) processed by import by {current_user.username}.")
+
+            except Exception as e:
+                db.session.rollback()
+                maps_errors.append({'error': f"Error processing floor map '{fm_data.get('name', 'N/A')}': {str(e)}", 'data': fm_data})
+
+    # Import Mapped Resource configurations
+    if isinstance(config_data.get('mapped_resources'), list):
+        for res_map_data in config_data['mapped_resources']:
+            try:
+                resource = None
+                if res_map_data.get('id') is not None:
+                    resource = Resource.query.get(res_map_data['id'])
+
+                if not resource and res_map_data.get('name'): # Fallback to name if ID not found or not provided
+                    resource = Resource.query.filter_by(name=res_map_data['name']).first()
+
+                if not resource:
+                    resource_errors.append({'error': f"Resource not found by ID or name: '{res_map_data.get('name') or res_map_data.get('id', 'N/A')}'", 'data': res_map_data})
+                    continue
+
+                imported_floor_map_id = res_map_data.get('floor_map_id')
+                target_floor_map = None
+                if imported_floor_map_id is not None:
+                    processed_map_entry = next((m for m in config_data['floor_maps'] if m.get('id') == imported_floor_map_id and 'processed_id' in m), None)
+                    if processed_map_entry:
+                        target_floor_map = FloorMap.query.get(processed_map_entry['processed_id'])
+                    else:
+                        target_floor_map = FloorMap.query.get(imported_floor_map_id)
+
+                if target_floor_map:
+                    resource.floor_map_id = target_floor_map.id
+                elif imported_floor_map_id is not None:
+                    resource_errors.append({'error': f"FloorMap ID '{imported_floor_map_id}' not found for resource '{resource.name}'.", 'data': res_map_data})
+
+                if 'map_coordinates' in res_map_data:
+                    resource.map_coordinates = json.dumps(res_map_data['map_coordinates']) if res_map_data['map_coordinates'] else None
+                if 'booking_restriction' in res_map_data:
+                    resource.booking_restriction = res_map_data['booking_restriction']
+                if 'allowed_user_ids' in res_map_data:
+                    resource.allowed_user_ids = res_map_data['allowed_user_ids']
+                if 'role_ids' in res_map_data and isinstance(res_map_data['role_ids'], list):
+                    new_roles = []
+                    for r_id in res_map_data['role_ids']:
+                        role = Role.query.get(r_id)
+                        if role: new_roles.append(role)
+                        else: resource_errors.append({'error': f"Role ID '{r_id}' not found for resource '{resource.name}'.", 'data': res_map_data})
+                    resource.roles = new_roles
+
+                resource_updates +=1
+                add_audit_log(action="UPDATE_RESOURCE_MAP_INFO_VIA_IMPORT", details=f"Resource '{resource.name}' (ID: {resource.id}) map info updated by import by {current_user.username}.")
+            except Exception as e:
+                db.session.rollback()
+                resource_errors.append({'error': f"Error processing resource mapping for '{res_map_data.get('name', 'N/A')}': {str(e)}", 'data': res_map_data})
+        try:
+            db.session.commit()
+        except Exception as e_commit_res:
+            db.session.rollback()
+            resource_errors.append({'error': f"General DB error committing resource mappings: {str(e_commit_res)}"})
+
+    summary = {
+        'message': "Map configuration import processed.",
+        'maps_created': maps_created, 'maps_updated': maps_updated, 'maps_errors': maps_errors,
+        'resource_mappings_updated': resource_updates, 'resource_mapping_errors': resource_errors,
+        'image_reminders': image_reminders
+    }
+    status_code = 200
+    if maps_errors or resource_errors:
+        status_code = 207 # Multi-Status
+        summary['message'] += " Some entries had errors."
+        app.logger.warning(f"Map configuration import by {current_user.username} completed with errors/reminders. Summary: {summary}")
+    else:
+        app.logger.info(f"Map configuration import by {current_user.username} successful. Summary: {summary}")
+
+    add_audit_log(action="IMPORT_MAP_CONFIGURATION_COMPLETED", details=f"User {current_user.username} completed map configuration import. Summary: {str(summary)}")
+    return summary, status_code
+
+# --- Scheduled Backup Job ---
+# This function needs to be defined before it's referenced by the scheduler.
+def run_scheduled_backup_job():
+    """
+    Checks the backup schedule and runs a full backup if due.
+    This function is intended to be called by APScheduler.
+    """
+    with app.app_context(): # Essential for DB access and app.logger
+        app.logger.info("run_scheduled_backup_job: Checking backup schedule...")
+        try:
+            schedule_config = db.session.query(BackupScheduleConfig).first()
+
+            if not schedule_config:
+                app.logger.warning("run_scheduled_backup_job: No backup schedule configuration found. Skipping.")
+                return
+
+            if not schedule_config.is_enabled:
+                app.logger.info("run_scheduled_backup_job: Scheduled backups are disabled. Skipping.")
+                return
+
+            now_utc = datetime.now(timezone.utc)
+            current_time_utc = now_utc.time()
+            current_date_utc = now_utc.date()
+
+            # Check if already run today
+            if schedule_config.last_run_date == current_date_utc:
+                app.logger.info(f"run_scheduled_backup_job: Backup for {current_date_utc.isoformat()} has already run. Skipping.")
+                return
+
+            backup_due = False
+            if schedule_config.schedule_type == 'daily':
+                # Check if current time is at or after scheduled time (within the hour)
+                # A more precise check would compare current_time_utc with schedule_config.time_of_day directly
+                # and ensure it's within a small window (e.g. job interval) past the scheduled time.
+                # For an hourly job, checking the hour is a common approach.
+                if current_time_utc.hour == schedule_config.time_of_day.hour and \
+                   current_time_utc.minute >= schedule_config.time_of_day.minute: # Ensure we don't miss it if job runs slightly late
+                    backup_due = True
+            elif schedule_config.schedule_type == 'weekly':
+                if now_utc.weekday() == schedule_config.day_of_week: # 0=Monday, 6=Sunday
+                    if current_time_utc.hour == schedule_config.time_of_day.hour and \
+                       current_time_utc.minute >= schedule_config.time_of_day.minute:
+                        backup_due = True
+
+            if backup_due:
+                app.logger.info(f"run_scheduled_backup_job: Backup is due for {current_date_utc.isoformat()} at {schedule_config.time_of_day.strftime('%H:%M')}. Starting backup...")
+
+                timestamp_str = now_utc.strftime('%Y%m%d_%H%M%S')
+                map_config = _get_map_configuration_data() # Ensure this helper is accessible
+
+                if not create_full_backup: # Check if the azure_backup function is available
+                    app.logger.error("run_scheduled_backup_job: create_full_backup function not available/imported.")
+                    return
+
+                # Pass None for socketio and task_id as this is an automated job
+                success = create_full_backup(timestamp_str, map_config_data=map_config, socketio_instance=None, task_id=None)
+
+                if success:
+                    app.logger.info(f"run_scheduled_backup_job: Scheduled backup completed successfully. Timestamp: {timestamp_str}")
+                    add_audit_log(action="SCHEDULED_BACKUP_SUCCESS", details=f"Scheduled backup successful. Timestamp: {timestamp_str}", username="System")
+                    schedule_config.last_run_date = current_date_utc
+                    db.session.commit()
+                else:
+                    app.logger.error(f"run_scheduled_backup_job: Scheduled backup failed. Timestamp attempted: {timestamp_str}")
+                    add_audit_log(action="SCHEDULED_BACKUP_FAILED", details=f"Scheduled backup failed. Timestamp attempted: {timestamp_str}", username="System")
+            else:
+                # This log can be verbose if the scheduler runs frequently. Consider logging level or less frequent logging.
+                app.logger.debug(f"run_scheduled_backup_job: Backup not currently due. Current time: {current_time_utc.strftime('%H:%M:%S')}, Scheduled: {schedule_config.time_of_day.strftime('%H:%M')}, Type: {schedule_config.schedule_type}, Last Run: {schedule_config.last_run_date}")
+
+        except Exception as e:
+            app.logger.exception("run_scheduled_backup_job: Error during scheduled backup job execution.")
+            add_audit_log(action="SCHEDULED_BACKUP_ERROR", details=f"Exception: {str(e)}", username="System")
+
 @app.route("/")
 def serve_index():
     if current_user.is_authenticated:
@@ -920,7 +1151,7 @@ def login_google_callback():
         return redirect(url_for('serve_login')) 
 
 
-@app.route("/api/resources", methods=['GET'])
+@app.route('/api/resources', methods=['GET'])
 def get_resources():
     try:
         query = Resource.query.filter_by(status='published')
@@ -1207,36 +1438,7 @@ def delete_floor_map(map_id):
         return jsonify({'error': 'Failed to delete floor map due to a server error.'}), 500
 
 # Helper function to get map configuration data
-def _get_map_configuration_data() -> dict:
-    """Helper function to generate map configuration data."""
-    floor_maps = FloorMap.query.all()
-    floor_maps_data = []
-    for fm in floor_maps:
-        floor_maps_data.append({
-            'id': fm.id,
-            'name': fm.name,
-            'image_filename': fm.image_filename,
-            'location': fm.location,
-            'floor': fm.floor
-        })
-
-    mapped_resources = Resource.query.filter(Resource.floor_map_id.isnot(None)).all()
-    mapped_resources_data = []
-    for r in mapped_resources:
-        mapped_resources_data.append({
-            'id': r.id,
-            'name': r.name,
-            'floor_map_id': r.floor_map_id,
-            'map_coordinates': json.loads(r.map_coordinates) if r.map_coordinates else None,
-            'booking_restriction': r.booking_restriction,
-            'allowed_user_ids': r.allowed_user_ids,
-            'role_ids': [role.id for role in r.roles] # Exporting as a list of role IDs
-        })
-
-    return {
-        'floor_maps': floor_maps_data,
-        'mapped_resources': mapped_resources_data
-    }
+# Duplicated _get_map_configuration_data and _import_map_configuration_data removed for brevity, assume they exist as before
 
 @app.route('/api/admin/maps/export_configuration', methods=['GET'])
 @login_required
@@ -1256,204 +1458,6 @@ def export_map_configuration():
         app.logger.exception("Error exporting map configuration:")
         add_audit_log(action="EXPORT_MAP_CONFIGURATION_FAILED", details=f"User {current_user.username} failed to export map configuration. Error: {str(e)}")
         return jsonify({'error': 'Failed to export map configuration due to a server error.'}), 500
-
-# Helper function to import map configuration data
-def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
-    """Helper function to process imported map configuration data."""
-    if not isinstance(config_data, dict) or 'floor_maps' not in config_data or 'mapped_resources' not in config_data:
-        return {'error': 'Invalid configuration format. Expected "floor_maps" and "mapped_resources" keys.'}, 400
-
-    maps_created = 0
-    maps_updated = 0
-    maps_errors = []
-    resource_updates = 0
-    resource_errors = []
-    image_reminders = []
-
-    # Import Floor Maps
-    if isinstance(config_data.get('floor_maps'), list):
-        for fm_data in config_data['floor_maps']:
-            try:
-                fm = None
-                if fm_data.get('id') is not None:
-                    fm = FloorMap.query.get(fm_data['id'])
-
-                if not fm and fm_data.get('name'):
-                    fm = FloorMap.query.filter_by(name=fm_data['name']).first()
-
-                action = "UPDATE_FLOOR_MAP_VIA_IMPORT"
-                if not fm:
-                    fm = FloorMap()
-                    action = "CREATE_FLOOR_MAP_VIA_IMPORT"
-                    if not fm_data.get('name') or not fm_data.get('image_filename'):
-                        maps_errors.append({'error': 'Missing name or image_filename for new map.', 'data': fm_data})
-                        continue
-
-                fm.name = fm_data.get('name', fm.name)
-                fm.image_filename = fm_data.get('image_filename', fm.image_filename)
-                fm.location = fm_data.get('location', fm.location)
-                fm.floor = fm_data.get('floor', fm.floor)
-
-                if fm.image_filename and not os.path.exists(os.path.join(app.config['UPLOAD_FOLDER'], fm.image_filename)):
-                    image_reminders.append(f"Ensure image '{fm.image_filename}' for map '{fm.name}' exists in 'static/floor_map_uploads/'.")
-
-                if action == "CREATE_FLOOR_MAP_VIA_IMPORT":
-                    db.session.add(fm)
-                    maps_created += 1
-                else:
-                    maps_updated += 1
-
-                db.session.commit() # Commit each map to get ID for resources if it's new
-                fm_data['processed_id'] = fm.id # Store processed ID for resource mapping
-                add_audit_log(action=action, details=f"FloorMap '{fm.name}' (ID: {fm.id}) processed by import by {current_user.username}.")
-
-            except Exception as e:
-                db.session.rollback()
-                maps_errors.append({'error': f"Error processing floor map '{fm_data.get('name', 'N/A')}': {str(e)}", 'data': fm_data})
-
-    # Import Mapped Resource configurations
-    if isinstance(config_data.get('mapped_resources'), list):
-        for res_map_data in config_data['mapped_resources']:
-            try:
-                resource = None
-                if res_map_data.get('id') is not None:
-                    resource = Resource.query.get(res_map_data['id'])
-
-                if not resource and res_map_data.get('name'): # Fallback to name if ID not found or not provided
-                    resource = Resource.query.filter_by(name=res_map_data['name']).first()
-
-                if not resource:
-                    resource_errors.append({'error': f"Resource not found by ID or name: '{res_map_data.get('name') or res_map_data.get('id', 'N/A')}'", 'data': res_map_data})
-                    continue
-
-                imported_floor_map_id = res_map_data.get('floor_map_id')
-                target_floor_map = None
-                if imported_floor_map_id is not None:
-                    processed_map_entry = next((m for m in config_data['floor_maps'] if m.get('id') == imported_floor_map_id and 'processed_id' in m), None)
-                    if processed_map_entry:
-                        target_floor_map = FloorMap.query.get(processed_map_entry['processed_id'])
-                    else:
-                        target_floor_map = FloorMap.query.get(imported_floor_map_id)
-
-                if target_floor_map:
-                    resource.floor_map_id = target_floor_map.id
-                elif imported_floor_map_id is not None:
-                    resource_errors.append({'error': f"FloorMap ID '{imported_floor_map_id}' not found for resource '{resource.name}'.", 'data': res_map_data})
-
-                if 'map_coordinates' in res_map_data:
-                    resource.map_coordinates = json.dumps(res_map_data['map_coordinates']) if res_map_data['map_coordinates'] else None
-                if 'booking_restriction' in res_map_data:
-                    resource.booking_restriction = res_map_data['booking_restriction']
-                if 'allowed_user_ids' in res_map_data:
-                    resource.allowed_user_ids = res_map_data['allowed_user_ids']
-                if 'role_ids' in res_map_data and isinstance(res_map_data['role_ids'], list):
-                    new_roles = []
-                    for r_id in res_map_data['role_ids']:
-                        role = Role.query.get(r_id)
-                        if role: new_roles.append(role)
-                        else: resource_errors.append({'error': f"Role ID '{r_id}' not found for resource '{resource.name}'.", 'data': res_map_data})
-                    resource.roles = new_roles
-
-                resource_updates +=1
-                add_audit_log(action="UPDATE_RESOURCE_MAP_INFO_VIA_IMPORT", details=f"Resource '{resource.name}' (ID: {resource.id}) map info updated by import by {current_user.username}.")
-            except Exception as e:
-                db.session.rollback()
-                resource_errors.append({'error': f"Error processing resource mapping for '{res_map_data.get('name', 'N/A')}': {str(e)}", 'data': res_map_data})
-        try:
-            db.session.commit()
-        except Exception as e_commit_res:
-            db.session.rollback()
-            resource_errors.append({'error': f"General DB error committing resource mappings: {str(e_commit_res)}"})
-
-    summary = {
-        'message': "Map configuration import processed.",
-        'maps_created': maps_created, 'maps_updated': maps_updated, 'maps_errors': maps_errors,
-        'resource_mappings_updated': resource_updates, 'resource_mapping_errors': resource_errors,
-        'image_reminders': image_reminders
-    }
-    status_code = 200
-    if maps_errors or resource_errors:
-        status_code = 207 # Multi-Status
-        summary['message'] += " Some entries had errors."
-        app.logger.warning(f"Map configuration import by {current_user.username} completed with errors/reminders. Summary: {summary}")
-    else:
-        app.logger.info(f"Map configuration import by {current_user.username} successful. Summary: {summary}")
-
-    add_audit_log(action="IMPORT_MAP_CONFIGURATION_COMPLETED", details=f"User {current_user.username} completed map configuration import. Summary: {str(summary)}")
-    return summary, status_code
-
-# --- Scheduled Backup Job ---
-# This function needs to be defined before it's referenced by the scheduler.
-def run_scheduled_backup_job():
-    """
-    Checks the backup schedule and runs a full backup if due.
-    This function is intended to be called by APScheduler.
-    """
-    with app.app_context(): # Essential for DB access and app.logger
-        app.logger.info("run_scheduled_backup_job: Checking backup schedule...")
-        try:
-            schedule_config = db.session.query(BackupScheduleConfig).first()
-
-            if not schedule_config:
-                app.logger.warning("run_scheduled_backup_job: No backup schedule configuration found. Skipping.")
-                return
-
-            if not schedule_config.is_enabled:
-                app.logger.info("run_scheduled_backup_job: Scheduled backups are disabled. Skipping.")
-                return
-
-            now_utc = datetime.now(timezone.utc)
-            current_time_utc = now_utc.time()
-            current_date_utc = now_utc.date()
-
-            # Check if already run today
-            if schedule_config.last_run_date == current_date_utc:
-                app.logger.info(f"run_scheduled_backup_job: Backup for {current_date_utc.isoformat()} has already run. Skipping.")
-                return
-
-            backup_due = False
-            if schedule_config.schedule_type == 'daily':
-                # Check if current time is at or after scheduled time (within the hour)
-                # A more precise check would compare current_time_utc with schedule_config.time_of_day directly
-                # and ensure it's within a small window (e.g. job interval) past the scheduled time.
-                # For an hourly job, checking the hour is a common approach.
-                if current_time_utc.hour == schedule_config.time_of_day.hour and \
-                   current_time_utc.minute >= schedule_config.time_of_day.minute: # Ensure we don't miss it if job runs slightly late
-                    backup_due = True
-            elif schedule_config.schedule_type == 'weekly':
-                if now_utc.weekday() == schedule_config.day_of_week: # 0=Monday, 6=Sunday
-                    if current_time_utc.hour == schedule_config.time_of_day.hour and \
-                       current_time_utc.minute >= schedule_config.time_of_day.minute:
-                        backup_due = True
-
-            if backup_due:
-                app.logger.info(f"run_scheduled_backup_job: Backup is due for {current_date_utc.isoformat()} at {schedule_config.time_of_day.strftime('%H:%M')}. Starting backup...")
-
-                timestamp_str = now_utc.strftime('%Y%m%d_%H%M%S')
-                map_config = _get_map_configuration_data() # Ensure this helper is accessible
-
-                if not create_full_backup: # Check if the azure_backup function is available
-                    app.logger.error("run_scheduled_backup_job: create_full_backup function not available/imported.")
-                    return
-
-                # Pass None for socketio and task_id as this is an automated job
-                success = create_full_backup(timestamp_str, map_config_data=map_config, socketio_instance=None, task_id=None)
-
-                if success:
-                    app.logger.info(f"run_scheduled_backup_job: Scheduled backup completed successfully. Timestamp: {timestamp_str}")
-                    add_audit_log(action="SCHEDULED_BACKUP_SUCCESS", details=f"Scheduled backup successful. Timestamp: {timestamp_str}", username="System")
-                    schedule_config.last_run_date = current_date_utc
-                    db.session.commit()
-                else:
-                    app.logger.error(f"run_scheduled_backup_job: Scheduled backup failed. Timestamp attempted: {timestamp_str}")
-                    add_audit_log(action="SCHEDULED_BACKUP_FAILED", details=f"Scheduled backup failed. Timestamp attempted: {timestamp_str}", username="System")
-            else:
-                # This log can be verbose if the scheduler runs frequently. Consider logging level or less frequent logging.
-                app.logger.debug(f"run_scheduled_backup_job: Backup not currently due. Current time: {current_time_utc.strftime('%H:%M:%S')}, Scheduled: {schedule_config.time_of_day.strftime('%H:%M')}, Type: {schedule_config.schedule_type}, Last Run: {schedule_config.last_run_date}")
-
-        except Exception as e:
-            app.logger.exception("run_scheduled_backup_job: Error during scheduled backup job execution.")
-            add_audit_log(action="SCHEDULED_BACKUP_ERROR", details=f"Exception: {str(e)}", username="System")
 
 @app.route('/api/admin/maps/import_configuration', methods=['POST'])
 @login_required
@@ -3240,7 +3244,7 @@ def create_booking():
                 # db.session.commit() # Commit waitlist entry separately or with main booking transaction
                 app.logger.info(f"Added user {current_user.id} to waitlist for resource {resource_id} due to conflict with booking {conflicting.id}")
 
-            return jsonify({'error': f"This time slot ({occ_start.strftime('%Y-%m-%d %H:%M')} to {occ_end.strftime('%H:%M')}) on resource '{resource.name}' is already booked or conflicts. You may have been added to the waitlist if available."}), 409
+            return jsonify({'error': f"This time slot ({occ_start.strftime('%Y-%m-%d %H:%M')} to {occ_end.strftime('%Y-%m-%d %H:%M')}) on resource '{resource.name}' is already booked or conflicts. You may have been added to the waitlist if available."}), 409
 
         # New check: User's overlapping bookings on ANY OTHER resource for this specific recurrence
         user_conflicting_recurring = Booking.query.filter(
@@ -3964,6 +3968,41 @@ __all__ = [
     "scheduler",
 ]
 
+@app.route('/ping')
+def ping():
+    # Ensure necessary imports are at the top of app.py:
+    # from flask import jsonify
+    # from datetime import datetime, timezone
+    return jsonify(message='pong', timestamp=datetime.now(timezone.utc).isoformat()), 200
+
+@app.route('/debug/list_routes')
+def debug_list_routes():
+    # Ensure necessary imports are at the top of app.py:
+    # from flask import jsonify
+    # import urllib
+    output = []
+    for rule in app.url_map.iter_rules():
+        options = {}
+        for arg in rule.arguments:
+            options[arg] = f"[{arg}]"
+
+        methods = ','.join(sorted(rule.methods))
+        # url = urllib.parse.unquote(url_for(rule.endpoint, **options)) # This can fail if rule has no args or complex ones
+        url = str(rule) # Rule.rule gives the path pattern
+        line = f"{url:50s} {methods:20s} {rule.endpoint:20s}"
+        output.append(line)
+
+    # Sort output for easier reading
+    output.sort()
+
+    # Create a simple HTML response for better readability in the browser
+    html_output = "<html><head><title>Registered Routes</title></head><body><pre>"
+    html_output += "\n".join(output)
+    html_output += "</pre></body></html>"
+
+    # Return as HTML
+    return html_output, 200
+
 if __name__ == "__main__":
     # To initialize the DB, run `python init_setup.py` once or import
     # `init_db` from `init_setup` in a Python shell. Pass force=True if you
@@ -4326,3 +4365,5 @@ def update_backup_schedule():
         app.logger.exception("Error updating backup schedule configuration:")
         add_audit_log(action="UPDATE_BACKUP_SCHEDULE_FAILED", details=f"Error: {str(e)}. Data: {data}")
         return jsonify({'success': False, 'message': f'Error updating schedule: {str(e)}'}), 500
+
+[end of app.py]
