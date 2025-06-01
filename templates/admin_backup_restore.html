@@ -236,10 +236,13 @@
             backupStatusMessageEl.className = `alert alert-${messageType === 'error' ? 'danger' : (messageType === 'success' ? 'success' : 'info')}`;
 
 
-            if (data.status.toLowerCase().includes("finished") || data.status.toLowerCase().includes("completed") || data.status.toLowerCase().includes("failed")) {
+            const lowerStatus = data.status.toLowerCase();
+            if (lowerStatus.includes("completed successfully") || lowerStatus.includes("failed") || lowerStatus.includes("finished")) {
                 backupButton.disabled = false;
-                currentBackupTaskId = null; // Clear task ID on completion/failure
-                if (messageType === 'success' || (data.detail && data.detail.toUpperCase().includes("SUCCESS: TRUE"))) {
+                // Log the message that *should* be persistent
+                console.log('Final backup status displayed:', backupStatusMessageEl.textContent);
+                currentBackupTaskId = null; // Clear task ID after processing final message
+                if (messageType === 'success' || (data.detail && data.detail.toUpperCase().includes("SUCCESS"))) { // also check data.detail for success for loadAvailableBackups
                     loadAvailableBackups();
                 }
             }
@@ -257,10 +260,13 @@
             restoreStatusMessageEl.textContent = `${data.status}${data.detail ? ' ('+data.detail+')':''}`;
             restoreStatusMessageEl.className = `alert alert-${messageType === 'error' ? 'danger' : (messageType === 'success' ? 'success' : 'info')}`;
 
-            if (data.status.toLowerCase().includes("fully completed") || data.status.toLowerCase().includes("failed") || data.status.toLowerCase().includes("error")) {
-                document.querySelectorAll('.restore-btn, .restore-dry-run-btn').forEach(btn => btn.disabled = false);
-                backupButton.disabled = false; // Also re-enable backup button
-                currentRestoreTaskId = null; // Clear task ID
+            const lowerStatus = data.status.toLowerCase();
+            if (lowerStatus.includes("fully completed") || lowerStatus.includes("failed") || lowerStatus.includes("error")) {
+                document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn').forEach(btn => btn.disabled = false);
+                backupButton.disabled = false;
+                // Log the message that *should* be persistent
+                console.log('Final restore status displayed:', restoreStatusMessageEl.textContent);
+                currentRestoreTaskId = null; // Clear task ID after processing final message
             }
 
             // If actions are present in the data (from a dry run), display them
