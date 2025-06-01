@@ -1127,37 +1127,39 @@ nav#sidebar {
 }
 */
 
-/* Ensure event content in month view does not overflow and is scrollable */
+/* Styling for FullCalendar event content container */
+/* Properties like display and position are kept for basic layout. */
+/* Text wrapping, overflow, and max-height are removed as JS now handles truncation. */
 .fc-daygrid-event .fc-event-main-frame {
-    display: block; /* Ensure block context for overflow properties */
-    position: relative; /* Usually good for containing elements */
-    white-space: normal !important;
-    overflow-wrap: break-word !important; /* For long words */
-    word-wrap: break-word !important; /* Older browsers */
-    max-height: 3.6em !important; /* Approx 2-3 lines, !important to override other FC styles */
-    overflow-y: auto !important; /* Enable vertical scrollbar, !important to override */
+    display: block;
+    position: relative;
+    /* white-space: normal !important; */ /* Removed */
+    /* overflow-wrap: break-word !important; */ /* Removed */
+    /* word-wrap: break-word !important; */ /* Removed */
+    /* max-height: 3.6em !important; */ /* Removed */
+    /* overflow-y: auto !important; */ /* Removed */
+    /* FullCalendar's default overflow behavior will apply (usually hidden for event segments) */
 }
 
-/* If FullCalendar uses a specific class for the event title container or the title itself */
-/* This applies wrapping rules directly to common FullCalendar title class. */
+/* Styling for FullCalendar event titles */
+/* Text wrapping properties removed. */
 .fc-daygrid-event .fc-event-title { /* Common class for event titles */
-    white-space: normal !important;
-    overflow-wrap: break-word !important;
-    word-wrap: break-word !important;
-    display: block; /* Assuming title should behave as a block for consistent layout with <b> */
-    /* max-height and overflow-y are typically on the container (.fc-event-main-frame) */
+    display: block; /* Kept, as titles often benefit from block display */
+    /* white-space: normal !important; */ /* Removed */
+    /* overflow-wrap: break-word !important; */ /* Removed */
+    /* word-wrap: break-word !important; */ /* Removed */
 }
 
-/* Ensure the bold tag used in calendar.js for the title also wraps aggressively */
-/* This directly targets the <b> tag within the event frame. */
+/* Styling for the bold tag used for the title in calendar.js */
+/* Text wrapping properties removed. Max-width and display are kept. */
 .fc-daygrid-event .fc-event-main-frame b {
-    display: block; /* Make it a block to control overflow and ensure it takes its own line if needed */
-    white-space: normal !important; /* Force wrapping */
-    overflow-wrap: break-word !important; /* Force break for long words */
-    word-wrap: break-word !important; /* Older browsers */
-    max-width: 100%; /* Ensure it respects container width */
+    display: block;
+    max-width: 100%; /* Can be useful to prevent breaking out of cell if FC doesn't handle it */
+    /* white-space: normal !important; */ /* Removed */
+    /* overflow-wrap: break-word !important; */ /* Removed */
+    /* word-wrap: break-word !important; */ /* Removed */
 }
 
-/* For the time part (text node after <br>), it should inherit wrapping from .fc-event-main-frame. */
-/* No specific rule needed unless further issues are observed. */
+/* Time part (text node) will inherit default text handling. */
+/* JavaScript truncation now manages its length. */
 ```
