@@ -540,9 +540,9 @@ def create_full_backup(timestamp_str, map_config_data=None, socketio_instance=No
             # overall_success might be set to False here if manifest is critical, but current plan implies it's best effort after successful backup.
 
     if overall_success:
-        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backup Completed Successfully.', 'SUCCESS')
+        _emit_progress(socketio_instance, task_id, 'backup_progress', f'Backup completed with overall success: True', 'SUCCESS')
     else:
-        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backup Failed. Check server logs for details.', 'ERROR')
+        _emit_progress(socketio_instance, task_id, 'backup_progress', f'Backup completed with overall success: False. Check server logs for details.', 'ERROR')
     return overall_success
 
 
