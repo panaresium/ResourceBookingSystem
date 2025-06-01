@@ -4451,86 +4451,86 @@ def api_one_click_restore():
             if socketio:
                  socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Map configuration import skipped (no file).'})
 
-    resource_import_summary_msg = "Resource configurations file was not part of this backup or was not downloaded."
-    if resource_configs_json_path and os.path.exists(resource_configs_json_path):
-        app.logger.info(f"Resource configs JSON {resource_configs_json_path} (task {task_id}) downloaded for {backup_timestamp}.")
-        if socketio:
-            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Importing resource configurations...', 'detail': resource_configs_json_path})
-        try:
-            with open(resource_configs_json_path, 'r', encoding='utf-8') as f:
-                resource_configs_to_import = json.load(f)
-
-            # Call the new import function (ensure db object is correctly passed, likely 'db' from global app scope)
-            # _import_resource_configurations_data returns: created_count, updated_count, errors_list
-            res_created, res_updated, res_errors = _import_resource_configurations_data(resource_configs_to_import, db)
-
-            resource_import_summary_msg = f"Resource config import: {res_created} created, {res_updated} updated."
-            if res_errors:
-                resource_import_summary_msg += f" Errors: {len(res_errors)} (see logs for details)."
-                app.logger.error(f"Errors during resource config import (task {task_id}): {res_errors}")
-
+        resource_import_summary_msg = "Resource configurations file was not part of this backup or was not downloaded."
+        if resource_configs_json_path and os.path.exists(resource_configs_json_path):
+            app.logger.info(f"Resource configs JSON {resource_configs_json_path} (task {task_id}) downloaded for {backup_timestamp}.")
             if socketio:
-                socketio.emit('restore_progress', {'task_id': task_id, 'status': f'Resource configurations import status: {resource_import_summary_msg}', 'detail': 'Completed processing resource_configs.json'})
-            app.logger.info(f"Resource configurations import (task {task_id}) summary: {resource_import_summary_msg}")
-        except Exception as res_import_exc:
-            resource_import_summary_msg = f"Error processing resource_configs file {resource_configs_json_path} (task {task_id}): {str(res_import_exc)}"
-            app.logger.exception(resource_import_summary_msg)
-            if socketio:
-                socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Error during resource configurations import.', 'detail': str(res_import_exc)})
-        finally:
+                socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Importing resource configurations...', 'detail': resource_configs_json_path})
             try:
-                os.remove(resource_configs_json_path)
-            except OSError as e_remove:
-                app.logger.error(f"Error removing temp resource_configs file {resource_configs_json_path} (task {task_id}): {e_remove}")
-    else:
-        app.logger.info(f"No resource_configs.json file for {backup_timestamp} (task {task_id}). Skipping resource configurations import.")
-        if socketio:
-             socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Resource configurations import skipped (no file).'})
+                with open(resource_configs_json_path, 'r', encoding='utf-8') as f:
+                    resource_configs_to_import = json.load(f)
 
-    user_import_summary_msg = "User/role configurations file was not part of this backup or was not downloaded."
-    if user_configs_json_path and os.path.exists(user_configs_json_path):
-        app.logger.info(f"User/role configs JSON {user_configs_json_path} (task {task_id}) downloaded for {backup_timestamp}.")
-        if socketio:
-            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Importing user/role configurations...', 'detail': user_configs_json_path})
-        try:
-            with open(user_configs_json_path, 'r', encoding='utf-8') as f:
-                user_configs_to_import = json.load(f)
+                # Call the new import function (ensure db object is correctly passed, likely 'db' from global app scope)
+                # _import_resource_configurations_data returns: created_count, updated_count, errors_list
+                res_created, res_updated, res_errors = _import_resource_configurations_data(resource_configs_to_import, db)
 
-            # Call the new import function
-            # _import_user_configurations_data returns: roles_created, roles_updated, users_created, users_updated, errors_list
-            r_created, r_updated, u_created, u_updated, u_errors = _import_user_configurations_data(user_configs_to_import, db)
+                resource_import_summary_msg = f"Resource config import: {res_created} created, {res_updated} updated."
+                if res_errors:
+                    resource_import_summary_msg += f" Errors: {len(res_errors)} (see logs for details)."
+                    app.logger.error(f"Errors during resource config import (task {task_id}): {res_errors}")
 
-            user_import_summary_msg = f"User/Role config import: Roles ({r_created} created, {r_updated} updated), Users ({u_created} created, {u_updated} updated)."
-            if u_errors:
-                user_import_summary_msg += f" Errors: {len(u_errors)} (see logs for details)."
-                app.logger.error(f"Errors during user/role config import (task {task_id}): {u_errors}")
-
+                if socketio:
+                    socketio.emit('restore_progress', {'task_id': task_id, 'status': f'Resource configurations import status: {resource_import_summary_msg}', 'detail': 'Completed processing resource_configs.json'})
+                app.logger.info(f"Resource configurations import (task {task_id}) summary: {resource_import_summary_msg}")
+            except Exception as res_import_exc:
+                resource_import_summary_msg = f"Error processing resource_configs file {resource_configs_json_path} (task {task_id}): {str(res_import_exc)}"
+                app.logger.exception(resource_import_summary_msg)
+                if socketio:
+                    socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Error during resource configurations import.', 'detail': str(res_import_exc)})
+            finally:
+                try:
+                    os.remove(resource_configs_json_path)
+                except OSError as e_remove:
+                    app.logger.error(f"Error removing temp resource_configs file {resource_configs_json_path} (task {task_id}): {e_remove}")
+        else:
+            app.logger.info(f"No resource_configs.json file for {backup_timestamp} (task {task_id}). Skipping resource configurations import.")
             if socketio:
-                socketio.emit('restore_progress', {'task_id': task_id, 'status': f'User/role configurations import status: {user_import_summary_msg}', 'detail': 'Completed processing user_configs.json'})
-            app.logger.info(f"User/role configurations import (task {task_id}) summary: {user_import_summary_msg}")
-        except Exception as user_import_exc:
-            user_import_summary_msg = f"Error processing user_configs file {user_configs_json_path} (task {task_id}): {str(user_import_exc)}"
-            app.logger.exception(user_import_summary_msg)
+                 socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Resource configurations import skipped (no file).'})
+
+        user_import_summary_msg = "User/role configurations file was not part of this backup or was not downloaded."
+        if user_configs_json_path and os.path.exists(user_configs_json_path):
+            app.logger.info(f"User/role configs JSON {user_configs_json_path} (task {task_id}) downloaded for {backup_timestamp}.")
             if socketio:
-                socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Error during user/role configurations import.', 'detail': str(user_import_exc)})
-        finally:
+                socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Importing user/role configurations...', 'detail': user_configs_json_path})
             try:
-                os.remove(user_configs_json_path)
-            except OSError as e_remove:
-                app.logger.error(f"Error removing temp user_configs file {user_configs_json_path} (task {task_id}): {e_remove}")
-    else:
-        app.logger.info(f"No user_configs.json file for {backup_timestamp} (task {task_id}). Skipping user/role configurations import.")
-        if socketio:
-            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'User/role configurations import skipped (no file).'})
+                with open(user_configs_json_path, 'r', encoding='utf-8') as f:
+                    user_configs_to_import = json.load(f)
 
-    # Update the final_message to include summaries from new imports
-    final_message = (
-        f"Restore (task {task_id}) from {backup_timestamp} file ops completed. "
-        f"DB restored. {map_import_summary_msg} {resource_import_summary_msg} {user_import_summary_msg} "
-        f"Restart app."
-    )
-    app.logger.info(final_message)
-    add_audit_log(action="ONE_CLICK_RESTORE_COMPLETED", details=final_message)
+                # Call the new import function
+                # _import_user_configurations_data returns: roles_created, roles_updated, users_created, users_updated, errors_list
+                r_created, r_updated, u_created, u_updated, u_errors = _import_user_configurations_data(user_configs_to_import, db)
+
+                user_import_summary_msg = f"User/Role config import: Roles ({r_created} created, {r_updated} updated), Users ({u_created} created, {u_updated} updated)."
+                if u_errors:
+                    user_import_summary_msg += f" Errors: {len(u_errors)} (see logs for details)."
+                    app.logger.error(f"Errors during user/role config import (task {task_id}): {u_errors}")
+
+                if socketio:
+                    socketio.emit('restore_progress', {'task_id': task_id, 'status': f'User/role configurations import status: {user_import_summary_msg}', 'detail': 'Completed processing user_configs.json'})
+                app.logger.info(f"User/role configurations import (task {task_id}) summary: {user_import_summary_msg}")
+            except Exception as user_import_exc:
+                user_import_summary_msg = f"Error processing user_configs file {user_configs_json_path} (task {task_id}): {str(user_import_exc)}"
+                app.logger.exception(user_import_summary_msg)
+                if socketio:
+                    socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Error during user/role configurations import.', 'detail': str(user_import_exc)})
+            finally:
+                try:
+                    os.remove(user_configs_json_path)
+                except OSError as e_remove:
+                    app.logger.error(f"Error removing temp user_configs file {user_configs_json_path} (task {task_id}): {e_remove}")
+        else:
+            app.logger.info(f"No user_configs.json file for {backup_timestamp} (task {task_id}). Skipping user/role configurations import.")
+            if socketio:
+                socketio.emit('restore_progress', {'task_id': task_id, 'status': 'User/role configurations import skipped (no file).'})
+
+        # Update the final_message to include summaries from new imports
+        final_message = (
+            f"Restore (task {task_id}) from {backup_timestamp} file ops completed. "
+            f"DB restored. {map_import_summary_msg} {resource_import_summary_msg} {user_import_summary_msg} "
+            f"Restart app."
+        )
+        app.logger.info(final_message)
+        add_audit_log(action="ONE_CLICK_RESTORE_COMPLETED", details=final_message)
         if socketio:
             socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore process fully completed. Please restart application.', 'detail': 'SUCCESS'})
         return jsonify({'success': True, 'message': 'Restore process initiated. See live logs.', 'task_id': task_id}), 200
