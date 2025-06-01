@@ -8,8 +8,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const cebmResourceName = document.getElementById('cebm-resource-name');
     const cebmBookingId = document.getElementById('cebm-booking-id');
     const cebmBookingTitle = document.getElementById('cebm-booking-title');
-    const cebmStartTime = document.getElementById('cebm-start-time');
-    const cebmEndTime = document.getElementById('cebm-end-time');
+    // const cebmStartTime = document.getElementById('cebm-start-time'); // Replaced by date and select
+    // const cebmEndTime = document.getElementById('cebm-end-time');   // Replaced by date and select
+    const cebmBookingDate = document.getElementById('cebm-booking-date');
+    const cebmAvailableSlotsSelect = document.getElementById('cebm-available-slots-select');
     const cebmSaveChangesBtn = document.getElementById('cebm-save-changes-btn');
     const cebmStatusMessage = document.getElementById('cebm-status-message');
 
@@ -21,19 +23,53 @@ document.addEventListener('DOMContentLoaded', () => {
     let allUserEvents = []; // Store all user bookings
 
     // Helper function to format Date objects for datetime-local input
-    function formatDateForDatetimeLocal(date) {
-        if (!date) return '';
-        // Create a new Date object from the UTC time, then slice to YYYY-MM-DDTHH:MM
-        // This interprets the UTC date as if it were local, to fill the input correctly.
-        // The input itself doesn't carry timezone info, it's just a local datetime string.
-        const year = date.getUTCFullYear();
-        const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
-        const day = date.getUTCDate().toString().padStart(2, '0');
-        const hours = date.getUTCHours().toString().padStart(2, '0');
-        const minutes = date.getUTCMinutes().toString().padStart(2, '0');
-        return `${year}-${month}-${day}T${hours}:${minutes}`;
-    }
+    // function formatDateForDatetimeLocal(date) { // No longer needed for datetime-local inputs
+    //     if (!date) return '';
+    //     const year = date.getUTCFullYear();
+    //     const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
+    //     const day = date.getUTCDate().toString().padStart(2, '0');
+    //     const hours = date.getUTCHours().toString().padStart(2, '0');
+    //     const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+    //     return `${year}-${month}-${day}T${hours}:${minutes}`;
+    // }
 
+    async function fetchAndDisplayAvailableSlots(resourceId, dateStr, selectedStartTimeStr) {
+        const slotsSelect = document.getElementById('cebm-available-slots-select');
+        const statusMessage = document.getElementById('cebm-status-message'); // Or a dedicated message area for slots
+
+        slotsSelect.innerHTML = '<option value="">Loading slots...</option>';
+        slotsSelect.disabled = true;
+
+        try {
+            const availableSlots = await apiCall(`/api/resources/${resourceId}/available_slots?date=${dateStr}`);
+
+            slotsSelect.innerHTML = '<option value="">Select a time slot</option>'; // Reset
+
+            if (availableSlots && availableSlots.length > 0) {
+                availableSlots.forEach(slot => {
+                    const optionValue = `${slot.start_time},${slot.end_time}`;
+                    const optionText = `${slot.start_time} - ${slot.end_time}`;
+                    const option = new Option(optionText, optionValue);
+
+                    if (selectedStartTimeStr && slot.start_time === selectedStartTimeStr) {
+                        option.selected = true;
+                    }
+                    slotsSelect.add(option);
+                });
+                slotsSelect.disabled = false;
+            } else {
+                slotsSelect.innerHTML = '<option value="">No available slots</option>';
+            }
+            if (statusMessage) statusMessage.textContent = '';
+        } catch (error) {
+            console.error('Error fetching available slots:', error);
+            slotsSelect.innerHTML = '<option value="">Error loading slots</option>';
+            if (statusMessage) {
+                statusMessage.textContent = error.message || 'Failed to load available slots.';
+                statusMessage.className = 'status-message error-message';
+            }
+        }
+    }
 
     async function populateResourceSelector() {
         try {
@@ -58,24 +94,35 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Function to handle saving changes from the modal
-    async function saveBookingChanges(bookingId, title, startTimeStr, endTimeStr, calendarEventToUpdate) {
+    async function saveBookingChanges(bookingId, title, calendarEventToUpdate) { // Signature updated
         cebmStatusMessage.textContent = '';
         cebmStatusMessage.className = 'status-message';
 
-        // Basic validation
-        const startDate = new Date(startTimeStr); // Parsed as local time by Date constructor
-        const endDate = new Date(endTimeStr);   // Parsed as local time
+        const bookingDateStr = document.getElementById('cebm-booking-date').value;
+        const selectedSlotValue = document.getElementById('cebm-available-slots-select').value;
 
-        if (endDate <= startDate) {
+        if (!bookingDateStr || !selectedSlotValue) {
+            cebmStatusMessage.textContent = 'Please select a date and a time slot.';
+            cebmStatusMessage.className = 'status-message error-message';
+            return;
+        }
+
+        const [slotStartTime, slotEndTime] = selectedSlotValue.split(',');
+
+        // Construct full ISO datetime strings for start and end
+        const localStartDate = new Date(`${bookingDateStr}T${slotStartTime}:00`); // Parsed as local time
+        const localEndDate = new Date(`${bookingDateStr}T${slotEndTime}:00`);   // Parsed as local time
+
+        if (localEndDate <= localStartDate) { // Validation for new slot times
             cebmStatusMessage.textContent = 'End time must be after start time.';
-            cebmStatusMessage.className = 'status-message error-message'; // Ensure you have .error-message CSS
+            cebmStatusMessage.className = 'status-message error-message';
             return;
         }
 
         const eventPayload = {
             title: title,
-            start_time: startDate.toISOString(), // Convert to UTC ISO string
-            end_time: endDate.toISOString(),     // Convert to UTC ISO string
+            start_time: localStartDate.toISOString(),
+            end_time: localEndDate.toISOString(),
         };
 
         try {
@@ -92,13 +139,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // Update the event on the calendar
             if (calendarEventToUpdate) {
                 calendarEventToUpdate.setProp('title', title);
-                // When setting start/end, FullCalendar interprets these based on its timeZone (UTC)
-                // The date objects created from datetime-local are local. Convert them to what FC expects.
-                // Since FC is in UTC, and API needs UTC, we ensure these are UTC dates.
-                calendarEventToUpdate.setStart(startDate.toISOString());
-                calendarEventToUpdate.setEnd(endDate.toISOString());
+                // Use the localStartDate and localEndDate, FullCalendar will handle timezone conversion
+                calendarEventToUpdate.setStart(localStartDate.toISOString());
+                calendarEventToUpdate.setEnd(localEndDate.toISOString());
             }
-            // calendar.refetchEvents(); // Alternative: refetch all events for the current source
+            // calendar.refetchEvents();
 
             cebmStatusMessage.textContent = response.message || 'Booking updated successfully!';
             cebmStatusMessage.className = 'status-message success-message'; // Ensure you have .success-message CSS
@@ -121,7 +166,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     const calendar = new FullCalendar.Calendar(calendarEl, {
-        initialView: 'timeGridWeek',
+        initialView: 'dayGridMonth',
         timeZone: 'UTC', // Keep timezone as UTC for consistency with server
         headerToolbar: {
             left: 'prev,next today',
@@ -137,9 +182,36 @@ document.addEventListener('DOMContentLoaded', () => {
             // Ensure resource_name is correctly sourced. Assuming it's in extendedProps.
             cebmResourceName.textContent = info.event.extendedProps.resource_name || info.event.title || 'N/A';
 
-            // Convert event's UTC start/end times to format suitable for datetime-local input
-            cebmStartTime.value = formatDateForDatetimeLocal(info.event.start);
-            cebmEndTime.value = info.event.end ? formatDateForDatetimeLocal(info.event.end) : '';
+            // Store resource_id in hidden input
+            const cebmResourceIdInput = document.getElementById('cebm-resource-id');
+            cebmResourceIdInput.value = info.event.extendedProps.resource_id;
+
+            const cebmBookingDateInput = document.getElementById('cebm-booking-date');
+
+            if (info.event.start) {
+                const startDate = new Date(info.event.start); // Local representation of event's start
+                const year = startDate.getFullYear();
+                const month = (startDate.getMonth() + 1).toString().padStart(2, '0');
+                const day = startDate.getDate().toString().padStart(2, '0');
+                cebmBookingDateInput.value = `${year}-${month}-${day}`;
+
+                const startHours = info.event.start.getUTCHours().toString().padStart(2, '0');
+                const startMinutes = info.event.start.getUTCMinutes().toString().padStart(2, '0');
+                const selectedStartTimeHHMM = `${startHours}:${startMinutes}`;
+
+                fetchAndDisplayAvailableSlots(info.event.extendedProps.resource_id, cebmBookingDateInput.value, selectedStartTimeHHMM);
+            } else {
+                cebmBookingDateInput.value = ''; // Or today's date
+                // Optionally fetch slots for a default date or leave selector empty
+                document.getElementById('cebm-available-slots-select').innerHTML = '<option value="">-- Select a date first --</option>';
+            }
+
+            cebmBookingDateInput.onchange = () => {
+                const resourceId = cebmResourceIdInput.value;
+                if (resourceId && cebmBookingDateInput.value) {
+                    fetchAndDisplayAvailableSlots(resourceId, cebmBookingDateInput.value, null);
+                }
+            };
 
             cebmStatusMessage.textContent = ''; // Clear previous messages
             cebmStatusMessage.className = 'status-message';
@@ -151,13 +223,12 @@ document.addEventListener('DOMContentLoaded', () => {
             // Re-assign to the new button for the current scope
             const currentSaveBtn = document.getElementById('cebm-save-changes-btn');
 
-            currentSaveBtn.onclick = () => { // Use onclick for simplicity here, or manage event listeners carefully
+            currentSaveBtn.onclick = () => {
                 saveBookingChanges(
                     cebmBookingId.value,
                     cebmBookingTitle.value,
-                    cebmStartTime.value,
-                    cebmEndTime.value,
-                    info.event // Pass the FullCalendar event object to update it directly
+                    // startTime and endTime are no longer passed directly
+                    info.event
                 );
             };
         },
