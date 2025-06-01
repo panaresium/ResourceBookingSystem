@@ -43,8 +43,29 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const availableSlots = await apiCall(`/api/resources/${resourceId}/available_slots?date=${dateStr}`);
 
-            // Reset the select element
-            slotsSelect.innerHTML = '<option value="">-- Select a time slot --</option>'; // Reset
+            // API call to availableSlots is kept (as per previous logic), but its direct output isn't used to populate slots here.
+            // It could be used for general resource availability checks in a more advanced version.
+            if (!availableSlots) {
+                console.warn('API call for resource slots returned no data, or resource might be generally unavailable. Proceeding with predefined slots and user conflict check.');
+            }
+
+            const allCalendarEvents = calendar.getEvents();
+            const currentEditingBookingId = document.getElementById('cebm-booking-id').value;
+
+            // PROACTIVE FIX APPLIED HERE based on prompt's suggestion
+            const otherUserBookingsOnDate = allCalendarEvents.filter(event => {
+                // Ensure event.id is string if currentEditingBookingId is string.
+                if (String(event.id) === String(currentEditingBookingId)) { // Explicitly cast to string for safety
+                    return false;
+                }
+                if (!event.start) {
+                    return false;
+                }
+                // Date comparison: event.start is a Date object. dateStr is 'YYYY-MM-DD'.
+                // Convert event.start to a 'YYYY-MM-DD' string in UTC for reliable comparison.
+                const eventDateString = event.start.toISOString().split('T')[0];
+                return eventDateString === dateStr;
+            });
 
             // Define the predefined slots
             const predefinedSlots = [
@@ -53,41 +74,54 @@ document.addEventListener('DOMContentLoaded', () => {
                 { text: "08:00 - 17:00 UTC", value: "08:00,17:00" }
             ];
 
-            // Populate the select element with predefined slots
-            predefinedSlots.forEach(slot => {
-                const option = new Option(slot.text, slot.value);
-                slotsSelect.add(option);
+            slotsSelect.innerHTML = '<option value="">-- Select a time slot --</option>'; // Reset
+
+            predefinedSlots.forEach(pSlot => {
+                const [pSlotStartStr, pSlotEndStr] = pSlot.value.split(',');
+                // Construct Date objects for the predefined slot in UTC
+                const predefinedSlotStartUTC = new Date(dateStr + 'T' + pSlotStartStr + ':00Z');
+                const predefinedSlotEndUTC = new Date(dateStr + 'T' + pSlotEndStr + ':00Z');
+
+                let isConflicting = false;
+                for (const existingEvent of otherUserBookingsOnDate) {
+                    // FullCalendar events store start/end as Date objects.
+                    // These are already likely in UTC or will be correctly compared if Date objects are consistently used.
+                    const existingBookingStart = existingEvent.start;
+                    const existingBookingEnd = existingEvent.end;
+
+                    if (existingBookingStart && existingBookingEnd) { // Standard check for events with duration
+                        if ((predefinedSlotStartUTC < existingBookingEnd) && (predefinedSlotEndUTC > existingBookingStart)) {
+                            isConflicting = true;
+                            break;
+                        }
+                    } else if (existingBookingStart) {
+                        // Handle events that might be point-in-time or have missing end dates
+                        // This logic assumes such events conflict if they are within the predefined slot
+                        if (predefinedSlotStartUTC <= existingBookingStart && predefinedSlotEndUTC > existingBookingStart) {
+                           // isConflicting = true; // Uncomment and refine if point-in-time events need specific handling
+                           // break;
+                        }
+                    }
+                }
+                if (!isConflicting) {
+                    const option = new Option(pSlot.text, pSlot.value);
+                    // Regarding selectedStartTimeStr:
+                    // The original instruction was "we will not attempt to pre-select any of these fixed slots based on selectedStartTimeStr."
+                    // If pre-selection for non-conflicting matching slots is desired later, it would be added here.
+                    // Example: if (selectedStartTimeStr && pSlotStartStr === selectedStartTimeStr) { option.selected = true; }
+                    slotsSelect.add(option);
+                }
             });
+
+            if (slotsSelect.options.length <= 1) { // Only the default "-- Select a time slot --" is present
+                slotsSelect.innerHTML = '<option value="">No conflict-free slots available</option>';
+            }
             slotsSelect.disabled = false;
 
-            // The original logic for handling empty or error states for availableSlots can be kept
-            // or adapted if the API call itself is still meaningful for other purposes (e.g. general availability check)
-            if (!availableSlots) { // Example: if API call failed or indicated resource is generally unavailable
-                 console.warn('API call for slots succeeded but returned no data, or resource might be unavailable. Proceeding with predefined slots.');
-            }
-            // if (availableSlots && availableSlots.length > 0) { // This block is replaced
-            //     availableSlots.forEach(slot => {
-            //         const optionValue = `${slot.start_time},${slot.end_time}`;
-            //         const optionText = `${slot.start_time} - ${slot.end_time} UTC`;
-            //         const option = new Option(optionText, optionValue);
-            //
-            //         if (selectedStartTimeStr && slot.start_time === selectedStartTimeStr) {
-            //             option.selected = true;
-            //         }
-            //         slotsSelect.add(option);
-            //     });
-            //     slotsSelect.disabled = false;
-            // } else { // This logic might need adjustment if API call result is still used
-            //     slotsSelect.innerHTML = '<option value="">No available slots (using predefined)</option>';
-            //     // Populate with predefined even if API says no specific slots, or handle as error.
-            //     // For now, predefined slots are added regardless of API's slot list.
-            // }
             if (statusMessage) statusMessage.textContent = ''; // Clear loading/previous status
         } catch (error) {
-            console.error('Error fetching available slots:', error);
-            // Even if API fails, we might still want to show predefined slots,
-            // or show an error and not show slots. For now, let's assume error means no slots.
-            slotsSelect.innerHTML = '<option value="">Error loading slots</option>';
+            console.error('Error fetching available slots or processing conflicts:', error);
+            slotsSelect.innerHTML = '<option value="">Error loading or checking slots</option>';
             if (statusMessage) {
                 statusMessage.textContent = error.message || 'Failed to load available slots.';
                 statusMessage.className = 'status-message error-message';
