@@ -47,8 +47,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (availableSlots && availableSlots.length > 0) {
                 availableSlots.forEach(slot => {
-                    const optionValue = `${slot.start_time},${slot.end_time}`;
-                    const optionText = `${slot.start_time} - ${slot.end_time}`;
+                    const optionValue = `${slot.start_time},${slot.end_time}`; // e.g., "09:00,09:30"
+                    const optionText = `${slot.start_time} - ${slot.end_time} UTC`; // e.g., "09:00 - 09:30 UTC"
                     const option = new Option(optionText, optionValue);
 
                     if (selectedStartTimeStr && slot.start_time === selectedStartTimeStr) {
@@ -290,18 +290,33 @@ document.addEventListener('DOMContentLoaded', () => {
             if (b.extendedProps && b.extendedProps.isActualBooking) return -1;
             return 0; 
         },
-        eventContent: function(arg) { // For month view time display
+        eventContent: function(arg) {
             if (arg.view.type === 'dayGridMonth') {
                 let eventHtml = `<b>${arg.event.title}</b>`;
                 if (arg.event.start) {
-                    const startTime = arg.event.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-                    const endTime = arg.event.end ? arg.event.end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
-                    if (!arg.event.allDay || (startTime !== '00:00' || (endTime && endTime !== '00:00'))) {
-                         eventHtml += `<br>${startTime}${endTime && endTime !== startTime ? ' - ' + endTime : ''}`;
+                    const startHours = arg.event.start.getUTCHours().toString().padStart(2, '0');
+                    const startMinutes = arg.event.start.getUTCMinutes().toString().padStart(2, '0');
+                    const startTimeUTC = `${startHours}:${startMinutes}`;
+
+                    let endTimeUTC = '';
+                    if (arg.event.end) {
+                        const endHours = arg.event.end.getUTCHours().toString().padStart(2, '0');
+                        const endMinutes = arg.event.end.getUTCMinutes().toString().padStart(2, '0');
+                        endTimeUTC = `${endHours}:${endMinutes}`;
+                    }
+
+                    // Show time if not an all-day event or if time is not midnight
+                    if (!arg.event.allDay || (startTimeUTC !== '00:00' || (endTimeUTC && endTimeUTC !== '00:00'))) {
+                        eventHtml += `<br>${startTimeUTC}`;
+                        if (endTimeUTC && endTimeUTC !== startTimeUTC) {
+                            eventHtml += ` - ${endTimeUTC}`;
+                        }
+                        eventHtml += ' UTC'; // Append UTC label
                     }
                 }
                 return { html: eventHtml };
             }
+            // For other views, retain original behavior (bold title, FC handles time)
             return { html: `<b>${arg.event.title}</b>` }; 
         }
     });
