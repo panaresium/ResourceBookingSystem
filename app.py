@@ -4365,5 +4365,3 @@ def update_backup_schedule():
         app.logger.exception("Error updating backup schedule configuration:")
         add_audit_log(action="UPDATE_BACKUP_SCHEDULE_FAILED", details=f"Error: {str(e)}. Data: {data}")
         return jsonify({'success': False, 'message': f'Error updating schedule: {str(e)}'}), 500
-
-[end of app.py]
