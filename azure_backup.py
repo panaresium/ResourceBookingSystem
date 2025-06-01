@@ -363,11 +363,22 @@ def create_full_backup(timestamp_str, map_config_data=None, socketio_instance=No
         media_share_client.create_share()
 
     # Ensure the base directory for all media backups exists first
-    logger.info(f"Ensuring base media backup directory '{MEDIA_BACKUPS_DIR_BASE}' exists on share '{media_share_name}'.")
-    _ensure_directory_exists(media_share_client, MEDIA_BACKUPS_DIR_BASE) # <<< NEWLY ADDED LINE
+    logger.info(f"Checking/Creating base media backup directory '{MEDIA_BACKUPS_DIR_BASE}' on share '{media_share_name}'.")
+    media_base_dir_client = media_share_client.get_directory_client(MEDIA_BACKUPS_DIR_BASE)
+    if not _client_exists(media_base_dir_client):
+        try:
+            logger.info(f"Base media backup directory '{MEDIA_BACKUPS_DIR_BASE}' not found on share '{media_share_name}'. Attempting to create.")
+            media_base_dir_client.create_directory()
+            logger.info(f"Successfully created base media backup directory '{MEDIA_BACKUPS_DIR_BASE}' on share '{media_share_name}'.")
+        except Exception as e:
+            logger.error(f"CRITICAL: Failed to create base media backup directory '{MEDIA_BACKUPS_DIR_BASE}' on share '{media_share_name}': {e}", exc_info=True)
+            raise RuntimeError(f"Could not create base media backup directory '{MEDIA_BACKUPS_DIR_BASE}'. Error: {e}")
+    else:
+        logger.info(f"Base media backup directory '{MEDIA_BACKUPS_DIR_BASE}' already exists on share '{media_share_name}'.")
 
     # Backup FLOOR_MAP_UPLOADS
     remote_floor_map_dir = f"{MEDIA_BACKUPS_DIR_BASE}/floor_map_uploads_{timestamp_str}"
+    # Now, _ensure_directory_exists should correctly create 'floor_map_uploads_TIMESTAMP' inside 'media_backups'
     _ensure_directory_exists(media_share_client, remote_floor_map_dir)
     if os.path.isdir(FLOOR_MAP_UPLOADS):
         for filename in os.listdir(FLOOR_MAP_UPLOADS):
