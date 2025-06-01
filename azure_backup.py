@@ -539,7 +539,10 @@ def create_full_backup(timestamp_str, map_config_data=None, socketio_instance=No
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'Failed to upload backup manifest.', str(e))
             # overall_success might be set to False here if manifest is critical, but current plan implies it's best effort after successful backup.
 
-    _emit_progress(socketio_instance, task_id, 'backup_progress', f'Full backup function finished. Overall success: {overall_success}', 'SUCCESS' if overall_success else 'ERROR')
+    if overall_success:
+        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backup Completed Successfully.', 'SUCCESS')
+    else:
+        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backup Failed. Check server logs for details.', 'ERROR')
     return overall_success
 
 
