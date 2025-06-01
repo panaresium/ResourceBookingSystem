@@ -1129,15 +1129,16 @@ nav#sidebar {
 
 /* Ensure event content in month view does not overflow */
 .fc-daygrid-event .fc-event-main-frame {
-    overflow: hidden; /* This will clip content that's too large */
+    overflow: visible; /* Allow content to be visible, enabling wrapping */
     position: relative; /* For text-overflow to work correctly with children */
+    white-space: normal; /* Ensure text wrapping for all content */
 }
 
 .fc-daygrid-event .fc-event-main-frame b { /* Targeting the title */
     display: block; /* Make it a block to control overflow */
     white-space: normal; /* Allow text to wrap */
     /* overflow: hidden; */ /* Not needed here, parent will clip */
-    /* text-overflow: ellipsis; */ /* Not needed if wrapping */
+    /* text-overflow: ellipsis; */ /* Not needed if wrapping - text will wrap due to parent */
     max-width: 100%; /* Ensure it respects container width */
 }
 
