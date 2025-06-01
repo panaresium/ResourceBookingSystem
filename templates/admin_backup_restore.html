@@ -2,6 +2,38 @@
 
 {% block title %}{{ _('Admin - Backup & Restore') }}{% endblock %}
 
+{% block head_extra %}
+{{ super() }}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js" integrity="sha512-CPDRw laudeJEjYqdKq1sW3L3GGLAnL_7A_K9vG2gZf_3DSpC7GjHWTX2r_G2tq2oV_A2/8Bw6J24aO0yL_5jEQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<style>
+    .log-area {
+        max-height: 200px;
+        overflow-y: auto;
+        background: #f0f0f0;
+        border: 1px solid #ccc;
+        padding: 10px;
+        margin-top: 10px;
+        white-space: pre-wrap;
+        font-family: monospace;
+        font-size: 0.9em;
+    }
+    .log-entry {
+        padding: 2px 0;
+    }
+    .log-error {
+        color: red;
+        font-weight: bold;
+    }
+    .log-success {
+        color: green;
+        font-weight: bold;
+    }
+    .log-info {
+        color: #333;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container mt-4">
     <h1>{{ _('Admin - Backup & Restore') }}</h1>
@@ -12,6 +44,7 @@
         <p>{{ _('Perform a full backup of the database, map configurations, and uploaded media files.') }}</p>
         <button id="one-click-backup-btn" class="btn btn-primary">{{ _('Perform Full Backup Now') }}</button>
         <div id="backup-status-message" class="mt-2"></div>
+        <pre id="backup-log-area" class="log-area" style="display: none;"></pre>
     </section>
 
     <hr>
@@ -21,6 +54,7 @@
         <p>{{ _('Restore the system from a previously created full backup. This will overwrite current data.') }}</p>
         <button id="list-backups-btn" class="btn btn-info mb-3">{{ _('Refresh Available Backups') }}</button>
         <div id="restore-status-message" class="mt-2 mb-3"></div>
+        <pre id="restore-log-area" class="log-area" style="display: none;"></pre>
 
         <table id="available-backups-table" class="table table-striped">
             <thead>
@@ -36,6 +70,41 @@
     </section>
 
     <hr>
+
+    <!-- Selective Restore Modal -->
+    <div id="selective-restore-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal-btn" id="close-selective-restore-modal">&times;</span>
+            <h3>{{ _('Selective Restore Options') }}</h3>
+            <p>{{ _('Select components to restore for backup:') }} <strong id="modal-backup-timestamp"></strong></p>
+            <form id="selective-restore-form">
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="database" id="component-database" name="components">
+                    <label class="form-check-label" for="component-database">{{ _('Database (Bookings, Users, Resources, etc.)') }}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="map_config" id="component-map_config" name="components">
+                    <label class="form-check-label" for="component-map_config">{{ _('Map Configuration (Floor map definitions & resource mappings on maps)') }}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="floor_maps" id="component-floor_maps" name="components">
+                    <label class="form-check-label" for="component-floor_maps">{{ _('Floor Map Images (in static/floor_map_uploads)') }}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="resource_uploads" id="component-resource_uploads" name="components">
+                    <label class="form-check-label" for="component-resource_uploads">{{ _('Resource Images (in static/resource_uploads)') }}</label>
+                </div>
+                <hr>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="all" id="component-all" name="components_all">
+                    <label class="form-check-label" for="component-all">{{ _('ALL COMPONENTS (Full Restore)') }}</label>
+                </div>
+                <button type="submit" id="confirm-selective-restore-btn" class="btn btn-primary mt-3">{{ _('Proceed with Selected Restore') }}</button>
+            </form>
+            <div id="selective-restore-modal-status" class="status-message mt-2"></div>
+        </div>
+    </div>
+
     <h2>{{ _('Scheduled Full Backups') }}</h2>
     <div id="schedule-status-message" class="status-message my-2" role="alert"></div>
     <form id="backup-schedule-form" class="mb-4">
@@ -75,17 +144,18 @@
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-        const socket = io(); // Initialize SocketIO
+        const socket = io();
 
         const backupButton = document.getElementById('one-click-backup-btn');
-        const backupStatusMessage = document.getElementById('backup-status-message');
+        const backupStatusMessageEl = document.getElementById('backup-status-message'); // Renamed for clarity
+        const backupLogAreaEl = document.getElementById('backup-log-area');
 
         const listBackupsButton = document.getElementById('list-backups-btn');
-        const restoreStatusMessage = document.getElementById('restore-status-message');
+        const restoreStatusMessageEl = document.getElementById('restore-status-message'); // Renamed for clarity
+        const restoreLogAreaEl = document.getElementById('restore-log-area');
         const availableBackupsTbody = document.getElementById('available-backups-tbody');
         const availableBackupsTable = document.getElementById('available-backups-table');
 
-        // Schedule form elements
         const scheduleForm = document.getElementById('backup-schedule-form');
         const scheduleEnabledCheckbox = document.getElementById('schedule-enabled');
         const scheduleTypeSelect = document.getElementById('schedule-type');
@@ -95,10 +165,43 @@
         const saveScheduleButton = document.getElementById('save-schedule-btn');
         const scheduleStatusMessage = document.getElementById('schedule-status-message');
 
+        // Selective Restore Modal Elements
+        const selectiveRestoreModal = document.getElementById('selective-restore-modal');
+        const closeModalBtn = document.getElementById('close-selective-restore-modal');
+        const modalBackupTimestampEl = document.getElementById('modal-backup-timestamp');
+        const selectiveRestoreForm = document.getElementById('selective-restore-form');
+        const confirmSelectiveRestoreBtn = document.getElementById('confirm-selective-restore-btn');
+        const selectiveRestoreModalStatusEl = document.getElementById('selective-restore-modal-status');
+        const componentCheckboxes = document.querySelectorAll('#selective-restore-form input[name="components"]');
+        const componentAllCheckbox = document.getElementById('component-all');
+
+
         let currentBackupTaskId = null;
         let currentRestoreTaskId = null;
+        let currentVerifyTaskId = null; // Added for verification tasks
 
-        // Keep-alive function
+        socket.on('connect', () => {
+            console.log('Socket.IO connected for backup/restore logs.');
+        });
+        socket.on('disconnect', (reason) => {
+            console.warn('Socket.IO disconnected:', reason);
+        });
+        socket.on('connect_error', (error) => {
+            console.error('Socket.IO connection error:', error);
+        });
+
+        function appendLog(logAreaId, message, detail, type = 'info') {
+            const logArea = document.getElementById(logAreaId);
+            if (!logArea) return;
+            logArea.style.display = 'block';
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry log-' + type; // e.g. log-info, log-error
+            logEntry.textContent = `[${timestamp}] ${message}${detail ? ' - ' + detail : ''}`;
+            logArea.appendChild(logEntry);
+            logArea.scrollTop = logArea.scrollHeight; // Auto-scroll to bottom
+        }
+
         function keepAlive() {
             fetch('/ping', {
                 method: 'GET',
@@ -107,99 +210,211 @@
             .then(response => {
                 if (!response.ok) {
                     console.warn('Keep-alive ping failed. Status:', response.status);
-                } else {
-                    // console.log('Keep-alive ping successful.'); // Optional: for debugging
+                    appendLog(currentBackupTaskId ? 'backup-log-area' : (currentRestoreTaskId ? 'restore-log-area' : 'backup-log-area'),
+                              'Session keep-alive ping failed.', `Status: ${response.status}`, 'error');
                 }
             })
-            .catch(error => console.error('Keep-alive ping error:', error));
+            .catch(error => {
+                console.error('Keep-alive ping error:', error);
+                appendLog(currentBackupTaskId ? 'backup-log-area' : (currentRestoreTaskId ? 'restore-log-area' : 'backup-log-area'),
+                          'Session keep-alive ping error.', error.message, 'error');
+            });
         }
-
-        // Set interval for keep-alive (e.g., every 5 minutes)
-        setInterval(keepAlive, 5 * 60 * 1000); // 300,000 milliseconds
+        setInterval(keepAlive, 4 * 60 * 1000); // 4 minutes
 
         // SocketIO listeners
         socket.on('backup_progress', function(data) {
             console.log('Backup progress event:', data);
-            if (data.task_id === currentBackupTaskId) {
-                let detailMessage = data.detail ? ` (${data.detail})` : '';
-                backupStatusMessage.textContent = `{{ _('Backup progress:') }} ${data.status}${detailMessage}`;
-                if (data.detail && data.detail.toUpperCase() === 'ERROR') {
-                    backupStatusMessage.className = 'alert alert-danger';
-                } else if (data.detail && data.detail.toUpperCase() === 'SUCCESS') {
-                    backupStatusMessage.className = 'alert alert-success';
-                    loadAvailableBackups(); // Refresh backup list on success
-                } else {
-                    backupStatusMessage.className = 'alert alert-info';
+            if (data.task_id !== currentBackupTaskId) return;
+
+            let messageType = 'info';
+            if (data.detail && data.detail.toUpperCase().includes('ERROR')) messageType = 'error';
+            else if (data.detail && data.detail.toUpperCase().includes('SUCCESS')) messageType = 'success';
+
+            appendLog('backup-log-area', data.status, data.detail, messageType);
+            backupStatusMessageEl.textContent = `${data.status}${data.detail ? ' ('+data.detail+')':''}`;
+            backupStatusMessageEl.className = `alert alert-${messageType === 'error' ? 'danger' : (messageType === 'success' ? 'success' : 'info')}`;
+
+
+            if (data.status.toLowerCase().includes("finished") || data.status.toLowerCase().includes("completed") || data.status.toLowerCase().includes("failed")) {
+                backupButton.disabled = false;
+                currentBackupTaskId = null; // Clear task ID on completion/failure
+                if (messageType === 'success' || (data.detail && data.detail.toUpperCase().includes("SUCCESS: TRUE"))) {
+                    loadAvailableBackups();
                 }
             }
         });
 
         socket.on('restore_progress', function(data) {
             console.log('Restore progress event:', data);
-            if (data.task_id === currentRestoreTaskId) {
-                let detailMessage = data.detail ? ` (${data.detail})` : '';
-                restoreStatusMessage.textContent = `{{ _('Restore progress:') }} ${data.status}${detailMessage}`;
-                 if (data.detail && data.detail.toUpperCase() === 'ERROR') {
-                    restoreStatusMessage.className = 'alert alert-danger';
-                } else if (data.detail && data.detail.toUpperCase() === 'SUCCESS') {
-                    restoreStatusMessage.className = 'alert alert-success';
+            if (data.task_id !== currentRestoreTaskId) return;
+
+            let messageType = 'info';
+            if (data.detail && data.detail.toUpperCase().includes('ERROR')) messageType = 'error';
+            else if (data.detail && data.detail.toUpperCase().includes('SUCCESS')) messageType = 'success';
+
+            appendLog('restore-log-area', data.status, data.detail, messageType);
+            restoreStatusMessageEl.textContent = `${data.status}${data.detail ? ' ('+data.detail+')':''}`;
+            restoreStatusMessageEl.className = `alert alert-${messageType === 'error' ? 'danger' : (messageType === 'success' ? 'success' : 'info')}`;
+
+            if (data.status.toLowerCase().includes("fully completed") || data.status.toLowerCase().includes("failed") || data.status.toLowerCase().includes("error")) {
+                document.querySelectorAll('.restore-btn, .restore-dry-run-btn').forEach(btn => btn.disabled = false);
+                backupButton.disabled = false; // Also re-enable backup button
+                currentRestoreTaskId = null; // Clear task ID
+            }
+
+            // If actions are present in the data (from a dry run), display them
+            if (data.actions && Array.isArray(data.actions)) {
+                appendLog('restore-log-area', "DRY RUN ACTIONS:", '', 'info');
+                if (data.actions.length === 0) {
+                    appendLog('restore-log-area', "  No actions would be performed.", '', 'info');
                 } else {
-                    restoreStatusMessage.className = 'alert alert-info';
+                    data.actions.forEach(action => {
+                        appendLog('restore-log-area', `  - ${action}`, '', 'info');
+                    });
+                }
+            }
+            // If a summary is present (from selective restore), display it
+            if (data.summary && Array.isArray(data.summary)) {
+                appendLog('restore-log-area', "SELECTIVE RESTORE SUMMARY:", '', 'info');
+                if (data.summary.length === 0) {
+                    appendLog('restore-log-area', "  No component actions reported.", '', 'info');
+                } else {
+                    data.summary.forEach(action_summary => {
+                        appendLog('restore-log-area', `  - ${action_summary}`, '', 'info');
+                    });
                 }
             }
         });
 
-
         // One Click Backup
         backupButton.addEventListener('click', function () {
+            currentBackupTaskId = null;
+            backupLogAreaEl.innerHTML = '';
+            backupLogAreaEl.style.display = 'block'; // Show log area
+            restoreLogAreaEl.style.display = 'none'; // Hide other log area
+            appendLog('backup-log-area', "{{ _('Initiating backup request...') }}", '', 'info');
             backupButton.disabled = true;
-            backupStatusMessage.textContent = "{{ _('Initiating backup...') }}";
-            backupStatusMessage.className = 'alert alert-info';
-            currentBackupTaskId = null; // Reset task ID
+            document.querySelectorAll('.restore-btn').forEach(btn => btn.disabled = true); // Disable restore buttons
+
+            backupStatusMessageEl.textContent = "{{ _('Initiating backup...') }}";
+            backupStatusMessageEl.className = 'alert alert-info';
 
             fetch('/api/admin/one_click_backup', {
                 method: 'POST',
-                headers: {
-                    'X-CSRFToken': csrfToken,
-                    'Accept': 'application/json'
-                }
+                headers: { 'X-CSRFToken': csrfToken, 'Accept': 'application/json' }
             })
             .then(response => response.json())
             .then(data => {
-                if (data.task_id) {
-                    currentBackupTaskId = data.task_id;
-                }
-                if (data.success) {
-                    // Message is now primarily handled by SocketIO events
-                    backupStatusMessage.textContent = data.message || "{{ _('Backup process started. See live updates.') }}";
-                    backupStatusMessage.className = 'alert alert-info'; // Initial info, SocketIO will update
-                } else {
-                    backupStatusMessage.textContent = "{{ _('Backup initiation failed:') }} " + (data.message || "{{ _('Unknown error.') }}");
-                    backupStatusMessage.className = 'alert alert-danger';
+                currentBackupTaskId = data.task_id; // Store task_id
+                const messageType = data.success ? 'info' : 'error';
+                appendLog('backup-log-area', data.message || (data.success ? "{{ _('Backup process started on server.') }}" : "{{ _('Failed to start backup process.') }}"), `Task ID: ${data.task_id || 'N/A'}`, messageType);
+                backupStatusMessageEl.textContent = data.message;
+                backupStatusMessageEl.className = `alert alert-${messageType}`;
+
+                if (!data.success) {
                     backupButton.disabled = false;
+                    document.querySelectorAll('.restore-btn').forEach(btn => btn.disabled = false);
                 }
-                // Do not re-enable button here if success, SocketIO will indicate completion
-                if (!data.success) backupButton.disabled = false;
             })
             .catch(error => {
                 console.error('Backup error:', error);
-                backupStatusMessage.textContent = "{{ _('Backup request failed:') }} " + error.toString();
-                backupStatusMessage.className = 'alert alert-danger';
+                appendLog('backup-log-area', "{{ _('Backup request failed:') }}", error.message, 'error');
+                backupStatusMessageEl.textContent = "{{ _('Backup request failed:') }} " + error.toString();
+                backupStatusMessageEl.className = 'alert alert-danger';
+                backupButton.disabled = false;
+                document.querySelectorAll('.restore-btn').forEach(btn => btn.disabled = false);
+            });
+        });
+
+        // Selective Restore Form Submission
+        selectiveRestoreForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const backupTimestamp = this.dataset.timestamp;
+            const selectedComponents = Array.from(document.querySelectorAll('#selective-restore-form input[name="components"]:checked'))
+                                         .map(cb => cb.value);
+
+            if (selectedComponents.length === 0) {
+                selectiveRestoreModalStatusEl.textContent = "{{ _('Please select at least one component to restore.') }}";
+                selectiveRestoreModalStatusEl.className = 'alert alert-warning';
+                return;
+            }
+
+            currentRestoreTaskId = null; // Reset task ID
+            restoreLogAreaEl.innerHTML = ''; // Clear main log area
+            restoreLogAreaEl.style.display = 'block';
+            backupLogAreaEl.style.display = 'none';
+            appendLog('restore-log-area', `{{ _('Initiating selective restore for') }} ${backupTimestamp}...`, `Components: ${selectedComponents.join(', ')}`, 'info');
+
+            // Disable buttons
+            confirmSelectiveRestoreBtn.disabled = true;
+            document.querySelectorAll('.restore-btn, .restore-dry-run-btn').forEach(btn => btn.disabled = true);
+            backupButton.disabled = true;
+
+            restoreStatusMessageEl.textContent = `{{ _('Initiating selective restore...') }}`;
+            restoreStatusMessageEl.className = 'alert alert-info';
+            selectiveRestoreModalStatusEl.textContent = "{{ _('Processing...') }}";
+            selectiveRestoreModalStatusEl.className = 'alert alert-info';
+
+
+            fetch('/api/admin/selective_restore', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({
+                    backup_timestamp: backupTimestamp,
+                    components: selectedComponents
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                currentRestoreTaskId = data.task_id;
+                const messageType = data.success ? 'info' : 'error';
+
+                appendLog('restore-log-area', data.message || (data.success ? `{{ _('Selective restore for ${backupTimestamp} process started.') }}` : `{{ _('Failed to start selective restore for ${backupTimestamp}.') }}`), `Task ID: ${data.task_id || 'N/A'}`, messageType);
+                restoreStatusMessageEl.textContent = data.message; // Update main page status
+                restoreStatusMessageEl.className = `alert alert-${messageType}`;
+
+                selectiveRestoreModalStatusEl.textContent = data.message; // Update modal status
+                selectiveRestoreModalStatusEl.className = `alert alert-${messageType}`;
+
+
+                if (data.success) {
+                    selectiveRestoreModal.style.display = 'none'; // Close modal on successful initiation
+                } else {
+                    // Re-enable buttons if initiation failed
+                    confirmSelectiveRestoreBtn.disabled = false;
+                    document.querySelectorAll('.restore-btn, .restore-dry-run-btn').forEach(btn => btn.disabled = false);
+                    backupButton.disabled = false;
+                }
+            })
+            .catch(error => {
+                console.error('Selective restore error:', error);
+                const errorMsg = `{{ _('Selective restore request for ${backupTimestamp} failed:') }} ${error.toString()}`;
+                appendLog('restore-log-area', errorMsg, '', 'error');
+                restoreStatusMessageEl.textContent = errorMsg;
+                restoreStatusMessageEl.className = 'alert alert-danger';
+                selectiveRestoreModalStatusEl.textContent = errorMsg;
+                selectiveRestoreModalStatusEl.className = 'alert alert-danger';
+
+                // Re-enable buttons on catch
+                confirmSelectiveRestoreBtn.disabled = false;
+                document.querySelectorAll('.restore-btn, .restore-dry-run-btn').forEach(btn => btn.disabled = false);
                 backupButton.disabled = false;
             });
         });
 
-        // Function to load available backups
-        function loadAvailableBackups() {
-            restoreStatusMessage.textContent = "{{ _('Fetching available backups...') }}";
-            restoreStatusMessage.className = 'alert alert-info';
+        function loadAvailableBackups() { /* ... existing loadAvailableBackups ... */
+            restoreStatusMessageEl.textContent = "{{ _('Fetching available backups...') }}";
+            restoreStatusMessageEl.className = 'alert alert-info';
             availableBackupsTbody.innerHTML = '<tr><td colspan="2">{{ _("Loading...") }}</td></tr>';
 
             fetch('/api/admin/list_backups', {
                 method: 'GET',
-                headers: {
-                    'Accept': 'application/json'
-                }
+                headers: { 'Accept': 'application/json' }
             })
             .then(response => response.json())
             .then(data => {
@@ -211,129 +426,319 @@
                         const cellAction = row.insertCell();
                         let displayTimestamp = timestamp;
                         try {
-                            const year = timestamp.substring(0,4);
-                            const month = timestamp.substring(4,6);
-                            const day = timestamp.substring(6,8);
-                            const hour = timestamp.substring(9,11);
-                            const minute = timestamp.substring(11,13);
-                            const second = timestamp.substring(13,15);
+                            const year = timestamp.substring(0,4); const month = timestamp.substring(4,6);
+                            const day = timestamp.substring(6,8); const hour = timestamp.substring(9,11);
+                            const minute = timestamp.substring(11,13); const second = timestamp.substring(13,15);
                             displayTimestamp = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
                         } catch (e) { /* ignore */ }
 
                         cellTimestamp.textContent = displayTimestamp;
-                        const restoreButton = document.createElement('button');
-                        restoreButton.textContent = "{{ _('Restore') }}";
-                        restoreButton.className = 'btn btn-sm btn-warning restore-btn';
-                        restoreButton.setAttribute('data-timestamp', timestamp);
-                        cellAction.appendChild(restoreButton);
+                        const restoreBtn = document.createElement('button');
+                        restoreBtn.textContent = "{{ _('Restore') }}";
+                        restoreBtn.className = 'btn btn-sm btn-warning restore-btn me-2'; // Added me-2 for spacing
+                        restoreBtn.setAttribute('data-timestamp', timestamp);
+                        cellAction.appendChild(restoreBtn);
+
+                        const dryRunBtn = document.createElement('button');
+                        dryRunBtn.textContent = "{{ _('Dry Run') }}";
+                        dryRunBtn.className = 'btn btn-sm btn-info restore-dry-run-btn me-2'; // Added me-2 for spacing
+                        dryRunBtn.setAttribute('data-timestamp', timestamp);
+                        cellAction.appendChild(dryRunBtn);
+
+                        const verifyBtn = document.createElement('button');
+                        verifyBtn.textContent = "{{ _('Verify') }}";
+                        verifyBtn.className = 'btn btn-sm btn-secondary verify-backup-btn';
+                        verifyBtn.setAttribute('data-timestamp', timestamp);
+                        cellAction.appendChild(verifyBtn);
+
                     });
-                    restoreStatusMessage.textContent = "{{ _('Available backups loaded.') }}";
-                    restoreStatusMessage.className = 'alert alert-success';
+                    restoreStatusMessageEl.textContent = "{{ _('Available backups loaded.') }}";
+                    restoreStatusMessageEl.className = 'alert alert-success';
                 } else if (data.success && data.backups && data.backups.length === 0) {
                     availableBackupsTbody.innerHTML = '<tr><td colspan="2">{{ _("No backups available.") }}</td></tr>';
-                    restoreStatusMessage.textContent = "{{ _('No backups found.') }}";
-                    restoreStatusMessage.className = 'alert alert-info';
+                    restoreStatusMessageEl.textContent = "{{ _('No backups found.') }}";
+                    restoreStatusMessageEl.className = 'alert alert-info';
                 } else {
                     availableBackupsTbody.innerHTML = '<tr><td colspan="2">{{ _("Failed to load backups.") }}</td></tr>';
-                    restoreStatusMessage.textContent = "{{ _('Failed to load backups:') }} " + (data.message || "{{ _('Unknown error.') }}");
-                    restoreStatusMessage.className = 'alert alert-danger';
+                    restoreStatusMessageEl.textContent = "{{ _('Failed to load backups:') }} " + (data.message || "{{ _('Unknown error.') }}");
+                    restoreStatusMessageEl.className = 'alert alert-danger';
                 }
             })
             .catch(error => {
                 console.error('List backups error:', error);
                 availableBackupsTbody.innerHTML = '<tr><td colspan="2">{{ _("Error loading backups.") }}</td></tr>';
-                restoreStatusMessage.textContent = "{{ _('Error fetching backups:') }} " + error.toString();
-                restoreStatusMessage.className = 'alert alert-danger';
+                restoreStatusMessageEl.textContent = "{{ _('Error fetching backups:') }} " + error.toString();
+                restoreStatusMessageEl.className = 'alert alert-danger';
             });
         }
 
         listBackupsButton.addEventListener('click', loadAvailableBackups);
 
         availableBackupsTable.addEventListener('click', function (event) {
-            if (event.target.classList.contains('restore-btn')) {
-                const timestamp = event.target.getAttribute('data-timestamp');
-                let displayTimestamp = timestamp;
-                 try {
-                    const year = timestamp.substring(0,4);
-                    const month = timestamp.substring(4,6);
-                    const day = timestamp.substring(6,8);
-                    const hour = timestamp.substring(9,11);
-                    const minute = timestamp.substring(11,13);
-                    const second = timestamp.substring(13,15);
-                    displayTimestamp = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
-                } catch (e) { /* ignore */ }
+            const targetButton = event.target;
+            let isRestore = targetButton.classList.contains('restore-btn');
+            let isDryRun = targetButton.classList.contains('restore-dry-run-btn');
+            let isVerify = targetButton.classList.contains('verify-backup-btn'); // Added
 
-                if (!confirm("{{ _('Are you sure you want to restore from backup') }} " + displayTimestamp + "? {{ _('This will overwrite current data and may require an application restart.') }}")) {
-                    return;
-                }
+            if (isVerify) {
+                const timestampToVerify = targetButton.getAttribute('data-timestamp');
+                // Optional: Confirmation
+                // if (!confirm(`{{ _('Perform health check for backup') }} ${timestampToVerify}?`)) return;
 
-                document.querySelectorAll('.restore-btn').forEach(btn => btn.disabled = true);
-                backupButton.disabled = true; // Disable backup button during restore
-                restoreStatusMessage.textContent = `{{ _('Initiating restore from') }} ${displayTimestamp}... {{ _('This may take a while. Please do not navigate away.') }}`;
-                restoreStatusMessage.className = 'alert alert-info';
-                currentRestoreTaskId = null; // Reset task ID
+                currentVerifyTaskId = null; // Reset verify task ID
+                restoreLogAreaEl.innerHTML = ''; // Clear main log area (or use a dedicated one)
+                restoreLogAreaEl.style.display = 'block';
+                backupLogAreaEl.style.display = 'none';
+                appendLog('restore-log-area', `VERIFY: Initiating for ${timestampToVerify}...`, '', 'info');
 
-                fetch('/api/admin/one_click_restore', {
+                // Disable all action buttons
+                document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn').forEach(btn => btn.disabled = true);
+                backupButton.disabled = true;
+
+                restoreStatusMessageEl.textContent = `{{ _('Initiating verification for') }} ${timestampToVerify}...`;
+                restoreStatusMessageEl.className = 'alert alert-info';
+
+                fetch('/api/admin/verify_backup', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-CSRFToken': csrfToken,
                         'Accept': 'application/json'
                     },
-                    body: JSON.stringify({ backup_timestamp: timestamp })
+                    body: JSON.stringify({ backup_timestamp: timestampToVerify })
                 })
                 .then(response => response.json())
                 .then(data => {
-                    if(data.task_id) {
-                        currentRestoreTaskId = data.task_id;
-                    }
-                    if (data.success) {
-                        restoreStatusMessage.textContent = data.message || `{{ _('Restore from ${displayTimestamp} process started. See live updates.') }}`;
-                        restoreStatusMessage.className = 'alert alert-info'; // SocketIO will update final status
-                    } else {
-                        restoreStatusMessage.textContent = `{{ _('Restore initiation for ${displayTimestamp} failed:') }} ${data.message || '{{ _("Unknown error.") }}'}`;
-                        restoreStatusMessage.className = 'alert alert-danger';
-                        document.querySelectorAll('.restore-btn').forEach(btn => btn.disabled = false);
+                    currentVerifyTaskId = data.task_id; // Store the new verify task ID
+                    const messageType = data.success ? 'info' : 'error';
+                    appendLog('restore-log-area', `VERIFY: ${data.message || (data.success ? 'Verification process started.' : 'Failed to start verification.')}`, `Task ID: ${data.task_id || 'N/A'}`, messageType);
+                    restoreStatusMessageEl.textContent = data.message; // Update main status
+                    restoreStatusMessageEl.className = `alert alert-${messageType}`;
+
+                    if (!data.success) { // If API call itself fails to initiate
+                        document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn').forEach(btn => btn.disabled = false);
                         backupButton.disabled = false;
+                        currentVerifyTaskId = null; // Clear if initiation failed
                     }
-                    // Do not re-enable buttons here if success, SocketIO will indicate completion
-                     if (!data.success) {
-                        document.querySelectorAll('.restore-btn').forEach(btn => btn.disabled = false);
-                        backupButton.disabled = false;
-                     }
+                    // Detailed results and final button re-enabling will be handled by the 'verify_backup_progress' socket listener
                 })
                 .catch(error => {
-                    console.error('Restore error:', error);
-                    restoreStatusMessage.textContent = `{{ _('Restore request for ${displayTimestamp} failed:') }} ${error.toString()}`;
-                    restoreStatusMessage.className = 'alert alert-danger';
-                    document.querySelectorAll('.restore-btn').forEach(btn => btn.disabled = false);
+                    console.error('Verify backup error:', error);
+                    const errorMsg = `{{ _('Verification request for ${timestampToVerify} failed:') }} ${error.toString()}`;
+                    appendLog('restore-log-area', errorMsg, '', 'error');
+                    restoreStatusMessageEl.textContent = errorMsg;
+                    restoreStatusMessageEl.className = 'alert alert-danger';
+                    document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn').forEach(btn => btn.disabled = false);
+                    backupButton.disabled = false;
+                    currentVerifyTaskId = null; // Clear on error
+                });
+
+            } else if (isRestore || isDryRun) { // Logic for Restore and Dry Run
+                const timestampToProcess = targetButton.getAttribute('data-timestamp');
+                let displayTimestamp = timestampToProcess;
+                try {
+                    const year = timestampToProcess.substring(0,4); const month = timestampToProcess.substring(4,6);
+                    const day = timestampToProcess.substring(6,8); const hour = timestampToProcess.substring(9,11);
+                    const minute = timestampToProcess.substring(11,13); const second = timestampToProcess.substring(13,15);
+                    displayTimestamp = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+                } catch (e) { /* ignore */ }
+
+                let confirmationMessage = "";
+                let endpoint = "";
+                let actionVerb = "";
+
+                if (isRestore) {
+                    confirmationMessage = "{{ _('Are you sure you want to restore from backup') }} " + displayTimestamp + "? {{ _('This will overwrite current data and may require an application restart.') }}";
+                    endpoint = '/api/admin/one_click_restore';
+                    actionVerb = "{{ _('restore from') }}";
+                } else { // isDryRun
+                    confirmationMessage = "{{ _('Are you sure you want to perform a dry run for restoring from backup') }} " + displayTimestamp + "?";
+                    endpoint = `/api/admin/restore_dry_run/${timestampToProcess}`; // Timestamp in URL for dry run
+                    actionVerb = "{{ _('dry run restore from') }}";
+                }
+
+                if (!confirm(confirmationMessage)) {
+                    return;
+                }
+
+                currentRestoreTaskId = null;
+                restoreLogAreaEl.innerHTML = '';
+                restoreLogAreaEl.style.display = 'block';
+                backupLogAreaEl.style.display = 'none';
+                appendLog('restore-log-area', `{{ _('Initiating') }} ${actionVerb} ${displayTimestamp}...`, '', 'info');
+
+                document.querySelectorAll('.restore-btn, .restore-dry-run-btn').forEach(btn => btn.disabled = true);
+                backupButton.disabled = true;
+                restoreStatusMessageEl.textContent = `{{ _('Initiating') }} ${actionVerb} ${displayTimestamp}... {{ _('This may take a while. Please do not navigate away.') }}`;
+                restoreStatusMessageEl.className = 'alert alert-info';
+
+                let fetchOptions = {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken, 'Accept': 'application/json' }
+                };
+                // For actual restore, timestamp is in body. For dry run, it's in URL.
+                if (isRestore) {
+                    fetchOptions.body = JSON.stringify({ backup_timestamp: timestampToProcess });
+                }
+
+
+                fetch(endpoint, fetchOptions)
+                .then(response => response.json())
+                .then(data => {
+                    currentRestoreTaskId = data.task_id;
+                    const messageType = data.success ? 'info' : 'error';
+                    appendLog('restore-log-area', data.message || (data.success ? `{{ _('Process for ${displayTimestamp} started.') }}` : `{{ _('Failed to start process for ${displayTimestamp}.') }}`), `Task ID: ${data.task_id || 'N/A'}`, messageType);
+                    restoreStatusMessageEl.textContent = data.message;
+                    restoreStatusMessageEl.className = `alert alert-${messageType}`;
+
+                    if (!data.success) {
+                        document.querySelectorAll('.restore-btn, .restore-dry-run-btn').forEach(btn => btn.disabled = false);
+                        backupButton.disabled = false;
+                    }
+                    // If it's a dry run and successful, display actions from HTTP response for immediate feedback
+                    if (isDryRun && data.success && data.actions && Array.isArray(data.actions)) {
+                        appendLog('restore-log-area', "DRY RUN ACTIONS (from HTTP response):", '', 'info');
+                        if (data.actions.length === 0) {
+                            appendLog('restore-log-area', "  No actions would be performed.", '', 'info');
+                        } else {
+                            data.actions.forEach(action => {
+                                appendLog('restore-log-area', `  - ${action}`, '', 'info');
+                            });
+                        }
+                    }
+                    // The socket listener will also receive actions with the final success message,
+                    // which might update or confirm this list.
+                })
+                .catch(error => {
+                    console.error(`${actionVerb} error:`, error);
+                    appendLog('restore-log-area', `{{ _('Request for ${actionVerb} ${displayTimestamp} failed:') }}`, error.message, 'error');
+                    restoreStatusMessageEl.textContent = `{{ _('Request for ${actionVerb} ${displayTimestamp} failed:') }} ${error.toString()}`;
+                    restoreStatusMessageEl.className = 'alert alert-danger';
+                    document.querySelectorAll('.restore-btn, .restore-dry-run-btn').forEach(btn => btn.disabled = false);
                     backupButton.disabled = false;
                 });
+            } else if (targetButton.classList.contains('restore-btn')) { // Modified to open modal
+                const timestampToRestore = targetButton.getAttribute('data-timestamp');
+                let displayTimestamp = timestampToRestore;
+                 try { // Format for display
+                    const year = timestampToRestore.substring(0,4); const month = timestampToRestore.substring(4,6);
+                    const day = timestampToRestore.substring(6,8); const hour = timestampToRestore.substring(9,11);
+                    const minute = timestampToRestore.substring(11,13); const second = timestampToRestore.substring(13,15);
+                    displayTimestamp = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+                } catch (e) { /* ignore */ }
+
+                modalBackupTimestampEl.textContent = displayTimestamp;
+                selectiveRestoreForm.dataset.timestamp = timestampToRestore; // Store timestamp for form submission
+
+                // Reset form: uncheck all individual, check 'ALL', clear status
+                componentCheckboxes.forEach(cb => cb.checked = true);
+                componentAllCheckbox.checked = true;
+                selectiveRestoreModalStatusEl.textContent = '';
+                selectiveRestoreModalStatusEl.className = 'status-message mt-2';
+
+                selectiveRestoreModal.style.display = 'block';
             }
         });
 
-        loadAvailableBackups();
+        // Modal Close Button
+        closeModalBtn.onclick = function() {
+            selectiveRestoreModal.style.display = 'none';
+        }
+        window.onclick = function(event) { // Close if clicked outside modal content
+            if (event.target == selectiveRestoreModal) {
+                selectiveRestoreModal.style.display = 'none';
+            }
+        }
 
-        function toggleDayOfWeekVisibility() {
+        // "ALL COMPONENTS" checkbox logic
+        componentAllCheckbox.addEventListener('change', function() {
+            componentCheckboxes.forEach(cb => cb.checked = this.checked);
+        });
+
+        componentCheckboxes.forEach(cb => {
+            cb.addEventListener('change', function() {
+                if (!this.checked) {
+                    componentAllCheckbox.checked = false;
+                } else {
+                    // Check if all individual components are checked
+                    const allChecked = Array.from(componentCheckboxes).every(indCb => indCb.checked);
+                    if (allChecked) {
+                        componentAllCheckbox.checked = true;
+                    }
+                }
+            });
+        });
+
+
+        loadAvailableBackups(); // Initial load
+
+        // --- Scheduled Backups Logic ---
+        // SocketIO handler for backup verification progress
+        socket.on('verify_backup_progress', function(data) {
+            console.log('Verify backup progress event:', data);
+            if (data.task_id !== currentVerifyTaskId) return;
+
+            let messageType = 'info';
+            // Determine message type based on content
+            if (data.detail && data.detail.toUpperCase().includes('ERROR')) messageType = 'error';
+            else if (data.results && data.results.status && data.results.status !== 'verified_present' && data.results.status !== 'pending') messageType = 'error';
+            else if (data.results && data.results.status && data.results.status === 'verified_present') messageType = 'success';
+
+
+            appendLog('restore-log-area', `VERIFY: ${data.status}`, data.detail, messageType);
+            // Update main status message element as well
+            restoreStatusMessageEl.textContent = `VERIFY: ${data.status}${data.detail ? ' ('+data.detail+')':''}`;
+            restoreStatusMessageEl.className = `alert alert-${messageType}`;
+
+            if (data.results) { // This is the final message with all results
+                appendLog('restore-log-area', `VERIFY: Overall Status: ${data.results.status}`, '', data.results.status === 'verified_present' ? 'success' : 'error');
+                if (data.results.checks && data.results.checks.length > 0) {
+                    appendLog('restore-log-area', 'VERIFY: Detailed Checks:', '', 'info');
+                    data.results.checks.forEach(check => {
+                        let checkLogType = 'info';
+                        if (check.status !== 'found' && check.status !== 'found_count_match') {
+                            checkLogType = 'error';
+                        }
+                        let detailMsg = `- Item: ${check.item} (${check.type || 'N/A'}) - Status: ${check.status}`;
+                        if (check.hasOwnProperty('expected_count')) {
+                            detailMsg += `, Expected: ${check.expected_count}, Actual: ${check.actual_count}`;
+                        }
+                        appendLog('restore-log-area', detailMsg, '', checkLogType);
+                    });
+                }
+                if (data.results.errors && data.results.errors.length > 0) {
+                    appendLog('restore-log-area', 'VERIFY: Errors Found:', '', 'error');
+                    data.results.errors.forEach(err => {
+                        appendLog('restore-log-area', `  - ${err}`, '', 'error');
+                    });
+                }
+                // Re-enable buttons on completion
+                document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn').forEach(btn => btn.disabled = false);
+                backupButton.disabled = false;
+                currentVerifyTaskId = null;
+            } else if (data.status && (data.status.toLowerCase().includes("failed") || data.status.toLowerCase().includes("error") || data.status.toLowerCase().includes("missing"))) {
+                 // Re-enable buttons if an intermediate error message implies failure for the task
+                document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn').forEach(btn => btn.disabled = false);
+                backupButton.disabled = false;
+                currentVerifyTaskId = null;
+            }
+        });
+
+        function toggleDayOfWeekVisibility() { /* ... existing ... */
             if (scheduleTypeSelect.value === 'weekly') {
                 dayOfWeekGroup.style.display = 'block';
             } else {
                 dayOfWeekGroup.style.display = 'none';
             }
         }
-
         scheduleTypeSelect.addEventListener('change', toggleDayOfWeekVisibility);
 
-        function loadBackupSchedule() {
+        function loadBackupSchedule() { /* ... existing ... */
             scheduleStatusMessage.textContent = "{{ _('Loading schedule...') }}";
             scheduleStatusMessage.className = 'alert alert-info';
-
             fetch('/api/admin/backup_schedule', {
                 method: 'GET',
-                headers: {
-                    'Accept': 'application/json',
-                    'X-CSRFToken': csrfToken
-                }
+                headers: { 'Accept': 'application/json', 'X-CSRFToken': csrfToken }
             })
             .then(response => response.json())
             .then(data => {
@@ -364,32 +769,24 @@
                 scheduleStatusMessage.className = 'alert alert-danger';
             });
         }
-
-        scheduleForm.addEventListener('submit', function(event) {
+        scheduleForm.addEventListener('submit', function(event) { /* ... existing ... */
             event.preventDefault();
             saveScheduleButton.disabled = true;
             scheduleStatusMessage.textContent = "{{ _('Saving schedule...') }}";
             scheduleStatusMessage.className = 'alert alert-info';
-
             const payload = {
                 is_enabled: scheduleEnabledCheckbox.checked,
                 schedule_type: scheduleTypeSelect.value,
                 time_of_day: scheduleTimeOfDayInput.value
             };
-
             if (payload.schedule_type === 'weekly') {
                 payload.day_of_week = parseInt(scheduleDayOfWeekSelect.value, 10);
             } else {
                 payload.day_of_week = null;
             }
-
             fetch('/api/admin/backup_schedule', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfToken,
-                    'Accept': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken, 'Accept': 'application/json' },
                 body: JSON.stringify(payload)
             })
             .then(response => response.json())
@@ -411,9 +808,7 @@
                 saveScheduleButton.disabled = false;
             });
         });
-
-        loadBackupSchedule();
-
+        loadBackupSchedule(); // Initial Load
     });
 </script>
 {% endblock %}
