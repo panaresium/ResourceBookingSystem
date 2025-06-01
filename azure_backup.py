@@ -1,4 +1,3 @@
-
 import os
 import hashlib
 import logging
@@ -445,8 +444,474 @@ def create_full_backup(timestamp_str, map_config_data=None, socketio_instance=No
             # Do not change overall_success here, as the backup itself was successful.
             # Retention is a secondary operation.
 
-    _emit_progress(socketio_instance, task_id, 'backup_progress', f'Full backup function finished. Overall success: {overall_success}')
+    # --- Manifest Creation ---
+    if overall_success: # Only create manifest if all primary backup operations were successful
+        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Creating backup manifest...')
+        logger.info(f"Creating backup manifest for timestamp: {timestamp_str}")
+        manifest_data = {'timestamp': timestamp_str, 'files': [], 'media_directories_expected': []}
+
+        # Database entry in manifest
+        if os.path.exists(local_db_path): # Check if DB was actually backed up
+            try:
+                db_hash = _hash_file(local_db_path)
+                manifest_data['files'].append({
+                    'path': remote_db_path, # remote_db_path defined earlier in the function
+                    'type': 'database',
+                    'sha256': db_hash,
+                    'share': db_share_name
+                })
+            except Exception as e:
+                logger.error(f"Failed to hash local database for manifest: {e}")
+                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing database for manifest.', str(e))
+                # Potentially mark manifest as incomplete or skip it
+
+        # Map Configuration entry in manifest
+        if map_config_data: # Check if map_config_data was provided and presumably uploaded
+            try:
+                config_json_bytes = json.dumps(map_config_data, indent=2).encode('utf-8')
+                config_hash = hashlib.sha256(config_json_bytes).hexdigest()
+                manifest_data['files'].append({
+                    'path': remote_config_path, # remote_config_path defined earlier
+                    'type': 'map_config',
+                    'sha256': config_hash,
+                    'share': config_share_name
+                })
+            except Exception as e:
+                logger.error(f"Failed to hash map configuration for manifest: {e}")
+                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing map_config for manifest.', str(e))
+
+        # Media Directories entries in manifest
+        if os.path.isdir(FLOOR_MAP_UPLOADS):
+            num_floor_maps = len([name for name in os.listdir(FLOOR_MAP_UPLOADS) if os.path.isfile(os.path.join(FLOOR_MAP_UPLOADS, name))])
+            manifest_data['media_directories_expected'].append({
+                'path': remote_floor_map_dir, # remote_floor_map_dir defined earlier
+                'type': 'floor_maps',
+                'expected_file_count': num_floor_maps,
+                'share': media_share_name
+            })
+
+        if os.path.isdir(RESOURCE_UPLOADS):
+            num_resource_uploads = len([name for name in os.listdir(RESOURCE_UPLOADS) if os.path.isfile(os.path.join(RESOURCE_UPLOADS, name))])
+            manifest_data['media_directories_expected'].append({
+                'path': remote_resource_uploads_dir, # remote_resource_uploads_dir defined earlier
+                'type': 'resource_uploads',
+                'expected_file_count': num_resource_uploads,
+                'share': media_share_name
+            })
+
+        # Upload Manifest File (to DB share for simplicity)
+        manifest_filename = f"backup_manifest_{timestamp_str}.json"
+        remote_manifest_path = f"{DB_BACKUPS_DIR}/{manifest_filename}"
+        try:
+            manifest_json_bytes = json.dumps(manifest_data, indent=2).encode('utf-8')
+            # db_share_client is already defined and initialized
+            manifest_file_client = db_share_client.get_file_client(remote_manifest_path)
+            manifest_file_client.upload_file(data=manifest_json_bytes, overwrite=True)
+            logger.info(f"Successfully uploaded backup manifest to '{db_share_name}/{remote_manifest_path}'.")
+            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backup manifest uploaded successfully.')
+        except Exception as e:
+            logger.error(f"Failed to upload backup manifest to '{db_share_name}/{remote_manifest_path}': {e}")
+            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Failed to upload backup manifest.', str(e))
+            # overall_success might be set to False here if manifest is critical, but current plan implies it's best effort after successful backup.
+
+    _emit_progress(socketio_instance, task_id, 'backup_progress', f'Full backup function finished. Overall success: {overall_success}', 'SUCCESS' if overall_success else 'ERROR')
     return overall_success
+
+
+def verify_backup_set(timestamp_str, socketio_instance=None, task_id=None):
+    """
+    Verifies a backup set against its manifest.
+
+    Args:
+        timestamp_str (str): The timestamp of the backup set to verify.
+        socketio_instance: Optional SocketIO instance for progress.
+        task_id: Optional task ID for SocketIO.
+
+    Returns:
+        dict: A dictionary containing verification results.
+    """
+    verification_results = {
+        'timestamp': timestamp_str,
+        'status': 'pending', # Possible statuses: pending, manifest_missing, manifest_corrupt, failed_verification, verified_present
+        'checks': [], # List of dicts detailing each check
+        'errors': []  # List of error messages
+    }
+    component_name = f"BackupSetVerify-{timestamp_str}"
+
+    def _emit_verify_progress(status_msg, detail='', level="INFO"):
+        logger.info(f"[{component_name}] {status_msg} {detail}")
+        if socketio_instance and task_id:
+            _emit_progress(socketio_instance, task_id, 'backup_verification_progress', status_msg, detail)
+
+    _emit_verify_progress(f"Starting verification for backup set: {timestamp_str}")
+
+    try:
+        service_client = _get_service_client()
+        db_share_name = os.environ.get('AZURE_DB_SHARE', 'db-backups')
+        db_share_client = service_client.get_share_client(db_share_name)
+
+        if not _client_exists(db_share_client):
+            msg = f"Database share '{db_share_name}' not found."
+            verification_results['errors'].append(msg)
+            verification_results['status'] = 'failed_verification'
+            _emit_verify_progress(msg, level="ERROR")
+            return verification_results
+
+        # 1. Download and Parse Manifest
+        manifest_filename = f"backup_manifest_{timestamp_str}.json"
+        remote_manifest_path = f"{DB_BACKUPS_DIR}/{manifest_filename}"
+        manifest_file_client = db_share_client.get_file_client(remote_manifest_path)
+
+        if not _client_exists(manifest_file_client):
+            msg = f"Manifest file '{remote_manifest_path}' not found on share '{db_share_name}'."
+            verification_results['errors'].append(msg)
+            verification_results['status'] = 'manifest_missing'
+            _emit_verify_progress(msg, level="ERROR")
+            return verification_results
+
+        manifest_data = None
+        try:
+            downloader = manifest_file_client.download_file()
+            manifest_bytes = downloader.readall()
+            manifest_data = json.loads(manifest_bytes.decode('utf-8'))
+            _emit_verify_progress("Manifest downloaded and parsed successfully.")
+            verification_results['checks'].append({'item': 'manifest', 'status': 'found_and_parsed', 'path': remote_manifest_path})
+        except Exception as e:
+            msg = f"Error downloading or parsing manifest '{remote_manifest_path}': {e}"
+            verification_results['errors'].append(msg)
+            verification_results['status'] = 'manifest_corrupt'
+            _emit_verify_progress(msg, level="ERROR")
+            return verification_results
+
+        # 2. Verify Files from Manifest (manifest_data['files'])
+        config_share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups') # Used if map_config is in manifest
+        config_share_client = service_client.get_share_client(config_share_name) # Initialize once
+
+        for file_entry in manifest_data.get('files', []):
+            entry_path = file_entry.get('path')
+            entry_type = file_entry.get('type')
+            entry_share_name = file_entry.get('share')
+            # entry_hash = file_entry.get('sha256') # For future checksum verification
+
+            check_item = {'item': entry_path, 'type': entry_type, 'status': 'unknown'}
+            _emit_verify_progress(f"Verifying file: {entry_path} (type: {entry_type})")
+
+            target_share_client = None
+            if entry_share_name == db_share_name:
+                target_share_client = db_share_client
+            elif entry_share_name == config_share_name:
+                target_share_client = config_share_client
+            else:
+                msg = f"Unknown share '{entry_share_name}' for file '{entry_path}' in manifest."
+                verification_results['errors'].append(msg)
+                check_item['status'] = 'error_unknown_share'
+                _emit_verify_progress(msg, level="ERROR")
+                verification_results['checks'].append(check_item)
+                continue
+
+            if not _client_exists(target_share_client):
+                msg = f"Share '{entry_share_name}' for file '{entry_path}' does not exist."
+                verification_results['errors'].append(msg)
+                check_item['status'] = 'error_share_missing'
+                _emit_verify_progress(msg, level="ERROR")
+                verification_results['checks'].append(check_item)
+                continue
+
+            file_client_to_check = target_share_client.get_file_client(entry_path)
+            if _client_exists(file_client_to_check):
+                check_item['status'] = 'found'
+                # Optional: Add checksum verification here if feasible in future
+                # For now, presence is the main check.
+            else:
+                msg = f"Missing file: {entry_path} on share {entry_share_name}"
+                verification_results['errors'].append(msg)
+                check_item['status'] = 'missing'
+            verification_results['checks'].append(check_item)
+            _emit_verify_progress(f"File {entry_path}: {check_item['status']}")
+
+        # 3. Verify Media Directories from Manifest (manifest_data['media_directories_expected'])
+        media_share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media') # Used for media
+        media_share_client = service_client.get_share_client(media_share_name)
+
+        for dir_entry in manifest_data.get('media_directories_expected', []):
+            dir_path = dir_entry.get('path')
+            dir_type = dir_entry.get('type')
+            expected_count = dir_entry.get('expected_file_count')
+            entry_share_name = dir_entry.get('share')
+
+            check_item = {'item': dir_path, 'type': dir_type, 'status': 'unknown', 'expected_count': expected_count, 'actual_count': 0}
+            _emit_verify_progress(f"Verifying media directory: {dir_path} (type: {dir_type})")
+
+            if entry_share_name != media_share_name:
+                msg = f"Manifest inconsistency: Media directory '{dir_path}' expected on share '{media_share_name}' but manifest says '{entry_share_name}'."
+                verification_results['errors'].append(msg)
+                check_item['status'] = 'error_share_mismatch'
+                _emit_verify_progress(msg, level="ERROR")
+                verification_results['checks'].append(check_item)
+                continue
+
+            if not _client_exists(media_share_client):
+                msg = f"Media share '{media_share_name}' for directory '{dir_path}' does not exist."
+                verification_results['errors'].append(msg)
+                check_item['status'] = 'error_share_missing'
+                _emit_verify_progress(msg, level="ERROR")
+                verification_results['checks'].append(check_item)
+                continue
+
+            dir_client_to_check = media_share_client.get_directory_client(dir_path)
+            if _client_exists(dir_client_to_check):
+                try:
+                    remote_files = list(dir_client_to_check.list_directories_and_files())
+                    actual_count = len([f for f in remote_files if not f['is_directory']])
+                    check_item['actual_count'] = actual_count
+                    if actual_count == expected_count:
+                        check_item['status'] = 'found_count_match'
+                    else:
+                        msg = f"File count mismatch for {dir_path}: Expected {expected_count}, Found {actual_count}."
+                        verification_results['errors'].append(msg) # Considered an error for verification
+                        check_item['status'] = 'found_count_mismatch'
+                        _emit_verify_progress(msg, level="WARNING")
+                except Exception as e:
+                    msg = f"Error listing files in remote directory '{dir_path}': {e}"
+                    verification_results['errors'].append(msg)
+                    check_item['status'] = 'error_listing_files'
+                    _emit_verify_progress(msg, level="ERROR")
+            else:
+                msg = f"Missing media directory: {dir_path} on share {media_share_name}"
+                verification_results['errors'].append(msg)
+                check_item['status'] = 'missing'
+            verification_results['checks'].append(check_item)
+            _emit_verify_progress(f"Directory {dir_path}: {check_item['status']}")
+
+        # 4. Determine Overall Status
+        if verification_results['errors']:
+            verification_results['status'] = 'failed_verification'
+        else:
+            verification_results['status'] = 'verified_present'
+
+        _emit_verify_progress(f"Verification finished for {timestamp_str}. Status: {verification_results['status']}", level="INFO" if verification_results['status'] == 'verified_present' else "ERROR")
+
+    except Exception as e:
+        msg = f"Critical error during backup verification for {timestamp_str}: {e}"
+        logger.error(msg, exc_info=True)
+        verification_results['errors'].append(msg)
+        verification_results['status'] = 'critical_error'
+        _emit_verify_progress(msg, level="CRITICAL")
+
+    return verification_results
+
+
+def restore_database_component(timestamp_str, db_share_client, dry_run=False, socketio_instance=None, task_id=None):
+    """
+    Restores the database from a backup.
+
+    Returns:
+        tuple: (success_bool, message_str, actions_list, restored_db_path_or_placeholder_str)
+    """
+    actions = []
+    dry_run_prefix = "DRY RUN: " if dry_run else ""
+    component_name = "Database"
+    restored_db_path = None
+
+    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {component_name} restore component...', f'Timestamp: {timestamp_str}')
+
+    remote_db_filename = f"{DB_FILENAME_PREFIX}{timestamp_str}.db"
+    azure_db_path = f"{DB_BACKUPS_DIR}/{remote_db_filename}"
+    local_db_target_path = os.path.join(DATA_DIR, 'site.db')
+
+    db_file_client = db_share_client.get_file_client(azure_db_path)
+
+    if not _client_exists(db_file_client):
+        err_msg = f"{dry_run_prefix}{component_name} backup file '{azure_db_path}' not found on share '{db_share_client.share_name}'."
+        logger.error(err_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg, "ERROR")
+        if dry_run: actions.append(err_msg)
+        return False, err_msg, actions, None
+
+    if dry_run:
+        action_msg = f"DRY RUN: Would download {component_name} from '{db_share_client.share_name}/{azure_db_path}' to '{local_db_target_path}'."
+        actions.append(action_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg)
+        logger.info(action_msg)
+        restored_db_path = "DRY_RUN_DB_PATH_PLACEHOLDER"
+        success_msg = f"DRY RUN: {component_name} component finished."
+        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg)
+        logger.info(success_msg)
+        return True, success_msg, actions, restored_db_path
+    else:
+        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Restoring {component_name}...', f'{azure_db_path} to {local_db_target_path}')
+        logger.info(f"Restoring {component_name} from '{db_share_client.share_name}/{azure_db_path}' to '{local_db_target_path}'.")
+        if download_file(db_share_client, azure_db_path, local_db_target_path):
+            success_msg = f"{component_name} restored successfully."
+            logger.info(success_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', f'{component_name} download complete.')
+            restored_db_path = local_db_target_path
+            return True, success_msg, actions, restored_db_path
+        else:
+            err_msg = f"{component_name} restoration failed during download."
+            logger.error(err_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg, "ERROR")
+            return False, err_msg, actions, None
+
+
+def download_map_config_component(timestamp_str, config_share_client, dry_run=False, socketio_instance=None, task_id=None):
+    """
+    Downloads the map configuration JSON from a backup.
+
+    Returns:
+        tuple: (success_bool, message_str, actions_list, downloaded_config_path_or_placeholder_str)
+    """
+    actions = []
+    dry_run_prefix = "DRY RUN: " if dry_run else ""
+    component_name = "Map Configuration"
+    downloaded_config_path = None
+
+    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {component_name} download component...', f'Timestamp: {timestamp_str}')
+
+    remote_config_filename = f"{MAP_CONFIG_FILENAME_PREFIX}{timestamp_str}.json"
+    azure_config_path = f"{CONFIG_BACKUPS_DIR}/{remote_config_filename}"
+    # Note: DATA_DIR is a global constant
+    local_config_target_path = os.path.join(DATA_DIR, remote_config_filename)
+
+    config_file_client = config_share_client.get_file_client(azure_config_path)
+
+    if not _client_exists(config_file_client):
+        warn_msg = f"{dry_run_prefix}{component_name} backup file '{azure_config_path}' not found on share '{config_share_client.share_name}'. Skipping."
+        logger.warning(warn_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, azure_config_path)
+        if dry_run: actions.append(warn_msg)
+        # This is not a critical failure for the overall restore, so return True.
+        return True, warn_msg, actions, None
+
+    if dry_run:
+        action_msg = f"DRY RUN: Would download {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'."
+        actions.append(action_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg)
+        logger.info(action_msg)
+        downloaded_config_path = "DRY_RUN_MAP_CONFIG_PATH_PLACEHOLDER"
+        success_msg = f"DRY RUN: {component_name} component finished (simulated download)."
+        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg)
+        logger.info(success_msg)
+        return True, success_msg, actions, downloaded_config_path
+    else:
+        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Downloading {component_name}...', f'{azure_config_path} to {local_config_target_path}')
+        logger.info(f"Downloading {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'.")
+        if download_file(config_share_client, azure_config_path, local_config_target_path):
+            success_msg = f"{component_name} JSON downloaded successfully."
+            logger.info(success_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', f'{component_name} download complete.')
+            downloaded_config_path = local_config_target_path
+            return True, success_msg, actions, downloaded_config_path
+        else:
+            # Log as warning because map config might be optional for some restore scenarios.
+            warn_msg = f"{component_name} JSON download failed from '{azure_config_path}'."
+            logger.warning(warn_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, "WARNING")
+            return True, warn_msg, actions, None # Non-critical failure, return True
+
+
+def restore_media_component(timestamp_str, media_type_name, local_target_dir, remote_media_subdir_base, media_share_client, dry_run=False, socketio_instance=None, task_id=None):
+    """
+    Restores a specific type of media files (e.g., FloorMaps, ResourceUploads).
+
+    Args:
+        timestamp_str (str): The backup timestamp.
+        media_type_name (str): User-friendly name of the media type (e.g., "Floor Maps").
+        local_target_dir (str): The local directory to restore files to (e.g., FLOOR_MAP_UPLOADS).
+        remote_media_subdir_base (str): The base name for the remote subdirectory
+                                        (e.g., "floor_map_uploads" which becomes "floor_map_uploads_{timestamp_str}").
+        media_share_client: The Azure ShareClient for media.
+        dry_run (bool): If True, simulate operations.
+        socketio_instance: Optional SocketIO instance.
+        task_id: Optional task ID for SocketIO.
+
+    Returns:
+        tuple: (success_bool, message_str, actions_list)
+    """
+    actions = []
+    dry_run_prefix = "DRY RUN: " if dry_run else ""
+
+    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {media_type_name} restore component...', f'Timestamp: {timestamp_str}')
+
+    remote_media_dir_path = f"{MEDIA_BACKUPS_DIR_BASE}/{remote_media_subdir_base}_{timestamp_str}"
+    azure_media_dir_client = media_share_client.get_directory_client(remote_media_dir_path)
+
+    if not _client_exists(azure_media_dir_client):
+        warn_msg = f"{dry_run_prefix}{media_type_name} backup directory '{remote_media_dir_path}' not found on share '{media_share_client.share_name}'. Skipping."
+        logger.warning(warn_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, remote_media_dir_path)
+        if dry_run: actions.append(warn_msg)
+        return True, warn_msg, actions # Not a critical failure
+
+    if dry_run:
+        action_msg = f"DRY RUN: Would clear local directory: {local_target_dir}"
+        actions.append(action_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg)
+        logger.info(action_msg)
+
+        # Simulate listing and downloading files
+        try:
+            # To list files in dry run, we still need to query the remote directory
+            item_count = 0
+            for item in azure_media_dir_client.list_directories_and_files():
+                if not item['is_directory']:
+                    item_count +=1
+                    filename = item['name']
+                    azure_file_path = f"{remote_media_dir_path}/{filename}"
+                    local_file_path = os.path.join(local_target_dir, filename)
+                    action_msg_file = f"DRY RUN: Would download media file '{filename}' from '{azure_file_path}' to '{local_file_path}'."
+                    actions.append(action_msg_file)
+                    _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg_file)
+                    logger.info(action_msg_file)
+            if item_count == 0:
+                 actions.append(f"DRY RUN: No files found in remote directory {remote_media_dir_path} to download.")
+
+        except Exception as e:
+            err_msg = f"DRY RUN: Error listing files in {remote_media_dir_path}: {e}"
+            logger.error(err_msg)
+            actions.append(err_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg, "ERROR")
+            # Continue, as this is a dry run, but report the issue.
+
+        success_msg = f"DRY RUN: {media_type_name} component finished (simulated operations)."
+        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg)
+        logger.info(success_msg)
+        return True, success_msg, actions
+    else:
+        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Clearing local directory: {local_target_dir}')
+        if os.path.exists(local_target_dir):
+            for filename in os.listdir(local_target_dir):
+                file_to_delete = os.path.join(local_target_dir, filename)
+                if os.path.isfile(file_to_delete):
+                    try:
+                        os.remove(file_to_delete)
+                    except Exception as e:
+                        logger.error(f"Failed to delete local file {file_to_delete}: {e}")
+                        _emit_progress(socketio_instance, task_id, 'restore_progress', f"Error deleting local file {file_to_delete}", str(e))
+                        # Decide if this is critical enough to stop this component
+        else:
+            os.makedirs(local_target_dir, exist_ok=True)
+
+        files_downloaded = 0
+        files_failed = 0
+        for item in azure_media_dir_client.list_directories_and_files():
+            if not item['is_directory']:
+                filename = item['name']
+                azure_file_path = f"{remote_media_dir_path}/{filename}"
+                local_file_path = os.path.join(local_target_dir, filename)
+                _emit_progress(socketio_instance, task_id, 'restore_progress', f'Restoring {media_type_name} file: {filename}', local_file_path)
+                if download_file(media_share_client, azure_file_path, local_file_path):
+                    logger.info(f"Restored {media_type_name} file '{filename}' successfully.")
+                    files_downloaded +=1
+                else:
+                    logger.warning(f"Failed to restore {media_type_name} file '{filename}' from '{azure_file_path}'.")
+                    _emit_progress(socketio_instance, task_id, 'restore_progress', f'Failed to restore {media_type_name} file: {filename}', "WARNING")
+                    files_failed +=1
+
+        final_msg = f"{media_type_name.capitalize()} restoration: {files_downloaded} files downloaded, {files_failed} failed."
+        logger.info(final_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', final_msg)
+        return files_failed == 0, final_msg, actions # Success if no files failed
 
 
 def list_available_backups():
@@ -499,169 +964,108 @@ def list_available_backups():
         return []
 
 
-def restore_full_backup(timestamp_str, socketio_instance=None, task_id=None):
+def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, task_id=None):
     """
     Restores a full backup (database, map configuration, and media files) for a specific timestamp.
 
     Args:
         timestamp_str (str): The timestamp string (YYYYMMDD_HHMMSS) of the backup to restore.
+        dry_run (bool): If True, simulates restore operations without making changes.
         socketio_instance: Optional SocketIO instance for progress emitting.
         task_id: Optional task ID for SocketIO progress emitting.
 
     Returns:
-        tuple: (path_to_restored_db_or_None, path_to_downloaded_map_config_or_None)
-               Returns (None, None) if critical (DB) restoration fails.
+        tuple: (path_to_restored_db_or_None, path_to_downloaded_map_config_or_None, actions_list)
+               Returns (None, None, actions_list) if critical (DB) restoration fails.
+               actions_list contains strings describing operations if dry_run is True.
     """
-    logger.info(f"Starting full restore for timestamp: {timestamp_str}")
-    _emit_progress(socketio_instance, task_id, 'restore_progress', 'Starting full restore processing...', f'Timestamp: {timestamp_str}')
-    restored_db_path = None
-    downloaded_map_config_json_path = None
+    overall_actions_list = []
+    dry_run_prefix = "DRY RUN: " if dry_run else ""
+    final_restored_db_path = None
+    final_downloaded_map_config_path = None
+
+    logger.info(f"{dry_run_prefix}Starting full restore for timestamp: {timestamp_str}")
+    _emit_progress(socketio_instance, task_id, 'restore_progress', f"{dry_run_prefix}Starting full restore processing...", f'Timestamp: {timestamp_str}')
 
     try:
         service_client = _get_service_client()
 
-        # --- Database Restore ---
+        # --- Database Restore Component ---
         db_share_name = os.environ.get('AZURE_DB_SHARE', 'db-backups')
         db_share_client = service_client.get_share_client(db_share_name)
 
         if not _client_exists(db_share_client):
-            logger.error(f"Database backup share '{db_share_name}' does not exist. Cannot restore.")
-            _emit_progress(socketio_instance, task_id, 'restore_progress', f"Database backup share '{db_share_name}' does not exist. Cannot restore.", "ERROR")
-            return None, None
+            err_msg = f"{dry_run_prefix}Database backup share '{db_share_name}' does not exist. Cannot proceed with any restore operations."
+            logger.error(err_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg, "ERROR")
+            if dry_run: overall_actions_list.append(err_msg)
+            return None, None, overall_actions_list
 
-        remote_db_filename = f"{DB_FILENAME_PREFIX}{timestamp_str}.db"
-        azure_db_path = f"{DB_BACKUPS_DIR}/{remote_db_filename}"
-        local_db_target_path = os.path.join(DATA_DIR, 'site.db')
-        _emit_progress(socketio_instance, task_id, 'restore_progress', 'Restoring database...', f'{azure_db_path} to {local_db_target_path}')
+        db_success, db_message, db_actions, db_output_path = restore_database_component(
+            timestamp_str, db_share_client, dry_run, socketio_instance, task_id
+        )
+        if dry_run: overall_actions_list.extend(db_actions)
+        final_restored_db_path = db_output_path # This will be placeholder in dry_run, actual path otherwise
 
-        db_file_client = db_share_client.get_file_client(azure_db_path)
-        if not _client_exists(db_file_client):
-            logger.error(f"Database backup file '{azure_db_path}' not found on share '{db_share_name}'. Aborting restore.")
-            _emit_progress(socketio_instance, task_id, 'restore_progress', f"Database backup file '{azure_db_path}' not found. Aborting.", "ERROR")
-            return None, None
+        if not db_success: # Critical failure if DB component fails
+            logger.error(f"{dry_run_prefix}Database restore component failed: {db_message}. Aborting full restore.")
+            _emit_progress(socketio_instance, task_id, 'restore_progress', f"{dry_run_prefix}Database restore failed. Full restore aborted.", "ERROR")
+            return None, None, overall_actions_list # Return None for paths, include actions gathered so far
 
-        logger.info(f"Restoring database from '{db_share_name}/{azure_db_path}' to '{local_db_target_path}'.")
-        if download_file(db_share_client, azure_db_path, local_db_target_path):
-            logger.info("Database restored successfully.")
-            _emit_progress(socketio_instance, task_id, 'restore_progress', 'Database restore complete.')
-            restored_db_path = local_db_target_path
-        else:
-            logger.error("Database restoration failed.")
-            _emit_progress(socketio_instance, task_id, 'restore_progress', 'Database restore failed. Aborting.', "ERROR")
-            return None, None # Critical failure
-
-        # --- Map Configuration JSON Restore ---
+        # --- Map Configuration Download Component ---
         config_share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
         config_share_client = service_client.get_share_client(config_share_name)
-        _emit_progress(socketio_instance, task_id, 'restore_progress', 'Processing map configuration restore...')
 
         if _client_exists(config_share_client):
-            remote_config_filename = f"{MAP_CONFIG_FILENAME_PREFIX}{timestamp_str}.json"
-            azure_config_path = f"{CONFIG_BACKUPS_DIR}/{remote_config_filename}"
-            local_config_target_path = os.path.join(DATA_DIR, remote_config_filename)
-            _emit_progress(socketio_instance, task_id, 'restore_progress', 'Downloading map configuration...', f'{azure_config_path} to {local_config_target_path}')
-
-            config_file_client = config_share_client.get_file_client(azure_config_path)
-            if _client_exists(config_file_client):
-                logger.info(f"Restoring map configuration from '{config_share_name}/{azure_config_path}' to '{local_config_target_path}'.")
-                if download_file(config_share_client, azure_config_path, local_config_target_path):
-                    logger.info("Map configuration JSON restored successfully.")
-                    _emit_progress(socketio_instance, task_id, 'restore_progress', 'Map configuration download complete.')
-                    downloaded_map_config_json_path = local_config_target_path
-                else:
-                    logger.warning(f"Map configuration JSON restoration failed from '{azure_config_path}'.")
-                    _emit_progress(socketio_instance, task_id, 'restore_progress', 'Map configuration download failed.', azure_config_path)
-            else:
-                logger.warning(f"Map configuration backup file '{azure_config_path}' not found on share '{config_share_name}'. Skipping.")
-                _emit_progress(socketio_instance, task_id, 'restore_progress', 'Map configuration backup file not found. Skipping.', azure_config_path)
+            map_success, map_message, map_actions, map_output_path = download_map_config_component(
+                timestamp_str, config_share_client, dry_run, socketio_instance, task_id
+            )
+            if dry_run: overall_actions_list.extend(map_actions)
+            final_downloaded_map_config_path = map_output_path
+            if not map_success: # Log warning, but continue as it's not deemed critical
+                 logger.warning(f"{dry_run_prefix}Map configuration download component reported issues: {map_message}")
         else:
-            logger.warning(f"Config backup share '{config_share_name}' does not exist. Skipping map configuration restore.")
-            _emit_progress(socketio_instance, task_id, 'restore_progress', f"Config backup share '{config_share_name}' not found. Skipping map restore.")
+            warn_msg = f"{dry_run_prefix}Config backup share '{config_share_name}' does not exist. Skipping map configuration download."
+            logger.warning(warn_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg)
+            if dry_run: overall_actions_list.append(warn_msg)
 
-        # --- Media Restore ---
-        # Media restore failures do not change the primary return tuple of this function.
+        # --- Media Restore Components ---
         media_share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media')
         media_share_client = service_client.get_share_client(media_share_name)
 
         if _client_exists(media_share_client):
             # Restore Floor Maps
-            remote_floor_map_dir_path = f"{MEDIA_BACKUPS_DIR_BASE}/floor_map_uploads_{timestamp_str}"
-            local_floor_map_dir = FLOOR_MAP_UPLOADS
-            _emit_progress(socketio_instance, task_id, 'restore_progress', 'Restoring floor maps...', remote_floor_map_dir_path)
-
-            logger.info(f"Attempting to restore floor maps from '{media_share_name}/{remote_floor_map_dir_path}' to '{local_floor_map_dir}'.")
-            azure_floor_map_dir_client = media_share_client.get_directory_client(remote_floor_map_dir_path)
-            if _client_exists(azure_floor_map_dir_client):
-                _emit_progress(socketio_instance, task_id, 'restore_progress', f'Clearing local directory: {local_floor_map_dir}')
-                if os.path.exists(local_floor_map_dir):
-                    for filename in os.listdir(local_floor_map_dir):
-                        file_to_delete = os.path.join(local_floor_map_dir, filename)
-                        if os.path.isfile(file_to_delete):
-                            os.remove(file_to_delete)
-                else:
-                    os.makedirs(local_floor_map_dir, exist_ok=True)
-
-                for item in azure_floor_map_dir_client.list_directories_and_files():
-                    if not item['is_directory']:
-                        filename = item['name']
-                        azure_file_path = f"{remote_floor_map_dir_path}/{filename}"
-                        local_file_path = os.path.join(local_floor_map_dir, filename)
-                        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Restoring floor map: {filename}', local_file_path)
-                        if download_file(media_share_client, azure_file_path, local_file_path):
-                            logger.info(f"Restored floor map '{filename}' successfully.")
-                        else:
-                            logger.warning(f"Failed to restore floor map '{filename}' from '{azure_file_path}'.")
-                            _emit_progress(socketio_instance, task_id, 'restore_progress', f'Failed to restore floor map: {filename}', azure_file_path)
-                logger.info("Floor map restoration process finished.")
-                _emit_progress(socketio_instance, task_id, 'restore_progress', 'Floor map restore phase complete.')
-            else:
-                logger.warning(f"Floor map backup directory '{remote_floor_map_dir_path}' not found on share '{media_share_name}'. Skipping floor map restore.")
-                _emit_progress(socketio_instance, task_id, 'restore_progress', 'Floor map backup directory not found. Skipping.', remote_floor_map_dir_path)
+            fm_success, fm_message, fm_actions = restore_media_component(
+                timestamp_str, "FloorMaps", FLOOR_MAP_UPLOADS, "floor_map_uploads",
+                media_share_client, dry_run, socketio_instance, task_id
+            )
+            if dry_run: overall_actions_list.extend(fm_actions)
+            if not fm_success: logger.warning(f"{dry_run_prefix}FloorMaps restore component reported issues: {fm_message}")
 
             # Restore Resource Uploads
-            remote_resource_uploads_dir_path = f"{MEDIA_BACKUPS_DIR_BASE}/resource_uploads_{timestamp_str}"
-            local_resource_uploads_dir = RESOURCE_UPLOADS
-            _emit_progress(socketio_instance, task_id, 'restore_progress', 'Restoring resource uploads...', remote_resource_uploads_dir_path)
-
-            logger.info(f"Attempting to restore resource uploads from '{media_share_name}/{remote_resource_uploads_dir_path}' to '{local_resource_uploads_dir}'.")
-            azure_resource_uploads_dir_client = media_share_client.get_directory_client(remote_resource_uploads_dir_path)
-            if _client_exists(azure_resource_uploads_dir_client):
-                _emit_progress(socketio_instance, task_id, 'restore_progress', f'Clearing local directory: {local_resource_uploads_dir}')
-                if os.path.exists(local_resource_uploads_dir):
-                    for filename in os.listdir(local_resource_uploads_dir):
-                        file_to_delete = os.path.join(local_resource_uploads_dir, filename)
-                        if os.path.isfile(file_to_delete):
-                            os.remove(file_to_delete)
-                else:
-                    os.makedirs(local_resource_uploads_dir, exist_ok=True)
-
-                for item in azure_resource_uploads_dir_client.list_directories_and_files():
-                    if not item['is_directory']:
-                        filename = item['name']
-                        azure_file_path = f"{remote_resource_uploads_dir_path}/{filename}"
-                        local_file_path = os.path.join(local_resource_uploads_dir, filename)
-                        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Restoring resource file: {filename}', local_file_path)
-                        if download_file(media_share_client, azure_file_path, local_file_path):
-                            logger.info(f"Restored resource upload '{filename}' successfully.")
-                        else:
-                            logger.warning(f"Failed to restore resource upload '{filename}' from '{azure_file_path}'.")
-                            _emit_progress(socketio_instance, task_id, 'restore_progress', f'Failed to restore resource file: {filename}', azure_file_path)
-                logger.info("Resource uploads restoration process finished.")
-                _emit_progress(socketio_instance, task_id, 'restore_progress', 'Resource uploads restore phase complete.')
-            else:
-                logger.warning(f"Resource uploads backup directory '{remote_resource_uploads_dir_path}' not found on share '{media_share_name}'. Skipping resource uploads restore.")
-                _emit_progress(socketio_instance, task_id, 'restore_progress', 'Resource uploads backup directory not found. Skipping.', remote_resource_uploads_dir_path)
+            ru_success, ru_message, ru_actions = restore_media_component(
+                timestamp_str, "ResourceUploads", RESOURCE_UPLOADS, "resource_uploads",
+                media_share_client, dry_run, socketio_instance, task_id
+            )
+            if dry_run: overall_actions_list.extend(ru_actions)
+            if not ru_success: logger.warning(f"{dry_run_prefix}ResourceUploads restore component reported issues: {ru_message}")
         else:
-            logger.warning(f"Media backup share '{media_share_name}' does not exist. Skipping media restore.")
-            _emit_progress(socketio_instance, task_id, 'restore_progress', f"Media backup share '{media_share_name}' not found. Skipping media restore.")
+            warn_msg = f"{dry_run_prefix}Media backup share '{media_share_name}' does not exist. Skipping all media restore."
+            logger.warning(warn_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg)
+            if dry_run: overall_actions_list.append(warn_msg)
 
-        logger.info(f"Full restore process completed for timestamp: {timestamp_str}")
-        _emit_progress(socketio_instance, task_id, 'restore_progress', 'Full restore file operations finished.')
-        return restored_db_path, downloaded_map_config_json_path
+        logger.info(f"{dry_run_prefix}Full restore process completed for timestamp: {timestamp_str}")
+        _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Full restore operations finished.')
+        return final_restored_db_path, final_downloaded_map_config_path, overall_actions_list
+
     except Exception as e:
-        logger.error(f"Error during full restore for timestamp {timestamp_str}: {e}")
-        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Critical error during restore: {str(e)}', "ERROR")
-        return None, None
+        err_msg_final = f"{dry_run_prefix}Critical error during full restore orchestration for timestamp {timestamp_str}: {e}"
+        logger.error(err_msg_final, exc_info=True)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg_final, "ERROR")
+        if dry_run: overall_actions_list.append(err_msg_final)
+        return None, None, overall_actions_list
 
 
 def delete_backup_set(timestamp_str):

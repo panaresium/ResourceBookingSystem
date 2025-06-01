@@ -30,8 +30,10 @@ try:
         restore_from_share,
         create_full_backup,       # Added
         list_available_backups,   # Added
-        restore_full_backup       # Added
+        restore_full_backup,      # Added
+        verify_backup_set         # Added for health checks
     )
+    import azure_backup # Import the module itself to access constants like FLOOR_MAP_UPLOADS
 except Exception:
     save_floor_map_to_share = None
     backup_if_changed = None
@@ -39,6 +41,8 @@ except Exception:
     create_full_backup = None     # Added fallback
     list_available_backups = None # Added fallback
     restore_full_backup = None    # Added fallback
+    verify_backup_set = None      # Added fallback
+    azure_backup = None           # Added fallback for the module itself
 
 # Attempt to import APScheduler; provide a basic fallback if unavailable
 try:
@@ -4003,6 +4007,506 @@ def debug_list_routes():
     # Return as HTML
     return html_output, 200
 
+# --- Backup and Restore API Routes ---
+
+@app.route('/api/admin/one_click_backup', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_one_click_backup():
+    app.logger.info(f"User {current_user.username} initiated one-click backup.")
+    task_id = uuid.uuid4().hex
+    app.logger.info(f"Generated task_id {task_id} for one-click backup.")
+
+    if not create_full_backup:
+        app.logger.error("Azure backup module not available for one-click backup.")
+        return jsonify({'success': False, 'message': 'Backup module is not configured or available.', 'task_id': task_id}), 500
+    try:
+        timestamp_str = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+        map_config_data = _get_map_configuration_data()
+        success = create_full_backup(
+            timestamp_str,
+            map_config_data=map_config_data,
+            socketio_instance=socketio,
+            task_id=task_id
+        )
+        if success:
+            message = f"Backup process initiated with timestamp {timestamp_str}. See live logs for completion status."
+            app.logger.info(f"One-click backup process for task {task_id} (timestamp {timestamp_str}) completed with overall success: {success}.")
+            add_audit_log(action="ONE_CLICK_BACKUP_COMPLETED", details=f"Task {task_id}, Timestamp {timestamp_str}, Success: {success}")
+            return jsonify({'success': True, 'message': message, 'task_id': task_id, 'timestamp': timestamp_str}), 200
+        else:
+            message = "Backup process initiated but reported failure. Check server logs for details."
+            app.logger.error(f"One-click backup process for task {task_id} (timestamp {timestamp_str}) failed.")
+            add_audit_log(action="ONE_CLICK_BACKUP_COMPLETED_WITH_FAILURES", details=f"Task {task_id}, Timestamp {timestamp_str}, Success: {success}")
+            return jsonify({'success': False, 'message': message, 'task_id': task_id}), 500
+    except Exception as e:
+        app.logger.exception(f"Exception during one-click backup (task {task_id}) initiated by {current_user.username}:")
+        add_audit_log(action="ONE_CLICK_BACKUP_ERROR", details=f"Task {task_id}, Exception: {str(e)}")
+        return jsonify({'success': False, 'message': f'An unexpected error occurred: {str(e)}', 'task_id': task_id}), 500
+
+@app.route('/api/admin/list_backups', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def api_list_backups():
+    app.logger.info(f"User {current_user.username} requested list of available backups.")
+    if not list_available_backups:
+        app.logger.error("Azure backup module not available for listing backups.")
+        return jsonify({'success': False, 'message': 'Backup module is not configured or available.', 'backups': []}), 500
+    try:
+        backups = list_available_backups()
+        app.logger.info(f"Found {len(backups)} available backups.")
+        return jsonify({'success': True, 'backups': backups}), 200
+    except Exception as e:
+        app.logger.exception(f"Exception listing available backups for user {current_user.username}:")
+        return jsonify({'success': False, 'message': f'An error occurred while listing backups: {str(e)}', 'backups': []}), 500
+
+@app.route('/api/admin/one_click_restore', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_one_click_restore():
+    data = request.get_json()
+    task_id = uuid.uuid4().hex
+
+    if not data or 'backup_timestamp' not in data:
+        app.logger.warning(f"Restore attempt (task {task_id}) with missing backup_timestamp.")
+        return jsonify({'success': False, 'message': 'Backup timestamp is required.', 'task_id': task_id}), 400
+
+    backup_timestamp = data['backup_timestamp']
+    app.logger.info(f"User {current_user.username} initiated restore (task {task_id}) for timestamp: {backup_timestamp}.")
+
+    if not restore_full_backup or not _import_map_configuration_data:
+        app.logger.error(f"Azure backup or map import module not available for restore (task {task_id}).")
+        if socketio:
+             socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore module not configured on server.', 'detail': 'ERROR'})
+        return jsonify({'success': False, 'message': 'Restore module is not configured or available.', 'task_id': task_id}), 500
+
+    try:
+        if socketio:
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore process starting...', 'detail': f'Timestamp: {backup_timestamp}'})
+
+        restored_db_path, map_config_json_path = restore_full_backup(
+            backup_timestamp,
+            socketio_instance=socketio,
+            task_id=task_id
+        )
+
+        if not restored_db_path:
+            message = f"Restore (task {task_id}) failed during file download phase for timestamp {backup_timestamp}."
+            app.logger.error(message)
+            add_audit_log(action="ONE_CLICK_RESTORE_FILE_OPS_FAILED", details=message)
+            return jsonify({'success': False, 'message': message, 'task_id': task_id}), 500
+
+        app.logger.info(f"Database restored (task {task_id}) for backup {backup_timestamp} to {restored_db_path}.")
+
+        map_import_summary_msg = "Map configuration file was not part of this backup or was not downloaded."
+        if map_config_json_path and os.path.exists(map_config_json_path):
+            app.logger.info(f"Map config JSON {map_config_json_path} (task {task_id}) downloaded for {backup_timestamp}.")
+            if socketio:
+                socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Importing map configuration...', 'detail': map_config_json_path})
+            try:
+                with open(map_config_json_path, 'r', encoding='utf-8') as f:
+                    map_config_data_to_import = json.load(f)
+                import_summary, import_status_code = _import_map_configuration_data(map_config_data_to_import)
+                map_import_summary_msg = f"Map configuration import from {backup_timestamp} completed with status {import_status_code}."
+                if socketio:
+                    socketio.emit('restore_progress', {'task_id': task_id, 'status': f'Map configuration import status: {import_status_code}', 'detail': map_import_summary_msg})
+                if import_status_code >= 400:
+                    app.logger.error(f"Failed to import map config (task {task_id}): {json.dumps(import_summary)}")
+                else:
+                    app.logger.info(f"Successfully imported map config (task {task_id}).")
+            except Exception as map_import_exc:
+                map_import_summary_msg = f"Error processing map config file {map_config_json_path} (task {task_id}): {str(map_import_exc)}"
+                app.logger.exception(map_import_summary_msg)
+                if socketio:
+                    socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Error during map configuration import.', 'detail': str(map_import_exc)})
+            finally:
+                try:
+                    os.remove(map_config_json_path)
+                except OSError as e_remove:
+                    app.logger.error(f"Error removing temp map config file {map_config_json_path} (task {task_id}): {e_remove}")
+        else:
+            app.logger.info(f"No map config file for {backup_timestamp} (task {task_id}). Skipping map import.")
+            if socketio:
+                 socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Map configuration import skipped (no file).'})
+
+        final_message = f"Restore (task {task_id}) from {backup_timestamp} file ops completed. DB restored. {map_import_summary_msg} Restart app."
+        app.logger.info(final_message)
+        add_audit_log(action="ONE_CLICK_RESTORE_COMPLETED", details=final_message)
+        if socketio:
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore process fully completed. Please restart application.', 'detail': 'SUCCESS'})
+        return jsonify({'success': True, 'message': 'Restore process initiated. See live logs.', 'task_id': task_id}), 200
+    except Exception as e:
+        app.logger.exception(f"Critical exception during restore (task {task_id}) for {backup_timestamp}:")
+        add_audit_log(action="ONE_CLICK_RESTORE_CRITICAL_ERROR", details=f"Task {task_id}, Exception: {str(e)} for {backup_timestamp}")
+        if socketio:
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': f'Critical error during restore: {str(e)}', 'detail': 'ERROR'})
+        return jsonify({'success': False, 'message': f'An unexpected critical error: {str(e)}', 'task_id': task_id}), 500
+
+@app.route('/api/admin/restore_dry_run/<string:backup_timestamp>', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_restore_dry_run(backup_timestamp):
+    task_id = uuid.uuid4().hex
+    # backup_timestamp is from URL parameter
+    app.logger.info(f"User {current_user.username} initiated RESTORE DRY RUN (task {task_id}) for timestamp: {backup_timestamp}.")
+
+    if not restore_full_backup:
+        app.logger.error(f"Azure backup module not available for restore dry run (task {task_id}).")
+        if socketio:
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore Dry Run: Backup module not configured on server.', 'detail': 'ERROR', 'actions': []})
+        return jsonify({'success': False, 'message': 'Backup module is not configured or available.', 'task_id': task_id, 'actions': []}), 500
+
+    try:
+        if socketio:
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore Dry Run starting...', 'detail': f'Timestamp: {backup_timestamp}', 'actions': []})
+
+        # restore_full_backup(dry_run=True) returns (None, None, actions_list)
+        # It emits its own SocketIO messages for detailed steps, including "backup not found".
+        db_path_placeholder, map_config_path_placeholder, actions_list = restore_full_backup(
+            backup_timestamp,
+            dry_run=True,
+            socketio_instance=socketio,
+            task_id=task_id
+        )
+
+        final_actions_list = list(actions_list) # Ensure it's a list
+
+        # The logic for "backup not found" (where db_path_placeholder would be None) is tricky
+        # because for a dry run, db_path_placeholder is *always* None from azure_backup.py.
+        # azure_backup.py's restore_full_backup is responsible for emitting a SocketIO message
+        # if the backup is not found (e.g., "DRY RUN: Backup timestamp X not found...").
+        # If that specific error occurs, actions_list would likely be empty.
+        # This API endpoint will thus report completion, and the UI will show the detailed error from azure_backup.
+
+        # Check if azure_backup.py indicated map config would be processed (it adds specific actions for this)
+        # The current task asks to append "DRY RUN: Would import map configuration..." if map_config_path_placeholder is not None.
+        # However, map_config_path_placeholder is always None for dry_run.
+        # The actions_list from azure_backup.py should already detail this.
+        # For simplicity and to avoid duplicate messages, we trust actions_list from azure_backup.py.
+        # No specific check for map_config_path_placeholder here to add more actions.
+
+        message = f"Restore Dry Run (task {task_id}) for {backup_timestamp} completed."
+        app.logger.info(message)
+        # Log the number of actions that would be performed.
+        add_audit_log(action="RESTORE_DRY_RUN_COMPLETED", details=f"{message} Actions: {len(final_actions_list)} items.")
+
+        if socketio:
+            # The 'actions' field here will deliver the list of actions to the UI.
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore Dry Run completed.', 'detail': 'SUCCESS', 'actions': final_actions_list})
+
+        return jsonify({'success': True, 'message': message, 'task_id': task_id, 'actions': final_actions_list}), 200
+
+    except Exception as e:
+        app.logger.exception(f"Critical exception during restore dry run (task {task_id}) for {backup_timestamp}:")
+        add_audit_log(action="RESTORE_DRY_RUN_CRITICAL_ERROR", details=f"Task {task_id}, Exception: {str(e)} for {backup_timestamp}")
+        if socketio:
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': f'DRY RUN: Critical error: {str(e)}', 'detail': 'ERROR', 'actions': []})
+        return jsonify({'success': False, 'message': f'An unexpected critical error during dry run: {str(e)}', 'task_id': task_id, 'actions': []}), 500
+
+
+@app.route('/api/admin/selective_restore', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_selective_restore():
+    data = request.get_json()
+    task_id = uuid.uuid4().hex
+
+    if not data:
+        return jsonify({'success': False, 'message': 'Invalid input. JSON data expected.', 'task_id': task_id}), 400
+
+    backup_timestamp = data.get('backup_timestamp')
+    components = data.get('components') # Expected to be a list of strings
+
+    if not backup_timestamp:
+        return jsonify({'success': False, 'message': 'Backup timestamp is required.', 'task_id': task_id}), 400
+    if not components or not isinstance(components, list) or not all(isinstance(c, str) for c in components):
+        return jsonify({'success': False, 'message': 'Components list is required and must be a list of strings.', 'task_id': task_id}), 400
+    if not components: # Empty list check
+        return jsonify({'success': False, 'message': 'At least one component must be selected for selective restore.', 'task_id': task_id}), 400
+
+
+    app.logger.info(f"User {current_user.username} initiated SELECTIVE RESTORE (task {task_id}) for ts: {backup_timestamp}, components: {components}.")
+    if socketio:
+        socketio.emit('restore_progress', {
+            'task_id': task_id,
+            'status': 'Selective Restore process starting...',
+            'detail': f'Timestamp: {backup_timestamp}, Components: {", ".join(components)}'
+        })
+
+    overall_success = True # Assume success until a component fails
+    actions_performed_summary = []
+
+    # These will store actual paths if component runs, or placeholders if azure_backup component returns them for dry_run (not applicable here as dry_run=False)
+    final_restored_db_path = None
+    final_downloaded_map_config_path = None
+
+    # Ensure azure_backup and its components are loaded
+    if not restore_full_backup: # Used as a proxy to check if azure_backup module loaded its functions
+        message = "Selective Restore failed: Backup module is not configured or available."
+        app.logger.error(message)
+        if socketio:
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': message, 'detail': 'ERROR'})
+        return jsonify({'success': False, 'message': message, 'task_id': task_id}), 500
+
+    try:
+        service_client = azure_backup._get_service_client() # Use the helper from azure_backup
+        # Get share clients - it's okay if they don't exist yet, component functions will check _client_exists
+        db_share_client = service_client.get_share_client(os.environ.get('AZURE_DB_SHARE', 'db-backups'))
+        config_share_client = service_client.get_share_client(os.environ.get('AZURE_CONFIG_SHARE', 'config-backups'))
+        media_share_client = service_client.get_share_client(os.environ.get('AZURE_MEDIA_SHARE', 'media'))
+
+        if 'database' in components:
+            if not azure_backup._client_exists(db_share_client):
+                db_msg = f"Database component skipped: Share '{db_share_client.share_name}' does not exist."
+                app.logger.warning(db_msg)
+                actions_performed_summary.append(db_msg)
+                overall_success = False # Or treat as partial success, depending on desired strictness
+            else:
+                db_success, db_msg, _, db_path = azure_backup.restore_database_component(
+                    backup_timestamp, db_share_client, dry_run=False, socketio_instance=socketio, task_id=task_id
+                )
+                actions_performed_summary.append(f"Database: {db_msg}")
+                if db_success:
+                    final_restored_db_path = db_path
+                else:
+                    overall_success = False # DB restore failure is critical for this component's success
+
+        if 'map_config' in components:
+            if not azure_backup._client_exists(config_share_client):
+                mc_msg = f"Map Config component skipped: Share '{config_share_client.share_name}' does not exist."
+                app.logger.warning(mc_msg)
+                actions_performed_summary.append(mc_msg)
+                # overall_success = False # Typically map config is not critical to halt others
+            else:
+                mc_success, mc_msg, _, mc_path = azure_backup.download_map_config_component(
+                    backup_timestamp, config_share_client, dry_run=False, socketio_instance=socketio, task_id=task_id
+                )
+                actions_performed_summary.append(f"Map Config Download: {mc_msg}")
+                if mc_success and mc_path and os.path.exists(mc_path):
+                    final_downloaded_map_config_path = mc_path
+                    app.logger.info(f"Map config JSON {mc_path} downloaded for selective restore (task {task_id}).")
+                    socketio_detail = f"Importing map configuration from {mc_path}"
+                    if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': socketio_detail })
+                    try:
+                        with open(mc_path, 'r', encoding='utf-8') as f:
+                            map_data_to_import = json.load(f)
+                        import_summary, import_status_code = _import_map_configuration_data(map_data_to_import)
+                        map_import_summary_msg = f"Map config import from {mc_path} status: {import_status_code}. Summary: {json.dumps(import_summary)}"
+                        actions_performed_summary.append(map_import_summary_msg)
+                        if import_status_code >= 400:
+                            app.logger.error(f"Failed map config import (task {task_id}): {map_import_summary_msg}")
+                            overall_success = False
+                        else:
+                            app.logger.info(f"Successful map config import (task {task_id}).")
+                        if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': map_import_summary_msg})
+                    except Exception as map_import_exc:
+                        err_msg = f"Error processing map config file {mc_path} (task {task_id}): {str(map_import_exc)}"
+                        actions_performed_summary.append(err_msg)
+                        app.logger.exception(err_msg)
+                        if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': err_msg, 'detail': 'ERROR'})
+                        overall_success = False
+                    finally:
+                        try:
+                            os.remove(mc_path)
+                        except OSError as e_remove:
+                            app.logger.error(f"Error removing temp map config file {mc_path} (task {task_id}): {e_remove}")
+                elif not mc_success: # Download failed
+                    overall_success = False
+
+        # Media components
+        if 'floor_maps' in components or 'resource_uploads' in components:
+            if not azure_backup._client_exists(media_share_client):
+                media_msg = f"Media components (floor_maps, resource_uploads) skipped: Share '{media_share_client.share_name}' does not exist."
+                app.logger.warning(media_msg)
+                actions_performed_summary.append(media_msg)
+                if 'floor_maps' in components : overall_success = False
+                if 'resource_uploads' in components : overall_success = False
+            else:
+                if 'floor_maps' in components:
+                    # Constants like FLOOR_MAP_UPLOADS are directly from azure_backup module
+                    fm_success, fm_msg, _ = azure_backup.restore_media_component(
+                        backup_timestamp, "FloorMaps", azure_backup.FLOOR_MAP_UPLOADS,
+                        f"floor_map_uploads", # Pass base name, component adds _{timestamp_str}
+                        media_share_client, dry_run=False, socketio_instance=socketio, task_id=task_id
+                    )
+                    actions_performed_summary.append(f"Floor Maps: {fm_msg}")
+                    if not fm_success: overall_success = False
+
+                if 'resource_uploads' in components:
+                    ru_success, ru_msg, _ = azure_backup.restore_media_component(
+                        backup_timestamp, "ResourceUploads", azure_backup.RESOURCE_UPLOADS,
+                        f"resource_uploads", # Pass base name
+                        media_share_client, dry_run=False, socketio_instance=socketio, task_id=task_id
+                    )
+                    actions_performed_summary.append(f"Resource Uploads: {ru_msg}")
+                    if not ru_success: overall_success = False
+
+        final_status_message = f"Selective restore (task {task_id}) for {backup_timestamp} components {components} finished. Overall Success: {overall_success}. Details: {'; '.join(actions_performed_summary)}"
+        app.logger.info(final_status_message)
+        add_audit_log(action="SELECTIVE_RESTORE_COMPLETED", details=final_status_message)
+        if socketio:
+            socketio.emit('restore_progress', {
+                'task_id': task_id,
+                'status': 'Selective restore process completed.',
+                'detail': 'SUCCESS' if overall_success else 'PARTIAL_FAILURE',
+                'summary': actions_performed_summary
+            })
+        return jsonify({'success': overall_success, 'message': final_status_message, 'task_id': task_id, 'summary': actions_performed_summary}), 200
+
+    except Exception as e:
+        error_message = f"Critical error during selective restore (task {task_id}): {str(e)}"
+        app.logger.exception(error_message)
+        add_audit_log(action="SELECTIVE_RESTORE_CRITICAL_ERROR", details=error_message)
+        if socketio:
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': error_message, 'detail': 'ERROR'})
+        return jsonify({'success': False, 'message': error_message, 'task_id': task_id}), 500
+
+# --- Backup Schedule API Routes ---
+
+@app.route('/api/admin/verify_backup', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_verify_backup():
+    data = request.get_json()
+    task_id = uuid.uuid4().hex
+
+    if not data or 'backup_timestamp' not in data:
+        return jsonify({'success': False, 'message': 'Backup timestamp is required.', 'task_id': task_id}), 400
+
+    backup_timestamp = data['backup_timestamp']
+    app.logger.info(f"User {current_user.username} initiated VERIFY BACKUP (task {task_id}) for timestamp: {backup_timestamp}.")
+
+    if not verify_backup_set: # Check if the function is available
+        message = "Backup verification module not configured or available."
+        app.logger.error(message)
+        if socketio:
+             socketio.emit('verify_backup_progress', {'task_id': task_id, 'status': message, 'detail': 'ERROR', 'results': None})
+        return jsonify({'success': False, 'message': message, 'task_id': task_id, 'results': None}), 500
+
+    try:
+        if socketio:
+            socketio.emit('verify_backup_progress', {
+                'task_id': task_id,
+                'status': 'Backup verification starting...',
+                'detail': f'Timestamp: {backup_timestamp}'
+            })
+
+        verification_results = verify_backup_set(
+            backup_timestamp,
+            socketio_instance=socketio,
+            task_id=task_id
+        )
+
+        final_message = f"Verification for backup {backup_timestamp} (task {task_id}) completed. Status: {verification_results.get('status')}."
+        app.logger.info(final_message)
+        add_audit_log(action="VERIFY_BACKUP_COMPLETED", details=f"{final_message} Results: {json.dumps(verification_results)}")
+
+        if socketio:
+            socketio.emit('verify_backup_progress', {
+                'task_id': task_id,
+                'status': f"Verification complete: {verification_results.get('status')}",
+                'detail': 'SUCCESS' if verification_results.get('status') == 'verified_present' else 'INFO',
+                'results': verification_results
+            })
+        return jsonify({'success': True, 'message': final_message, 'task_id': task_id, 'results': verification_results}), 200
+
+    except Exception as e:
+        error_message = f"Error during backup verification for {backup_timestamp} (task {task_id}): {str(e)}"
+        app.logger.exception(error_message)
+        add_audit_log(action="VERIFY_BACKUP_ERROR", details=error_message)
+        if socketio:
+            socketio.emit('verify_backup_progress', {'task_id': task_id, 'status': 'Backup verification failed.', 'detail': str(e), 'results': None})
+        return jsonify({'success': False, 'message': error_message, 'task_id': task_id, 'results': None}), 500
+
+
+@app.route('/api/admin/backup_schedule', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def get_backup_schedule():
+    app.logger.info(f"User {current_user.username} fetching backup schedule configuration.")
+    try:
+        schedule_config = db.session.query(BackupScheduleConfig).first()
+        if schedule_config:
+            return jsonify({
+                'id': schedule_config.id,
+                'is_enabled': schedule_config.is_enabled,
+                'schedule_type': schedule_config.schedule_type,
+                'day_of_week': schedule_config.day_of_week,
+                'time_of_day': schedule_config.time_of_day.strftime('%H:%M:%S') if schedule_config.time_of_day else None
+            }), 200
+        else:
+            app.logger.warning("No backup schedule configuration found.")
+            return jsonify({'is_enabled': False, 'schedule_type': 'daily', 'day_of_week': None, 'time_of_day': '02:00:00'}), 200
+    except Exception as e:
+        app.logger.exception("Error fetching backup schedule config:")
+        return jsonify({'success': False, 'message': f'Error fetching schedule: {str(e)}'}), 500
+
+@app.route('/api/admin/backup_schedule', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def update_backup_schedule():
+    app.logger.info(f"User {current_user.username} attempting to update backup schedule.")
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'message': 'Invalid input. JSON data expected.'}), 400
+    try:
+        is_enabled = data.get('is_enabled')
+        schedule_type = data.get('schedule_type')
+        day_of_week_str = data.get('day_of_week')
+        time_of_day_str = data.get('time_of_day')
+
+        if not isinstance(is_enabled, bool):
+            return jsonify({'success': False, 'message': 'is_enabled must be true or false.'}), 400
+        if schedule_type not in ['daily', 'weekly']:
+            return jsonify({'success': False, 'message': "schedule_type must be 'daily' or 'weekly'."}), 400
+
+        parsed_time_of_day = None
+        if time_of_day_str:
+            try:
+                parsed_time_of_day = datetime.strptime(time_of_day_str, '%H:%M').time()
+            except ValueError:
+                try:
+                    parsed_time_of_day = datetime.strptime(time_of_day_str, '%H:%M:%S').time()
+                except ValueError:
+                    return jsonify({'success': False, 'message': "time_of_day must be in HH:MM or HH:MM:SS format."}), 400
+        else:
+            return jsonify({'success': False, 'message': 'time_of_day is required.'}), 400
+
+        parsed_day_of_week = None
+        if schedule_type == 'weekly':
+            if day_of_week_str is None or day_of_week_str == '':
+                 return jsonify({'success': False, 'message': 'day_of_week is required for weekly schedule.'}), 400
+            try:
+                parsed_day_of_week = int(day_of_week_str)
+                if not (0 <= parsed_day_of_week <= 6):
+                    raise ValueError("Day of week must be 0-6.")
+            except ValueError as ve:
+                 return jsonify({'success': False, 'message': str(ve)}), 400
+
+        schedule_config = db.session.query(BackupScheduleConfig).first()
+        if not schedule_config:
+            schedule_config = BackupScheduleConfig(id=1)
+            db.session.add(schedule_config)
+            app.logger.info("No existing backup schedule config, creating new one.")
+
+        schedule_config.is_enabled = is_enabled
+        schedule_config.schedule_type = schedule_type
+        schedule_config.time_of_day = parsed_time_of_day
+        schedule_config.day_of_week = parsed_day_of_week if schedule_type == 'weekly' else None
+
+        db.session.commit()
+        app.logger.info(f"Backup schedule updated by {current_user.username}: {data}")
+        add_audit_log(action="UPDATE_BACKUP_SCHEDULE", details=f"User {current_user.username} updated backup schedule. New config: {data}")
+        app.logger.info("Placeholder: Scheduler would be reconfigured here.") # Actual scheduler reconfig is complex
+        return jsonify({'success': True, 'message': 'Backup schedule updated successfully.'}), 200
+    except ValueError as ve: # Specific validation errors
+        return jsonify({'success': False, 'message': str(ve)}), 400
+    except Exception as e:
+        db.session.rollback()
+        app.logger.exception("Error updating backup schedule config:")
+        add_audit_log(action="UPDATE_BACKUP_SCHEDULE_FAILED", details=f"Error: {str(e)}. Data: {data}")
+        return jsonify({'success': False, 'message': f'Error updating schedule: {str(e)}'}), 500
+
 if __name__ == "__main__":
     # To initialize the DB, run `python init_setup.py` once or import
     # `init_db` from `init_setup` in a Python shell. Pass force=True if you
@@ -4036,7 +4540,7 @@ def get_all_bookings_for_resource(resource_id):
         # Try parsing directly as ISO8601 datetime (handles offsets like +07:00 and Z)
         start_dt_aware = datetime.fromisoformat(start_str)
         end_dt_aware = datetime.fromisoformat(end_str)
-        
+
         # Convert to UTC then make naive for DB comparison, assuming DB stores naive UTC
         # If already naive (e.g. fromisoformat didn't find tz info), astimezone(timezone.utc) would error
         # So, check if tzinfo is present first.
@@ -4055,7 +4559,7 @@ def get_all_bookings_for_resource(resource_id):
         try:
             start_dt_date = datetime.strptime(start_str, '%Y-%m-%d').date()
             end_dt_date = datetime.strptime(end_str, '%Y-%m-%d').date()
-            
+
             start_dt = datetime.combine(start_dt_date, time.min) # Start of the day (naive)
             end_dt = datetime.combine(end_dt_date, time.max)     # End of the day (naive)
         except ValueError:
@@ -4078,292 +4582,20 @@ def get_all_bookings_for_resource(resource_id):
         for booking in bookings_for_resource:
             events.append({
                 'id': booking.id,
-                'title': booking.title or resource.name, 
+                'title': booking.title or resource.name,
                 'start': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
                 'end': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
-                'color': 'blue', 
+                'color': 'blue',
                 'display': 'block',
                 'extendedProps': { # Optional: include more data if needed by frontend
                     'user_name': booking.user_name,
                     'status': booking.status
                 }
             })
-        
+
         app.logger.info(f"Fetched {len(events)} bookings for resource {resource_id} between {start_str} and {end_str}.")
         return jsonify(events), 200
 
     except Exception as e:
         app.logger.exception(f"Error fetching all bookings for resource {resource_id}:")
         return jsonify({'error': 'Failed to fetch bookings due to a server error.'}), 500
-
-# --- Backup and Restore API Routes ---
-
-@app.route('/api/admin/one_click_backup', methods=['POST'])
-@login_required
-@permission_required('manage_system')
-def api_one_click_backup():
-    app.logger.info(f"User {current_user.username} initiated one-click backup.")
-    task_id = uuid.uuid4().hex
-    app.logger.info(f"Generated task_id {task_id} for one-click backup.")
-
-    if not create_full_backup: # Check if azure_backup functions were imported
-        app.logger.error("Azure backup module not available for one-click backup.")
-        return jsonify({'success': False, 'message': 'Backup module is not configured or available.', 'task_id': task_id}), 500
-    try:
-        # Ensure timezone-aware datetime for timestamp consistency
-        timestamp_str = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
-
-        map_config_data = _get_map_configuration_data()
-
-        # Call the modified create_full_backup from azure_backup.py
-        # It now accepts map_config_data, socketio_instance, task_id and returns a boolean success status
-        # Note: This call is synchronous in terms of Flask request handling, but create_full_backup itself
-        # will emit SocketIO events. The success here means the backup process initiated and completed.
-        success = create_full_backup(
-            timestamp_str,
-            map_config_data=map_config_data,
-            socketio_instance=socketio,
-            task_id=task_id
-        )
-
-        if success:
-            message = f"Backup process initiated with timestamp {timestamp_str}. See live logs for completion status."
-            # The final status of the backup (success/failure) is now primarily communicated via SocketIO.
-            # The HTTP response indicates if the process started.
-            app.logger.info(f"One-click backup process for task {task_id} (timestamp {timestamp_str}) completed with overall success: {success}.")
-            add_audit_log(action="ONE_CLICK_BACKUP_COMPLETED", details=f"Task {task_id}, Timestamp {timestamp_str}, Success: {success}")
-            # Return 202 if we want to imply it's truly async and client should rely only on websockets.
-            # For now, keeping 200 as create_full_backup is blocking from perspective of this route.
-            return jsonify({'success': True, 'message': message, 'task_id': task_id, 'timestamp': timestamp_str}), 200
-        else:
-            message = "Backup process initiated but reported failure. Check server logs for details."
-            app.logger.error(f"One-click backup process for task {task_id} (timestamp {timestamp_str}) failed.")
-            add_audit_log(action="ONE_CLICK_BACKUP_COMPLETED_WITH_FAILURES", details=f"Task {task_id}, Timestamp {timestamp_str}, Success: {success}")
-            return jsonify({'success': False, 'message': message, 'task_id': task_id}), 500 # Or 200 if process started but had internal errors
-
-    except Exception as e:
-        app.logger.exception(f"Exception during one-click backup (task {task_id}) initiated by {current_user.username}:")
-        add_audit_log(action="ONE_CLICK_BACKUP_ERROR", details=f"Task {task_id}, Exception: {str(e)}")
-        return jsonify({'success': False, 'message': f'An unexpected error occurred: {str(e)}', 'task_id': task_id}), 500
-
-@app.route('/api/admin/list_backups', methods=['GET'])
-@login_required
-@permission_required('manage_system')
-def api_list_backups():
-    app.logger.info(f"User {current_user.username} requested list of available backups.")
-    if not list_available_backups: # Check if azure_backup functions were imported
-        app.logger.error("Azure backup module not available for listing backups.")
-        return jsonify({'success': False, 'message': 'Backup module is not configured or available.', 'backups': []}), 500
-    try:
-        backups = list_available_backups() # This should return a list of timestamp strings
-        app.logger.info(f"Found {len(backups)} available backups.")
-        return jsonify({'success': True, 'backups': backups}), 200
-    except Exception as e:
-        app.logger.exception(f"Exception listing available backups for user {current_user.username}:")
-        return jsonify({'success': False, 'message': f'An error occurred while listing backups: {str(e)}', 'backups': []}), 500
-
-@app.route('/api/admin/one_click_restore', methods=['POST'])
-@login_required
-@permission_required('manage_system')
-def api_one_click_restore():
-    data = request.get_json()
-    task_id = uuid.uuid4().hex # Generate task ID first
-
-    if not data or 'backup_timestamp' not in data:
-        app.logger.warning(f"Restore attempt (task {task_id}) with missing backup_timestamp.")
-        return jsonify({'success': False, 'message': 'Backup timestamp is required.', 'task_id': task_id}), 400
-
-    backup_timestamp = data['backup_timestamp']
-    app.logger.info(f"User {current_user.username} initiated restore (task {task_id}) for timestamp: {backup_timestamp}.")
-
-    if not restore_full_backup or not _import_map_configuration_data: # Check availability
-        app.logger.error(f"Azure backup or map import module not available for restore (task {task_id}).")
-        # Emit failure to client if possible, though this indicates a server config issue
-        if socketio:
-             socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore module not configured on server.', 'detail': 'ERROR'})
-        return jsonify({'success': False, 'message': 'Restore module is not configured or available.', 'task_id': task_id}), 500
-
-    try:
-        if socketio:
-            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore process starting...', 'detail': f'Timestamp: {backup_timestamp}'})
-
-        restored_db_path, map_config_json_path = restore_full_backup(
-            backup_timestamp,
-            socketio_instance=socketio,
-            task_id=task_id
-        )
-
-        if not restored_db_path:
-            # restore_full_backup should have emitted a detailed error via SocketIO already
-            message = f"Restore (task {task_id}) failed during file download phase for timestamp {backup_timestamp}. Check server logs for specific errors reported by azure_backup module."
-            app.logger.error(message)
-            add_audit_log(action="ONE_CLICK_RESTORE_FILE_OPS_FAILED", details=message)
-            return jsonify({'success': False, 'message': message, 'task_id': task_id}), 500 # Or 200 if client should not retry
-
-        app.logger.info(f"Database restored (task {task_id}) for backup {backup_timestamp} to {restored_db_path}.")
-
-        map_import_summary_msg = "Map configuration file was not part of this backup or was not downloaded."
-        if map_config_json_path and os.path.exists(map_config_json_path):
-            app.logger.info(f"Map configuration JSON {map_config_json_path} (task {task_id}) downloaded for timestamp {backup_timestamp}.")
-            if socketio:
-                socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Importing map configuration...', 'detail': map_config_json_path})
-            try:
-                with open(map_config_json_path, 'r', encoding='utf-8') as f:
-                    map_config_data_to_import = json.load(f)
-
-                import_summary, import_status_code = _import_map_configuration_data(map_config_data_to_import)
-
-                map_import_summary_msg = f"Map configuration import from {backup_timestamp} completed with status {import_status_code}."
-                if socketio:
-                    socketio.emit('restore_progress', {'task_id': task_id, 'status': f'Map configuration import status: {import_status_code}', 'detail': map_import_summary_msg})
-
-                if import_status_code >= 400: # HTTP error codes indicate failure
-                    app.logger.error(f"Failed to import map configuration (task {task_id}) from {map_config_json_path}. Status: {import_status_code}, Summary: {json.dumps(import_summary)}")
-                else:
-                    app.logger.info(f"Successfully imported map configuration (task {task_id}) from {map_config_json_path}.")
-
-            except Exception as map_import_exc:
-                map_import_summary_msg = f"Error processing/importing downloaded map configuration file {map_config_json_path} (task {task_id}): {str(map_import_exc)}"
-                app.logger.exception(map_import_summary_msg)
-                if socketio:
-                    socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Error during map configuration import.', 'detail': str(map_import_exc)})
-            finally:
-                try:
-                    os.remove(map_config_json_path)
-                    app.logger.info(f"Removed temporary map config file (task {task_id}): {map_config_json_path}")
-                except OSError as e_remove:
-                    app.logger.error(f"Error removing temporary map config file {map_config_json_path} (task {task_id}): {e_remove}")
-        else:
-            app.logger.info(f"No map configuration file found or downloaded for timestamp {backup_timestamp} (task {task_id}). Skipping map import.")
-            if socketio:
-                 socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Map configuration import skipped (no file).'})
-
-        final_message = (
-            f"Restore (task {task_id}) from timestamp {backup_timestamp} completed. "
-            f"Database restored. {map_import_summary_msg} "
-            "Application restart is highly recommended."
-        )
-        app.logger.info(final_message)
-        add_audit_log(action="ONE_CLICK_RESTORE_COMPLETED", details=final_message)
-        if socketio:
-            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore process fully completed. Please restart application.', 'detail': 'SUCCESS'})
-        return jsonify({'success': True, 'message': 'Restore process initiated. See live logs for completion status.', 'task_id': task_id}), 200 # Or 202
-
-    except Exception as e:
-        app.logger.exception(f"Critical exception during one-click restore (task {task_id}) for timestamp {backup_timestamp} by {current_user.username}:")
-        add_audit_log(action="ONE_CLICK_RESTORE_CRITICAL_ERROR", details=f"Task {task_id}, Exception: {str(e)} for timestamp {backup_timestamp}")
-        if socketio:
-            socketio.emit('restore_progress', {'task_id': task_id, 'status': f'Critical error during restore: {str(e)}', 'detail': 'ERROR'})
-        return jsonify({'success': False, 'message': f'An unexpected critical error occurred during restore: {str(e)}', 'task_id': task_id}), 500
-
-# --- Backup Schedule API Routes ---
-
-@app.route('/api/admin/backup_schedule', methods=['GET'])
-@login_required
-@permission_required('manage_system')
-def get_backup_schedule():
-    app.logger.info(f"User {current_user.username} fetching backup schedule configuration.")
-    try:
-        schedule_config = db.session.query(BackupScheduleConfig).first() # Assuming single config entry
-        if schedule_config:
-            return jsonify({
-                'id': schedule_config.id,
-                'is_enabled': schedule_config.is_enabled,
-                'schedule_type': schedule_config.schedule_type,
-                'day_of_week': schedule_config.day_of_week,
-                'time_of_day': schedule_config.time_of_day.strftime('%H:%M:%S') if schedule_config.time_of_day else None
-            }), 200
-        else:
-            # This case should ideally not be reached if init_db ensures a default config.
-            app.logger.warning("No backup schedule configuration found in the database.")
-            # Return a default disabled state or an error
-            return jsonify({
-                'is_enabled': False,
-                'schedule_type': 'daily',
-                'day_of_week': None,
-                'time_of_day': '02:00:00' # A sensible default
-            }), 200 # Or 404 if preferred that it must exist
-    except Exception as e:
-        app.logger.exception("Error fetching backup schedule configuration:")
-        return jsonify({'success': False, 'message': f'Error fetching schedule: {str(e)}'}), 500
-
-@app.route('/api/admin/backup_schedule', methods=['POST'])
-@login_required
-@permission_required('manage_system')
-def update_backup_schedule():
-    app.logger.info(f"User {current_user.username} attempting to update backup schedule.")
-    data = request.get_json()
-    if not data:
-        return jsonify({'success': False, 'message': 'Invalid input. JSON data expected.'}), 400
-
-    try:
-        is_enabled = data.get('is_enabled')
-        schedule_type = data.get('schedule_type')
-        day_of_week_str = data.get('day_of_week') # Expect string or null from JS
-        time_of_day_str = data.get('time_of_day') # Expect 'HH:MM'
-
-        # Basic Validations
-        if not isinstance(is_enabled, bool):
-            return jsonify({'success': False, 'message': 'is_enabled must be true or false.'}), 400
-        if schedule_type not in ['daily', 'weekly']:
-            return jsonify({'success': False, 'message': "schedule_type must be 'daily' or 'weekly'."}), 400
-
-        parsed_time_of_day = None
-        if time_of_day_str:
-            try:
-                parsed_time_of_day = datetime.strptime(time_of_day_str, '%H:%M').time()
-            except ValueError:
-                try: # Attempt to parse with seconds if provided
-                    parsed_time_of_day = datetime.strptime(time_of_day_str, '%H:%M:%S').time()
-                except ValueError:
-                    return jsonify({'success': False, 'message': "time_of_day must be in HH:MM or HH:MM:SS format."}), 400
-        else:
-            return jsonify({'success': False, 'message': 'time_of_day is required.'}), 400
-
-        parsed_day_of_week = None
-        if schedule_type == 'weekly':
-            if day_of_week_str is None or day_of_week_str == '': # Allow empty string from form to mean None
-                 return jsonify({'success': False, 'message': 'day_of_week is required for weekly schedule.'}), 400
-            try:
-                parsed_day_of_week = int(day_of_week_str)
-                if not (0 <= parsed_day_of_week <= 6):
-                    raise ValueError("Day of week must be between 0 (Monday) and 6 (Sunday).")
-            except ValueError as ve:
-                 return jsonify({'success': False, 'message': str(ve)}), 400
-
-        # Fetch existing or create new config (should always exist due to init_db)
-        schedule_config = db.session.query(BackupScheduleConfig).first()
-        if not schedule_config:
-            schedule_config = BackupScheduleConfig(id=1) # Or handle error if it must exist
-            db.session.add(schedule_config)
-            app.logger.info("No existing backup schedule config, creating a new one.")
-
-        schedule_config.is_enabled = is_enabled
-        schedule_config.schedule_type = schedule_type
-        schedule_config.time_of_day = parsed_time_of_day
-
-        if schedule_type == 'daily':
-            schedule_config.day_of_week = None
-        else: # weekly
-            schedule_config.day_of_week = parsed_day_of_week
-
-        db.session.commit()
-        app.logger.info(f"Backup schedule updated by {current_user.username}: Enabled={is_enabled}, Type={schedule_type}, DayOfWeek={schedule_config.day_of_week}, Time={time_of_day_str}")
-        add_audit_log(action="UPDATE_BACKUP_SCHEDULE", details=f"User {current_user.username} updated backup schedule. New config: {data}")
-
-        # After successful update, inform the scheduler (implementation in next step)
-        # For now, just log that this would happen.
-        app.logger.info("Placeholder: Scheduler would be reconfigured here if changes occurred.")
-
-        return jsonify({'success': True, 'message': 'Backup schedule updated successfully.'}), 200
-
-    except ValueError as ve: # Catch specific ValueErrors from parsing if any slip through
-        app.logger.warning(f"ValueError during backup schedule update: {ve}")
-        return jsonify({'success': False, 'message': str(ve)}), 400
-    except Exception as e:
-        db.session.rollback()
-        app.logger.exception("Error updating backup schedule configuration:")
-        add_audit_log(action="UPDATE_BACKUP_SCHEDULE_FAILED", details=f"Error: {str(e)}. Data: {data}")
-        return jsonify({'success': False, 'message': f'Error updating schedule: {str(e)}'}), 500
-
-[end of app.py]
