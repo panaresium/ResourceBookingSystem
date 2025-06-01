@@ -4167,7 +4167,7 @@ def api_one_click_restore():
         if socketio:
             socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore process starting...', 'detail': f'Timestamp: {backup_timestamp}'})
 
-        restored_db_path, map_config_json_path = restore_full_backup(
+        restored_db_path, map_config_json_path, _ = restore_full_backup(
             backup_timestamp,
             socketio_instance=socketio,
             task_id=task_id
