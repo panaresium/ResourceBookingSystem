@@ -1382,6 +1382,79 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
     add_audit_log(action="IMPORT_MAP_CONFIGURATION_COMPLETED", details=f"User {current_user.username} completed map configuration import. Summary: {str(summary)}")
     return summary, status_code
 
+# --- Scheduled Backup Job ---
+# This function needs to be defined before it's referenced by the scheduler.
+def run_scheduled_backup_job():
+    """
+    Checks the backup schedule and runs a full backup if due.
+    This function is intended to be called by APScheduler.
+    """
+    with app.app_context(): # Essential for DB access and app.logger
+        app.logger.info("run_scheduled_backup_job: Checking backup schedule...")
+        try:
+            schedule_config = db.session.query(BackupScheduleConfig).first()
+
+            if not schedule_config:
+                app.logger.warning("run_scheduled_backup_job: No backup schedule configuration found. Skipping.")
+                return
+
+            if not schedule_config.is_enabled:
+                app.logger.info("run_scheduled_backup_job: Scheduled backups are disabled. Skipping.")
+                return
+
+            now_utc = datetime.now(timezone.utc)
+            current_time_utc = now_utc.time()
+            current_date_utc = now_utc.date()
+
+            # Check if already run today
+            if schedule_config.last_run_date == current_date_utc:
+                app.logger.info(f"run_scheduled_backup_job: Backup for {current_date_utc.isoformat()} has already run. Skipping.")
+                return
+
+            backup_due = False
+            if schedule_config.schedule_type == 'daily':
+                # Check if current time is at or after scheduled time (within the hour)
+                # A more precise check would compare current_time_utc with schedule_config.time_of_day directly
+                # and ensure it's within a small window (e.g. job interval) past the scheduled time.
+                # For an hourly job, checking the hour is a common approach.
+                if current_time_utc.hour == schedule_config.time_of_day.hour and \
+                   current_time_utc.minute >= schedule_config.time_of_day.minute: # Ensure we don't miss it if job runs slightly late
+                    backup_due = True
+            elif schedule_config.schedule_type == 'weekly':
+                if now_utc.weekday() == schedule_config.day_of_week: # 0=Monday, 6=Sunday
+                    if current_time_utc.hour == schedule_config.time_of_day.hour and \
+                       current_time_utc.minute >= schedule_config.time_of_day.minute:
+                        backup_due = True
+
+            if backup_due:
+                app.logger.info(f"run_scheduled_backup_job: Backup is due for {current_date_utc.isoformat()} at {schedule_config.time_of_day.strftime('%H:%M')}. Starting backup...")
+
+                timestamp_str = now_utc.strftime('%Y%m%d_%H%M%S')
+                map_config = _get_map_configuration_data() # Ensure this helper is accessible
+
+                if not create_full_backup: # Check if the azure_backup function is available
+                    app.logger.error("run_scheduled_backup_job: create_full_backup function not available/imported.")
+                    return
+
+                # Pass None for socketio and task_id as this is an automated job
+                success = create_full_backup(timestamp_str, map_config_data=map_config, socketio_instance=None, task_id=None)
+
+                if success:
+                    app.logger.info(f"run_scheduled_backup_job: Scheduled backup completed successfully. Timestamp: {timestamp_str}")
+                    add_audit_log(action="SCHEDULED_BACKUP_SUCCESS", details=f"Scheduled backup successful. Timestamp: {timestamp_str}", username="System")
+                    schedule_config.last_run_date = current_date_utc
+                    db.session.commit()
+                else:
+                    app.logger.error(f"run_scheduled_backup_job: Scheduled backup failed. Timestamp attempted: {timestamp_str}")
+                    add_audit_log(action="SCHEDULED_BACKUP_FAILED", details=f"Scheduled backup failed. Timestamp attempted: {timestamp_str}", username="System")
+            else:
+                # This log can be verbose if the scheduler runs frequently. Consider logging level or less frequent logging.
+                app.logger.debug(f"run_scheduled_backup_job: Backup not currently due. Current time: {current_time_utc.strftime('%H:%M:%S')}, Scheduled: {schedule_config.time_of_day.strftime('%H:%M')}, Type: {schedule_config.schedule_type}, Last Run: {schedule_config.last_run_date}")
+
+        except Exception as e:
+            app.logger.exception("run_scheduled_backup_job: Error during scheduled backup job execution.")
+            add_audit_log(action="SCHEDULED_BACKUP_ERROR", details=f"Exception: {str(e)}", username="System")
+
 @app.route('/api/admin/maps/import_configuration', methods=['POST'])
 @login_required
 @permission_required('manage_floor_maps') # Or a new, more specific permission
@@ -4066,48 +4139,55 @@ def api_one_click_restore():
 
     if not restore_full_backup or not _import_map_configuration_data: # Check availability
         app.logger.error(f"Azure backup or map import module not available for restore (task {task_id}).")
+        # Emit failure to client if possible, though this indicates a server config issue
+        if socketio:
+             socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore module not configured on server.', 'detail': 'ERROR'})
         return jsonify({'success': False, 'message': 'Restore module is not configured or available.', 'task_id': task_id}), 500
 
     try:
-        # restore_full_backup now returns (restored_db_path, downloaded_map_config_json_path)
-        # And accepts socketio_instance and task_id
+        if socketio:
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore process starting...', 'detail': f'Timestamp: {backup_timestamp}'})
+
         restored_db_path, map_config_json_path = restore_full_backup(
             backup_timestamp,
             socketio_instance=socketio,
             task_id=task_id
         )
 
-        if not restored_db_path: # Primary indicator of restore failure (DB part)
-            message = f"Restore (task {task_id}) failed during file download phase for timestamp {backup_timestamp}. Check server logs."
+        if not restored_db_path:
+            # restore_full_backup should have emitted a detailed error via SocketIO already
+            message = f"Restore (task {task_id}) failed during file download phase for timestamp {backup_timestamp}. Check server logs for specific errors reported by azure_backup module."
             app.logger.error(message)
-            add_audit_log(action="ONE_CLICK_RESTORE_DOWNLOAD_FAILED", details=message)
-            # SocketIO event for failure already sent by restore_full_backup
-            return jsonify({'success': False, 'message': message, 'task_id': task_id}), 500
+            add_audit_log(action="ONE_CLICK_RESTORE_FILE_OPS_FAILED", details=message)
+            return jsonify({'success': False, 'message': message, 'task_id': task_id}), 500 # Or 200 if client should not retry
 
-        app.logger.info(f"Database restored (task {task_id}) from backup {backup_timestamp} to {restored_db_path}.")
+        app.logger.info(f"Database restored (task {task_id}) for backup {backup_timestamp} to {restored_db_path}.")
 
-        map_import_summary_msg = "Map configuration restore skipped as no config file was downloaded."
+        map_import_summary_msg = "Map configuration file was not part of this backup or was not downloaded."
         if map_config_json_path and os.path.exists(map_config_json_path):
-            app.logger.info(f"Map configuration JSON downloaded (task {task_id}) to {map_config_json_path} for timestamp {backup_timestamp}.")
-            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Importing map configuration...', 'detail': map_config_json_path})
+            app.logger.info(f"Map configuration JSON {map_config_json_path} (task {task_id}) downloaded for timestamp {backup_timestamp}.")
+            if socketio:
+                socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Importing map configuration...', 'detail': map_config_json_path})
             try:
                 with open(map_config_json_path, 'r', encoding='utf-8') as f:
                     map_config_data_to_import = json.load(f)
 
                 import_summary, import_status_code = _import_map_configuration_data(map_config_data_to_import)
 
-                map_import_summary_msg = f"Map configuration import from {backup_timestamp} completed with status {import_status_code}. Summary: {json.dumps(import_summary)}"
-                socketio.emit('restore_progress', {'task_id': task_id, 'status': f'Map configuration import status: {import_status_code}', 'detail': str(import_summary)})
+                map_import_summary_msg = f"Map configuration import from {backup_timestamp} completed with status {import_status_code}."
+                if socketio:
+                    socketio.emit('restore_progress', {'task_id': task_id, 'status': f'Map configuration import status: {import_status_code}', 'detail': map_import_summary_msg})
 
-                if import_status_code >= 400:
-                    app.logger.error(f"Failed to import map configuration (task {task_id}) from {map_config_json_path}. Status: {import_status_code}, Summary: {import_summary}")
+                if import_status_code >= 400: # HTTP error codes indicate failure
+                    app.logger.error(f"Failed to import map configuration (task {task_id}) from {map_config_json_path}. Status: {import_status_code}, Summary: {json.dumps(import_summary)}")
                 else:
                     app.logger.info(f"Successfully imported map configuration (task {task_id}) from {map_config_json_path}.")
 
             except Exception as map_import_exc:
-                map_import_summary_msg = f"Error processing downloaded map configuration file {map_config_json_path} (task {task_id}): {str(map_import_exc)}"
+                map_import_summary_msg = f"Error processing/importing downloaded map configuration file {map_config_json_path} (task {task_id}): {str(map_import_exc)}"
                 app.logger.exception(map_import_summary_msg)
-                socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Error during map configuration import.', 'detail': str(map_import_exc)})
+                if socketio:
+                    socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Error during map configuration import.', 'detail': str(map_import_exc)})
             finally:
                 try:
                     os.remove(map_config_json_path)
@@ -4116,25 +4196,26 @@ def api_one_click_restore():
                     app.logger.error(f"Error removing temporary map config file {map_config_json_path} (task {task_id}): {e_remove}")
         else:
             app.logger.info(f"No map configuration file found or downloaded for timestamp {backup_timestamp} (task {task_id}). Skipping map import.")
-            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Map configuration import skipped (no file).'})
-
+            if socketio:
+                 socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Map configuration import skipped (no file).'})
 
         final_message = (
-            f"Restore (task {task_id}) from timestamp {backup_timestamp} file operations completed. "
-            f"Database has been restored. {map_import_summary_msg} "
-            "It is highly recommended to restart the application."
+            f"Restore (task {task_id}) from timestamp {backup_timestamp} completed. "
+            f"Database restored. {map_import_summary_msg} "
+            "Application restart is highly recommended."
         )
         app.logger.info(final_message)
         add_audit_log(action="ONE_CLICK_RESTORE_COMPLETED", details=final_message)
-        # The final "finished" signal for SocketIO is sent by restore_full_backup for file ops.
-        # Additional emits here cover the map import part.
-        return jsonify({'success': True, 'message': 'Restore process initiated. See live logs for completion status.', 'task_id': task_id}), 200
+        if socketio:
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Restore process fully completed. Please restart application.', 'detail': 'SUCCESS'})
+        return jsonify({'success': True, 'message': 'Restore process initiated. See live logs for completion status.', 'task_id': task_id}), 200 # Or 202
 
     except Exception as e:
-        app.logger.exception(f"Exception during one-click restore (task {task_id}) for timestamp {backup_timestamp} by {current_user.username}:")
-        add_audit_log(action="ONE_CLICK_RESTORE_ERROR", details=f"Task {task_id}, Exception: {str(e)} for timestamp {backup_timestamp}")
-        socketio.emit('restore_progress', {'task_id': task_id, 'status': f'Critical error during restore: {str(e)}', 'detail': 'ERROR'})
-        return jsonify({'success': False, 'message': f'An unexpected error occurred during restore: {str(e)}', 'task_id': task_id}), 500
+        app.logger.exception(f"Critical exception during one-click restore (task {task_id}) for timestamp {backup_timestamp} by {current_user.username}:")
+        add_audit_log(action="ONE_CLICK_RESTORE_CRITICAL_ERROR", details=f"Task {task_id}, Exception: {str(e)} for timestamp {backup_timestamp}")
+        if socketio:
+            socketio.emit('restore_progress', {'task_id': task_id, 'status': f'Critical error during restore: {str(e)}', 'detail': 'ERROR'})
+        return jsonify({'success': False, 'message': f'An unexpected critical error occurred during restore: {str(e)}', 'task_id': task_id}), 500
 
 # --- Backup Schedule API Routes ---
 
@@ -4245,70 +4326,3 @@ def update_backup_schedule():
         app.logger.exception("Error updating backup schedule configuration:")
         add_audit_log(action="UPDATE_BACKUP_SCHEDULE_FAILED", details=f"Error: {str(e)}. Data: {data}")
         return jsonify({'success': False, 'message': f'Error updating schedule: {str(e)}'}), 500
-
-# --- Scheduled Backup Job ---
-def run_scheduled_backup_job():
-    """
-    Checks the backup schedule and runs a full backup if due.
-    This function is intended to be called by APScheduler.
-    """
-    with app.app_context(): # Essential for DB access and app.logger
-        app.logger.info("run_scheduled_backup_job: Checking backup schedule...")
-        try:
-            schedule_config = db.session.query(BackupScheduleConfig).first()
-
-            if not schedule_config:
-                app.logger.warning("run_scheduled_backup_job: No backup schedule configuration found. Skipping.")
-                return
-
-            if not schedule_config.is_enabled:
-                app.logger.info("run_scheduled_backup_job: Scheduled backups are disabled. Skipping.")
-                return
-
-            now_utc = datetime.now(timezone.utc)
-            current_time_utc = now_utc.time()
-            current_date_utc = now_utc.date()
-
-            # Check if already run today
-            if schedule_config.last_run_date == current_date_utc:
-                app.logger.info(f"run_scheduled_backup_job: Backup for {current_date_utc.isoformat()} has already run. Skipping.")
-                return
-
-            backup_due = False
-            if schedule_config.schedule_type == 'daily':
-                # Check if current time is at or after scheduled time (within the hour)
-                if current_time_utc.hour == schedule_config.time_of_day.hour and \
-                   current_time_utc.minute >= schedule_config.time_of_day.minute:
-                    backup_due = True
-            elif schedule_config.schedule_type == 'weekly':
-                if now_utc.weekday() == schedule_config.day_of_week: # 0=Monday, 6=Sunday
-                    if current_time_utc.hour == schedule_config.time_of_day.hour and \
-                       current_time_utc.minute >= schedule_config.time_of_day.minute:
-                        backup_due = True
-
-            if backup_due:
-                app.logger.info(f"run_scheduled_backup_job: Backup is due for {current_date_utc.isoformat()} at {schedule_config.time_of_day.strftime('%H:%M')}. Starting backup...")
-
-                timestamp_str = now_utc.strftime('%Y%m%d_%H%M%S')
-                map_config = _get_map_configuration_data() # Ensure this helper is accessible
-
-                if not create_full_backup:
-                    app.logger.error("run_scheduled_backup_job: create_full_backup function not available/imported.")
-                    return
-
-                success = create_full_backup(timestamp_str, map_config_data=map_config)
-
-                if success:
-                    app.logger.info(f"run_scheduled_backup_job: Scheduled backup completed successfully. Timestamp: {timestamp_str}")
-                    add_audit_log(action="SCHEDULED_BACKUP_SUCCESS", details=f"Scheduled backup successful. Timestamp: {timestamp_str}", username="System")
-                    schedule_config.last_run_date = current_date_utc
-                    db.session.commit()
-                else:
-                    app.logger.error(f"run_scheduled_backup_job: Scheduled backup failed. Timestamp attempted: {timestamp_str}")
-                    add_audit_log(action="SCHEDULED_BACKUP_FAILED", details=f"Scheduled backup failed. Timestamp attempted: {timestamp_str}", username="System")
-            else:
-                app.logger.info(f"run_scheduled_backup_job: Backup not currently due. Current time: {current_time_utc.strftime('%H:%M:%S')}, Scheduled: {schedule_config.time_of_day.strftime('%H:%M')}, Type: {schedule_config.schedule_type}, Last Run: {schedule_config.last_run_date}")
-
-        except Exception as e:
-            app.logger.exception("run_scheduled_backup_job: Error during scheduled backup job execution.")
-            add_audit_log(action="SCHEDULED_BACKUP_ERROR", details=f"Exception: {str(e)}", username="System")
