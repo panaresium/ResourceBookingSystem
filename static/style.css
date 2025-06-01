@@ -1129,9 +1129,11 @@ nav#sidebar {
 
 /* Ensure event content in month view does not overflow */
 .fc-daygrid-event .fc-event-main-frame {
-    overflow: visible; /* Allow content to be visible, enabling wrapping */
+    overflow-y: auto;   /* Enable vertical scrollbar if content overflows */
+    max-height: 3.6em;  /* Adjust as needed, allows approx 2-3 lines */
     position: relative; /* For text-overflow to work correctly with children */
     white-space: normal; /* Ensure text wrapping for all content */
+    /* overflow: visible; was here, replaced by overflow-y: auto */
 }
 
 .fc-daygrid-event .fc-event-main-frame b { /* Targeting the title */
