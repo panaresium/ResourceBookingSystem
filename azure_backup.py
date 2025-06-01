@@ -169,15 +169,21 @@ def download_file(share_client, file_path, dest_path):
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     try:
         downloader = file_client.download_file()
-        # The primary way SDK signals critical issues is via exceptions during download_file() or readall().
 
-        content = downloader.readall() # This might raise HttpResponseError for 4xx/5xx
+        # Check for 0-byte file
+        if downloader.properties.size == 0:
+            with open(dest_path, 'wb') as f:
+                pass # Create empty file
+            logger.info(f"Successfully created empty file for 0-byte remote file '{file_path}' at '{dest_path}'.")
+            return True
+
+        # For non-empty files, proceed to read content
+        content = downloader.readall()
 
         with open(dest_path, 'wb') as f:
             f.write(content)
 
-        # After a successful download and write, explicitly log success for this file.
-        logger.info(f"Successfully downloaded '{file_path}' to '{dest_path}'.")
+        logger.info(f"Successfully downloaded '{file_path}' (size: {downloader.properties.size}) to '{dest_path}'.")
         return True
 
     except HttpResponseError as hre:
@@ -382,7 +388,7 @@ def create_full_backup(timestamp_str, map_config_data=None, socketio_instance=No
             file_client = config_share_client.get_file_client(remote_config_path)
             config_json_bytes = json.dumps(map_config_data, indent=2).encode('utf-8')
             logger.info(f"Attempting map configuration backup: Share='{config_share_client.share_name}', Path='{remote_config_path}'")
-            file_client.upload_file(data=config_json_bytes, overwrite=True)
+            file_client.upload_file(data=config_json_bytes)
             logger.info(f"Successfully backed up map configuration to '{config_share_name}/{remote_config_path}'.")
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'Map configuration backup complete.')
         except Exception as e:
