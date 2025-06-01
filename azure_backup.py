@@ -362,6 +362,10 @@ def create_full_backup(timestamp_str, map_config_data=None, socketio_instance=No
         logger.info(f"Creating share '{media_share_name}' for media backups.")
         media_share_client.create_share()
 
+    # Ensure the base directory for all media backups exists first
+    logger.info(f"Ensuring base media backup directory '{MEDIA_BACKUPS_DIR_BASE}' exists on share '{media_share_name}'.")
+    _ensure_directory_exists(media_share_client, MEDIA_BACKUPS_DIR_BASE) # <<< NEWLY ADDED LINE
+
     # Backup FLOOR_MAP_UPLOADS
     remote_floor_map_dir = f"{MEDIA_BACKUPS_DIR_BASE}/floor_map_uploads_{timestamp_str}"
     _ensure_directory_exists(media_share_client, remote_floor_map_dir)
