@@ -959,6 +959,129 @@ body.high-contrast footer {
 /* e.g. body.with-sidebar nav ul, body.with-sidebar #main-content */
 /* These have been addressed by replacing or removing them in the sections above. */
 
+/* Mobile Menu Styles */
+.hamburger-icon {
+    display: none; /* Hidden by default */
+    background: none;
+    border: none;
+    color: var(--text-color-light); /* Hamburger color to match header text */
+    font-size: 1.5rem; /* Adjust size as needed */
+    cursor: pointer;
+    padding: 0.25em 0.5em;
+    z-index: 1040; /* Above sidebar (1020) but below modals (1050) */
+    align-self: center; /* Align with other header items */
+}
+
+.hamburger-icon span {
+    display: block;
+    width: 22px;
+    height: 3px;
+    background-color: var(--text-color-light); /* Color of the bars */
+    margin: 4px 0;
+    transition: background-color 0.3s ease;
+}
+
+/* Styles for the sidebar when it's opened via mobile toggle */
+/* This assumes #sidebar is the element to be shown/hidden */
+/* The .sidebar-open class will be toggled by JavaScript on #sidebar */
+nav#sidebar.sidebar-open {
+    display: block !important; /* Important to override other display states */
+    width: 80%;
+    max-width: 300px; /* Max width for the overlay menu */
+    position: fixed;
+    top: 0; /* Align to top, below header or covering header based on z-index */
+    left: 0;
+    height: 100vh; /* Full viewport height */
+    background-color: var(--background-color-dark); /* Match existing sidebar bg */
+    z-index: 1035; /* Higher than header content, but hamburger icon itself is 1040 if it needs to be above this */
+    overflow-y: auto;
+    box-shadow: 3px 0 6px rgba(0,0,0,0.2);
+    transition: transform 0.3s ease-in-out;
+    transform: translateX(0%); /* Default shown state if class is present */
+}
+
+/* Initially hide the sidebar-open state off-screen if doing a slide-in animation */
+/* For simple display block/none, this is not needed.
+nav#sidebar {
+    transform: translateX(-100%);
+}
+*/
+
+
+@media (max-width: 767px) and (orientation: portrait) {
+    /* Show hamburger icon only for admins, matching sidebar visibility */
+    body:not(.no-sidebar) .hamburger-icon { /* Assumes body.no-sidebar is correctly set for non-admins */
+        display: flex; /* Or block/inline-block */
+        flex-direction: column;
+        justify-content: space-around;
+    }
+
+    /* Hide the default desktop sidebar toggle if the mobile one is shown */
+    body:not(.no-sidebar) nav#sidebar #sidebar-toggle {
+        display: none;
+    }
+
+    /* Hide the sidebar itself by default in mobile portrait */
+    /* The .sidebar-open class will override this to show it */
+    body:not(.no-sidebar) nav#sidebar {
+        display: none;
+        /* transform: translateX(-100%); */ /* Prepare for slide-in if using transform for open state */
+    }
+
+    /* Ensure the main content takes full width when sidebar is hidden for mobile portrait */
+    body:not(.no-sidebar) #main-content {
+        margin-left: 0;
+    }
+
+    /* Specific styles for items inside the opened mobile menu */
+    nav#sidebar.sidebar-open ul li {
+        padding: 1em; /* More padding for tappable items */
+    }
+    nav#sidebar.sidebar-open ul li a,
+    nav#sidebar.sidebar-open ul li button,
+    nav#sidebar.sidebar-open details summary {
+        font-size: 1rem; /* Ensure readability */
+        white-space: normal; /* Allow text wrapping */
+    }
+    nav#sidebar.sidebar-open .menu-text {
+        display: inline-block !important; /* Ensure text is visible */
+    }
+    nav#sidebar.sidebar-open .menu-icon {
+        display: inline-block !important; /* Ensure icon is visible */
+        margin-right: 0.8em;
+    }
+    nav#sidebar.sidebar-open details ul.admin-menu {
+        display: block !important; /* Ensure admin submenu is shown */
+        padding-left: 1.5em;
+    }
+    nav#sidebar.sidebar-open details summary::after { /* Optional: better indicator for openable summary */
+        content: ' ▼';
+        font-size: 0.8em;
+    }
+    nav#sidebar.sidebar-open details[open] summary::after {
+        content: ' ▲';
+    }
+
+    /* Remove collapsed styles from sidebar when it's in mobile overlay mode */
+    nav#sidebar.sidebar-open.collapsed {
+        width: 80% !important; /* Override collapsed width */
+        max-width: 300px !important;
+    }
+    nav#sidebar.sidebar-open.collapsed li .menu-text,
+    nav#sidebar.sidebar-open.collapsed details ul.admin-menu {
+        display: inline-block !important; /* Ensure text and submenus are visible */
+    }
+    nav#sidebar.sidebar-open.collapsed li {
+        text-align: left; /* Revert text alignment */
+    }
+    nav#sidebar.sidebar-open.collapsed li a,
+    nav#sidebar.sidebar-open.collapsed li button,
+    nav#sidebar.sidebar-open.collapsed summary {
+        justify-content: flex-start; /* Revert justification */
+    }
+
+}
+
 /* Ensure admin dropdown in sidebar still looks okay */
 #sidebar details summary {
     /* cursor: pointer; Removed to make it less interactive for always-open admin menu */
