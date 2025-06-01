@@ -1,0 +1,24 @@
+#name: Notify Mobile on Completion
+
+on:
+  workflow_run:
+    workflows: ["ResourceBookingSystem"]
+    types:
+      - completed
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }} # only for success
+    steps:
+      - name: Deploy Resource Booking System Completed
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: "✅ Workflow Successful: ${{ github.event.workflow_run.name }}"
+          content: |
+            Workflow **${{ github.event.workflow_run.name }}** has successfully completed.
+
+            **Details**:
+            - Status: **${{ github.event.workflow_run.conclusion }}**
+            - Commit SHA: [${{ github.event.workflow_run.head_sha }}](https://github.com/${{ github.repository }}/commit/${{ github.event.workflow_run.head_sha }})
+            - Triggered by: ${{ github.event.workflow_run.triggering_actor.login }}
