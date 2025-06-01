@@ -1127,6 +1127,14 @@ nav#sidebar {
 }
 */
 
+/* Ensure the main event anchor tag behaves as a block */
+a.fc-daygrid-event.fc-event { /* Targeting the <a> tag specifically */
+    display: block;
+    width: 100%; /* Ensure it takes full width of its cell container */
+    /* Note: FullCalendar's own CSS might have padding or other box model properties.
+       This change focuses on making the anchor itself a block-level element. */
+}
+
 /* Styling for FullCalendar event content container */
 /* Properties like display and position are kept for basic layout. */
 /* Text wrapping, overflow, and max-height are removed as JS now handles truncation. */
