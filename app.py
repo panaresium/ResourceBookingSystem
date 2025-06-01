@@ -4639,7 +4639,8 @@ if __name__ == "__main__":
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "False").lower() in ("1", "true", "yes")
-    socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
+    # Moved route definitions before this block
+    # socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
 
 
 @app.route('/api/admin/delete_backup/<string:backup_timestamp>', methods=['POST'])
@@ -4699,6 +4700,9 @@ def api_delete_backup_set(backup_timestamp):
             socketio.emit('backup_delete_progress', {'task_id': task_id, 'status': error_message, 'detail': 'CRITICAL_ERROR'})
         return jsonify({'success': False, 'message': error_message, 'task_id': task_id}), 500
 
+@app.route('/api/resources/<int:resource_id>/all_bookings', methods=['GET'])
+@login_required
+def get_all_bookings_for_resource(resource_id):
     """
     Fetches all bookings for a specific resource within a given date range,
     formatted for FullCalendar.
@@ -4773,3 +4777,19 @@ def api_delete_backup_set(backup_timestamp):
     except Exception as e:
         app.logger.exception(f"Error fetching all bookings for resource {resource_id}:")
         return jsonify({'error': 'Failed to fetch bookings due to a server error.'}), 500
+
+# Add the if __name__ == "__main__": block here, after all route definitions
+if __name__ == "__main__":
+    # To initialize the DB, run `python init_setup.py` once or import
+    # `init_db` from `init_setup` in a Python shell. Pass force=True if you
+    # really want to wipe existing data.
+    try:
+        scheduler.start()
+    except Exception:
+        app.logger.exception("Failed to start background scheduler")
+    # Avoid using _() here because no request context exists at startup
+    app.logger.info(translator.gettext("Flask app starting...", translator.default_locale))
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", 5000))
+    debug = os.environ.get("FLASK_DEBUG", "False").lower() in ("1", "true", "yes")
+    socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
