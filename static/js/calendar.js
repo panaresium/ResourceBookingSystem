@@ -134,8 +134,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const [slotStartTime, slotEndTime] = selectedSlotValue.split(',');
 
         // Construct full ISO datetime strings for start and end
-        const localStartDate = new Date(`${bookingDateStr}T${slotStartTime}:00`); // Parsed as local time
-        const localEndDate = new Date(`${bookingDateStr}T${slotEndTime}:00`);   // Parsed as local time
+        const localStartDate = new Date(`${bookingDateStr}T${slotStartTime}:00Z`); // Parsed as UTC
+        const localEndDate = new Date(`${bookingDateStr}T${slotEndTime}:00Z`);   // Parsed as UTC
 
         if (localEndDate <= localStartDate) { // Validation for new slot times
             cebmStatusMessage.textContent = 'End time must be after start time.';
