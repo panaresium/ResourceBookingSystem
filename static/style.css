@@ -1127,4 +1127,23 @@ nav#sidebar {
 }
 */
 
+/* Ensure event content in month view does not overflow */
+.fc-daygrid-event .fc-event-main-frame {
+    overflow: hidden; /* This will clip content that's too large */
+    position: relative; /* For text-overflow to work correctly with children */
+}
+
+.fc-daygrid-event .fc-event-main-frame b { /* Targeting the title */
+    display: block; /* Make it a block to control overflow */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%; /* Ensure it respects container width */
+}
+
+/* For the time part, allow wrapping or also truncate if necessary */
+/* This part is trickier as it's a text node after a <br>. */
+/* We might rely on the parent's overflow:hidden for the time part,
+   or if it becomes an issue, wrap the time in a span within eventContent. */
+/* For now, let's assume the title is the primary concern for truncation. */
 ```

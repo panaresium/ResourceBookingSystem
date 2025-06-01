@@ -1259,6 +1259,89 @@ def get_resource_availability(resource_id):
         return jsonify({'error': 'Failed to fetch resource availability due to a server error.'}), 500
 
 
+@app.route('/api/resources/<int:resource_id>/available_slots', methods=['GET'])
+@login_required
+def get_resource_available_slots(resource_id):
+    date_str = request.args.get('date')
+    if not date_str:
+        app.logger.warning(f"Missing date parameter for available_slots for resource ID: {resource_id}")
+        return jsonify({'error': 'Date query parameter is required (YYYY-MM-DD).'}), 400
+
+    try:
+        target_date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        app.logger.warning(f"Invalid date format '{date_str}' for available_slots for resource ID: {resource_id}")
+        return jsonify({'error': 'Invalid date format. Please use YYYY-MM-DD.'}), 400
+
+    resource = Resource.query.get(resource_id)
+    if not resource:
+        app.logger.warning(f"Available_slots check for non-existent resource ID: {resource_id}")
+        return jsonify({'error': 'Resource not found.'}), 404
+
+    if resource.status != 'published':
+        app.logger.info(f"Available_slots check for non-published resource ID: {resource_id}, status: {resource.status}")
+        return jsonify({'error': f'Resource is not currently available (status: {resource.status}).'}), 403
+
+    if resource.is_under_maintenance and (resource.maintenance_until is None or target_date_obj <= resource.maintenance_until.date()):
+        until_str = resource.maintenance_until.isoformat() if resource.maintenance_until else 'indefinitely'
+        app.logger.info(f"Available_slots check for resource ID: {resource_id} under maintenance until {until_str}.")
+        return jsonify({'error': f'Resource under maintenance until {until_str}. No slots available.'}), 403
+
+
+    # Query bookings for the resource on the target date
+    # Assuming Booking.start_time and Booking.end_time are naive UTC datetimes in DB
+    bookings_on_date = Booking.query.filter(
+        Booking.resource_id == resource_id,
+        func.date(Booking.start_time) == target_date_obj
+    ).all()
+
+    available_slots = []
+    slot_start_hour = 0
+    slot_start_minute = 0
+    slot_duration_minutes = 30 # Standard 30-minute slots
+
+    while slot_start_hour < 24:
+        # Create naive datetime objects for the slot start and end
+        slot_start_dt = datetime.combine(target_date_obj, time(slot_start_hour, slot_start_minute))
+        slot_end_dt = slot_start_dt + timedelta(minutes=slot_duration_minutes)
+
+        # Ensure slot doesn't spill into the next day if it starts late on the target_date_obj
+        if slot_end_dt.date() > target_date_obj:
+            break
+
+        is_available = True
+        for booking in bookings_on_date:
+            # Ensure booking times are naive UTC for comparison
+            booking_start_naive = booking.start_time # Assuming already naive UTC
+            booking_end_naive = booking.end_time   # Assuming already naive UTC
+
+            # Check for overlap: (SlotStart < BookingEnd) and (SlotEnd > BookingStart)
+            if (slot_start_dt < booking_end_naive) and (slot_end_dt > booking_start_naive):
+                is_available = False
+                break
+
+        if is_available:
+            available_slots.append({
+                'start_time': slot_start_dt.strftime('%H:%M'),
+                'end_time': slot_end_dt.strftime('%H:%M')
+            })
+
+        # Move to the next potential slot
+        new_minute = slot_start_minute + slot_duration_minutes
+        slot_start_hour += new_minute // 60
+        slot_start_minute = new_minute % 60
+
+        # Safety break if somehow hour calculation goes beyond 24
+        if slot_start_hour >= 24 and slot_start_minute > 0: # e.g. if a slot would end at 00:30 next day
+            break
+        if slot_start_hour >=24: # if slot would start at or after midnight
+            break
+
+
+    app.logger.info(f"Generated {len(available_slots)} available slots for resource {resource_id} on {date_str}.")
+    return jsonify(available_slots), 200
+
+
 @app.route('/api/maps', methods=['GET'])
 def get_public_floor_maps():
     try:
