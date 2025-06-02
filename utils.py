@@ -261,7 +261,7 @@ def _get_user_configurations_data() -> dict:
         if 'users' not in final_data: final_data['users'] = []
         return final_data
 
-def _import_user_configurations_data(user_config_data: dict, db_instance) -> tuple[int, int, int, int, list]:
+def _import_user_configurations_data(user_config_data: dict) -> tuple[int, int, int, int, list]:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     roles_created, roles_updated, users_created, users_updated = 0, 0, 0, 0
     errors = []
@@ -269,12 +269,13 @@ def _import_user_configurations_data(user_config_data: dict, db_instance) -> tup
     # Import Roles
     if 'roles' in user_config_data and isinstance(user_config_data['roles'], list):
         for role_data in user_config_data['roles']:
+            action = "PROCESS_ROLE_VIA_RESTORE" # Initialize action
             try:
                 role = None
                 if 'id' in role_data and role_data['id'] is not None:
-                    role = db_instance.session.query(Role).get(role_data['id'])
+                    role = db.session.query(Role).get(role_data['id'])
                 if not role and 'name' in role_data:
-                    role = db_instance.session.query(Role).filter_by(name=role_data['name']).first()
+                    role = db.session.query(Role).filter_by(name=role_data['name']).first()
 
                 action = "UPDATE_ROLE_VIA_RESTORE"
                 if not role:
@@ -286,14 +287,14 @@ def _import_user_configurations_data(user_config_data: dict, db_instance) -> tup
                 role.permissions = role_data.get('permissions', role.permissions)
 
                 if action == "CREATE_ROLE_VIA_RESTORE":
-                    db_instance.session.add(role)
+                    db.session.add(role)
                     roles_created +=1
                 else:
                     roles_updated +=1
-                db_instance.session.commit() # Commit each role
+                db.session.commit() # Commit each role
                 add_audit_log(action=action, details=f"Role '{role.name}' (ID: {role.id}) processed from backup by system.")
             except Exception as e:
-                db_instance.session.rollback()
+                db.session.rollback()
                 err_detail = f"Error processing role '{role_data.get('name', 'N/A')}': {str(e)}"
                 logger.error(err_detail, exc_info=True)
                 errors.append({'role_name': role_data.get('name', 'N/A'), 'error': str(e)})
@@ -302,15 +303,16 @@ def _import_user_configurations_data(user_config_data: dict, db_instance) -> tup
 
     # Import Users
     # Get all existing role IDs once to avoid repeated DB queries for roles
-    existing_role_ids = {role.id for role in db_instance.session.query(Role.id).all()}
+    existing_role_ids = {role.id for role in db.session.query(Role.id).all()}
     if 'users' in user_config_data and isinstance(user_config_data['users'], list):
         for user_data in user_config_data['users']:
+            action = "PROCESS_USER_VIA_RESTORE" # Initialize action
             try:
                 user = None
                 if 'id' in user_data and user_data['id'] is not None:
-                    user = db_instance.session.query(User).get(user_data['id'])
+                    user = db.session.query(User).get(user_data['id'])
                 if not user and 'username' in user_data:
-                    user = db_instance.session.query(User).filter_by(username=user_data['username']).first()
+                    user = db.session.query(User).filter_by(username=user_data['username']).first()
 
                 action = "UPDATE_USER_VIA_RESTORE"
                 if not user:
@@ -332,7 +334,7 @@ def _import_user_configurations_data(user_config_data: dict, db_instance) -> tup
                     valid_roles_for_user = []
                     for role_id in user_data['role_ids']:
                         if role_id in existing_role_ids:
-                            role_obj = db_instance.session.query(Role).get(role_id) # Fetch role object
+                            role_obj = db.session.query(Role).get(role_id) # Fetch role object
                             if role_obj: valid_roles_for_user.append(role_obj)
                             else: errors.append({'user_name': user_data.get('username'), 'error': f"Role ID {role_id} for user not found despite being in existing_role_ids."})
                         else:
@@ -340,14 +342,14 @@ def _import_user_configurations_data(user_config_data: dict, db_instance) -> tup
                     user.roles = valid_roles_for_user
 
                 if action == "CREATE_USER_VIA_RESTORE":
-                    db_instance.session.add(user)
+                    db.session.add(user)
                     users_created +=1
                 else:
                     users_updated +=1
-                db_instance.session.commit() # Commit each user
+                db.session.commit() # Commit each user
                 add_audit_log(action=action, details=f"User '{user.username}' (ID: {user.id}) processed from backup by system.")
             except Exception as e:
-                db_instance.session.rollback()
+                db.session.rollback()
                 err_detail = f"Error processing user '{user_data.get('username', 'N/A')}': {str(e)}"
                 logger.error(err_detail, exc_info=True)
                 errors.append({'user_name': user_data.get('username', 'N/A'), 'error': str(e)})
@@ -357,21 +359,21 @@ def _import_user_configurations_data(user_config_data: dict, db_instance) -> tup
     return roles_created, roles_updated, users_created, users_updated, errors
 
 
-def _import_resource_configurations_data(resources_data_list: list, db_instance) -> tuple[int, int, list]:
+def _import_resource_configurations_data(resources_data_list: list) -> tuple[int, int, list]:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     created_count = 0
     updated_count = 0
     errors = []
-    existing_role_ids = {role.id for role in db_instance.session.query(Role.id).all()}
+    existing_role_ids = {role.id for role in db.session.query(Role.id).all()}
 
     for res_data in resources_data_list:
         resource = None
         original_resource_name_for_log = res_data.get('name', 'UnknownResource')
         try:
             if 'id' in res_data and res_data['id'] is not None:
-                resource = db_instance.session.query(Resource).get(res_data['id'])
+                resource = db.session.query(Resource).get(res_data['id'])
             if not resource and 'name' in res_data and res_data['name']:
-                resource = db_instance.session.query(Resource).filter_by(name=res_data['name']).first()
+                resource = db.session.query(Resource).filter_by(name=res_data['name']).first()
 
             action_taken = "UPDATE_RESOURCE_VIA_RESTORE"
             if not resource:
@@ -405,7 +407,7 @@ def _import_resource_configurations_data(resources_data_list: list, db_instance)
                 selected_roles_for_this_resource = []
                 for role_id in res_data['role_ids']:
                     # Querying Role directly to ensure we get fresh objects or ones managed by this session
-                    role_obj = db_instance.session.query(Role).get(role_id)
+                    role_obj = db.session.query(Role).get(role_id)
                     if role_obj:
                         selected_roles_for_this_resource.append(role_obj)
                     else:
@@ -415,7 +417,7 @@ def _import_resource_configurations_data(resources_data_list: list, db_instance)
                 # For existing resources, clear old roles before assigning new ones to prevent IntegrityError
                 if action_taken == "UPDATE_RESOURCE_VIA_RESTORE":
                     resource.roles.clear() # Clear existing associations
-                    db_instance.session.flush() # Ensure the clear is processed before adding new ones
+                    db.session.flush() # Ensure the clear is processed before adding new ones
 
                 resource.roles = selected_roles_for_this_resource # Assign the new set of roles
             
@@ -426,15 +428,15 @@ def _import_resource_configurations_data(resources_data_list: list, db_instance)
                 # No flush needed here if we are just clearing and not adding immediately after in this branch
 
             if action_taken == "CREATE_RESOURCE_VIA_RESTORE":
-                db_instance.session.add(resource)
+                db.session.add(resource)
                 created_count += 1
             else:
                 updated_count += 1
 
-            db_instance.session.commit()
+            db.session.commit()
             add_audit_log(action=action_taken, details=f"Resource '{resource.name}' (ID: {resource.id}) processed from backup by system.")
         except Exception as e:
-            db_instance.session.rollback()
+            db.session.rollback()
             error_detail = f"Error processing resource '{original_resource_name_for_log}' (ID: {res_data.get('id')}): {str(e)}"
             logger.error(error_detail, exc_info=True)
             errors.append({'resource_name': original_resource_name_for_log, 'id': res_data.get('id'), 'error': str(e)})
@@ -472,7 +474,8 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
                 else: maps_updated += 1
                 db.session.commit()
                 fm_data['processed_id'] = fm.id
-                add_audit_log(action=action, details=f"FloorMap '{fm.name}' (ID: {fm.id}) processed by import by {current_user.username}.")
+                username_for_audit_fm = current_user.username if current_user and current_user.is_authenticated else "System_Startup"
+                add_audit_log(action=action, details=f"FloorMap '{fm.name}' (ID: {fm.id}) processed by import by {username_for_audit_fm}.")
             except Exception as e:
                 db.session.rollback()
                 maps_errors.append({'error': f"Error processing floor map '{fm_data.get('name', 'N/A')}': {str(e)}", 'data': fm_data})
@@ -503,7 +506,8 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
                     new_roles = [Role.query.get(r_id) for r_id in res_map_data['role_ids'] if Role.query.get(r_id)]
                     resource.roles = new_roles # Filtered for valid roles
                 resource_updates +=1
-                add_audit_log(action="UPDATE_RESOURCE_MAP_INFO_VIA_IMPORT", details=f"Resource '{resource.name}' (ID: {resource.id}) map info updated by import by {current_user.username}.")
+                username_for_audit_res = current_user.username if current_user and current_user.is_authenticated else "System_Startup"
+                add_audit_log(action="UPDATE_RESOURCE_MAP_INFO_VIA_IMPORT", details=f"Resource '{resource.name}' (ID: {resource.id}) map info updated by import by {username_for_audit_res}.")
             except Exception as e:
                 db.session.rollback()
                 resource_errors.append({'error': f"Error processing resource mapping for '{res_map_data.get('name', 'N/A')}': {str(e)}", 'data': res_map_data})
@@ -516,8 +520,10 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
                'resource_mappings_updated': resource_updates, 'resource_mapping_errors': resource_errors, 'image_reminders': image_reminders}
     status_code = 207 if maps_errors or resource_errors else 200
     if status_code == 207: summary['message'] += " Some entries had errors."
-    logger.log(logging.WARNING if status_code == 207 else logging.INFO, f"Map config import by {current_user.username} summary: {summary}")
-    add_audit_log(action="IMPORT_MAP_CONFIGURATION_COMPLETED", details=f"User {current_user.username} completed map config import. Summary: {str(summary)}")
+    username_for_log = current_user.username if current_user and current_user.is_authenticated else "System_Startup"
+    logger.log(logging.WARNING if status_code == 207 else logging.INFO, f"Map config import by {username_for_log} summary: {summary}")
+    username_for_audit_final = current_user.username if current_user and current_user.is_authenticated else "System_Startup"
+    add_audit_log(action="IMPORT_MAP_CONFIGURATION_COMPLETED", details=f"User {username_for_audit_final} completed map config import. Summary: {str(summary)}")
     return summary, status_code
 
 def _load_schedule_from_json():

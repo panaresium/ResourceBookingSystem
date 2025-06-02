@@ -112,8 +112,8 @@ def create_app(config_object=config):
                         try:
                             with open(resource_configs_path, 'r', encoding='utf-8') as f:
                                 resource_data_to_import = json.load(f)
-                            # Assuming db object is available here, or pass it if necessary
-                            res_created, res_updated, res_errors = _import_resource_configurations_data(resource_data_to_import, db)
+                            # db object is globally available from extensions.py and functions are called within app_context
+                            res_created, res_updated, res_errors = _import_resource_configurations_data(resource_data_to_import)
                             app.logger.info(f"Startup import of resource configs: {res_created} created, {res_updated} updated. Errors: {len(res_errors)}")
                             if res_errors: app.logger.error(f"Startup resource import errors: {res_errors}")
                             # add_audit_log needs user context or to handle being called by system
@@ -147,7 +147,8 @@ def create_app(config_object=config):
                         try:
                             with open(user_configs_path, 'r', encoding='utf-8') as f:
                                 user_data_to_import = json.load(f)
-                            r_created, r_updated, u_created, u_updated, u_errors = _import_user_configurations_data(user_data_to_import, db)
+                            # db object is globally available from extensions.py and functions are called within app_context
+                            r_created, r_updated, u_created, u_updated, u_errors = _import_user_configurations_data(user_data_to_import)
                             app.logger.info(f"Startup import of user/role configs: Roles({r_created}c, {r_updated}u), Users({u_created}c, {u_updated}u). Errors: {len(u_errors)}")
                             if u_errors: app.logger.error(f"Startup user/role import errors: {u_errors}")
                             add_audit_log(action="STARTUP_RESTORE_IMPORT", details=f"User/role configs imported. Roles({r_created}c, {r_updated}u), Users({u_created}c, {u_updated}u). Errors: {len(u_errors)}")
