@@ -295,26 +295,29 @@ def backup_if_changed():
     _save_hashes(hashes)
 
 
-def restore_from_share():
-    """Download DB and media files from Azure File Share if available."""
-    service_client = _get_service_client()
+# def restore_from_share():
+#     """
+#     DEPRECATED: Replaced by restore_latest_backup_set_on_startup for use in app_factory.py.
+#     Download DB and media files from Azure File Share if available.
+#     """
+#     service_client = _get_service_client()
 
-    db_share = os.environ.get('AZURE_DB_SHARE', 'db-backups')
-    db_client = service_client.get_share_client(db_share)
-    if _client_exists(db_client):
-        download_file(db_client, 'site.db', os.path.join(DATA_DIR, 'site.db'))
+#     db_share = os.environ.get('AZURE_DB_SHARE', 'db-backups')
+#     db_client = service_client.get_share_client(db_share)
+#     if _client_exists(db_client):
+#         download_file(db_client, 'site.db', os.path.join(DATA_DIR, 'site.db'))
 
-    media_share = os.environ.get('AZURE_MEDIA_SHARE', 'media')
-    media_client = service_client.get_share_client(media_share)
-    if _client_exists(media_client):
-        for prefix in ('floor_map_uploads', 'resource_uploads'):
-            directory_client = media_client.get_directory_client(prefix)
-            if not _client_exists(directory_client):
-                continue
-            for item in directory_client.list_directories_and_files():
-                file_path = f"{prefix}/{item['name']}"
-                dest = os.path.join(STATIC_DIR, prefix, item['name'])
-                download_file(media_client, file_path, dest)
+#     media_share = os.environ.get('AZURE_MEDIA_SHARE', 'media')
+#     media_client = service_client.get_share_client(media_share)
+#     if _client_exists(media_client):
+#         for prefix in ('floor_map_uploads', 'resource_uploads'):
+#             directory_client = media_client.get_directory_client(prefix)
+#             if not _client_exists(directory_client):
+#                 continue
+#             for item in directory_client.list_directories_and_files():
+#                 file_path = f"{prefix}/{item['name']}"
+#                 dest = os.path.join(STATIC_DIR, prefix, item['name'])
+#                 download_file(media_client, file_path, dest)
 
 
 def main():
@@ -663,6 +666,116 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
     else:
         _emit_progress(socketio_instance, task_id, 'backup_progress', f'Backup completed with overall success: False. Check server logs for details.', 'ERROR')
     return overall_success
+
+
+def restore_latest_backup_set_on_startup(app_logger=None):
+    """
+    Restores the latest available backup set on application startup.
+    This includes database, configurations, and media files.
+    Designed to be called from app_factory.py.
+    """
+    log = app_logger if app_logger else logger
+    log.info("Attempting to restore latest backup set on startup...")
+
+    try:
+        service_client = _get_service_client() # Handles RuntimeError if not configured
+        
+        available_backups = list_available_backups() # Handles its own errors, returns [] if issues
+        if not available_backups:
+            log.info("No available backups found in Azure. Startup restore will not proceed.")
+            return None
+
+        latest_timestamp = available_backups[0] # list_available_backups sorts newest first
+        log.info(f"Latest backup timestamp found: {latest_timestamp}. Proceeding with restore of this set.")
+
+        downloaded_config_paths = {}
+
+        # Get share clients
+        db_share_name = os.environ.get('AZURE_DB_SHARE', 'db-backups')
+        db_share_client = service_client.get_share_client(db_share_name)
+        config_share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
+        config_share_client = service_client.get_share_client(config_share_name)
+        media_share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media')
+        media_share_client = service_client.get_share_client(media_share_name)
+
+        # --- Database Restore ---
+        if not _client_exists(db_share_client):
+            log.error(f"Database share '{db_share_name}' not found. Cannot restore database. Aborting startup restore.")
+            return None
+        
+        db_success, db_msg, _, db_path = restore_database_component(
+            latest_timestamp, db_share_client, dry_run=False, socketio_instance=None, task_id=None
+        )
+        if not db_success:
+            log.error(f"Critical: Failed to restore database for latest backup {latest_timestamp} on startup: {db_msg}. Aborting startup restore.")
+            return None
+        log.info(f"Database for {latest_timestamp} successfully restored to {db_path} on startup.")
+
+        # --- Resource Configurations Download (before Map Config) ---
+        if _client_exists(config_share_client):
+            rc_success, rc_msg, _, rc_path = download_resource_configs_component(
+                latest_timestamp, config_share_client, dry_run=False, socketio_instance=None, task_id=None
+            )
+            if rc_success and rc_path:
+                downloaded_config_paths['resource_configs_path'] = rc_path
+                log.info(f"Resource configurations for {latest_timestamp} downloaded to {rc_path} on startup.")
+            else:
+                log.warning(f"Could not download resource configurations for {latest_timestamp} on startup: {rc_msg}")
+        else:
+            log.warning(f"Config share '{config_share_name}' not found. Skipping resource configurations download on startup.")
+
+        # --- Map Configuration Download ---
+        if _client_exists(config_share_client):
+            map_success, map_msg, _, map_path = download_map_config_component(
+                latest_timestamp, config_share_client, dry_run=False, socketio_instance=None, task_id=None
+            )
+            if map_success and map_path:
+                downloaded_config_paths['map_config_path'] = map_path
+                log.info(f"Map configuration for {latest_timestamp} downloaded to {map_path} on startup.")
+            else:
+                log.warning(f"Could not download map configuration for {latest_timestamp} on startup: {map_msg}")
+        else:
+            # This log might be redundant if already logged for resource_configs, but good for clarity
+            log.warning(f"Config share '{config_share_name}' not found. Skipping map configuration download on startup.")
+
+        # --- User Configurations Download ---
+        if _client_exists(config_share_client):
+            uc_success, uc_msg, _, uc_path = download_user_configs_component(
+                latest_timestamp, config_share_client, dry_run=False, socketio_instance=None, task_id=None
+            )
+            if uc_success and uc_path:
+                downloaded_config_paths['user_configs_path'] = uc_path
+                log.info(f"User configurations for {latest_timestamp} downloaded to {uc_path} on startup.")
+            else:
+                log.warning(f"Could not download user configurations for {latest_timestamp} on startup: {uc_msg}")
+        else:
+            log.warning(f"Config share '{config_share_name}' not found. Skipping user configurations download on startup.")
+            
+        # --- Media Restore (Floor Maps & Resource Uploads) ---
+        if _client_exists(media_share_client):
+            fm_success, fm_msg, _ = restore_media_component(
+                latest_timestamp, "FloorMaps", FLOOR_MAP_UPLOADS, "floor_map_uploads",
+                media_share_client, dry_run=False, socketio_instance=None, task_id=None
+            )
+            log.info(f"Floor maps restore for {latest_timestamp} on startup: {fm_msg} (Success: {fm_success})")
+
+            ru_success, ru_msg, _ = restore_media_component(
+                latest_timestamp, "ResourceUploads", RESOURCE_UPLOADS, "resource_uploads",
+                media_share_client, dry_run=False, socketio_instance=None, task_id=None
+            )
+            log.info(f"Resource uploads restore for {latest_timestamp} on startup: {ru_msg} (Success: {ru_success})")
+        else:
+            log.warning(f"Media share '{media_share_name}' not found. Skipping media restore on startup.")
+
+        log.info(f"Startup restore process for {latest_timestamp} completed.")
+        return downloaded_config_paths
+
+    except RuntimeError as rte: # Catch specific RuntimeError from _get_service_client
+        log.error(f"Azure Storage not configured for startup restore: {rte}. Startup restore aborted.")
+        return None
+    except Exception as e:
+        log.exception(f"Critical error during startup restore process: {e}. Startup restore aborted.")
+        return None
 
 
 def verify_backup_set(timestamp_str, socketio_instance=None, task_id=None):
