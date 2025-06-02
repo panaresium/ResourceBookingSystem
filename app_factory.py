@@ -164,11 +164,11 @@ def create_app(config_object=config):
 
         # Add jobs from scheduler_tasks.py
         if cancel_unchecked_bookings:
-            scheduler.add_job(cancel_unchecked_bookings, 'interval', minutes=app.config.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', 5))
+            scheduler.add_job(cancel_unchecked_bookings, 'interval', minutes=app.config.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', 5), args=[app])
         if apply_scheduled_resource_status_changes:
-            scheduler.add_job(apply_scheduled_resource_status_changes, 'interval', minutes=1)
+            scheduler.add_job(apply_scheduled_resource_status_changes, 'interval', minutes=1, args=[app])
         if run_scheduled_backup_job:
-            scheduler.add_job(run_scheduled_backup_job, 'interval', minutes=app.config.get('SCHEDULER_BACKUP_JOB_INTERVAL_MINUTES', 60)) # New config option
+            scheduler.add_job(run_scheduled_backup_job, 'interval', minutes=app.config.get('SCHEDULER_BACKUP_JOB_INTERVAL_MINUTES', 60), args=[app]) # New config option
 
         if azure_backup_if_changed: # Legacy Azure backup
              scheduler.add_job(azure_backup_if_changed, 'interval', minutes=app.config.get('AZURE_BACKUP_INTERVAL_MINUTES', 60))

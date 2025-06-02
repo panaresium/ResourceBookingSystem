@@ -15,13 +15,13 @@ try:
 except ImportError:
     create_full_backup = None
 
-def cancel_unchecked_bookings():
+def cancel_unchecked_bookings(app):
     """
     Cancels bookings that were not checked in within the grace period.
     """
-    with current_app.app_context():
-        logger = current_app.logger
-        grace_minutes = current_app.config.get('CHECK_IN_GRACE_MINUTES', 15)
+    with app.app_context():
+        logger = app.logger
+        grace_minutes = app.config.get('CHECK_IN_GRACE_MINUTES', 15)
         cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=grace_minutes)
 
         stale_bookings = Booking.query.filter(
@@ -49,12 +49,12 @@ def cancel_unchecked_bookings():
         else:
             logger.info("No stale bookings to auto-cancel at this time.")
 
-def apply_scheduled_resource_status_changes():
+def apply_scheduled_resource_status_changes(app):
     """
     Applies scheduled status changes to resources.
     """
-    with current_app.app_context():
-        logger = current_app.logger
+    with app.app_context():
+        logger = app.logger
         now = datetime.now(timezone.utc)
         resources_to_update = Resource.query.filter(
             Resource.scheduled_status_at.isnot(None),
@@ -99,15 +99,16 @@ def apply_scheduled_resource_status_changes():
             db.session.rollback()
             logger.error(f"Error committing scheduled status changes: {e}", exc_info=True)
 
-def run_scheduled_backup_job():
+def run_scheduled_backup_job(app):
     """
     Checks the backup schedule and runs a full backup if due.
     """
-    with current_app.app_context():
-        logger = current_app.logger
+    with app.app_context():
+        logger = app.logger
         logger.info("run_scheduled_backup_job: Checking backup schedule (from JSON)...")
         try:
-            # _load_schedule_from_json is expected to use current_app.config internally
+            # _load_schedule_from_json is expected to use app.config internally
+            # This change is not part of this subtask, but noted.
             schedule_data = _load_schedule_from_json()
 
             if not schedule_data.get('is_enabled'):
