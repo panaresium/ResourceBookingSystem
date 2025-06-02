@@ -405,7 +405,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 await apiCall('/api/admin/resources/bulk', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ids, fields })
+                    body: JSON.stringify({ ids, changes: fields })
                 }, bulkEditFormStatus);
                 await fetchAndDisplayResources();
                 setTimeout(() => { bulkEditModal.style.display = 'none'; }, 500);
