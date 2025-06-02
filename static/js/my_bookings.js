@@ -268,13 +268,49 @@ document.addEventListener('DOMContentLoaded', () => {
             end_time: isoEndTime
         };
 
-        // Optional: Check if any actual change was made (more complex with new date/slot structure)
-        // For now, we assume if "Save" is clicked with valid inputs, an update is intended.
+        // Refined "No Changes" detection
+        const originalButtonText = saveBookingTitleBtn.textContent; // Keep this for button state reset later
+        const bookingItemDiv = bookingsListDiv.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
+        let noChangesMade = false;
 
-        const originalButtonText = saveBookingTitleBtn.textContent;
+        if (bookingItemDiv) {
+            const originalTitle = bookingItemDiv.querySelector('.booking-title').dataset.originalTitle;
+            const originalStartTimeISO = bookingItemDiv.dataset.startTime; // Full ISO string from booking item
+            const originalEndTimeISO = bookingItemDiv.dataset.endTime;     // Full ISO string from booking item
+
+            const titleChanged = newTitle !== originalTitle;
+            let timeChanged = false;
+
+            // Selected date and slot are already validated to be present by checks above.
+            // isoStartTime and isoEndTime are already constructed based on selectedDate and selectedSlot.
+            if (isoStartTime !== originalStartTimeISO || isoEndTime !== originalEndTimeISO) {
+                timeChanged = true;
+            }
+
+            if (!titleChanged && !timeChanged) {
+                noChangesMade = true;
+            }
+        } else {
+            // If bookingItemDiv is not found, something is wrong, proceed with save and let server handle it,
+            // or show an error. For now, assume it will be found or error handling later catches issues.
+            console.warn(`Could not find booking item div for booking ID ${bookingId} to check for changes.`);
+        }
+
+        if (noChangesMade) {
+            showStatusMessage(updateModalStatusDiv, 'No changes detected.', 'info');
+            // Button state reset is handled by the finally block, but we need to return early.
+            // No need to manually reset here if we return BEFORE setting to "Processing..."
+            // However, the current structure sets to "Processing..." then tries to save.
+            // Let's adjust. This "no changes" check should be before setting to "Processing...".
+            // Re-evaluating placement: The "No changes" check should be done BEFORE "Processing..." state.
+            // The current diff places this logic *after* originalButtonText is captured, which is fine.
+            // The button state will be reset by the finally block if we return now.
+            return;
+        }
+
         saveBookingTitleBtn.textContent = 'Processing...';
         saveBookingTitleBtn.disabled = true;
-        showLoading(updateModalStatusDiv, 'Saving changes...'); // This might be redundant if button text changes
+        showLoading(updateModalStatusDiv, 'Saving changes...');
 
         try {
             const updatedBooking = await apiCall(`/api/bookings/${bookingId}`, {
