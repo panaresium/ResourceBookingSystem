@@ -19,35 +19,25 @@
 
 <div id="calendar"></div>
 
-<div id="calendar-edit-booking-modal" class="modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="cebm-title">
-    <div class="modal-content">
-        <span id="cebm-close-modal-btn" class="close-modal-btn" role="button" aria-label="{{ _('Close modal') }}">&times;</span>
-        <h3 id="cebm-title">{{ _('Edit Booking') }}</h3>
-        <p>{{ _('Resource:') }} <strong id="cebm-resource-name">N/A</strong></p>
-        <input type="hidden" id="cebm-booking-id">
-        <input type="hidden" id="cebm-resource-id">
-        <div>
-            <label for="cebm-booking-title">{{ _('Booking Title:') }}</label>
-            <input type="text" id="cebm-booking-title" name="booking_title" class="form-control">
-        </div>
-       <div>
-           <label for="cebm-booking-date">{{ _('Date:') }}</label>
-           <input type="date" id="cebm-booking-date" name="booking_date" class="form-control">
-       </div>
-       <div>
-           <label for="cebm-available-slots-select">{{ _('Available Time Slots:') }}</label>
-           <select id="cebm-available-slots-select" name="available_slots" class="form-select">
-               <option value="">-- {{ _('Select a time slot') }} --</option>
-           </select>
-       </div>
-        <button id="cebm-save-changes-btn" class="button" style="margin-top: 15px;">{{ _('Save Changes') }}</button>
-        <div id="cebm-status-message" class="status-message" style="margin-top:10px;"></div>
-    </div>
-</div>
+{% include '_booking_modal.html' %} {# Include the shared modal #}
+
 {% endblock %}
 
 {% block scripts %}
 {{ super() }}
+<script>
+    // Make username available to scripts
+    // Ideally, this would be on the body tag in base.html: <body data-user-name="{{ current_user.username }}">
+    // Adding it here to fulfill dependency for booking_modal_handler.js and calendar.js
+    document.addEventListener('DOMContentLoaded', function() {
+        {% if current_user and current_user.is_authenticated %}
+            document.body.dataset.userName = "{{ current_user.username }}";
+        {% else %}
+            document.body.dataset.userName = ""; // Set to empty if no user or not authenticated
+        {% endif %}
+    });
+</script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+<script src="{{ url_for('static', filename='js/booking_modal_handler.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/calendar.js') }}" defer></script>
 {% endblock %}

@@ -37,45 +37,23 @@
         </div>
     </template>
 
-    <!-- Modal for Updating Booking Title -->
-    <div class="modal fade" id="update-booking-modal" tabindex="-1" aria-labelledby="updateBookingModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="updateBookingModalLabel">{{ _('Update Booking') }}</h5>
-                </div>
-                <div class="modal-body">
-                    <form id="update-booking-form">
-                        <input type="hidden" id="modal-booking-id" value="">
-                        <div class="mb-3">
-                            <label for="new-booking-title" class="form-label">{{ _('New Title') }}:</label>
-                            <input type="text" class="form-control" id="new-booking-title" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="modal-booking-date" class="form-label">{{ _('New Date') }}:</label>
-                            <input type="date" class="form-control" id="modal-booking-date">
-                        </div>
-                        <div class="mb-3">
-                            <label for="modal-available-slots-select" class="form-label">{{ _('Available Time Slots') }}:</label>
-                            <select class="form-control" id="modal-available-slots-select">
-                                <!-- Options will be populated by JavaScript -->
-                            </select>
-                        </div>
-                        <div id="update-modal-status" class="alert" style="display:none;"></div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Close') }}</button>
-                    <button type="button" class="btn btn-primary" id="save-booking-title-btn">{{ _('Save Changes') }}</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    {% include '_booking_modal.html' %}
 
 </main>
 {% endblock %}
 
 {% block scripts %}
     {{ super() }}
+    <script>
+        // Make username available to scripts
+        // Ideally, this would be on the body tag in base.html: <body data-user-name="{{ current_user.username }}">
+        // Adding it here to fulfill dependency for booking_modal_handler.js and my_bookings.js
+        {% if current_user and current_user.is_authenticated %}
+            document.body.dataset.userName = "{{ current_user.username }}";
+        {% else %}
+            document.body.dataset.userName = ""; // Set to empty if no user or not authenticated
+        {% endif %}
+    </script>
+    <script src="{{ url_for('static', filename='js/booking_modal_handler.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/my_bookings.js') }}" defer></script>
 {% endblock %}

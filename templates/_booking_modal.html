@@ -1,0 +1,43 @@
+<!-- templates/_booking_modal.html -->
+<div class="modal fade" id="booking-slot-modal" tabindex="-1" aria-labelledby="bookingSlotModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bookingSlotModalLabel">{{ _('Update Booking') }}</h5> <!-- Title will be set by JS -->
+                <!-- Removed X button from header as per last feedback round, will be re-evaluated based on final design for shared modal -->
+                <!-- If an X button is desired in header for shared modal, it would be:
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                -->
+            </div>
+            <div class="modal-body">
+                <form id="booking-slot-form"> <!-- Changed form ID for clarity -->
+                    <input type="hidden" id="modal-booking-id" value="">
+                    <input type="hidden" id="modal-resource-id" value=""> <!-- Added for when creating new booking -->
+                    <div class="mb-3">
+                        <label for="modal-resource-name-display" class="form-label">{{ _('Resource') }}:</label>
+                        <input type="text" class="form-control" id="modal-resource-name-display" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label for="modal-booking-title" class="form-label">{{ _('Title') }}:</label>
+                        <input type="text" class="form-control" id="modal-booking-title" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="modal-booking-date" class="form-label">{{ _('Date') }}:</label>
+                        <input type="date" class="form-control" id="modal-booking-date">
+                    </div>
+                    <div class="mb-3">
+                        <label for="modal-available-slots-select" class="form-label">{{ _('Available Time Slots') }}:</label>
+                        <select class="form-select" id="modal-available-slots-select">
+                            <!-- Options will be populated by JavaScript -->
+                        </select>
+                    </div>
+                    <div id="modal-status-div" class="alert" style="display:none;"></div> <!-- Renamed for clarity -->
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Close') }}</button>
+                <button type="button" class="btn btn-primary" id="modal-save-booking-btn">{{ _('Save Changes') }}</button> <!-- Button text will be set by JS -->
+            </div>
+        </div>
+    </div>
+</div>
