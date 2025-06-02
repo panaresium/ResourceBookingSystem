@@ -53,20 +53,14 @@
                             <input type="text" class="form-control" id="new-booking-title" required>
                         </div>
                         <div class="mb-3">
-                            <label for="new-booking-start-date" class="form-label">{{ _('New Start Date') }}:</label>
-                            <input type="date" class="form-control" id="new-booking-start-date">
+                            <label for="modal-booking-date" class="form-label">{{ _('New Date') }}:</label>
+                            <input type="date" class="form-control" id="modal-booking-date">
                         </div>
                         <div class="mb-3">
-                            <label for="new-booking-start-time" class="form-label">{{ _('New Start Time') }}:</label>
-                            <input type="time" class="form-control" id="new-booking-start-time">
-                        </div>
-                        <div class="mb-3">
-                            <label for="new-booking-end-date" class="form-label">{{ _('New End Date') }}:</label>
-                            <input type="date" class="form-control" id="new-booking-end-date">
-                        </div>
-                        <div class="mb-3">
-                            <label for="new-booking-end-time" class="form-label">{{ _('New End Time') }}:</label>
-                            <input type="time" class="form-control" id="new-booking-end-time">
+                            <label for="modal-available-slots-select" class="form-label">{{ _('Available Time Slots') }}:</label>
+                            <select class="form-control" id="modal-available-slots-select">
+                                <!-- Options will be populated by JavaScript -->
+                            </select>
                         </div>
                         <div id="update-modal-status" class="alert" style="display:none;"></div>
                     </form>
