@@ -271,7 +271,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // Optional: Check if any actual change was made (more complex with new date/slot structure)
         // For now, we assume if "Save" is clicked with valid inputs, an update is intended.
 
-        showLoading(updateModalStatusDiv, 'Saving changes...');
+        const originalButtonText = saveBookingTitleBtn.textContent;
+        saveBookingTitleBtn.textContent = 'Processing...';
+        saveBookingTitleBtn.disabled = true;
+        showLoading(updateModalStatusDiv, 'Saving changes...'); // This might be redundant if button text changes
 
         try {
             const updatedBooking = await apiCall(`/api/bookings/${bookingId}`, {
@@ -302,7 +305,15 @@ document.addEventListener('DOMContentLoaded', () => {
             // fetchAndDisplayBookings(); 
         } catch (error) {
             console.error('Error updating booking:', error);
-            showError(updateModalStatusDiv, error.message || 'Failed to update booking.');
+            // Ensure showError is available or use showStatusMessage
+            if (typeof showError === 'function') {
+                 showError(updateModalStatusDiv, error.message || 'Failed to update booking.');
+            } else {
+                showStatusMessage(updateModalStatusDiv, error.message || 'Failed to update booking.', 'danger');
+            }
+        } finally {
+            saveBookingTitleBtn.textContent = originalButtonText;
+            saveBookingTitleBtn.disabled = false;
         }
     });
 
