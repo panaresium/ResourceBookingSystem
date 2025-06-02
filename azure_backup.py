@@ -360,6 +360,7 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             upload_file(db_share_client, local_db_path, remote_db_path)
             logger.info(f"Successfully backed up database to '{db_share_name}/{remote_db_path}'.")
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'Database backup complete.')
+            _emit_progress(socketio_instance, task_id, 'backup_progress', '(Note: Database backup includes all tables e.g., users, bookings, resources.)', 'info')
         except Exception as e:
             logger.error(f"Failed to backup database to '{db_share_name}/{remote_db_path}': {e}")
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'Database backup failed.', str(e))
