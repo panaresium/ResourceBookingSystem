@@ -31,6 +31,24 @@
     .log-info {
         color: #333;
     }
+    /* Styles for DB Records View */
+    .db-table-container {
+        border: 1px solid #eee;
+        padding: 10px;
+        border-radius: 4px;
+    }
+    .db-records-content pre {
+        background-color: #f8f9fa; /* Light background for pre */
+        padding: 10px;
+        border-radius: 4px;
+        max-height: 300px; /* Max height for individual record lists */
+        overflow-y: auto;
+    }
+    /* Style for active (expanded) button */
+    #view-db-records-output .btn.active { 
+        background-color: #007bff;
+        color: white;
+    }
 </style>
 {% endblock %}
 
@@ -354,8 +372,8 @@
             backupLogAreaEl.style.display = 'block'; // Show log area
             restoreLogAreaEl.style.display = 'none'; // Hide other log area
             appendLog('backup-log-area', "{{ _('Initiating backup request...') }}", '', 'info');
-            backupButton.disabled = true;
-            document.querySelectorAll('.restore-btn').forEach(btn => btn.disabled = true); // Disable restore buttons
+            // Disable all relevant buttons during one-click backup
+            document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = true);
 
             backupStatusMessageEl.textContent = "{{ _('Initiating backup...') }}";
             backupStatusMessageEl.className = 'alert alert-info';
@@ -1043,14 +1061,55 @@
                 })
                 .then(response => response.json())
                 .then(data => {
-                    if (data.success) {
-                        viewDbRecordsOutputEl.textContent = JSON.stringify(data.data, null, 2);
+                if (data.success && data.data) {
+                    viewDbRecordsOutputEl.innerHTML = ''; // Clear previous content
                         viewDbRecordsOutputEl.style.display = 'block';
+                    
+                    for (const tableName in data.data) {
+                        if (data.data.hasOwnProperty(tableName)) {
+                            const records = data.data[tableName];
+
+                            // Create a container for each table's data
+                            const tableContainer = document.createElement('div');
+                            tableContainer.className = 'db-table-container mb-3';
+
+                            // Create a button for the table name (for collapse/expand)
+                            const tableButton = document.createElement('button');
+                            tableButton.className = 'btn btn-outline-primary btn-sm mb-1 w-100 text-start';
+                            tableButton.textContent = `${tableName} (${records.length} records)`;
+                            
+                            // Create a div for the records, initially hidden
+                            const recordsDiv = document.createElement('div');
+                            recordsDiv.className = 'db-records-content'; 
+                            recordsDiv.style.display = 'none'; // Start collapsed
+
+                            if (records.length > 0) {
+                                const preFormattedRecords = document.createElement('pre');
+                                preFormattedRecords.style.whiteSpace = 'pre-wrap'; // Ensure wrapping
+                                preFormattedRecords.style.wordBreak = 'break-all'; // Break long strings
+                                preFormattedRecords.textContent = JSON.stringify(records, null, 2);
+                                recordsDiv.appendChild(preFormattedRecords);
+                            } else {
+                                recordsDiv.textContent = "{{ _('No records found for this table.') }}";
+                            }
+
+                            tableButton.addEventListener('click', function() {
+                                const isHidden = recordsDiv.style.display === 'none';
+                                recordsDiv.style.display = isHidden ? 'block' : 'none';
+                                tableButton.classList.toggle('active', isHidden); 
+                            });
+
+                            tableContainer.appendChild(tableButton);
+                            tableContainer.appendChild(recordsDiv);
+                            viewDbRecordsOutputEl.appendChild(tableContainer);
+                        }
+                    }
                         viewDbRecordsStatusEl.textContent = "{{ _('DB records fetched successfully.') }}";
                         viewDbRecordsStatusEl.className = 'alert alert-success';
                     } else {
                         viewDbRecordsStatusEl.textContent = "{{ _('Failed to fetch DB records:') }} " + (data.message || "{{ _('Unknown error.') }}");
                         viewDbRecordsStatusEl.className = 'alert alert-danger';
+                    viewDbRecordsOutputEl.style.display = 'none';
                     }
                 })
                 .catch(error => {
