@@ -153,6 +153,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Function to handle saving changes from the modal
     async function saveBookingChanges(bookingId, title, calendarEventToUpdate) { // Signature updated
+        cebmSaveChangesBtn.disabled = true;
+        cebmSaveChangesBtn.textContent = 'Saving...';
         cebmStatusMessage.textContent = '';
         cebmStatusMessage.className = 'status-message';
 
@@ -184,8 +186,6 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         try {
-            cebmSaveChangesBtn.disabled = true;
-            cebmSaveChangesBtn.textContent = 'Saving...';
             const response = await apiCall(`/api/bookings/${bookingId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -205,6 +205,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             cebmStatusMessage.textContent = response.message || 'Booking updated successfully!';
             cebmStatusMessage.className = 'status-message success-message'; // Ensure you have .success-message CSS
+
+            window.location.href = '/my_bookings'; // Redirect after successful save
 
             setTimeout(() => {
                 calendarEditBookingModal.style.display = 'none';
@@ -275,20 +277,33 @@ document.addEventListener('DOMContentLoaded', () => {
             cebmStatusMessage.className = 'status-message';
             calendarEditBookingModal.style.display = 'block';
 
-            // Remove previous event listener to avoid multiple bindings if any
-            const newSaveBtn = cebmSaveChangesBtn.cloneNode(true);
-            cebmSaveChangesBtn.parentNode.replaceChild(newSaveBtn, cebmSaveChangesBtn);
             // Re-assign to the new button for the current scope
-            const currentSaveBtn = document.getElementById('cebm-save-changes-btn');
+            let currentSaveBtn = cebmSaveChangesBtn; // Initialize with the original button
 
-            currentSaveBtn.onclick = () => {
-                saveBookingChanges(
-                    cebmBookingId.value,
-                    cebmBookingTitle.value,
-                    // startTime and endTime are no longer passed directly
-                    info.event
-                );
-            };
+            // Remove previous event listener to avoid multiple bindings if any
+            if (cebmSaveChangesBtn && cebmSaveChangesBtn.parentNode) {
+                const newSaveBtn = cebmSaveChangesBtn.cloneNode(true);
+                cebmSaveChangesBtn.parentNode.replaceChild(newSaveBtn, cebmSaveChangesBtn);
+                currentSaveBtn = newSaveBtn; // Assign the new button to currentSaveBtn
+            } else {
+                console.error("Error: Could not find 'cebm-save-changes-btn' or its parent node. Cannot re-attach event listener for save button.");
+                // Optionally, disable the button or show a user-facing error if this state is critical
+            }
+
+            // Ensure currentSaveBtn is valid before attaching onclick
+            if (currentSaveBtn) {
+                currentSaveBtn.onclick = () => {
+                    saveBookingChanges(
+                        cebmBookingId.value,
+                        cebmBookingTitle.value,
+                        info.event
+                    );
+                };
+            } else {
+                // This case should ideally not be reached if cebmSaveChangesBtn was initially found.
+                // If it is reached, it means the original button was also null.
+                console.error("Error: Save changes button ('cebm-save-changes-btn') not found. Save functionality will be unavailable.");
+            }
         },
         eventSources: [
             {
