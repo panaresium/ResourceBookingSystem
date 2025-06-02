@@ -73,10 +73,6 @@ def create_app(config_object=config):
     # This logic was in app.py; it's better here or in config.py itself.
     # config.py now handles directory creation, so this might be redundant.
     # However, double-checking critical folders controlled by app.config is fine.
-    if not os.path.exists(app.config['UPLOAD_FOLDER']):
-        os.makedirs(app.config['UPLOAD_FOLDER'])
-    if not os.path.exists(app.config['RESOURCE_UPLOAD_FOLDER']):
-        os.makedirs(app.config['RESOURCE_UPLOAD_FOLDER'])
     if not os.path.exists(app.config['DATA_DIR']): # From config.py
         os.makedirs(app.config['DATA_DIR'])
 
