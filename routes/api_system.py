@@ -10,7 +10,7 @@ from flask_login import login_required, current_user
 # Relative imports from project structure
 from auth import permission_required
 from extensions import db, socketio # socketio might be None if not available
-from models import AuditLog, User, Resource, FloorMap # Added User, Resource, FloorMap for utils that might need them in this context
+from models import AuditLog, User, Resource, FloorMap, Booking, Role # Added User, Resource, FloorMap for utils that might need them in this context
 from utils import (
     add_audit_log,
     _get_map_configuration_data,
@@ -590,3 +590,158 @@ def api_delete_backup_set(backup_timestamp):
 
 def init_api_system_routes(app):
     app.register_blueprint(api_system_bp)
+
+# --- Raw DB View Route ---
+
+@api_system_bp.route('/api/admin/view_db_raw_top100', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def api_admin_view_db_raw_top100():
+    """Fetches top 100 records from key database tables."""
+    current_app.logger.info(f"User {current_user.username} requested raw top 100 DB records.")
+    
+    models_to_query = {
+        "User": User,
+        "Booking": Booking,
+        "Resource": Resource,
+        "FloorMap": FloorMap,
+        "AuditLog": AuditLog,
+        "Role": Role
+    }
+    
+    raw_data = {}
+    
+    try:
+        for model_name, ModelClass in models_to_query.items():
+            records = ModelClass.query.limit(100).all()
+            serialized_records = []
+            for record in records:
+                record_dict = {}
+                for column in record.__table__.columns:
+                    val = getattr(record, column.name)
+                    if isinstance(val, datetime):
+                        record_dict[column.name] = val.isoformat()
+                    elif isinstance(val, (uuid.UUID)):
+                        record_dict[column.name] = str(val)
+                    else:
+                        record_dict[column.name] = val
+                serialized_records.append(record_dict)
+            raw_data[model_name] = serialized_records
+            
+        current_app.logger.info(f"Successfully fetched raw DB data for {current_user.username}.")
+        return jsonify({'success': True, 'data': raw_data}), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Error fetching raw DB data for {current_user.username}: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': f'Failed to fetch raw database data: {str(e)}'}), 500
+
+# --- System Data Cleanup Route ---
+
+@api_system_bp.route('/api/admin/cleanup_system_data', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_admin_cleanup_system_data():
+    """Cleans up database records and uploaded files."""
+    current_app.logger.info(f"User {current_user.username} initiated system data cleanup.")
+    
+    try:
+        # Database Cleanup
+        num_bookings_deleted = Booking.query.delete()
+        add_audit_log(action="DB_CLEANUP", details=f"Deleted {num_bookings_deleted} records from Booking table.", user_id=current_user.id)
+        current_app.logger.info(f"Deleted {num_bookings_deleted} records from Booking table.")
+
+        num_resources_deleted = Resource.query.delete()
+        add_audit_log(action="DB_CLEANUP", details=f"Deleted {num_resources_deleted} records from Resource table.", user_id=current_user.id)
+        current_app.logger.info(f"Deleted {num_resources_deleted} records from Resource table.")
+
+        num_floormaps_deleted = FloorMap.query.delete()
+        add_audit_log(action="DB_CLEANUP", details=f"Deleted {num_floormaps_deleted} records from FloorMap table.", user_id=current_user.id)
+        current_app.logger.info(f"Deleted {num_floormaps_deleted} records from FloorMap table.")
+        
+        db.session.commit()
+        current_app.logger.info("Database cleanup committed.")
+
+        # Uploaded Files Cleanup
+        # Construct paths relative to the application's root directory
+        floor_map_uploads_path = os.path.join(current_app.root_path, 'static', 'floor_map_uploads')
+        resource_uploads_path = os.path.join(current_app.root_path, 'static', 'resource_uploads')
+        
+        paths_to_clean = {
+            "Floor Map Uploads": floor_map_uploads_path,
+            "Resource Uploads": resource_uploads_path
+        }
+        
+        files_deleted_count = 0
+        deletion_errors = []
+
+        for dir_label, directory_path in paths_to_clean.items():
+            if not os.path.exists(directory_path):
+                current_app.logger.info(f"Directory '{directory_path}' for {dir_label} not found. Skipping.")
+                continue
+            if not os.path.isdir(directory_path):
+                current_app.logger.warning(f"Path '{directory_path}' for {dir_label} is not a directory. Skipping.")
+                continue
+
+            current_app.logger.info(f"Cleaning up files in {dir_label} at '{directory_path}'.")
+            for filename in os.listdir(directory_path):
+                file_path = os.path.join(directory_path, filename)
+                try:
+                    if os.path.isfile(file_path) or os.path.islink(file_path): # Check if it's a file or a symlink
+                        os.remove(file_path)
+                        files_deleted_count += 1
+                        current_app.logger.debug(f"Deleted file: {file_path}")
+                    # Optionally, handle subdirectories if they are not expected and should be removed.
+                    # else:
+                    #     current_app.logger.info(f"Skipping non-file item: {file_path}")
+                except Exception as e_file:
+                    err_msg = f"Failed to delete file {file_path}: {str(e_file)}"
+                    current_app.logger.error(err_msg)
+                    deletion_errors.append(err_msg)
+        
+        add_audit_log(action="FILE_CLEANUP", details=f"Deleted {files_deleted_count} uploaded files. Errors: {len(deletion_errors)}.", user_id=current_user.id)
+        current_app.logger.info(f"Uploaded files cleanup completed. Deleted: {files_deleted_count}. Errors: {len(deletion_errors)}.")
+
+        if deletion_errors:
+            return jsonify({'success': False, 'message': f'Cleanup partially completed. Database cleared. File deletion errors: {"; ".join(deletion_errors)}'}), 500
+            
+        return jsonify({'success': True, 'message': 'System data cleanup completed successfully.'}), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error during system data cleanup by {current_user.username}: {e}", exc_info=True)
+        add_audit_log(action="CLEANUP_SYSTEM_DATA_ERROR", details=f"Error: {str(e)}", user_id=current_user.id)
+        return jsonify({'success': False, 'message': f'An error occurred during cleanup: {str(e)}'}), 500
+
+# --- Reload Configurations Route ---
+
+@api_system_bp.route('/api/admin/reload_configurations', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_admin_reload_configurations():
+    """Attempts to reload certain configurations from their sources."""
+    current_app.logger.info(f"User {current_user.username} initiated configuration reload.")
+    
+    try:
+        # Reload Map Configuration
+        current_app.logger.info("Attempting to re-fetch map configuration data.")
+        map_data = _get_map_configuration_data()
+        # Note: This action re-fetches the data. For it to be effective globally,
+        # the application would need a mechanism to re-initialize or update
+        # any services or caches that use this data.
+        current_app.logger.info(f"Map configuration data re-fetched. Contains {len(map_data.get('floor_maps', []))} floor maps and {len(map_data.get('connections', []))} connections. Effective update depends on application's internal state management.")
+        add_audit_log(action="RELOAD_CONFIG_MAP", details="Attempted to reload map configurations. Data re-fetched.", user_id=current_user.id)
+
+        # Reload Backup Schedule
+        current_app.logger.info("Attempting to reload backup schedule configuration.")
+        schedule_data = _load_schedule_from_json()
+        current_app.config['BACKUP_SCHEDULE_CONFIG'] = schedule_data # Assuming scheduler reads from here
+        current_app.logger.info(f"Backup schedule configuration reloaded into app.config: {schedule_data}")
+        add_audit_log(action="RELOAD_CONFIG_SCHEDULE", details=f"Reloaded backup schedule configuration: {schedule_data}", user_id=current_user.id)
+        
+        add_audit_log(action="RELOAD_CONFIGURATIONS_FINISHED", details="Configuration reload attempt finished.", user_id=current_user.id)
+        return jsonify({'success': True, 'message': 'Configuration reload attempt finished. Note: Full effect for map configurations may require deeper application integration or restart.'}), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Error during configuration reload by {current_user.username}: {e}", exc_info=True)
+        add_audit_log(action="RELOAD_CONFIGURATIONS_ERROR", details=f"Error: {str(e)}", user_id=current_user.id)
+        return jsonify({'success': False, 'message': f'An error occurred during configuration reload: {str(e)}'}), 500
