@@ -10,6 +10,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (modalElement) {
         if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
             bookingSlotModalInstance = new bootstrap.Modal(modalElement);
+            // Explicitly hide modal on initialization to counter any premature display issues.
+            if (bookingSlotModalInstance) {
+                bookingSlotModalInstance.hide();
+                console.log('Modal #booking-slot-modal explicitly hidden by JS on init via booking_modal_handler.js.');
+            }
         } else {
             console.error("Bootstrap Modal class not found. Booking modal may not function correctly.");
             // Basic fallback for showing/hiding if Bootstrap JS fails to load (very basic)
@@ -33,6 +38,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const dateInput = document.getElementById('modal-booking-date');
     if (dateInput) {
         dateInput.addEventListener('change', loadAvailableSlotsForModal);
+    }
+
+    // Add event listener for when the modal is hidden
+    if (modalElement) {
+        modalElement.addEventListener('hidden.bs.modal', function () {
+            const closeButton = document.querySelector('#booking-slot-modal .modal-footer .btn-secondary[data-bs-dismiss="modal"]');
+            if (closeButton) {
+                closeButton.setAttribute('tabindex', '-1');
+                console.log('Modal hidden: Close button tabindex set to -1.');
+            }
+        });
     }
 });
 
@@ -224,6 +240,13 @@ function openBookingModal(options) {
 
     if (dateInputEl.value) {
         loadAvailableSlotsForModal();
+    }
+
+    // Make footer close button focusable when modal opens
+    const closeButton = document.querySelector('#booking-slot-modal .modal-footer .btn-secondary[data-bs-dismiss="modal"]');
+    if (closeButton) {
+        closeButton.removeAttribute('tabindex');
+        console.log('Modal open: Close button tabindex removed.');
     }
 
     if (bookingSlotModalInstance) {
