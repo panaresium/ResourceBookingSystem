@@ -54,6 +54,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const updateModalStatusDiv = document.getElementById('update-modal-status');
 
+    const predefinedSlots = [
+        { name: "Morning (08:00 - 12:00 UTC)", start: "08:00", end: "12:00" },
+        { name: "Afternoon (13:00 - 17:00 UTC)", start: "13:00", end: "17:00" },
+        { name: "Full Day (08:00 - 17:00 UTC)", start: "08:00", end: "17:00" }
+    ];
+
     // Helper to display status messages (could be moved to script.js if used globally)
     function showStatusMessage(element, message, type = 'info') {
         element.textContent = message;
@@ -81,6 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const bookingItemDiv = bookingItemClone.querySelector('.booking-item');
 
                 bookingItemDiv.dataset.bookingId = booking.id; // Store booking ID on the item div
+                bookingItemDiv.dataset.resourceId = booking.resource_id; // Store resource ID
                 bookingItemDiv.dataset.startTime = booking.start_time; // Store full start time
                 bookingItemDiv.dataset.endTime = booking.end_time; // Store full end time
 
@@ -157,20 +164,34 @@ document.addEventListener('DOMContentLoaded', () => {
             const bookingItemDiv = target.closest('.booking-item');
             const currentTitle = bookingItemDiv.querySelector('.booking-title').dataset.originalTitle;
             const currentStartTimeISO = bookingItemDiv.dataset.startTime;
-            const currentEndTimeISO = bookingItemDiv.dataset.endTime;
+            // const currentEndTimeISO = bookingItemDiv.dataset.endTime; // Not immediately needed for new modal
             const resourceName = bookingItemDiv.querySelector('.resource-name').textContent;
+            const resourceId = bookingItemDiv.dataset.resourceId;
 
             modalBookingIdInput.value = bookingId;
             newBookingTitleInput.value = currentTitle;
 
-            // Populate date and time fields
-            const startDate = new Date(currentStartTimeISO);
-            document.getElementById('new-booking-start-date').value = startDate.toISOString().split('T')[0];
-            document.getElementById('new-booking-start-time').value = startDate.toTimeString().slice(0,5);
+            // Store resourceId on the modal itself or a hidden input within the modal
+            updateModalElement.dataset.resourceId = resourceId; // Storing on modal element
 
-            const endDate = new Date(currentEndTimeISO);
-            document.getElementById('new-booking-end-date').value = endDate.toISOString().split('T')[0];
-            document.getElementById('new-booking-end-time').value = endDate.toTimeString().slice(0,5);
+            // Populate new date field
+            const startDate = new Date(currentStartTimeISO);
+            const modalBookingDateInput = document.getElementById('modal-booking-date');
+            if (modalBookingDateInput) {
+                modalBookingDateInput.value = startDate.toISOString().split('T')[0];
+                // Trigger change event to load slots for the current date
+                modalBookingDateInput.dispatchEvent(new Event('change'));
+            }
+
+            // Clear old time fields (if they are still in HTML, eventually they'll be removed)
+            const oldStartDateInput = document.getElementById('new-booking-start-date');
+            if (oldStartDateInput) oldStartDateInput.value = '';
+            const oldStartTimeInput = document.getElementById('new-booking-start-time');
+            if (oldStartTimeInput) oldStartTimeInput.value = '';
+            const oldEndDateInput = document.getElementById('new-booking-end-date');
+            if (oldEndDateInput) oldEndDateInput.value = '';
+            const oldEndTimeInput = document.getElementById('new-booking-end-time');
+            if (oldEndTimeInput) oldEndTimeInput.value = '';
             
             updateBookingModalLabel.textContent = `Update Booking for: ${resourceName}`;
             hideStatusMessage(updateModalStatusDiv);
@@ -211,61 +232,34 @@ document.addEventListener('DOMContentLoaded', () => {
     saveBookingTitleBtn.addEventListener('click', async () => {
         const bookingId = modalBookingIdInput.value;
         const newTitle = newBookingTitleInput.value.trim();
-
-        const newStartDate = document.getElementById('new-booking-start-date').value;
-        const newStartTime = document.getElementById('new-booking-start-time').value;
-        const newEndDate = document.getElementById('new-booking-end-date').value;
-        const newEndTime = document.getElementById('new-booking-end-time').value;
+        const selectedDate = document.getElementById('modal-booking-date').value;
+        const selectedSlot = document.getElementById('modal-available-slots-select').value;
 
         if (!newTitle) {
             showStatusMessage(updateModalStatusDiv, 'Title cannot be empty.', 'danger');
             return;
         }
-
-        const payload = { title: newTitle };
-        let timesProvided = false;
-        let timesComplete = false;
-
-        if (newStartDate && newStartTime && newEndDate && newEndTime) {
-            timesProvided = true;
-            timesComplete = true;
-            payload.start_time = `${newStartDate}T${newStartTime}:00`; // Add seconds
-            payload.end_time = `${newEndDate}T${newEndTime}:00`;     // Add seconds
-        } else if (newStartDate || newStartTime || newEndDate || newEndTime) {
-            // Some time fields are filled but not all, which is an incomplete input for time update
-            timesProvided = true;
-            timesComplete = false;
-        }
-
-        if (timesProvided && !timesComplete) {
-            showStatusMessage(updateModalStatusDiv, 'Please provide both date and time for start and end if you wish to update the booking time.', 'danger');
+        if (!selectedDate) {
+            showStatusMessage(updateModalStatusDiv, 'Please select a date.', 'danger');
             return;
         }
-        
-        // Check if any actual change was made
-        const bookingItemDiv = bookingsListDiv.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
-        const originalTitle = bookingItemDiv.querySelector('.booking-title').dataset.originalTitle;
-        const originalStartTimeISO = bookingItemDiv.dataset.startTime;
-        const originalEndTimeISO = bookingItemDiv.dataset.endTime;
-
-        let noChangesMade = true;
-        if (newTitle !== originalTitle) {
-            noChangesMade = false;
-        }
-        if (timesComplete) {
-            // Compare with original times, needs careful ISO string comparison or Date object comparison
-            // For simplicity, we'll assume if times are provided and valid, it's a change.
-            // A more robust check would convert payload.start_time and originalStartTimeISO to Date objects and compare.
-            if (payload.start_time !== originalStartTimeISO || payload.end_time !== originalEndTimeISO) {
-                 noChangesMade = false;
-            }
-        }
-        
-        if (noChangesMade && !timesComplete) { // No title change and no complete time change attempted
-             showStatusMessage(updateModalStatusDiv, 'No changes detected.', 'info');
-             return;
+        if (!selectedSlot) {
+            showStatusMessage(updateModalStatusDiv, 'Please select an available time slot.', 'danger');
+            return;
         }
 
+        const [slotStart, slotEnd] = selectedSlot.split(',');
+        const isoStartTime = `${selectedDate}T${slotStart}:00Z`; // Assuming slot times are UTC
+        const isoEndTime = `${selectedDate}T${slotEnd}:00Z`;   // Assuming slot times are UTC
+
+        const payload = {
+            title: newTitle,
+            start_time: isoStartTime,
+            end_time: isoEndTime
+        };
+
+        // Optional: Check if any actual change was made (more complex with new date/slot structure)
+        // For now, we assume if "Save" is clicked with valid inputs, an update is intended.
 
         showLoading(updateModalStatusDiv, 'Saving changes...');
 
@@ -277,6 +271,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             
             // Update the UI
+            const bookingItemDiv = bookingsListDiv.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
             if (bookingItemDiv) {
                 const titleSpan = bookingItemDiv.querySelector('.booking-title');
                 titleSpan.textContent = updatedBooking.title;
@@ -284,23 +279,159 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const startTimeSpan = bookingItemDiv.querySelector('.start-time');
                 startTimeSpan.textContent = new Date(updatedBooking.start_time).toUTCString();
-                bookingItemDiv.dataset.startTime = updatedBooking.start_time; // Update stored full start time
+                bookingItemDiv.dataset.startTime = updatedBooking.start_time;
 
                 const endTimeSpan = bookingItemDiv.querySelector('.end-time');
                 endTimeSpan.textContent = new Date(updatedBooking.end_time).toUTCString();
-                bookingItemDiv.dataset.endTime = updatedBooking.end_time; // Update stored full end time
+                bookingItemDiv.dataset.endTime = updatedBooking.end_time;
             }
             
             showSuccess(statusDiv, `Booking ${bookingId} updated successfully.`);
             updateModal.hide();
-            // Consider re-fetching or more granular UI update for check-in/out button visibility
-            // For now, only title and times are updated. A full refresh might be simpler:
+            // Consider re-fetching all bookings for simplicity and to ensure all states are correct.
             // fetchAndDisplayBookings(); 
         } catch (error) {
             console.error('Error updating booking:', error);
             showError(updateModalStatusDiv, error.message || 'Failed to update booking.');
         }
     });
+
+    // Event listener for modal date change
+    const modalBookingDateInput = document.getElementById('modal-booking-date');
+    if (modalBookingDateInput) {
+        modalBookingDateInput.addEventListener('change', async () => {
+            const availableSlotsSelect = document.getElementById('modal-available-slots-select');
+            const resourceId = updateModalElement.dataset.resourceId;
+            const selectedDate = modalBookingDateInput.value;
+            const currentBookingId = modalBookingIdInput.value; // Booking being edited
+
+            if (!selectedDate || !resourceId) {
+                availableSlotsSelect.innerHTML = '<option value="">Select a date first</option>';
+                return;
+            }
+
+            availableSlotsSelect.innerHTML = '<option value="">Loading...</option>';
+            availableSlotsSelect.disabled = true;
+
+            try {
+                // Step 3: Fetch necessary data
+                // Fetch resource details (for maintenance status)
+                const resource = await apiCall(`/api/resources/${resourceId}`);
+
+                // Fetch user's own bookings for the selected date
+                // The endpoint /api/bookings/my_bookings_for_date?date=${selectedDate} needs to be implemented
+                // For now, let's assume it exists or adapt.
+                // If not, we might need to fetch all user bookings and filter, which is less ideal.
+                // Let's placeholder the call:
+                let usersBookingsOnDate = [];
+                try {
+                    usersBookingsOnDate = await apiCall(`/api/bookings/my_bookings_for_date?date=${selectedDate}`);
+                } catch (e) {
+                    // If endpoint doesn't exist, this will fail. Log and continue, conflict check will be partial.
+                    console.warn(`Could not fetch user's bookings for date ${selectedDate}. User conflict check might be incomplete. Error: ${e.message}`);
+                }
+
+
+                // Step 5: Filter Slots
+                availableSlotsSelect.innerHTML = ''; // Clear "Loading..."
+                let availableSlotsFound = 0;
+
+                const selectedDateObj = new Date(selectedDate + "T00:00:00Z"); // Ensure date is treated as UTC midnight
+
+                for (const slot of predefinedSlots) {
+                    const slotStartDateTime = new Date(`${selectedDate}T${slot.start}:00Z`);
+                    const slotEndDateTime = new Date(`${selectedDate}T${slot.end}:00Z`);
+                    let isAvailable = true;
+                    let unavailabilityReason = "";
+
+                    // Past Date/Time Check
+                    const now = new Date();
+                    if (slotEndDateTime < now) {
+                        isAvailable = false;
+                        unavailabilityReason = " (Past)";
+                    }
+
+                    // Resource Maintenance Check
+                    if (isAvailable && resource.is_under_maintenance) {
+                        if (!resource.maintenance_until) { // Indefinite maintenance
+                            isAvailable = false;
+                            unavailabilityReason = " (Resource under maintenance)";
+                        } else {
+                            const maintenanceUntilDate = new Date(resource.maintenance_until);
+                            // If slot starts before maintenance ends OR slot ends after maintenance starts (assuming maintenance_from exists or is now)
+                            // For simplicity, if maintenance_until is on selectedDate or in future, check overlap.
+                            // This check assumes maintenance_until is the END of maintenance.
+                            // A more precise check would involve maintenance_from.
+                            // If slot is within a defined maintenance period.
+                            // Simplified: if selectedDate is before or on the day of maintenance_until, and slot is within it.
+                            // This logic needs to be robust based on how maintenance_until is defined (end of day? specific time?)
+                            // For now: if slot ends after "now" and starts before maintenance ends.
+                            if (slotStartDateTime < maintenanceUntilDate) { // Basic check: if slot starts before maintenance period ends.
+                                isAvailable = false;
+                                unavailabilityReason = " (Resource maintenance)";
+                            }
+                        }
+                    }
+
+                    // User's Own Bookings Check (excluding the current booking being edited)
+                    if (isAvailable) {
+                        for (const userBooking of usersBookingsOnDate) {
+                            if (userBooking.id.toString() === currentBookingId) continue;
+
+                            const userBookingStart = new Date(userBooking.start_time);
+                            const userBookingEnd = new Date(userBooking.end_time);
+
+                            if (checkOverlap(slotStartDateTime, slotEndDateTime, userBookingStart, userBookingEnd)) {
+                                isAvailable = false;
+                                unavailabilityReason = " (Conflicts with your other booking)";
+                                break;
+                            }
+                        }
+                    }
+
+                    // Server-side will handle resource booking conflicts.
+
+                    const option = document.createElement('option');
+                    option.value = `${slot.start},${slot.end}`;
+                    option.textContent = `${slot.name}${isAvailable ? '' : unavailabilityReason}`;
+                    option.disabled = !isAvailable;
+                    if (isAvailable) {
+                        availableSlotsFound++;
+                    }
+                    availableSlotsSelect.appendChild(option);
+                }
+
+                if (availableSlotsFound === 0) {
+                    availableSlotsSelect.innerHTML = '<option value="">No available slots</option>';
+                }
+                availableSlotsSelect.disabled = false;
+
+            } catch (error) {
+                console.error('Error fetching slot availability:', error);
+                showStatusMessage(updateModalStatusDiv, `Error loading slots: ${error.message}`, 'danger');
+                availableSlotsSelect.innerHTML = '<option value="">Error loading slots</option>';
+                availableSlotsSelect.disabled = true;
+            }
+        });
+    }
+
+    // Helper functions (to be implemented or ensured they are available)
+    function parseISODateTime(dateTimeStr) {
+        return new Date(dateTimeStr);
+    }
+
+    function checkOverlap(startA, endA, startB, endB) {
+        // Ensure these are Date objects
+        const aStart = startA instanceof Date ? startA : new Date(startA);
+        const aEnd = endA instanceof Date ? endA : new Date(endA);
+        const bStart = startB instanceof Date ? startB : new Date(startB);
+        const bEnd = endB instanceof Date ? endB : new Date(endB);
+
+        // Check if one interval starts after the other ends, or vice-versa
+        // No overlap if (A ends before B starts) OR (A starts after B ends)
+        const noOverlap = (aEnd <= bStart) || (aStart >= bEnd);
+        return !noOverlap; // Overlap is true if it's not "no overlap"
+    }
     
     // Initial fetch of bookings
     fetchAndDisplayBookings();
