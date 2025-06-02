@@ -1,5 +1,6 @@
 import os
 import json
+import logging # Added for fallback logger
 import requests
 from datetime import datetime, date, timedelta, time, timezone
 from flask import url_for, jsonify, current_app

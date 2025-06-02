@@ -16,7 +16,7 @@ from ..utils import add_audit_log, allowed_file, _get_map_configuration_data, _i
 
 # Conditional import for Azure
 try:
-    from azure_backup import save_floor_map_to_share
+    from ..azure_backup import save_floor_map_to_share
 except ImportError:
     save_floor_map_to_share = None
 

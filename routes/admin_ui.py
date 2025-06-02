@@ -3,11 +3,11 @@ from flask_login import login_required, current_user
 from sqlalchemy import func # For analytics_bookings_data if merged here, or general use
 
 # Assuming Booking, Resource, User models are in models.py
-from models import Booking, Resource, User
+from ..models import Booking, Resource, User
 # Assuming db is in extensions.py
-from extensions import db
+from ..extensions import db
 # Assuming permission_required is in auth.py
-from auth import permission_required # Corrected: auth.py is at root
+from ..auth import permission_required # Corrected: auth.py is at root
 
 admin_ui_bp = Blueprint('admin_ui', __name__, url_prefix='/admin', template_folder='../templates')
 

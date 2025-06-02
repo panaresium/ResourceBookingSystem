@@ -5,9 +5,9 @@ from flask_login import login_required, current_user, logout_user
 from datetime import datetime, timezone
 
 # Assuming Booking model is in models.py
-from models import Booking
+from ..models import Booking
 # Assuming add_audit_log is in utils.py
-from utils import add_audit_log
+from ..utils import add_audit_log
 
 # The template_folder is specified relative to the blueprint's location.
 # If app.py sets a global template_folder, and this blueprint's templates
