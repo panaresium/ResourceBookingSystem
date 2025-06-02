@@ -206,18 +206,29 @@ document.addEventListener('DOMContentLoaded', () => {
             cebmStatusMessage.textContent = response.message || 'Booking updated successfully!';
             cebmStatusMessage.className = 'status-message success-message'; // Ensure you have .success-message CSS
 
-            window.location.href = '/my_bookings'; // Redirect after successful save
-
+            // Redirect and clear message after a short delay
             setTimeout(() => {
                 calendarEditBookingModal.style.display = 'none';
                 cebmStatusMessage.textContent = ''; // Clear message
-                 cebmStatusMessage.className = 'status-message';
-            }, 1500); // Close modal after a short delay
+                cebmStatusMessage.className = 'status-message'; // Reset class
+                window.location.href = '/my_bookings';
+            }, 1500);
 
         } catch (error) {
             console.error('Error updating booking:', error);
-            cebmStatusMessage.textContent = error.message || 'Failed to update booking.';
-            cebmStatusMessage.className = 'status-message error-message';
+            if (error.message && error.message.includes("No changes supplied.")) {
+                cebmStatusMessage.textContent = 'No changes detected. Booking details are already up to date.';
+                cebmStatusMessage.className = 'status-message success-message'; // Treat as success
+                setTimeout(() => {
+                    calendarEditBookingModal.style.display = 'none';
+                    cebmStatusMessage.textContent = ''; // Clear message
+                    cebmStatusMessage.className = 'status-message'; // Reset class
+                    window.location.href = '/my_bookings';
+                }, 1500);
+            } else {
+                cebmStatusMessage.textContent = error.message || 'Failed to update booking.';
+                cebmStatusMessage.className = 'status-message error-message';
+            }
         } finally {
             cebmSaveChangesBtn.disabled = false;
             cebmSaveChangesBtn.textContent = 'Save Changes';
