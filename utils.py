@@ -400,15 +400,30 @@ def _import_resource_configurations_data(resources_data_list: list, db_instance)
             resource.floor_map_id = res_data.get('floor_map_id', resource.floor_map_id)
             resource.map_coordinates = res_data.get('map_coordinates', resource.map_coordinates)
 
+            # Revised role assignment logic
             if 'role_ids' in res_data and isinstance(res_data['role_ids'], list):
-                valid_roles_for_resource = []
+                selected_roles_for_this_resource = []
                 for role_id in res_data['role_ids']:
-                    if role_id in existing_role_ids:
-                        role_obj = db_instance.session.query(Role).get(role_id)
-                        if role_obj: valid_roles_for_resource.append(role_obj)
-                        else: errors.append({'resource_name': original_resource_name_for_log, 'id': res_data.get('id'), 'error': f"Role ID {role_id} not found."})
-                    else: errors.append({'resource_name': original_resource_name_for_log, 'id': res_data.get('id'), 'error': f"Role ID {role_id} does not exist."})
-                resource.roles = valid_roles_for_resource
+                    # Querying Role directly to ensure we get fresh objects or ones managed by this session
+                    role_obj = db_instance.session.query(Role).get(role_id)
+                    if role_obj:
+                        selected_roles_for_this_resource.append(role_obj)
+                    else:
+                        # Log error: role_id from backup data not found in current DB
+                        errors.append({'resource_name': original_resource_name_for_log, 'id': res_data.get('id'), 'error': f"Role ID {role_id} specified in backup not found in database."})
+                
+                # For existing resources, clear old roles before assigning new ones to prevent IntegrityError
+                if action_taken == "UPDATE_RESOURCE_VIA_RESTORE":
+                    resource.roles.clear() # Clear existing associations
+                    db_instance.session.flush() # Ensure the clear is processed before adding new ones
+
+                resource.roles = selected_roles_for_this_resource # Assign the new set of roles
+            
+            elif action_taken == "UPDATE_RESOURCE_VIA_RESTORE": # role_ids not in res_data or is empty
+                # If role_ids is not provided or empty for an existing resource,
+                # it means all roles should be removed from it.
+                resource.roles.clear()
+                # No flush needed here if we are just clearing and not adding immediately after in this branch
 
             if action_taken == "CREATE_RESOURCE_VIA_RESTORE":
                 db_instance.session.add(resource)

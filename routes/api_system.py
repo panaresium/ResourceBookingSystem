@@ -232,29 +232,6 @@ def api_one_click_restore():
 
         current_app.logger.info(f"Database restored (task {task_id}) for backup {backup_timestamp} to {restored_db_path}.")
 
-        # Import map configurations
-        map_import_summary_msg = "Map configuration file was not part of this backup or was not downloaded."
-        if map_config_json_path and os.path.exists(map_config_json_path):
-            current_app.logger.info(f"Map config JSON {map_config_json_path} (task {task_id}) downloaded for {backup_timestamp}.")
-            if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Importing map configuration...', 'detail': map_config_json_path})
-            try:
-                with open(map_config_json_path, 'r', encoding='utf-8') as f: map_config_data_to_import = json.load(f)
-                import_summary, import_status_code = _import_map_configuration_data(map_config_data_to_import) # Uses models directly
-                map_import_summary_msg = f"Map configuration import from {backup_timestamp} completed with status {import_status_code}."
-                if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': f'Map configuration import status: {import_status_code}', 'detail': json.dumps(import_summary)})
-                if import_status_code >= 400: current_app.logger.error(f"Failed to import map config (task {task_id}): {json.dumps(import_summary)}")
-                else: current_app.logger.info(f"Successfully imported map config (task {task_id}).")
-            except Exception as map_import_exc:
-                map_import_summary_msg = f"Error processing map config file {map_config_json_path} (task {task_id}): {str(map_import_exc)}"
-                current_app.logger.exception(map_import_summary_msg)
-                if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Error during map configuration import.', 'detail': str(map_import_exc)})
-            finally:
-                try: os.remove(map_config_json_path)
-                except OSError as e_remove: current_app.logger.error(f"Error removing temp map config file {map_config_json_path} (task {task_id}): {e_remove}")
-        else:
-            current_app.logger.info(f"No map config file for {backup_timestamp} (task {task_id}). Skipping map import.")
-            if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Map configuration import skipped (no file).'})
-
         # Import resource configurations
         resource_import_summary_msg = "Resource configurations file was not part of this backup or was not downloaded."
         if resource_configs_json_path and os.path.exists(resource_configs_json_path):
@@ -277,6 +254,29 @@ def api_one_click_restore():
         else:
             current_app.logger.info(f"No resource_configs.json file for {backup_timestamp} (task {task_id}). Skipping resource configurations import.")
             if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Resource configurations import skipped (no file).'})
+
+        # Import map configurations
+        map_import_summary_msg = "Map configuration file was not part of this backup or was not downloaded."
+        if map_config_json_path and os.path.exists(map_config_json_path):
+            current_app.logger.info(f"Map config JSON {map_config_json_path} (task {task_id}) downloaded for {backup_timestamp}.")
+            if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Importing map configuration...', 'detail': map_config_json_path})
+            try:
+                with open(map_config_json_path, 'r', encoding='utf-8') as f: map_config_data_to_import = json.load(f)
+                import_summary, import_status_code = _import_map_configuration_data(map_config_data_to_import) # Uses models directly
+                map_import_summary_msg = f"Map configuration import from {backup_timestamp} completed with status {import_status_code}."
+                if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': f'Map configuration import status: {import_status_code}', 'detail': json.dumps(import_summary)})
+                if import_status_code >= 400: current_app.logger.error(f"Failed to import map config (task {task_id}): {json.dumps(import_summary)}")
+                else: current_app.logger.info(f"Successfully imported map config (task {task_id}).")
+            except Exception as map_import_exc:
+                map_import_summary_msg = f"Error processing map config file {map_config_json_path} (task {task_id}): {str(map_import_exc)}"
+                current_app.logger.exception(map_import_summary_msg)
+                if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Error during map configuration import.', 'detail': str(map_import_exc)})
+            finally:
+                try: os.remove(map_config_json_path)
+                except OSError as e_remove: current_app.logger.error(f"Error removing temp map config file {map_config_json_path} (task {task_id}): {e_remove}")
+        else:
+            current_app.logger.info(f"No map config file for {backup_timestamp} (task {task_id}). Skipping map import.")
+            if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Map configuration import skipped (no file).'})
 
         # Import user/role configurations
         user_import_summary_msg = "User/role configurations file was not part of this backup or was not downloaded."
