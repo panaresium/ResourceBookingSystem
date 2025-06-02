@@ -70,6 +70,16 @@ document.addEventListener('DOMContentLoaded', () => {
     function hideStatusMessage(element) {
         element.style.display = 'none';
     }
+
+    function showModalStatus(message, type = 'info') { // Renaming for clarity as per plan, or use showStatusMessage directly
+        showStatusMessage(updateModalStatusDiv, message, type);
+    }
+
+    function clearAndDisableSlotsSelect(message) {
+        const slotsSelect = document.getElementById('modal-available-slots-select');
+        slotsSelect.innerHTML = `<option value="">${message}</option>`;
+        slotsSelect.disabled = true;
+    }
     
     async function fetchAndDisplayBookings() {
         showLoading(statusDiv, 'Loading your bookings...');
@@ -315,20 +325,63 @@ document.addEventListener('DOMContentLoaded', () => {
 
             try {
                 // Step 3: Fetch necessary data
-                // Fetch resource details (for maintenance status)
-                const resource = await apiCall(`/api/resources/${resourceId}`);
+                let resourceMaintenanceStatus = { is_under_maintenance: false, maintenance_until: null };
+                const selectedDateString = modalBookingDateInput.value; // Ensure this is in YYYY-MM-DD
+
+                try {
+                    // This call will either return booked slots (200 OK) or an error if resource is unavailable/under maintenance.
+                    // We are primarily interested in the error case for maintenance.
+                    await apiCall(`/api/resources/${resourceId}/availability?date=${selectedDateString}`);
+                    // If the call succeeds (200 OK), it means the resource is generally available for booking on this date,
+                    // so we assume it's not under prohibitive maintenance for this date.
+                } catch (error) {
+                    if (error.response && error.response.status === 403) {
+                        try {
+                            const errorData = await error.response.json();
+                            if (errorData.error && errorData.error.toLowerCase().includes('maintenance')) {
+                                resourceMaintenanceStatus.is_under_maintenance = true;
+                                // 'maintenance_until' is not directly available from this error structure,
+                                // but the 403 implies maintenance for the selectedDate.
+                                console.log(`Resource ${resourceId} is under maintenance on ${selectedDateString}. Error: ${errorData.error}`);
+                            } else {
+                                console.warn(`Received 403 from /availability for resource ${resourceId} but error message doesn't indicate maintenance:`, errorData.error);
+                                // Potentially treat as other critical error if slot calculation depends on availability data not just maintenance.
+                                // For now, if not maintenance, assume other 403s might still allow slot display if other data is fetched.
+                                // However, the current logic path after this try-catch doesn't rely on successful data from /availability,
+                                // so a non-maintenance 403 might not break things unless it was meant to provide data.
+                                // If the error is critical enough to stop, use clearAndDisableSlotsSelect and return.
+                            }
+                        } catch (parseError) {
+                            console.warn(`Could not parse JSON from 403 error response for /availability on resource ${resourceId}:`, parseError);
+                            // Treat as a general failure to get maintenance status, could default to not maintained or stop.
+                            // To be safe, if we can't parse the specific error, we might not know if it's safe to proceed.
+                        }
+                    } else if (error.response && error.response.status === 404) {
+                        console.error(`Resource ${resourceId} not found when checking availability.`);
+                        showModalStatus(`Error: Resource details not found (ID: ${resourceId}).`, 'danger');
+                        clearAndDisableSlotsSelect("Error fetching resource details.");
+                        return; // Stop further processing for slots
+                    } else {
+                        // Other unexpected errors (e.g., 500, network error)
+                        console.error(`Error fetching resource availability for ${resourceId} on ${selectedDateString}:`, error);
+                        showModalStatus('Error checking resource availability. Please try again.', 'danger');
+                        clearAndDisableSlotsSelect("Error checking resource availability.");
+                        return; // Stop further processing for slots
+                    }
+                }
 
                 // Fetch user's own bookings for the selected date
-                // The endpoint /api/bookings/my_bookings_for_date?date=${selectedDate} needs to be implemented
+                // The endpoint /api/bookings/my_bookings_for_date?date=${selectedDateString} needs to be implemented
                 // For now, let's assume it exists or adapt.
                 // If not, we might need to fetch all user bookings and filter, which is less ideal.
                 // Let's placeholder the call:
                 let usersBookingsOnDate = [];
                 try {
-                    usersBookingsOnDate = await apiCall(`/api/bookings/my_bookings_for_date?date=${selectedDate}`);
+                    // Use selectedDateString for consistency
+                    usersBookingsOnDate = await apiCall(`/api/bookings/my_bookings_for_date?date=${selectedDateString}`);
                 } catch (e) {
                     // If endpoint doesn't exist, this will fail. Log and continue, conflict check will be partial.
-                    console.warn(`Could not fetch user's bookings for date ${selectedDate}. User conflict check might be incomplete. Error: ${e.message}`);
+                    console.warn(`Could not fetch user's bookings for date ${selectedDateString}. User conflict check might be incomplete. Error: ${e.message}`);
                 }
 
 
@@ -352,25 +405,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
 
                     // Resource Maintenance Check
-                    if (isAvailable && resource.is_under_maintenance) {
-                        if (!resource.maintenance_until) { // Indefinite maintenance
-                            isAvailable = false;
-                            unavailabilityReason = " (Resource under maintenance)";
-                        } else {
-                            const maintenanceUntilDate = new Date(resource.maintenance_until);
-                            // If slot starts before maintenance ends OR slot ends after maintenance starts (assuming maintenance_from exists or is now)
-                            // For simplicity, if maintenance_until is on selectedDate or in future, check overlap.
-                            // This check assumes maintenance_until is the END of maintenance.
-                            // A more precise check would involve maintenance_from.
-                            // If slot is within a defined maintenance period.
-                            // Simplified: if selectedDate is before or on the day of maintenance_until, and slot is within it.
-                            // This logic needs to be robust based on how maintenance_until is defined (end of day? specific time?)
-                            // For now: if slot ends after "now" and starts before maintenance ends.
-                            if (slotStartDateTime < maintenanceUntilDate) { // Basic check: if slot starts before maintenance period ends.
-                                isAvailable = false;
-                                unavailabilityReason = " (Resource maintenance)";
-                            }
-                        }
+                    if (isAvailable && resourceMaintenanceStatus.is_under_maintenance) {
+                        // If the /availability call returned a 403 due to maintenance for the selectedDate,
+                        // then all slots on this day for this resource are considered unavailable due to maintenance.
+                        console.log(`Slot ${slot.name} on ${selectedDateString} for resource ${resourceId} is unavailable due to maintenance.`);
+                        isAvailable = false;
+                        unavailabilityReason = " (Resource under maintenance)";
                     }
 
                     // User's Own Bookings Check (excluding the current booking being edited)
@@ -408,14 +448,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             } catch (error) {
                 console.error('Error fetching slot availability:', error);
-                showStatusMessage(updateModalStatusDiv, `Error loading slots: ${error.message}`, 'danger');
-                availableSlotsSelect.innerHTML = '<option value="">Error loading slots</option>';
-                availableSlotsSelect.disabled = true;
+                showModalStatus(`Error loading slots: ${error.message}`, 'danger'); // Use showModalStatus
+                clearAndDisableSlotsSelect("Error loading slots."); // Use helper
             }
         });
     }
 
-    // Helper functions (to be implemented or ensured they are available)
+    // Helper functions
     function parseISODateTime(dateTimeStr) {
         return new Date(dateTimeStr);
     }
