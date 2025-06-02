@@ -154,7 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Function to handle saving changes from the modal
     async function saveBookingChanges(bookingId, title, calendarEventToUpdate) { // Signature updated
         cebmSaveChangesBtn.disabled = true;
-        cebmSaveChangesBtn.textContent = 'Saving...';
+        cebmSaveChangesBtn.textContent = 'Processing...';
         cebmStatusMessage.textContent = '';
         cebmStatusMessage.className = 'status-message';
 
@@ -205,13 +205,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             cebmStatusMessage.textContent = response.message || 'Booking updated successfully!';
             cebmStatusMessage.className = 'status-message success-message'; // Ensure you have .success-message CSS
+            calendar.refetchEvents(); // Refresh calendar events
 
-            // Redirect and clear message after a short delay
+            // Close modal and clear message after a short delay
             setTimeout(() => {
                 calendarEditBookingModal.style.display = 'none';
                 cebmStatusMessage.textContent = ''; // Clear message
                 cebmStatusMessage.className = 'status-message'; // Reset class
-                window.location.href = '/my_bookings';
+                // window.location.href = '/my_bookings'; // REMOVED
             }, 1500);
 
         } catch (error) {
@@ -219,11 +220,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (error.message && error.message.includes("No changes supplied.")) {
                 cebmStatusMessage.textContent = 'No changes detected. Booking details are already up to date.';
                 cebmStatusMessage.className = 'status-message success-message'; // Treat as success
+                calendar.refetchEvents(); // Refresh calendar events
+
                 setTimeout(() => {
                     calendarEditBookingModal.style.display = 'none';
                     cebmStatusMessage.textContent = ''; // Clear message
                     cebmStatusMessage.className = 'status-message'; // Reset class
-                    window.location.href = '/my_bookings';
+                    // window.location.href = '/my_bookings'; // REMOVED
                 }, 1500);
             } else {
                 cebmStatusMessage.textContent = error.message || 'Failed to update booking.';
