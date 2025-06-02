@@ -83,4 +83,82 @@ document.addEventListener('DOMContentLoaded', () => {
     // are not already rendered by the server or another script in resources.html.
     // If resource_management.js handles rendering, ensure buttons have 'book-resource-btn' class
     // and data-resource-id / data-resource-name attributes.
+
+    async function fetchAndDisplayResources() {
+        // Use the resourceListContainer defined at the top of the DOMContentLoaded listener
+        if (!resourceListContainer) {
+            // This message might not be visible if statusDiv itself is not found or is part of a non-existent container
+            console.error("Resource list container not found on the page. Cannot display resources.");
+            showResourcePageStatus("Cannot display resources: page element missing.", "danger");
+            return;
+        }
+
+        // Clear loading message from HTML template if it exists within this container
+        const loadingMessage = resourceListContainer.querySelector('p');
+        if (loadingMessage && loadingMessage.textContent.includes('Loading resources...')) {
+            loadingMessage.remove();
+        }
+        showResourcePageStatus("Loading resources...", "info");
+
+
+        try {
+            const resources = await apiCall('/api/resources'); // Public endpoint to get published resources
+
+            resourceListContainer.innerHTML = ''; // Clear loading message or previous content
+
+            if (!resources || resources.length === 0) {
+                resourceListContainer.innerHTML = '<p>No resources available at the moment.</p>';
+                showResourcePageStatus("No resources found.", "info"); // Update status
+                return;
+            }
+
+            resources.forEach(resource => {
+                const resourceElement = document.createElement('div');
+                resourceElement.className = 'col-md-4 mb-4'; // Bootstrap column for grid layout
+
+                // Use a card structure for better presentation
+                resourceElement.innerHTML = `
+                    <div class="card resource-item h-100">
+                        ${resource.image_url ? `<img src="${resource.image_url}" class="card-img-top" alt="${resource.name}" style="max-height: 200px; object-fit: cover;">` : '<div class="card-img-top bg-secondary d-flex align-items-center justify-content-center" style="height: 200px;"><span class="text-light">No Image</span></div>'}
+                        <div class="card-body d-flex flex-column">
+                            <h5 class="card-title">${resource.name}</h5>
+                            <p class="card-text mb-1"><small class="text-muted">ID: ${resource.id}</small></p>
+                            <p class="card-text flex-grow-1">
+                                ${resource.description ? resource.description.substring(0,100) + (resource.description.length > 100 ? '...' : '') : 'No description available.'}
+                            </p>
+                            <ul class="list-group list-group-flush mb-2">
+                                <li class="list-group-item">Capacity: ${resource.capacity || 'N/A'}</li>
+                                <li class="list-group-item">Equipment: ${resource.equipment || 'N/A'}</li>
+                                ${resource.tags ? `<li class="list-group-item">Tags: ${resource.tags}</li>` : ''}
+                            </ul>
+                            <button class="btn btn-primary book-resource-btn mt-auto"
+                                    data-resource-id="${resource.id}"
+                                    data-resource-name="${resource.name}">
+                                Book Now
+                            </button>
+                        </div>
+                    </div>
+                `;
+                resourceListContainer.appendChild(resourceElement);
+            });
+            if (statusDiv && statusDiv.textContent === "Loading resources...") { // Clear loading message if no other message replaced it
+                 statusDiv.style.display = 'none';
+            }
+        } catch (error) {
+            console.error("Failed to fetch and display resources:", error);
+            if (resourceListContainer) {
+                resourceListContainer.innerHTML = '<p class="text-danger">Error loading resources. Please try refreshing the page.</p>';
+            }
+            showResourcePageStatus(`Error loading resources: ${error.message || 'Please try refreshing.'}`, "danger");
+        }
+    }
+
+    // Call fetchAndDisplayResources if the container exists
+    if (resourceListContainer) {
+        fetchAndDisplayResources();
+    } else {
+        // This case is technically handled inside fetchAndDisplayResources, but good to be explicit.
+        console.warn("Resource list container ('resource-buttons-container' or 'resource-list-container') not found. Resources will not be displayed by resource_booking.js.");
+        showResourcePageStatus("Resource display area not found on page.", "warning");
+    }
 });
