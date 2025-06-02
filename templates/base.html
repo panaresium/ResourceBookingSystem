@@ -16,23 +16,23 @@
                 <span></span>
                 <span></span>
             </button>
-            <a href="{{ url_for('serve_index') }}"><span class="menu-icon" aria-hidden="true">🏠</span><span class="menu-text">{{ _('Home') }}</span></a>
-            <a href="{{ url_for('serve_resources') }}"><span class="menu-icon" aria-hidden="true">📁</span><span class="menu-text">{{ _('View Resources') }}</span></a>
-            <a href="{{ url_for('serve_calendar') }}"><span class="menu-icon" aria-hidden="true">📅</span><span class="menu-text">{{ _('Calendar') }}</span></a>
+            <a href="{{ url_for('ui.serve_index') }}"><span class="menu-icon" aria-hidden="true">🏠</span><span class="menu-text">{{ _('Home') }}</span></a>
+            <a href="{{ url_for('ui.serve_resources') }}"><span class="menu-icon" aria-hidden="true">📁</span><span class="menu-text">{{ _('View Resources') }}</span></a>
+            <a href="{{ url_for('ui.serve_calendar') }}"><span class="menu-icon" aria-hidden="true">📅</span><span class="menu-text">{{ _('Calendar') }}</span></a>
             <div id="my-bookings-nav-link" style="display: none;">
-                 <a href="{{ url_for('serve_my_bookings_page') }}"><span class="menu-icon" aria-hidden="true">📖</span><span class="menu-text">{{ _('My Bookings') }}</span></a>
+                 <a href="{{ url_for('ui.serve_my_bookings_page') }}"><span class="menu-icon" aria-hidden="true">📖</span><span class="menu-text">{{ _('My Bookings') }}</span></a>
             </div>
             <div id="welcome-message-container" style="display: none; margin-right: 10px; color: white; align-self: center;"></div>
             <div id="auth-link-container" style="display: none; margin-left:auto;">
-                <a href="{{ url_for('serve_login') }}"><span class="menu-icon" aria-hidden="true">🔑</span><span class="menu-text">{{ _('Login') }}</span></a>
+                <a href="{{ url_for('ui.serve_login') }}"><span class="menu-icon" aria-hidden="true">🔑</span><span class="menu-text">{{ _('Login') }}</span></a>
             </div>
             <div id="user-dropdown-container" style="display: none; position: relative; margin-left:auto;">
                 <button id="user-dropdown-button" aria-haspopup="true" aria-expanded="false" style="background: none; border: none; color: white; font-size: 1em; cursor: pointer; padding: 10px; font-weight: bold; display:flex; align-items:center;">
                     <span class="user-icon" style="font-size:1.2em;">&#x1F464;</span><span class="dropdown-arrow"> &#9662;</span>
                 </button>
                 <div class="dropdown-menu" id="user-dropdown-menu" style="display: none; position: absolute; top: 100%; left: 0; background-color: #333; border: 1px solid #555; min-width: 160px; z-index: 1000; list-style-type: none; padding: 0; margin: 0; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
-                    <a class="dropdown-item" href="{{ url_for('serve_profile_page') }}" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Profile') }}</a>
-                    <a class="dropdown-item" href="{{ url_for('logout_and_redirect') }}" id="logout-link-dropdown" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Logout') }}</a>
+                    <a class="dropdown-item" href="{{ url_for('ui.serve_profile_page') }}" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Profile') }}</a>
+                    <a class="dropdown-item" href="{{ url_for('ui.logout_and_redirect') }}" id="logout-link-dropdown" style="display: block; padding: 10px 15px; text-decoration: none; color: white;">{{ _('Logout') }}</a>
                 </div>
             </div>
         </div>
@@ -51,25 +51,25 @@
                 <summary><span class="menu-icon" aria-hidden="true">⚙️</span><span class="menu-text">{{ _('Admin') }}</span></summary>
                 <ul class="admin-menu">
                 <li id="admin-maps-nav-link" style="display: none;">
-                    <a href="{{ url_for('serve_admin_maps') }}">{{ _('Admin Maps') }}</a>
+                    <a href="{{ url_for('admin_ui.serve_admin_maps') }}">{{ _('Admin Maps') }}</a>
                 </li>
                 <li id="resource-management-nav-link" style="display: none;">
-                    <a href="{{ url_for('serve_resource_management_page') }}">{{ _('Resource Management') }}</a>
+                    <a href="{{ url_for('admin_ui.serve_resource_management_page') }}">{{ _('Resource Management') }}</a>
                 </li>
                 <li id="user-management-nav-link" style="display: none;">
-                    <a href="{{ url_for('serve_user_management_page') }}">{{ _('User Management') }}</a>
+                    <a href="{{ url_for('admin_ui.serve_user_management_page') }}">{{ _('User Management') }}</a>
                 </li>
                 <li id="log-nav-link" style="display: none;">
-                    <a href="{{ url_for('serve_audit_log_page') }}">{{ _('Audit Logs') }}</a>
+                    <a href="{{ url_for('admin_ui.serve_audit_log_page') }}">{{ _('Audit Logs') }}</a>
                 </li>
                 <li id="analytics-nav-link" style="display: none;">
-                    <a href="{{ url_for('analytics.analytics_dashboard') }}">{{ _('Analytics') }}</a>
+                    <a href="{{ url_for('admin_ui.analytics_dashboard') }}">{{ _('Analytics') }}</a>
                 </li>
                 <li id="admin-bookings-nav-link" style="display: none;">
-                    <a href="{{ url_for('serve_admin_bookings_page') }}">{{ _('Admin Bookings') }}</a>
+                    <a href="{{ url_for('admin_ui.serve_admin_bookings_page') }}">{{ _('Admin Bookings') }}</a>
                 </li>
                 <li id="backup-restore-nav-link" style="display: none;">
-                    <a href="{{ url_for('serve_backup_restore_page') }}">{{ _('Backup & Restore') }}</a>
+                    <a href="{{ url_for('admin_ui.serve_backup_restore_page') }}">{{ _('Backup & Restore') }}</a>
                 </li>
                 </ul>
             </details>
