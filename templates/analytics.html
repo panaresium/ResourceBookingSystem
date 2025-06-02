@@ -11,7 +11,7 @@
     {{ super() }}
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
-    fetch("{{ url_for('analytics.analytics_bookings_data') }}")
+    fetch("{{ url_for('admin_ui.analytics_bookings_data') }}")
         .then(resp => resp.json())
         .then(function(data){
             const ctx = document.getElementById('usageChart');

@@ -8,6 +8,7 @@ from models import Booking, Resource, User
 from extensions import db
 # Assuming permission_required is in auth.py
 from auth import permission_required # Corrected: auth.py is at root
+from datetime import datetime, timedelta # Add datetime imports
 
 admin_ui_bp = Blueprint('admin_ui', __name__, url_prefix='/admin', template_folder='../templates')
 
@@ -87,6 +88,46 @@ def serve_backup_restore_page():
 def analytics_dashboard():
     current_app.logger.info(f"User {current_user.username} accessed analytics dashboard.")
     return render_template('analytics.html')
+
+@admin_ui_bp.route('/analytics/data') # New route for analytics data
+@login_required
+@permission_required('view_analytics')
+def analytics_bookings_data():
+    try:
+        current_app.logger.info(f"User {current_user.username} requested analytics bookings data.")
+
+        # Calculate the date 30 days ago
+        thirty_days_ago = datetime.utcnow().date() - timedelta(days=30)
+
+        # Query to get booking counts per resource per day for the last 30 days
+        # We need to join Booking with Resource to get the resource name
+        # We also need to group by resource name and the date part of start_time
+        query_results = db.session.query(
+            Resource.name,
+            func.date(Booking.start_time).label('booking_date'),
+            func.count(Booking.id).label('booking_count')
+        ).join(Resource, Booking.resource_id == Resource.id) \
+        .filter(func.date(Booking.start_time) >= thirty_days_ago) \
+        .group_by(Resource.name, func.date(Booking.start_time)) \
+        .order_by(Resource.name, func.date(Booking.start_time)) \
+        .all()
+
+        analytics_data = {}
+        for resource_name, booking_date_obj, booking_count in query_results:
+            booking_date_str = booking_date_obj.strftime('%Y-%m-%d')
+            if resource_name not in analytics_data:
+                analytics_data[resource_name] = []
+            analytics_data[resource_name].append({
+                "date": booking_date_str,
+                "count": booking_count
+            })
+
+        current_app.logger.info(f"Successfully processed analytics data. Resources found: {len(analytics_data)}")
+        return jsonify(analytics_data)
+
+    except Exception as e:
+        current_app.logger.error(f"Error generating analytics bookings data: {e}", exc_info=True)
+        return jsonify({"error": "Could not process analytics data"}), 500
 
 # Function to register this blueprint in the app factory
 def init_admin_ui_routes(app):
