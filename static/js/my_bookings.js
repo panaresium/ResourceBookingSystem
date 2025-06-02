@@ -414,14 +414,31 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
 
                     // User's Own Bookings Check (excluding the current booking being edited)
-                    if (isAvailable) {
+                    if (isAvailable && usersBookingsOnDate && usersBookingsOnDate.length > 0) {
                         for (const userBooking of usersBookingsOnDate) {
-                            if (userBooking.id.toString() === currentBookingId) continue;
+                            // Ensure currentBookingId is a string if userBooking.id is a number, or vice-versa, for comparison.
+                            // Assuming userBooking.booking_id from the API.
+                            if (userBooking.booking_id && userBooking.booking_id.toString() === currentBookingId) {
+                                continue;
+                            }
+                            // Defensive check for start_time and end_time
+                            if (!userBooking || typeof userBooking.start_time !== 'string' || !userBooking.start_time.trim() ||
+                                typeof userBooking.end_time !== 'string' || !userBooking.end_time.trim()) {
+                                console.warn('Skipping a user booking due to missing or invalid start/end time:', userBooking);
+                                continue; // Skip this iteration
+                            }
 
-                            const userBookingStart = new Date(userBooking.start_time);
-                            const userBookingEnd = new Date(userBooking.end_time);
+                            // Construct full Date objects for user's other bookings using selectedDateString
+                            const userBookingStartDateTime = new Date(`${selectedDateString}T${userBooking.start_time}Z`); // Assume times are UTC
+                            const userBookingEndDateTime = new Date(`${selectedDateString}T${userBooking.end_time}Z`);   // Assume times are UTC
 
-                            if (checkOverlap(slotStartDateTime, slotEndDateTime, userBookingStart, userBookingEnd)) {
+                            // Validate date objects
+                            if (isNaN(userBookingStartDateTime.getTime()) || isNaN(userBookingEndDateTime.getTime())) {
+                                console.warn('Skipping a user booking due to invalid date construction from start/end time:', userBooking);
+                                continue;
+                            }
+
+                            if (checkOverlap(slotStartDateTime, slotEndDateTime, userBookingStartDateTime, userBookingEndDateTime)) {
                                 isAvailable = false;
                                 unavailabilityReason = " (Conflicts with your other booking)";
                                 break;
