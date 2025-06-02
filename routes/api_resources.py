@@ -372,17 +372,231 @@ def create_resources_bulk_admin():
 @login_required
 @permission_required('manage_resources')
 def update_resources_bulk_admin():
-    # Implementation from app.py can be adapted here
-    # For brevity, this will be a placeholder
-    return jsonify({'message': 'Bulk update endpoint not fully implemented in api_resources.py yet.'}), 501
+    logger = current_app.logger
+    data = request.get_json()
+
+    if not data or 'ids' not in data or 'changes' not in data:
+        return jsonify({'error': 'Invalid input. "ids" (list) and "changes" (dict) are required.'}), 400
+
+    resource_ids = data.get('ids')
+    changes_to_apply = data.get('changes')
+
+    if not isinstance(resource_ids, list) or not isinstance(changes_to_apply, dict):
+        return jsonify({'error': '"ids" must be a list and "changes" must be a dictionary.'}), 400
+
+    if not resource_ids:
+        return jsonify({'error': '"ids" list cannot be empty.'}), 400
+
+    updated_ids = []
+    errors = []
+
+    for resource_id in resource_ids:
+        if not isinstance(resource_id, int):
+            errors.append({'id': resource_id, 'error': 'Invalid resource ID type, must be integer.'})
+            continue
+
+        resource = Resource.query.get(resource_id)
+        if not resource:
+            errors.append({'id': resource_id, 'error': 'Resource not found.'})
+            continue
+
+        current_resource_had_error = False
+
+        if 'tags' in changes_to_apply:
+            tags_val = changes_to_apply['tags']
+            if isinstance(tags_val, str) or tags_val is None:
+                resource.tags = tags_val
+            else:
+                errors.append({'id': resource_id, 'field': 'tags', 'error': 'Must be a string or null.'})
+                current_resource_had_error = True
+
+
+        if 'status' in changes_to_apply:
+            status_val = changes_to_apply['status']
+            if isinstance(status_val, str):
+                resource.status = status_val
+                if status_val == 'published' and resource.published_at is None:
+                    resource.published_at = datetime.now(timezone.utc)
+            else:
+                errors.append({'id': resource_id, 'field': 'status', 'error': 'Must be a string.'})
+                current_resource_had_error = True
+
+        if 'booking_restriction' in changes_to_apply:
+            br_val = changes_to_apply['booking_restriction']
+            if isinstance(br_val, str) or br_val is None:
+                resource.booking_restriction = br_val
+            else:
+                errors.append({'id': resource_id, 'field': 'booking_restriction', 'error': 'Must be a string or null.'})
+                current_resource_had_error = True
+
+        if 'is_under_maintenance' in changes_to_apply:
+            ium_val = changes_to_apply['is_under_maintenance']
+            if not isinstance(ium_val, bool):
+                errors.append({'id': resource_id, 'field': 'is_under_maintenance', 'error': 'Must be boolean.'})
+                current_resource_had_error = True
+            else:
+                resource.is_under_maintenance = ium_val
+
+        if 'maintenance_until' in changes_to_apply:
+            mu_val = changes_to_apply['maintenance_until']
+            if mu_val is None:
+                resource.maintenance_until = None
+            else:
+                try:
+                    # Attempt to parse ISO format string
+                    parsed_datetime = datetime.fromisoformat(str(mu_val).replace('Z', '+00:00'))
+                    # Ensure it's offset-naive or UTC for DB consistency
+                    if parsed_datetime.tzinfo:
+                        resource.maintenance_until = parsed_datetime.astimezone(timezone.utc).replace(tzinfo=None)
+                    else: # If naive, assume it's intended as UTC
+                        resource.maintenance_until = parsed_datetime
+                except ValueError:
+                    errors.append({'id': resource_id, 'field': 'maintenance_until', 'error': 'Invalid datetime format. Use ISO 8601.'})
+                    current_resource_had_error = True
+
+        if 'floor_map_id' in changes_to_apply:
+            fm_id_val = changes_to_apply['floor_map_id']
+            if fm_id_val is None:
+                resource.floor_map_id = None
+            else:
+                try:
+                    fm_id = int(fm_id_val)
+                    if FloorMap.query.get(fm_id) is None:
+                        errors.append({'id': resource_id, 'field': 'floor_map_id', 'error': f'FloorMap with ID {fm_id} not found.'})
+                        current_resource_had_error = True
+                    else:
+                        resource.floor_map_id = fm_id
+                except (ValueError, TypeError):
+                    errors.append({'id': resource_id, 'field': 'floor_map_id', 'error': 'Must be an integer or null.'})
+                    current_resource_had_error = True
+
+        if 'role_ids' in changes_to_apply:
+            role_ids_val = changes_to_apply['role_ids']
+            if not isinstance(role_ids_val, list):
+                errors.append({'id': resource_id, 'field': 'role_ids', 'error': 'Must be a list.'})
+                current_resource_had_error = True
+            else:
+                new_roles = []
+                roles_valid = True
+                for r_id in role_ids_val:
+                    if not isinstance(r_id, int):
+                        errors.append({'id': resource_id, 'field': 'role_ids', 'error': f'Invalid role ID type: {r_id}. Must be integer.'})
+                        roles_valid = False
+                        break
+                    role = Role.query.get(r_id)
+                    if not role:
+                        errors.append({'id': resource_id, 'field': 'role_ids', 'error': f'Role with ID {r_id} not found.'})
+                        roles_valid = False
+                        break
+                    new_roles.append(role)
+                if roles_valid:
+                    resource.roles = new_roles
+                else:
+                    current_resource_had_error = True # Error already added
+
+        if not current_resource_had_error:
+            updated_ids.append(resource_id)
+
+    if updated_ids: # Only commit if there were attempts to update valid resources that didn't have pre-commit errors
+        try:
+            db.session.commit()
+            logger.info(f"User {current_user.username} bulk updated resources. IDs: {updated_ids}. Changes: {changes_to_apply}. Errors: {errors}")
+            add_audit_log(action="BULK_UPDATE_RESOURCES", details=f"User {current_user.username} bulk updated resources. IDs: {updated_ids}. Changes applied: {changes_to_apply}. Errors: {errors}")
+        except Exception as e:
+            db.session.rollback()
+            logger.exception(f"Error committing bulk resource update by {current_user.username}:")
+            # Add errors for all intended-to-be-updated IDs because commit failed globally
+            for uid in updated_ids:
+                 # Avoid duplicating if an error for this ID was already there
+                if not any(err['id'] == uid for err in errors):
+                    errors.append({'id': uid, 'error': f'Failed to commit changes due to server error: {str(e)}'})
+            # Clear updated_ids as the commit failed
+            updated_ids = []
+
+
+    response_data = {'updated_count': len(updated_ids), 'updated_ids': updated_ids, 'errors': errors}
+    status_code = 207 if errors else 200
+    return jsonify(response_data), status_code
 
 @api_resources_bp.route('/admin/resources/bulk', methods=['DELETE'])
 @login_required
 @permission_required('manage_resources')
 def delete_resources_bulk_admin():
-    # Implementation from app.py can be adapted here
-    # For brevity, this will be a placeholder
-    return jsonify({'message': 'Bulk delete endpoint not fully implemented in api_resources.py yet.'}), 501
+    logger = current_app.logger
+    data = request.get_json()
+
+    if not data or 'ids' not in data:
+        return jsonify({'error': 'Invalid input. "ids" (list) is required.'}), 400
+
+    resource_ids = data.get('ids')
+
+    if not isinstance(resource_ids, list) or not resource_ids:
+        return jsonify({'error': '"ids" must be a non-empty list.'}), 400
+
+    deleted_ids = []
+    errors = []
+
+    for resource_id in resource_ids:
+        if not isinstance(resource_id, int):
+            errors.append({'id': str(resource_id), 'error': 'Invalid ID format. Must be integer.'})
+            continue
+
+        resource = Resource.query.get(resource_id)
+        if not resource:
+            errors.append({'id': resource_id, 'error': 'Resource not found.'})
+            continue
+
+        resource_name_for_log = resource.name
+        image_filename_for_log = resource.image_filename
+
+        if image_filename_for_log:
+            try:
+                # Use RESOURCE_IMAGE_UPLOAD_FOLDER from config.py
+                image_path = os.path.join(current_app.config['RESOURCE_IMAGE_UPLOAD_FOLDER'], image_filename_for_log)
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+                    logger.info(f"Successfully deleted image file {image_path} for resource ID {resource_id} ('{resource_name_for_log}').")
+                else:
+                    logger.warning(f"Image file {image_path} not found for resource ID {resource_id} ('{resource_name_for_log}').")
+            except Exception as e_img:
+                logger.error(f"Error deleting image file for resource ID {resource_id} ('{resource_name_for_log}'): {str(e_img)}")
+                # Do not add to errors list for API response, as DB deletion is more critical
+
+        try:
+            db.session.delete(resource)
+            # We don't commit here yet, commit all at once after the loop
+            deleted_ids.append(resource_id)
+            # Individual audit log for each successful prep for deletion (actual deletion on commit)
+            # add_audit_log(action="PREPARE_BULK_DELETE_RESOURCE", details=f"Resource ID {resource_id} ('{resource_name_for_log}') prepared for bulk deletion by {current_user.username}.")
+        except Exception as e_db_delete:
+            # This case should be rare if query.get worked, but good for safety
+            db.session.rollback() # Rollback this specific failed delete attempt from session
+            errors.append({'id': resource_id, 'error': f'Error preparing resource for deletion: {str(e_db_delete)}'})
+            logger.error(f"Error preparing resource ID {resource_id} for deletion: {str(e_db_delete)}")
+
+
+    if not deleted_ids and not errors: # Should not happen if input validation is correct
+        return jsonify({'message': 'No resource IDs provided or processed.'}), 400
+
+    if deleted_ids:
+        try:
+            db.session.commit()
+            logger.info(f"User {current_user.username} successfully bulk deleted resources. IDs: {deleted_ids}.")
+            add_audit_log(action="BULK_DELETE_RESOURCES", details=f"User {current_user.username} bulk deleted resources. IDs: {deleted_ids}. Errors during process: {errors}")
+        except Exception as e_commit:
+            db.session.rollback()
+            logger.exception(f"Error committing bulk resource deletion by {current_user.username}:")
+            # Add errors for all IDs that were meant to be deleted as the commit failed
+            for r_id in deleted_ids:
+                if not any(err['id'] == r_id for err in errors): # Avoid duplicate error for same ID
+                    errors.append({'id': r_id, 'error': f'Commit failed: {str(e_commit)}'})
+            # Reset deleted_ids because the commit failed for all of them
+            deleted_ids = []
+            return jsonify({'error': 'Failed to delete resources due to a server error during commit.', 'details': errors}), 500
+
+    response_data = {'deleted_count': len(deleted_ids), 'deleted_ids': deleted_ids, 'errors': errors}
+    status_code = 207 if errors else 200
+    return jsonify(response_data), status_code
 
 
 @api_resources_bp.route('/resources/<int:resource_id>/all_bookings', methods=['GET'])
