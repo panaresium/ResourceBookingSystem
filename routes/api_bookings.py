@@ -6,13 +6,13 @@ from datetime import datetime, timedelta, timezone, time
 
 # Local imports
 # Assuming extensions.py contains db, socketio, mail
-from ..extensions import db, socketio, mail
+from extensions import db, socketio, mail
 # Assuming models.py contains these model definitions
-from ..models import Booking, Resource, User, WaitlistEntry
+from models import Booking, Resource, User, WaitlistEntry
 # Assuming utils.py contains these helper functions
-from ..utils import add_audit_log, parse_simple_rrule, send_email, send_slack_notification, send_teams_notification
+from utils import add_audit_log, parse_simple_rrule, send_email, send_slack_notification, send_teams_notification
 # Assuming auth.py contains permission_required decorator
-from ..auth import permission_required
+from auth import permission_required
 
 # Blueprint Configuration
 api_bookings_bp = Blueprint('api_bookings', __name__, url_prefix='/api')

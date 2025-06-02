@@ -8,10 +8,10 @@ from flask_login import login_required, current_user
 # from sqlalchemy import or_ # For more complex queries if needed in get_audit_logs
 
 # Relative imports from project structure
-from ..auth import permission_required
-from ..extensions import db, socketio # socketio might be None if not available
-from ..models import AuditLog, User, Resource, FloorMap # Added User, Resource, FloorMap for utils that might need them in this context
-from ..utils import (
+from auth import permission_required
+from extensions import db, socketio # socketio might be None if not available
+from models import AuditLog, User, Resource, FloorMap # Added User, Resource, FloorMap for utils that might need them in this context
+from utils import (
     add_audit_log,
     _get_map_configuration_data,
     _import_map_configuration_data,
@@ -25,7 +25,7 @@ from ..utils import (
 
 # Conditional imports for Azure Backup functionality
 try:
-    from ..azure_backup import (
+    from azure_backup import (
         create_full_backup,
         list_available_backups,
         restore_full_backup,
@@ -39,7 +39,7 @@ try:
         download_map_config_component, # For selective restore
         restore_media_component # For selective restore
     )
-    from .. import azure_backup # To access module-level constants if needed by moved functions
+    import azure_backup # To access module-level constants if needed by moved functions
 except ImportError:
     create_full_backup = None
     list_available_backups = None
