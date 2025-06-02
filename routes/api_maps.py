@@ -8,15 +8,15 @@ from flask_login import login_required, current_user
 from sqlalchemy import func # For func.date in get_map_details
 
 # Local imports
-from ..extensions import db
-from ..models import FloorMap, Resource, Booking
-from ..auth import permission_required
+from extensions import db
+from models import FloorMap, Resource, Booking
+from auth import permission_required
 # Assuming these utils will be moved to utils.py or are already there
-from ..utils import add_audit_log, allowed_file, _get_map_configuration_data, _import_map_configuration_data
+from utils import add_audit_log, allowed_file, _get_map_configuration_data, _import_map_configuration_data
 
 # Conditional import for Azure
 try:
-    from ..azure_backup import save_floor_map_to_share
+    from azure_backup import save_floor_map_to_share
 except ImportError:
     save_floor_map_to_share = None
 

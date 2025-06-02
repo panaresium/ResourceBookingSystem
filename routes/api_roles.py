@@ -3,10 +3,10 @@ from flask_login import login_required, current_user
 from sqlalchemy import func, exc as sqlalchemy_exc # Added sqlalchemy_exc for database errors
 
 # Assuming these paths are correct relative to how the app is structured.
-from ..auth import permission_required
-from ..extensions import db
-from ..models import Role, User # User might be needed for audit logging or future role assignments
-from ..utils import add_audit_log
+from auth import permission_required
+from extensions import db
+from models import Role, User # User might be needed for audit logging or future role assignments
+from utils import add_audit_log
 
 api_roles_bp = Blueprint('api_roles', __name__, url_prefix='/api/admin/roles')
 

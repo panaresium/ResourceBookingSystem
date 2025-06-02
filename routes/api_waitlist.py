@@ -3,10 +3,10 @@ from flask_login import login_required, current_user
 from datetime import timezone
 
 # Assuming these paths are correct relative to how the app is structured.
-from ..auth import permission_required
-from ..extensions import db
-from ..models import WaitlistEntry, User, Resource
-from ..utils import add_audit_log
+from auth import permission_required
+from extensions import db
+from models import WaitlistEntry, User, Resource
+from utils import add_audit_log
 
 api_waitlist_bp = Blueprint('api_waitlist', __name__, url_prefix='/api/admin/waitlist')
 

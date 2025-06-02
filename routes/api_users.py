@@ -3,10 +3,10 @@ from flask_login import login_required, current_user
 from sqlalchemy import func # For func.lower in create_resource, and func.ilike in get_all_users
 
 # Local imports
-from ..extensions import db
-from ..models import User, Role # Assuming Role is needed for export/import and updates
-from ..utils import add_audit_log
-from ..auth import permission_required
+from extensions import db
+from models import User, Role # Assuming Role is needed for export/import and updates
+from utils import add_audit_log
+from auth import permission_required
 
 # Blueprint Configuration
 api_users_bp = Blueprint('api_users', __name__, url_prefix='/api')

@@ -7,13 +7,13 @@ from sqlalchemy import func
 from werkzeug.utils import secure_filename
 
 # Assuming db is initialized in extensions.py
-from ..extensions import db
+from extensions import db
 # Assuming models are defined in models.py
-from ..models import Resource, Booking, FloorMap, Role # Added Role
+from models import Resource, Booking, FloorMap, Role # Added Role
 # Assuming utility functions are in utils.py
-from ..utils import add_audit_log, resource_to_dict, allowed_file
+from utils import add_audit_log, resource_to_dict, allowed_file, _import_resource_configurations_data
 # Assuming permission_required is in auth.py
-from ..auth import permission_required
+from auth import permission_required
 
 api_resources_bp = Blueprint('api_resources', __name__, url_prefix='/api')
 
@@ -308,7 +308,7 @@ def import_resources_admin():
     # which is already designed to handle the logic.
     # For simplicity, we'll call it directly if it's adapted for blueprint context or make a wrapper.
     # Assuming _import_resource_configurations_data is available via from utils import ...
-    from ..utils import _import_resource_configurations_data # Ensure it's imported
+    # _import_resource_configurations_data # Ensure it's imported # No longer needed here
 
     logger = current_app.logger
     if 'file' not in request.files: return jsonify({'error': 'No file part.'}), 400
