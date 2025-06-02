@@ -115,62 +115,48 @@
 
     {% block scripts %}
     <script>
-        // Diagnostic script to log focus changes
-        document.addEventListener('focusin', function(e) {
-            console.log('%cFocus changed. New focused element:', 'color: blue; font-weight: bold;', e.target);
-            if (e.target && e.target.id) {
-                console.log('    Focused element ID:', e.target.id);
+        // Script to explicitly set initial page focus
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Attempting to set initial page focus...');
+            // Option 1: Try to focus a specific known main content element if one exists with a consistent ID.
+            // Example: const mainElement = document.getElementById('main-content');
+            // Option 2: Fallback to the <main> tag, or then document.body.
+            const mainElement = document.querySelector('main') || document.body;
+
+            if (mainElement) {
+                // To make a non-interactive element like <main> or <body> focusable, it needs tabindex.
+                // Set tabindex="-1" to make it programmatically focusable but not part of the regular tab order.
+                if (!mainElement.hasAttribute('tabindex') && mainElement.tagName !== 'BODY') {
+                     // Avoid setting tabindex on body unless absolutely necessary and tested.
+                     // Focusing body can have scroll implications. Prefer <main> or a specific div.
+                    mainElement.setAttribute('tabindex', '-1');
+                } else if (mainElement.tagName === 'BODY' && !mainElement.hasAttribute('tabindex')) {
+                    // Only add to body if it's the ultimate fallback and doesn't have one.
+                    // Note: Focusing body is often not visually indicated.
+                    // mainElement.setAttribute('tabindex', '-1'); // Be cautious with body
+                }
+
+
+                // Only attempt focus if it's not the body or if it's explicitly made focusable.
+                // Or if it's an element that is naturally focusable (like an input, if that was the target).
+                // For <main> or a generic div, it needs tabindex="-1".
+                if (mainElement.hasAttribute('tabindex') || mainElement.tagName !== 'BODY') {
+                   try {
+                       mainElement.focus({ preventScroll: true }); // preventScroll is a good idea for non-input elements
+                       console.log('Initial page focus explicitly set to:', mainElement);
+                   } catch (e) {
+                       console.warn('Failed to explicitly set focus to:', mainElement, e);
+                   }
+                } else {
+                    console.log('Initial page focus: Not setting focus to body without tabindex, or a more specific element was not found/targetable.');
+                }
+            } else {
+                console.warn('Initial page focus: No suitable main element (e.g., <main>) or document.body found to set initial focus.');
             }
-            if (e.target && e.target.className) {
-                console.log('    Focused element classes:', e.target.className);
-            }
-            // Check if the focused element is within our modal
-            const modalElement = document.getElementById('booking-slot-modal');
-            if (modalElement && modalElement.contains(e.target)) {
-                console.warn('    ELEMENT FOCUSED INSIDE #booking-slot-modal:', e.target);
-                // You could add a breakpoint here in your browser's debugger
-                // debugger;
-            }
-        }, true); // Use capture phase to ensure this runs early for all focusin events
-        console.log('Focus logging diagnostic script initialized.');
+        });
     </script>
     <!-- Bootstrap JS Bundle (Popper.js included) -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz" crossorigin="anonymous"></script>
-    <script>
-        // Diagnostic script to monitor bootstrap.Modal.prototype.show calls
-        function attemptToWrapModalShow() {
-            if (window.bootstrap && window.bootstrap.Modal && window.bootstrap.Modal.prototype && window.bootstrap.Modal.prototype.show) {
-                const originalShow = window.bootstrap.Modal.prototype.show;
-                window.bootstrap.Modal.prototype.show = function() {
-                    // Ensure this._element exists and has an ID before logging
-                    let modalId = (this._element && this._element.id) ? this._element.id : 'Unknown Modal';
-                    if (modalId === 'booking-slot-modal') { // Only log for our specific modal
-                        console.warn('Bootstrap Modal .show() called on element:', this._element);
-                        console.trace(); // This will give a stack trace of who called it.
-                    }
-                    originalShow.apply(this, arguments);
-                };
-                console.log('Diagnostic: bootstrap.Modal.prototype.show has been wrapped.');
-            } else {
-                console.log('Diagnostic: bootstrap.Modal or prototype.show not ready for wrapping yet.');
-            }
-        }
-
-        // Attempt to wrap immediately after Bootstrap JS (this script block)
-        // DOMContentLoaded might be too late if other deferred scripts run before this specific logic
-        // but bootstrap.Modal might also only be fully ready on DOMContentLoaded.
-        // Using a robust approach:
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', attemptToWrapModalShow);
-        } else { // DOMContentLoaded has already fired
-            attemptToWrapModalShow(); // Try immediately
-        }
-        // Fallback timeout if Bootstrap loads asynchronously but before other dependent scripts
-        // This helps if Bootstrap itself is somehow deferred or loaded unusually.
-        setTimeout(attemptToWrapModalShow, 100); // Short timeout, adjust if necessary
-
-        console.log('Diagnostic script for Modal.show wrapping initialized.');
-    </script>
     <!-- Socket.IO (if used, currently commented out) -->
     <!-- <script src="/socket.io/socket.io.js"></script> -->
     <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
