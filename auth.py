@@ -213,6 +213,7 @@ def api_auth_status():
 
 # --- Initialization Function ---
 def init_auth(app, login_manager_instance, oauth_instance, csrf_instance):
+    login_manager_instance.init_app(app)
     # login_manager is already initialized in extensions.py, just configure it
     login_manager_instance.login_view = 'ui.serve_login' # Assuming serve_login will be in 'ui' blueprint
     login_manager_instance.login_message = 'Please log in to access this page.'
