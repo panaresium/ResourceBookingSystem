@@ -157,7 +157,7 @@ def api_one_click_backup():
             timestamp_str,
             map_config_data=map_config_data,
             resource_configs_data=resource_config_data,
-            user_config_data=user_config_data,
+            user_configs_data=user_config_data,
             socketio_instance=socketio, # socketio from extensions
             task_id=task_id
         )
