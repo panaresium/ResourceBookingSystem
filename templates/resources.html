@@ -23,29 +23,36 @@
         <button id="resource-clear-filters-btn" class="button">{{ _('Clear Filters') }}</button>
     </div>
 
-    <div id="resources-page-status" class="alert" style="display:none; margin-top:15px;"></div> <!-- Added status div -->
     <div id="resource-loading-status" class="status-message" style="margin-bottom: 15px;"></div>
     <div id="resource-buttons-container" class="resource-buttons-grid" style="margin-top: 20px;">
         <!-- Resource buttons will be populated by JavaScript -->
         <p>{{ _('Loading resources...') }}</p>
     </div>
 
-    {% include '_booking_modal.html' %} {# Include the shared modal #}
+    <div id="resource-page-booking-modal" class="modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="rpbm-title">
+        <div class="modal-content">
+            <span id="rpbm-close-modal-btn" class="close-modal-btn" role="button" aria-label="{{ _('Close modal') }}">&times;</span>
+            <h3 id="rpbm-title">{{ _('Book Resource') }}</h3>
+            
+            <p>{{ _('Resource:') }} <strong id="rpbm-resource-name">N/A</strong></p>
+            <p>{{ _('Date:') }} <strong id="rpbm-selected-date">N/A</strong></p>
+            <img id="rpbm-resource-image" src="#" alt="{{ _('Resource image') }}" style="max-width:100%; display:none; margin-bottom:10px;">
 
-{% endblock %}
+            <div id="rpbm-slot-options" style="margin-top: 15px; margin-bottom: 15px;">
+                <button class="button time-slot-btn" data-slot-type="first_half" data-start-time="08:00" data-end-time="12:00">{{ _('First Half-Day (08:00-12:00)') }}</button>
+                <button class="button time-slot-btn" data-slot-type="second_half" data-start-time="13:00" data-end-time="17:00">{{ _('Second Half-Day (13:00-17:00)') }}</button>
+                <button class="button time-slot-btn" data-slot-type="full_day" data-start-time="08:00" data-end-time="17:00">{{ _('Full Day (08:00-17:00)') }}</button>
+            </div>
+            
+            <div>
+                <label for="rpbm-booking-title">{{ _('Booking Title (optional):') }}</label>
+                <input type="text" id="rpbm-booking-title" name="booking_title" class="form-control">
+            </div>
+            
+            <button id="rpbm-confirm-booking-btn" class="button" style="margin-top: 15px;">{{ _('Confirm Booking') }}</button>
+            <div id="rpbm-status-message" class="status-message" style="margin-top:10px;"></div>
+            <button id="rpbm-ack-close-btn" class="button" style="display: none; margin-top: 10px;">{{ _('Close') }}</button>
+        </div>
+    </div>
 
-{% block scripts %}
-    {{ super() }}
-    <script>
-        // Make username available to scripts
-        document.addEventListener('DOMContentLoaded', function() {
-            {% if current_user and current_user.is_authenticated %}
-                document.body.dataset.userName = "{{ current_user.username }}";
-            {% else %}
-                document.body.dataset.userName = ""; // Set to empty if no user or not authenticated
-            {% endif %}
-        });
-    </script>
-    <script src="{{ url_for('static', filename='js/booking_modal_handler.js') }}" defer></script>
-    <script src="{{ url_for('static', filename='js/resource_booking.js') }}" defer></script>
 {% endblock %}
