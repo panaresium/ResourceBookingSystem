@@ -599,7 +599,7 @@ def init_api_system_routes(app):
 def api_admin_view_db_raw_top100():
     """Fetches top 100 records from key database tables."""
     current_app.logger.info(f"User {current_user.username} requested raw top 100 DB records.")
-
+    
     models_to_query = {
         "User": User,
         "Booking": Booking,
@@ -608,9 +608,9 @@ def api_admin_view_db_raw_top100():
         "AuditLog": AuditLog,
         "Role": Role
     }
-
+    
     raw_data = {}
-
+    
     try:
         for model_name, ModelClass in models_to_query.items():
             records = ModelClass.query.limit(100).all()
@@ -627,10 +627,10 @@ def api_admin_view_db_raw_top100():
                         record_dict[column.name] = val
                 serialized_records.append(record_dict)
             raw_data[model_name] = serialized_records
-
+            
         current_app.logger.info(f"Successfully fetched raw DB data for {current_user.username}.")
         return jsonify({'success': True, 'data': raw_data}), 200
-
+        
     except Exception as e:
         current_app.logger.error(f"Error fetching raw DB data for {current_user.username}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': f'Failed to fetch raw database data: {str(e)}'}), 500
@@ -643,7 +643,7 @@ def api_admin_view_db_raw_top100():
 def api_admin_cleanup_system_data():
     """Cleans up database records and uploaded files."""
     current_app.logger.info(f"User {current_user.username} initiated system data cleanup.")
-
+    
     try:
         # Database Cleanup
         num_bookings_deleted = Booking.query.delete()
@@ -657,7 +657,7 @@ def api_admin_cleanup_system_data():
         num_floormaps_deleted = FloorMap.query.delete()
         add_audit_log(action="DB_CLEANUP", details=f"Deleted {num_floormaps_deleted} records from FloorMap table.", user_id=current_user.id)
         current_app.logger.info(f"Deleted {num_floormaps_deleted} records from FloorMap table.")
-
+        
         db.session.commit()
         current_app.logger.info("Database cleanup committed.")
 
@@ -665,12 +665,12 @@ def api_admin_cleanup_system_data():
         # Construct paths relative to the application's root directory
         floor_map_uploads_path = os.path.join(current_app.root_path, 'static', 'floor_map_uploads')
         resource_uploads_path = os.path.join(current_app.root_path, 'static', 'resource_uploads')
-
+        
         paths_to_clean = {
             "Floor Map Uploads": floor_map_uploads_path,
             "Resource Uploads": resource_uploads_path
         }
-
+        
         files_deleted_count = 0
         deletion_errors = []
 
@@ -697,15 +697,15 @@ def api_admin_cleanup_system_data():
                     err_msg = f"Failed to delete file {file_path}: {str(e_file)}"
                     current_app.logger.error(err_msg)
                     deletion_errors.append(err_msg)
-
+        
         add_audit_log(action="FILE_CLEANUP", details=f"Deleted {files_deleted_count} uploaded files. Errors: {len(deletion_errors)}.", user_id=current_user.id)
         current_app.logger.info(f"Uploaded files cleanup completed. Deleted: {files_deleted_count}. Errors: {len(deletion_errors)}.")
 
         if deletion_errors:
             return jsonify({'success': False, 'message': f'Cleanup partially completed. Database cleared. File deletion errors: {"; ".join(deletion_errors)}'}), 500
-
+            
         return jsonify({'success': True, 'message': 'System data cleanup completed successfully.'}), 200
-
+        
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Error during system data cleanup by {current_user.username}: {e}", exc_info=True)
@@ -720,7 +720,7 @@ def api_admin_cleanup_system_data():
 def api_admin_reload_configurations():
     """Attempts to reload certain configurations from their sources."""
     current_app.logger.info(f"User {current_user.username} initiated configuration reload.")
-
+    
     try:
         # Reload Map Configuration
         current_app.logger.info("Attempting to re-fetch map configuration data.")
@@ -737,10 +737,10 @@ def api_admin_reload_configurations():
         current_app.config['BACKUP_SCHEDULE_CONFIG'] = schedule_data # Assuming scheduler reads from here
         current_app.logger.info(f"Backup schedule configuration reloaded into app.config: {schedule_data}")
         add_audit_log(action="RELOAD_CONFIG_SCHEDULE", details=f"Reloaded backup schedule configuration: {schedule_data}", user_id=current_user.id)
-
+        
         add_audit_log(action="RELOAD_CONFIGURATIONS_FINISHED", details="Configuration reload attempt finished.", user_id=current_user.id)
         return jsonify({'success': True, 'message': 'Configuration reload attempt finished. Note: Full effect for map configurations may require deeper application integration or restart.'}), 200
-
+        
     except Exception as e:
         current_app.logger.error(f"Error during configuration reload by {current_user.username}: {e}", exc_info=True)
         add_audit_log(action="RELOAD_CONFIGURATIONS_ERROR", details=f"Error: {str(e)}", user_id=current_user.id)

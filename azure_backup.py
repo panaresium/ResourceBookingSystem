@@ -394,9 +394,9 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             logger.info(f"Successfully backed up map configuration to '{config_share_name}/{remote_config_path}'.")
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'Map configuration backup complete.')
         except Exception as e:
-            logger.error(f"Failed to backup map configuration to '{config_share_name}/{remote_config_path}': {e}")
+            logger.error(f"Failed to backup map configuration to '{config_share_name}/{remote_config_path}': {e}", exc_info=True)
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'Map configuration backup failed.', str(e))
-            # Not setting overall_success = False for config backup failure, could be optional
+            overall_success = False # If map config was provided but failed to upload
     else:
         logger.warning(f"No map_config_data provided for timestamp {timestamp_str}. Skipping map configuration backup.")
         _emit_progress(socketio_instance, task_id, 'backup_progress', 'Map configuration backup skipped (no data provided).')
@@ -415,9 +415,9 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             logger.info(f"Successfully backed up resource configurations to '{config_share_name}/{remote_resource_configs_path}'.")
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'Resource configurations backup complete.')
         except Exception as e:
-            logger.error(f"Failed to backup resource configurations to '{config_share_name}/{remote_resource_configs_path}': {e}")
+            logger.error(f"Failed to backup resource configurations to '{config_share_name}/{remote_resource_configs_path}': {e}", exc_info=True)
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'Resource configurations backup failed.', str(e))
-            # Not necessarily setting overall_success = False, depends on criticality
+            overall_success = False # If resource configs were provided but failed to upload
     else:
         logger.warning(f"No resource_configs_data provided for timestamp {timestamp_str}. Skipping resource configurations backup.")
         _emit_progress(socketio_instance, task_id, 'backup_progress', 'Resource configurations backup skipped (no data).')
@@ -435,8 +435,9 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             logger.info(f"Successfully backed up user/role configurations to '{config_share_name}/{remote_user_configs_path}'.")
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'User/role configurations backup complete.')
         except Exception as e:
-            logger.error(f"Failed to backup user/role configurations to '{config_share_name}/{remote_user_configs_path}': {e}")
+            logger.error(f"Failed to backup user/role configurations to '{config_share_name}/{remote_user_configs_path}': {e}", exc_info=True)
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'User/role configurations backup failed.', str(e))
+            overall_success = False # If user configs were provided but failed to upload
     else:
         logger.warning(f"No user_configs_data provided for timestamp {timestamp_str}. Skipping user/role configurations backup.")
         _emit_progress(socketio_instance, task_id, 'backup_progress', 'User/role configurations backup skipped (no data).')
@@ -652,9 +653,9 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             logger.info(f"Successfully uploaded backup manifest to '{db_share_name}/{remote_manifest_path}'.")
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backup manifest uploaded successfully.')
         except Exception as e:
-            logger.error(f"Failed to upload backup manifest to '{db_share_name}/{remote_manifest_path}': {e}")
-            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Failed to upload backup manifest.', str(e))
-            # overall_success might be set to False here if manifest is critical, but current plan implies it's best effort after successful backup.
+            logger.error(f"Error during backup manifest creation or upload to '{db_share_name}/{remote_manifest_path}': {e}", exc_info=True)
+            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backup manifest creation/upload FAILED.', str(e))
+            overall_success = False # Crucial change
 
     if overall_success:
         _emit_progress(socketio_instance, task_id, 'backup_progress', f'Backup completed with overall success: True', 'SUCCESS')

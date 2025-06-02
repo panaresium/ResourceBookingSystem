@@ -181,6 +181,7 @@ def allowed_file(filename):
            filename.rsplit('.', 1)[1].lower() in current_app.config.get('ALLOWED_EXTENSIONS', set())
 
 def _get_map_configuration_data() -> dict:
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
     floor_maps = FloorMap.query.all()
     floor_maps_data = []
     for fm in floor_maps:
@@ -204,6 +205,7 @@ def _get_map_configuration_data() -> dict:
             'allowed_user_ids': r.allowed_user_ids,
             'role_ids': [role.id for role in r.roles]
         })
+    logger.info(f"Data for map configuration backup: Found {len(floor_maps_data)} floor_maps and {len(mapped_resources_data)} mapped_resources.")
     return {
         'floor_maps': floor_maps_data,
         'mapped_resources': mapped_resources_data
