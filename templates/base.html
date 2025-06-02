@@ -114,6 +114,26 @@
     </div>
 
     {% block scripts %}
+    <script>
+        // Diagnostic script to log focus changes
+        document.addEventListener('focusin', function(e) {
+            console.log('%cFocus changed. New focused element:', 'color: blue; font-weight: bold;', e.target);
+            if (e.target && e.target.id) {
+                console.log('    Focused element ID:', e.target.id);
+            }
+            if (e.target && e.target.className) {
+                console.log('    Focused element classes:', e.target.className);
+            }
+            // Check if the focused element is within our modal
+            const modalElement = document.getElementById('booking-slot-modal');
+            if (modalElement && modalElement.contains(e.target)) {
+                console.warn('    ELEMENT FOCUSED INSIDE #booking-slot-modal:', e.target);
+                // You could add a breakpoint here in your browser's debugger
+                // debugger;
+            }
+        }, true); // Use capture phase to ensure this runs early for all focusin events
+        console.log('Focus logging diagnostic script initialized.');
+    </script>
     <!-- Bootstrap JS Bundle (Popper.js included) -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" integrity="sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz" crossorigin="anonymous"></script>
     <!-- Socket.IO (if used, currently commented out) -->
