@@ -769,3 +769,96 @@ def list_pending_bookings():
             'title': b.title,
         })
     return jsonify(result), 200
+
+
+@api_bookings_bp.route('/admin/bookings/<int:booking_id>/approve', methods=['POST'])
+@login_required
+@permission_required('manage_bookings') # Replaces is_admin check
+def approve_booking_admin(booking_id):
+    # Removed: if not current_user.is_admin: return abort(403)
+    booking = Booking.query.get_or_404(booking_id) # Uses current_app.extensions['sqlalchemy'].get_or_404 with new setup
+    if booking.status != 'pending':
+        return jsonify({'error': 'Booking not pending'}), 400
+    booking.status = 'approved'
+    db.session.commit() # Uses current_app.extensions['sqlalchemy'].session
+    user = User.query.filter_by(username=booking.user_name).first()
+    if user and user.email: # Added check for user.email
+        # Use imported send_email utility
+        send_email(user.email, 'Booking Approved',
+                   f"Your booking for {booking.resource_booked.name if booking.resource_booked else 'resource'} on {booking.start_time.strftime('%Y-%m-%d %H:%M')} has been approved.")
+    # Use imported send_slack_notification utility
+    send_slack_notification(f"Booking {booking.id} approved by {current_user.username}")
+    # Use current_app.logger
+    current_app.logger.info(f"Booking {booking.id} approved by admin {current_user.username}.")
+    add_audit_log(action="APPROVE_BOOKING_ADMIN", details=f"Admin {current_user.username} approved booking ID {booking.id}.")
+    socketio.emit('booking_updated', {'action': 'approved', 'booking_id': booking.id, 'status': 'approved', 'resource_id': booking.resource_id})
+    return jsonify({'success': True}), 200
+
+
+@api_bookings_bp.route('/admin/bookings/<int:booking_id>/reject', methods=['POST'])
+@login_required
+@permission_required('manage_bookings') # Replaces is_admin check
+def reject_booking_admin(booking_id):
+    # Removed: if not current_user.is_admin: return abort(403)
+    booking = Booking.query.get_or_404(booking_id)
+    if booking.status != 'pending':
+        return jsonify({'error': 'Booking not pending'}), 400
+    booking.status = 'rejected'
+    db.session.commit()
+    user = User.query.filter_by(username=booking.user_name).first()
+    if user and user.email: # Added check for user.email
+        send_email(user.email, 'Booking Rejected',
+                   f"Your booking for {booking.resource_booked.name if booking.resource_booked else 'resource'} on {booking.start_time.strftime('%Y-%m-%d %H:%M')} has been rejected.")
+    send_slack_notification(f"Booking {booking.id} rejected by {current_user.username}")
+    current_app.logger.info(f"Booking {booking.id} rejected by admin {current_user.username}.")
+    add_audit_log(action="REJECT_BOOKING_ADMIN", details=f"Admin {current_user.username} rejected booking ID {booking.id}.")
+    socketio.emit('booking_updated', {'action': 'rejected', 'booking_id': booking.id, 'status': 'rejected', 'resource_id': booking.resource_id})
+    return jsonify({'success': True}), 200
+
+
+@api_bookings_bp.route('/admin/bookings/<int:booking_id>/cancel', methods=['POST'])
+@login_required
+@permission_required('manage_bookings')
+def admin_cancel_booking(booking_id):
+    current_app.logger.info(f"Admin user {current_user.username} attempting to cancel booking ID: {booking_id}")
+    try:
+        booking = Booking.query.get(booking_id)
+
+        if not booking:
+            current_app.logger.warning(f"Admin cancel attempt: Booking ID {booking_id} not found.")
+            return jsonify({'error': 'Booking not found.'}), 404
+
+        terminal_statuses = ['cancelled', 'rejected', 'completed', 'checked_out']
+        if booking.status and booking.status.lower() in terminal_statuses:
+            current_app.logger.warning(f"Admin cancel attempt: Booking ID {booking_id} is already in a terminal state: '{booking.status}'.")
+            return jsonify({'error': f'Booking is already in a terminal state ({booking.status}) and cannot be cancelled.'}), 400
+
+        original_status = booking.status
+        booking.status = 'cancelled'
+
+        resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
+        booking_title = booking.title or "N/A"
+
+        audit_details = (
+            f"Admin '{current_user.username}' cancelled booking ID {booking.id}. "
+            f"Original status: '{original_status}'. "
+            f"Booked by: '{booking.user_name}'. "
+            f"Resource: '{resource_name}' (ID: {booking.resource_id}). "
+            f"Title: '{booking_title}'."
+        )
+
+        db.session.commit()
+        add_audit_log(action="ADMIN_CANCEL_BOOKING", details=audit_details)
+        socketio.emit('booking_updated', {'action': 'cancelled_admin', 'booking_id': booking_id, 'resource_id': booking.resource_id, 'new_status': 'cancelled'})
+
+        current_app.logger.info(f"Admin user {current_user.username} successfully cancelled booking ID: {booking_id}.")
+        return jsonify({'message': 'Booking cancelled successfully.', 'booking_id': booking_id, 'new_status': 'cancelled'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception(f"Error during admin cancellation of booking ID {booking_id}:")
+        add_audit_log(
+            action="ADMIN_CANCEL_BOOKING_FAILED",
+            details=f"Admin '{current_user.username}' failed to cancel booking ID {booking_id}. Error: {str(e)}"
+        )
+        return jsonify({'error': 'Failed to cancel booking due to a server error.'}), 500
