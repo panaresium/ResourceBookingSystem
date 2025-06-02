@@ -558,13 +558,13 @@
 
                 const verifyBtn = document.createElement('button');
                 verifyBtn.textContent = "{{ _('Verify') }}";
-                verifyBtn.className = 'btn btn-sm btn-secondary verify-backup-btn';
+                verifyBtn.className = 'btn btn-sm btn-secondary verify-backup-btn me-2'; // Added me-2
                 verifyBtn.setAttribute('data-timestamp', timestamp);
                 cellAction.appendChild(verifyBtn);
 
                 const deleteBtn = document.createElement('button');
                 deleteBtn.textContent = "{{ _('Delete') }}";
-                deleteBtn.className = 'btn btn-sm btn-danger delete-backup-btn ms-2';
+                deleteBtn.className = 'btn btn-sm btn-danger delete-backup-btn'; // Removed ms-2, as verifyBtn now has me-2
                 deleteBtn.setAttribute('data-timestamp', timestamp);
                 cellAction.appendChild(deleteBtn);
             });
@@ -604,27 +604,23 @@
             let isRestore = targetButton.classList.contains('restore-btn');
             let isDryRun = targetButton.classList.contains('restore-dry-run-btn');
             let isVerify = targetButton.classList.contains('verify-backup-btn');
-            let isDelete = targetButton.classList.contains('delete-backup-btn'); // Added for delete
+            let isDelete = targetButton.classList.contains('delete-backup-btn');
 
             if (isVerify) {
                 const timestampToVerify = targetButton.getAttribute('data-timestamp');
-                // Optional: Confirmation
-                // if (!confirm(`{{ _('Perform health check for backup') }} ${timestampToVerify}?`)) return;
-
-                currentVerifyTaskId = null; // Reset verify task ID
-                currentDeleteTaskId = null; // Clear other task IDs
+                
+                currentVerifyTaskId = null; 
+                currentDeleteTaskId = null; 
                 currentRestoreTaskId = null;
                 currentBackupTaskId = null;
 
-                restoreLogAreaEl.innerHTML = ''; // Clear main log area (or use a dedicated one)
+                restoreLogAreaEl.innerHTML = ''; 
                 restoreLogAreaEl.style.display = 'block';
                 backupLogAreaEl.style.display = 'none';
                 appendLog('restore-log-area', `VERIFY: Initiating for ${timestampToVerify}...`, '', 'info');
 
-                // Disable all action buttons
                 document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = true);
-                // backupButton.disabled = true;
-
+                
                 restoreStatusMessageEl.textContent = `{{ _('Initiating verification for') }} ${timestampToVerify}...`;
                 restoreStatusMessageEl.className = 'alert alert-info';
 
@@ -639,18 +635,16 @@
                 })
                 .then(response => response.json())
                 .then(data => {
-                    currentVerifyTaskId = data.task_id; // Store the new verify task ID
+                    currentVerifyTaskId = data.task_id; 
                     const messageType = data.success ? 'info' : 'error';
-                    appendLog('restore-log-area', `VERIFY: ${data.message || (data.success ? 'Verification process started.' : 'Failed to start verification.')}`, `Task ID: ${data.task_id || 'N/A'}`, messageType);
-                    restoreStatusMessageEl.textContent = data.message; // Update main status
+                    appendLog('restore-log-area', `VERIFY: ${data.message || (data.success ? '{{ _("Verification process started.") }}' : '{{ _("Failed to start verification.") }}')}`, `Task ID: ${data.task_id || 'N/A'}`, messageType);
+                    restoreStatusMessageEl.textContent = data.message; 
                     restoreStatusMessageEl.className = `alert alert-${messageType}`;
 
-                    if (!data.success) { // If API call itself fails to initiate
+                    if (!data.success) { 
                         document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
-                        // backupButton.disabled = false;
-                        currentVerifyTaskId = null; // Clear if initiation failed
+                        currentVerifyTaskId = null; 
                     }
-                    // Detailed results and final button re-enabling will be handled by the 'verify_backup_progress' socket listener
                 })
                 .catch(error => {
                     console.error('Verify backup error:', error);
@@ -659,8 +653,7 @@
                     restoreStatusMessageEl.textContent = errorMsg;
                     restoreStatusMessageEl.className = 'alert alert-danger';
                     document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
-                    // backupButton.disabled = false;
-                    currentVerifyTaskId = null; // Clear on error
+                    currentVerifyTaskId = null; 
                 });
 
             } else if (isDelete) {
