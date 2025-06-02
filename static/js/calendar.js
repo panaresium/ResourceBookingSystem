@@ -152,9 +152,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Function to handle saving changes from the modal
-    async function saveBookingChanges(bookingId, title, calendarEventToUpdate) { // Signature updated
-        cebmSaveChangesBtn.disabled = true;
-        cebmSaveChangesBtn.textContent = 'Processing...';
+    async function saveBookingChanges(buttonElement, bookingId, title, calendarEventToUpdate) { // Signature updated
+        buttonElement.disabled = true;
+        buttonElement.textContent = 'Processing...';
         cebmStatusMessage.textContent = '';
         cebmStatusMessage.className = 'status-message';
 
@@ -233,8 +233,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 cebmStatusMessage.className = 'status-message error-message';
             }
         } finally {
-            cebmSaveChangesBtn.disabled = false;
-            cebmSaveChangesBtn.textContent = 'Save Changes';
+            buttonElement.disabled = false;
+            buttonElement.textContent = 'Save Changes';
         }
     }
 
@@ -308,6 +308,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (currentSaveBtn) {
                 currentSaveBtn.onclick = () => {
                     saveBookingChanges(
+                        currentSaveBtn, // Pass the button instance
                         cebmBookingId.value,
                         cebmBookingTitle.value,
                         info.event
