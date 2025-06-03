@@ -683,6 +683,62 @@ class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusi
         self.assertIn(b'Analytics Dashboard', resp_admin.data) # Updated title
         # Further checks for new elements can be added in a dedicated page rendering test
 
+    def test_view_db_raw_top100_all_tables(self):
+        """Test the /api/admin/view_db_raw_top100 endpoint to ensure it fetches all tables."""
+        # Create an admin user with 'manage_system' permission
+        # Assuming 'Administrator' role grants 'manage_system' via 'all_permissions'
+        admin_role = Role.query.filter_by(name="Administrator").first()
+        if not admin_role:
+            admin_role = Role(name="Administrator", permissions="all_permissions")
+            db.session.add(admin_role)
+            db.session.commit()
+
+        admin_user = User(username="dbviewadmin", email="dbview@example.com", is_admin=True)
+        admin_user.set_password("adminpass")
+        admin_user.roles.append(admin_role)
+        db.session.add(admin_user)
+        db.session.commit()
+
+        self.login(admin_user.username, "adminpass")
+
+        response = self.client.get('/api/admin/view_db_raw_top100')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content_type, 'application/json')
+
+        data = json.loads(response.data.decode('utf-8'))
+        self.assertTrue(data.get('success'))
+        self.assertIn('data', data)
+        self.assertIsInstance(data['data'], dict)
+
+        # Get all table names from the database metadata
+        all_db_table_names = db.metadata.tables.keys()
+        # Also include model names that might not directly match table names if the backend logic uses class names as keys sometimes
+        # For this test, we primarily care about what the API *returns* as keys, which should be table names.
+
+        response_table_keys = data['data'].keys()
+
+        for table_name in all_db_table_names:
+            self.assertIn(table_name, response_table_keys, f"Table '{table_name}' not found in API response.")
+
+            table_content = data['data'][table_name]
+            # The content should be a list (of records, or an empty list, or a list with an info dict for skipped)
+            self.assertIsInstance(table_content, list, f"Content for table '{table_name}' should be a list.")
+
+            if table_content: # If the list is not empty
+                # If it's an info message for a skipped table, it's a list with one dict: e.g. [{"info": "Skipped..."}]
+                if "info" in table_content[0]:
+                    self.assertTrue(isinstance(table_content[0]["info"], str))
+                else: # Otherwise, it's a list of records (dictionaries)
+                    for record in table_content:
+                        self.assertIsInstance(record, dict)
+
+        # Verify that all keys in response data are actual table names (no extra keys)
+        for response_key in response_table_keys:
+            self.assertIn(response_key, all_db_table_names, f"API response key '{response_key}' is not a valid table name.")
+
+        self.logout()
+
     @unittest.mock.patch('routes.admin_ui.db.session')
     def test_admin_analytics_data_endpoint_new_structure(self, mock_db_session):
         """Validate the new JSON structure and aggregations from /admin/analytics/data."""
