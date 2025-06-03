@@ -3225,4 +3225,3 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-[end of static/js/script.js]
