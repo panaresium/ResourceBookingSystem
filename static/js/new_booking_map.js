@@ -199,128 +199,119 @@ document.addEventListener('DOMContentLoaded', function () {
                         areaDiv.style.height = `${heightValue}px`;
                         areaDiv.textContent = resource.name;
                         areaDiv.dataset.resourceId = resource.id;
-                        // areaDiv.title = resource.name; // Title will be set based on availability
 
-                        // --- Start of new availability logic ---
+                        // 1. Data Preparation is implicitly done by variables in scope:
+                        // resource.bookings_on_date, userBookingsForDate, loggedInUsername
+                        // resource.is_under_maintenance (assuming it exists on the resource object)
+
+                        // 2. Define Primary Slots and Helper
                         const primarySlots = [
-                            { name: "first_half", start: 8 * 60, end: 12 * 60, isGenerallyAvailable: true, isAvailableToUser: true },
-                            { name: "second_half", start: 13 * 60, end: 17 * 60, isGenerallyAvailable: true, isAvailableToUser: true }
+                            { name: "first_half", start: 8 * 60, end: 12 * 60, isGenerallyBooked: false, isBookedByCurrentUser: false },
+                            { name: "second_half", start: 13 * 60, end: 17 * 60, isGenerallyBooked: false, isBookedByCurrentUser: false }
                         ];
-                        function timeToMinutes(timeStr) { // HH:MM or HH:MM:SS
-                            const parts = timeStr.split(':');
-                            return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
-                        }
+                        // Ensure timeToMinutes helper is defined (it's already in the outer scope of forEach, but good to be mindful)
+                        // function timeToMinutes(timeStr) { ... } // Already defined earlier in loadMapDetails
 
-                        // Determine General Availability for Primary Slots for THIS resource
+                        // 3. Step 1: Analyze Bookings on This Resource
+                        // Reset flags for each resource iteration (already done by new object creation for primarySlots)
                         if (resource.bookings_on_date && resource.bookings_on_date.length > 0) {
                             resource.bookings_on_date.forEach(booking => {
                                 const bookingStartMinutes = timeToMinutes(booking.start_time);
                                 const bookingEndMinutes = timeToMinutes(booking.end_time);
                                 primarySlots.forEach(slot => {
                                     if (Math.max(slot.start, bookingStartMinutes) < Math.min(slot.end, bookingEndMinutes)) {
-                                        slot.isGenerallyAvailable = false;
+                                        slot.isGenerallyBooked = true;
+                                        if (loggedInUsername && booking.user_name === loggedInUsername) {
+                                            slot.isBookedByCurrentUser = true;
+                                        }
                                     }
                                 });
                             });
                         }
 
-                        // Check User's Conflicts for Generally Available Primary Slots
-                        if (loggedInUsername && userBookingsForDate && userBookingsForDate.length > 0) {
+                        // 4. Step 2: Initial Classification
+                        let finalAvailabilityClass = '';
+                        let areaTitle = resource.name;
+                        const numGenerallyBookedSlots = primarySlots.filter(s => s.isGenerallyBooked).length;
+                        const numCurrentUserBookedSlotsHere = primarySlots.filter(s => s.isBookedByCurrentUser).length;
+
+                        // Assuming resource.is_under_maintenance is a boolean field from API
+                        if (resource.is_under_maintenance && numGenerallyBookedSlots === 0) {
+                            finalAvailabilityClass = 'map-area-light-blue'; // New class
+                            areaTitle += " (Under Maintenance)";
+                        } else if (numGenerallyBookedSlots === primarySlots.length) { // All primary slots booked by someone
+                            if (numCurrentUserBookedSlotsHere === primarySlots.length) {
+                                finalAvailabilityClass = 'map-area-red'; // New class
+                                areaTitle += " (Booked by You - Full Day)";
+                            } else {
+                                finalAvailabilityClass = 'map-area-red'; // New class
+                                areaTitle += " (Fully Booked)";
+                            }
+                        } else if (numCurrentUserBookedSlotsHere > 0) { // Current user booked at least one slot here, but not all
+                            finalAvailabilityClass = 'map-area-dark-orange'; // New class
+                            areaTitle += " (Partially Booked by You)";
+                        } else if (numGenerallyBookedSlots > 0) { // Partially booked by others
+                            finalAvailabilityClass = 'map-area-yellow'; // New class
+                            areaTitle += " (Partially Available)";
+                        } else { // No general bookings at all
+                            finalAvailabilityClass = 'map-area-green'; // New class
+                            areaTitle += " (Available)";
+                        }
+
+                        // 5. Step 3: User-Specific Override for Green/Yellow States
+                        if (loggedInUsername && (finalAvailabilityClass === 'map-area-green' || finalAvailabilityClass === 'map-area-yellow')) {
+                            let allPotentiallyAvailableSlotsBlockedByOtherUserBookings = true;
+                            let hasPotentiallyAvailableSlots = false;
                             primarySlots.forEach(slot => {
-                                if (slot.isGenerallyAvailable) {
-                                    for (const userBooking of userBookingsForDate) {
-                                        if (String(userBooking.resource_id) !== String(resource.id)) { // User's booking on a DIFFERENT resource
-                                            const userBookingStartMinutes = timeToMinutes(userBooking.start_time);
-                                            const userBookingEndMinutes = timeToMinutes(userBooking.end_time);
-                                            if (Math.max(slot.start, userBookingStartMinutes) < Math.min(slot.end, userBookingEndMinutes)) {
-                                                slot.isAvailableToUser = false;
-                                                break;
+                                if (!slot.isGenerallyBooked) { // Consider only slots not already booked on this resource
+                                    hasPotentiallyAvailableSlots = true;
+                                    let conflictWithUserOtherBooking = false;
+                                    if (userBookingsForDate && userBookingsForDate.length > 0) {
+                                        for (const userBooking of userBookingsForDate) {
+                                            if (String(userBooking.resource_id) !== String(resource.id)) {
+                                                const userBookingStartMinutes = timeToMinutes(userBooking.start_time);
+                                                const userBookingEndMinutes = timeToMinutes(userBooking.end_time);
+                                                if (Math.max(slot.start, userBookingStartMinutes) < Math.min(slot.end, userBookingEndMinutes)) {
+                                                    conflictWithUserOtherBooking = true; break;
+                                                }
                                             }
                                         }
                                     }
+                                    if (!conflictWithUserOtherBooking) {
+                                        allPotentiallyAvailableSlotsBlockedByOtherUserBookings = false;
+                                    }
                                 }
                             });
-                        }
-
-                        let allGenerallyAvailableSlotsBlockedForUser = true;
-                        let anyGenerallyAvailableSlotExists = false;
-                        primarySlots.forEach(slot => {
-                            if (slot.isGenerallyAvailable) {
-                                anyGenerallyAvailableSlotExists = true;
-                                if (slot.isAvailableToUser) {
-                                    allGenerallyAvailableSlotsBlockedForUser = false;
-                                }
-                            }
-                        });
-                        if (!anyGenerallyAvailableSlotExists) { // If no slots were generally available to begin with
-                            allGenerallyAvailableSlotsBlockedForUser = false;
-                        }
-                        // --- End of new availability logic ---
-
-                        // Clear existing classes before applying new ones
-                        areaDiv.classList.remove('resource-area-available', 'resource-area-partially-booked', 'resource-area-fully-booked', 'resource-area-user-conflict', 'resource-area-restricted', 'resource-area-unknown');
-
-                        let finalAvailabilityClass = 'resource-area-unknown'; // Default
-                        let isMapAreaClickable = true;
-                        const currentUserId = parseInt(sessionStorage.getItem('loggedInUserId'), 10);
-                        const currentUserIsAdmin = sessionStorage.getItem('loggedInUserIsAdmin') === 'true';
-                        const resourceForPermission = { // Ensure this object is correctly populated for checkUserPermissionForResource
-                            id: resource.id, name: resource.name,
-                            booking_restriction: resource.booking_restriction,
-                            allowed_user_ids: resource.allowed_user_ids,
-                            roles: resource.roles // Ensure roles are passed correctly
-                        };
-
-                        if (!checkUserPermissionForResource(resourceForPermission, currentUserId, currentUserIsAdmin)) {
-                            finalAvailabilityClass = 'resource-area-restricted';
-                            isMapAreaClickable = false;
-                            areaDiv.title = `${resource.name} (Access Restricted)`;
-                        } else if (!anyGenerallyAvailableSlotExists) { // All primary slots are booked on this resource
-                            finalAvailabilityClass = 'resource-area-fully-booked';
-                            areaDiv.title = resource.name + " (Fully Booked)";
-                            isMapAreaClickable = false;
-                        } else if (loggedInUsername && allGenerallyAvailableSlotsBlockedForUser) { // anyGenerallyAvailableSlotExists must be true here
-                            finalAvailabilityClass = 'resource-area-user-conflict';
-                            areaDiv.title = resource.name + " (Unavailable - Your bookings conflict)";
-                            isMapAreaClickable = false;
-                        } else {
-                            // Slots are generally available, and not all are blocked by user's other bookings.
-                            // Determine if available, partial based on remaining generally available slots that are also available to user.
-                            const stillBookableSlots = primarySlots.filter(slot => slot.isGenerallyAvailable && slot.isAvailableToUser);
-                            if (stillBookableSlots.length === primarySlots.filter(slot => slot.isGenerallyAvailable).length && stillBookableSlots.length > 0) {
-                                finalAvailabilityClass = 'resource-area-available';
-                            } else if (stillBookableSlots.length > 0) {
-                                finalAvailabilityClass = 'resource-area-partially-booked';
-                            } else {
-                                // This case should ideally be covered by !anyGenerallyAvailableSlotExists or allGenerallyAvailableSlotsBlockedForUser
-                                // but as a fallback, if no slots are bookable by the user for other reasons (e.g. partial general booking not covering a full primary slot)
-                                finalAvailabilityClass = 'resource-area-fully-booked'; // Or 'unavailable' if a more generic term is preferred
-                            }
-
-                            let statusText = finalAvailabilityClass.replace('resource-area-','').replace('-',' ');
-                            statusText = statusText.charAt(0).toUpperCase() + statusText.slice(1);
-                            areaDiv.title = resource.name + (finalAvailabilityClass !== 'resource-area-available' ? ` (${statusText})` : ' (Available)');
-
-                            // Redundant check for fully-booked, but safe
-                            if (finalAvailabilityClass === 'resource-area-fully-booked' || finalAvailabilityClass === 'resource-area-unknown') {
-                                isMapAreaClickable = false;
+                            if (hasPotentiallyAvailableSlots && allPotentiallyAvailableSlotsBlockedByOtherUserBookings) {
+                                finalAvailabilityClass = 'map-area-light-blue'; // New class for user conflict override
+                                areaTitle = resource.name + " (Unavailable - Your schedule conflicts)";
                             }
                         }
 
+                        // 6. Step 4: Assign Final Class and Title to areaDiv
+                        // Clear all potentially relevant old and new classes
+                        areaDiv.classList.remove(
+                            'resource-area-available', 'resource-area-partially-booked',
+                            'resource-area-fully-booked', 'resource-area-user-conflict',
+                            'resource-area-restricted', 'resource-area-unknown',
+                            'map-area-green', 'map-area-yellow', 'map-area-light-blue',
+                            'map-area-red', 'map-area-dark-orange'
+                        );
                         areaDiv.classList.add(finalAvailabilityClass);
+                        areaDiv.title = areaTitle;
 
-                        // Determine clickability based *only* on finalAvailabilityClass
-                        // Default to not clickable for restricted, fully-booked, user-conflict, partially-booked, and unknown states.
-                        isMapAreaClickable = false;
-                        if (finalAvailabilityClass === 'resource-area-available') {
-                            // Further check permissions if 'available' could be set despite restrictions (should not happen with current logic order)
-                            // For now, assume 'resource-area-available' implies it passed permission checks.
+                        // Clickability logic will be handled in the next step based on finalAvailabilityClass
+                        // For now, just ensure the class is set. The existing clickability logic might still run.
+                        // The existing clickability logic based on 'isMapAreaClickable' will be refined later.
+                        // We are only focusing on setting finalAvailabilityClass and areaTitle here.
+
+                        let isMapAreaClickable = false; // Default to not clickable
+                        if (finalAvailabilityClass === 'map-area-green' || finalAvailabilityClass === 'map-area-yellow') {
                             isMapAreaClickable = true;
                         }
 
                         if (isMapAreaClickable) {
                             areaDiv.classList.add('map-area-clickable');
-                            // Add event listener directly to the original areaDiv
                             areaDiv.addEventListener('click', function() {
                                 if (resourceSelectBooking) {
                                     resourceSelectBooking.value = resource.id;
