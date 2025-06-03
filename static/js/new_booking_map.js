@@ -126,6 +126,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 console.warn(`Could not fetch user's bookings for date ${dateString}:`, err.message);
             }
         }
+        console.log("DEBUG MAP: User's other bookings for the day (userBookingsForDate) at start of loadMapDetails:", JSON.stringify(userBookingsForDate));
 
         // Define timeToMinutes helper once within loadMapDetails
         function timeToMinutes(timeStr) {
@@ -147,6 +148,11 @@ document.addEventListener('DOMContentLoaded', function () {
             if (data.mapped_resources && data.mapped_resources.length > 0) {
                 data.mapped_resources.forEach(resource => {
                     if (resource.map_coordinates && resource.map_coordinates.type === 'rect') {
+                        console.log("DEBUG MAP: --- Resource:", resource.name, "(ID:", resource.id, ") ---");
+                        console.log("DEBUG MAP: Maintenance:", resource.is_under_maintenance, "Maintenance Until:", resource.maintenance_until);
+                        console.log("DEBUG MAP: General Bookings on this resource (resource.bookings_on_date):", JSON.stringify(resource.bookings_on_date));
+                        // userBookingsForDate is logged at the start of loadMapDetails
+
                         const coords = resource.map_coordinates;
                         const areaDiv = document.createElement('div');
                         areaDiv.className = 'resource-area';
@@ -228,7 +234,24 @@ document.addEventListener('DOMContentLoaded', function () {
                         areaDiv.classList.add(finalClass);
                         areaDiv.title = finalTitle;
 
-                        // Clickability logic to be added in next step based on finalClass
+                        let isMapAreaClickable = false; // Default to not clickable
+                        if (finalClass === 'map-area-green' || finalClass === 'map-area-yellow') {
+                            isMapAreaClickable = true;
+                        }
+
+                        if (isMapAreaClickable) {
+                            areaDiv.classList.add('map-area-clickable');
+                            areaDiv.addEventListener('click', function() {
+                                if (resourceSelectBooking) {
+                                    resourceSelectBooking.value = resource.id;
+                                    resourceSelectBooking.dispatchEvent(new Event('change'));
+                                }
+                                // Ensure userBookingsForDate is passed
+                                openResourceDetailModal(resource, dateString, userBookingsForDate || []);
+                            });
+                        } else {
+                            areaDiv.classList.remove('map-area-clickable');
+                        }
 
                         if (resourceSelectBooking && resourceSelectBooking.value === resource.id.toString()) {
                             areaDiv.classList.add('resource-area-form-selected');
