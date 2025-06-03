@@ -82,16 +82,19 @@ def upload_floor_map():
         current_app.logger.warning("No file selected for map upload.")
         return jsonify({'error': 'No selected file.'}), 400
 
-    if file and allowed_file(file.filename): # allowed_file from utils
-        filename = secure_filename(file.filename)
+    if file and allowed_file(file.filename):
+        original_filename = file.filename # For reference if needed
+        filename = secure_filename(original_filename).lower() # Standardize: secure + lowercase
 
+        # Check using the standardized filename
         existing_map_by_filename = FloorMap.query.filter_by(image_filename=filename).first()
+        # Note: existing_map_by_name check can remain as is, as map names might have legitimate case differences.
         existing_map_by_name = FloorMap.query.filter_by(name=map_name).first()
 
         if existing_map_by_filename:
-            current_app.logger.warning(f"Attempt to upload map with duplicate filename: {filename}")
-            return jsonify({'error': 'A map with this image filename already exists.'}), 409
-        if existing_map_by_name:
+            current_app.logger.warning(f"Attempt to upload map with duplicate standardized filename: {filename} (original: {original_filename})")
+            return jsonify({'error': 'A map with this image filename (or similar after standardization) already exists.'}), 409
+        if existing_map_by_name: # This check is fine as is
             current_app.logger.warning(f"Attempt to upload map with duplicate name: {map_name}")
             return jsonify({'error': 'A map with this name already exists.'}), 409
 
@@ -102,39 +105,43 @@ def upload_floor_map():
             if not os.path.exists(upload_folder): # Ensure folder exists
                 os.makedirs(upload_folder)
 
+            # Use standardized filename for saving
             file_path = os.path.join(upload_folder, filename)
             file.save(file_path)
 
             if save_floor_map_to_share: # Conditional Azure upload
                 try:
-                    save_floor_map_to_share(file_path, filename)
+                    save_floor_map_to_share(file_path, filename) # Use standardized filename
                 except Exception as azure_e:
                     current_app.logger.exception(f'Failed to upload floor map to Azure File Share: {azure_e}')
                     # Decide if this is a critical failure or just a warning
 
-            new_map = FloorMap(name=map_name, image_filename=filename,
+            new_map = FloorMap(name=map_name, image_filename=filename, # Use standardized filename
                                location=location, floor=floor,
-                               offset_x=offset_x, offset_y=offset_y)
+                               offset_x=offset_x, offset_y=offset_y) # Assuming offsets are handled
             db.session.add(new_map)
-            db.session.commit()
-            current_app.logger.info(f"Floor map '{map_name}' with offsets ({offset_x},{offset_y}) uploaded successfully by {current_user.username}.")
-            add_audit_log(action="CREATE_MAP_SUCCESS", details=f"Floor map '{map_name}' (ID: {new_map.id}, Offsets: ({offset_x},{offset_y})) uploaded by {current_user.username}.")
+            db.session.commit() # Commit first
+
+            # Log success AFTER commit
+            current_app.logger.info(f"Floor map '{map_name}' (image: {filename}, original: {original_filename}) with offsets ({offset_x},{offset_y}) uploaded successfully by {current_user.username}.")
+            add_audit_log(action="CREATE_MAP_SUCCESS", details=f"Floor map '{map_name}' (ID: {new_map.id}, image: {filename}, Offsets: ({offset_x},{offset_y})) uploaded by {current_user.username}.")
+
             return jsonify({
-                'id': new_map.id, 'name': new_map.name, 'image_filename': new_map.image_filename,
+                'id': new_map.id, 'name': new_map.name, 'image_filename': new_map.image_filename, # This is the standardized filename
                 'location': new_map.location, 'floor': new_map.floor,
-                'offset_x': new_map.offset_x, 'offset_y': new_map.offset_y,
-                'image_url': url_for('static', filename=f'floor_map_uploads/{new_map.image_filename}', _external=False)
+                'offset_x': new_map.offset_x, 'offset_y': new_map.offset_y, # Already included
+                'image_url': url_for('static', filename=f'floor_map_uploads/{new_map.image_filename}', _external=False) # Uses standardized filename
             }), 201
         except Exception as e:
             db.session.rollback()
             if file_path and os.path.exists(file_path):
                  os.remove(file_path)
-                 current_app.logger.info(f"Cleaned up partially uploaded file: {file_path}")
-            current_app.logger.exception(f"Error uploading floor map '{map_name}':")
-            add_audit_log(action="CREATE_MAP_FAILED", details=f"Failed to upload floor map '{map_name}' by {current_user.username}. Error: {str(e)}")
+                 current_app.logger.info(f"Cleaned up partially uploaded file: {file_path} (original: {original_filename})")
+            current_app.logger.exception(f"Error uploading floor map '{map_name}' (original filename: {original_filename}):")
+            add_audit_log(action="CREATE_MAP_FAILED", details=f"Failed to upload floor map '{map_name}' (original filename: {original_filename}) by {current_user.username}. Error: {str(e)}")
             return jsonify({'error': f'Failed to upload map due to a server error: {str(e)}'}), 500
     else:
-        current_app.logger.warning(f"File type not allowed for map upload: {file.filename}")
+        current_app.logger.warning(f"File type not allowed for map upload: {original_filename if 'original_filename' in locals() else file.filename}")
         return jsonify({'error': 'File type not allowed. Allowed types are: png, jpg, jpeg.'}), 400
 
 @api_maps_bp.route('/admin/maps', methods=['GET'])
