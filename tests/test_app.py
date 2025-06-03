@@ -2249,6 +2249,350 @@ class TestBulkUserOperationsAPI(AppTests):
         self.assertEqual(response.status_code, 403)
         self.logout()
 
+    # --- Tests for GET /api/admin/users/export/csv ---
+    def test_export_users_csv_success(self):
+        """Test successful CSV export of users."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+        # Create some users for export
+        u1, u2, u3 = self._setup_users_for_bulk_edit() # Reusing this helper for convenience
+        u1.roles = [self.role_user, self.role_editor]
+        u2.is_admin = True
+        db.session.commit()
+
+        response = self.client.get('/api/admin/users/export/csv')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['Content-Type'], 'text/csv')
+        self.assertIn('attachment; filename=users_export.csv', response.headers['Content-Disposition'])
+
+        csv_data = response.data.decode('utf-8')
+        import csv
+        import io
+        csv_reader = csv.reader(io.StringIO(csv_data))
+        rows = list(csv_reader)
+
+        self.assertTrue(len(rows) >= 4) # Header + 3 users (plus any other users created in setUp)
+        self.assertEqual(rows[0], ['id', 'username', 'email', 'is_admin', 'roles'])
+
+        # Find data for u1 (roles should be sorted: Editor,User)
+        u1_row = next((row for row in rows if row[1] == u1.username), None)
+        self.assertIsNotNone(u1_row)
+        self.assertEqual(u1_row[3], str(u1.is_admin).lower())
+        self.assertEqual(u1_row[4], f"{self.role_editor.name},{self.role_user.name}") # Roles are sorted alphabetically by name
+
+        u2_row = next((row for row in rows if row[1] == u2.username), None)
+        self.assertIsNotNone(u2_row)
+        self.assertEqual(u2_row[3], str(u2.is_admin).lower()) # Should be true
+        self.assertEqual(u2_row[4], "") # No roles assigned to u2 in setup
+
+        self.logout()
+
+    def test_export_users_csv_no_users(self):
+        """Test CSV export when no users exist (beyond the admin performing the export)."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+        # Delete other users if necessary, or ensure test DB is clean for this
+        User.query.filter(User.id != self.admin_bulk_user.id).delete()
+        db.session.commit()
+
+        response = self.client.get('/api/admin/users/export/csv')
+        self.assertEqual(response.status_code, 200)
+        csv_data = response.data.decode('utf-8')
+        import csv
+        import io
+        csv_reader = csv.reader(io.StringIO(csv_data))
+        rows = list(csv_reader)
+
+        self.assertEqual(len(rows), 2) # Header + admin_bulk_user
+        self.assertEqual(rows[0], ['id', 'username', 'email', 'is_admin', 'roles'])
+        self.logout()
+
+    def test_export_users_csv_no_permission(self):
+        """Test CSV export endpoint without 'manage_users' permission."""
+        self.login(self.non_admin_user.username, 'userpass')
+        response = self.client.get('/api/admin/users/export/csv')
+        self.assertEqual(response.status_code, 403)
+        self.logout()
+
+    # --- Tests for POST /api/admin/users/import/csv ---
+    def test_import_users_csv_success_create_update(self):
+        """Test successful CSV import creating new users and updating existing ones."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+
+        # Existing user to be updated
+        existing_user = User(username='csvupdateme', email='csvupdate@example.com', is_admin=False)
+        existing_user.set_password('oldpass')
+        db.session.add(existing_user)
+        db.session.commit()
+        existing_user_id = existing_user.id
+
+        csv_content = (
+            "username,email,password,is_admin,role_names\n"
+            "csvnew1,new1@example.com,newpass1,false,User\n" # New user
+            "csvupdateme,updated_email@example.com,newpass_upd,true,Editor\n" # Update existing_user
+            "csvnew2,new2@example.com,newpass2,true,\n" # New admin, no roles
+        )
+
+        from io import BytesIO
+        file_data = {'file': (BytesIO(csv_content.encode('utf-8')), 'import.csv')}
+
+        response = self.client.post('/api/admin/users/import/csv', data=file_data, content_type='multipart/form-data')
+        self.assertEqual(response.status_code, 200) # Expect 200 if all processed (even with individual errors later, but here expecting success)
+        data = response.get_json()
+
+        self.assertEqual(data.get('users_created'), 2)
+        self.assertEqual(data.get('users_updated'), 1)
+        self.assertEqual(len(data.get('errors', [])), 0)
+
+        # Verify new user csvnew1
+        u_new1 = User.query.filter_by(username='csvnew1').first()
+        self.assertIsNotNone(u_new1)
+        self.assertEqual(u_new1.email, 'new1@example.com')
+        self.assertTrue(u_new1.check_password('newpass1'))
+        self.assertFalse(u_new1.is_admin)
+        self.assertIn(self.role_user, u_new1.roles)
+
+        # Verify updated user
+        u_updated = User.query.get(existing_user_id)
+        self.assertEqual(u_updated.email, 'updated_email@example.com')
+        self.assertTrue(u_updated.check_password('newpass_upd'))
+        self.assertTrue(u_updated.is_admin)
+        self.assertIn(self.role_editor, u_updated.roles)
+
+        # Verify new user csvnew2
+        u_new2 = User.query.filter_by(username='csvnew2').first()
+        self.assertIsNotNone(u_new2)
+        self.assertTrue(u_new2.is_admin)
+        self.assertEqual(len(u_new2.roles), 0)
+
+        self.logout()
+
+    def test_import_users_csv_with_errors(self):
+        """Test CSV import with various errors in data rows."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+        csv_content = (
+            "username,email,password,is_admin,role_names\n"
+            "csvgood1,good1@example.com,goodpass,false,\n" # Valid
+            ",missingusername@example.com,pass1,false,\n" # Missing username
+            "csvbademail,bademail,pass2,false,\n" # Invalid email format
+            "csvnorole,norole@example.com,pass3,false,NonExistentRole\n" # Role not found
+            "csvnopassnew,newnopass@example.com,,false,\n" # New user, missing password
+        )
+        from io import BytesIO
+        file_data = {'file': (BytesIO(csv_content.encode('utf-8')), 'import_errors.csv')}
+        response = self.client.post('/api/admin/users/import/csv', data=file_data, content_type='multipart/form-data')
+        self.assertEqual(response.status_code, 207) # Partial content due to errors
+        data = response.get_json()
+
+        self.assertEqual(data.get('users_created'), 1) # Only csvgood1
+        self.assertEqual(data.get('users_updated'), 0)
+        self.assertTrue(len(data.get('errors', [])) >= 4) # Expecting 4 errors
+
+        # Verify only good user was created
+        self.assertIsNotNone(User.query.filter_by(username='csvgood1').first())
+        self.assertIsNone(User.query.filter_by(email='missingusername@example.com').first())
+        self.assertIsNone(User.query.filter_by(username='csvbademail').first())
+        self.assertIsNone(User.query.filter_by(username='csvnorole').first())
+        self.assertIsNone(User.query.filter_by(username='csvnopassnew').first())
+
+        errors = data.get('errors')
+        self.assertTrue(any("Username is required" in e['error'] and e['row'] == 3 for e in errors))
+        self.assertTrue(any("Invalid email format" in e['error'] and e['row'] == 4 for e in errors))
+        self.assertTrue(any("Role 'NonExistentRole' not found" in e['error'] and e['row'] == 5 for e in errors))
+        self.assertTrue(any("Password is required for new users" in e['error'] and e['row'] == 6 for e in errors))
+
+        self.logout()
+
+    def test_import_users_csv_invalid_file_or_no_file(self):
+        """Test CSV import with invalid file or no file provided."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+
+        # No file
+        response_no_file = self.client.post('/api/admin/users/import/csv', content_type='multipart/form-data')
+        self.assertEqual(response_no_file.status_code, 400)
+        self.assertIn("No file part", response_no_file.get_json().get('error', ''))
+
+        # Invalid file type (e.g., a JSON file)
+        from io import BytesIO
+        json_content = b'{"not": "csv"}'
+        file_data_json = {'file': (BytesIO(json_content), 'fake.json')}
+        response_json_file = self.client.post('/api/admin/users/import/csv', data=file_data_json, content_type='multipart/form-data')
+        self.assertEqual(response_json_file.status_code, 400)
+        self.assertIn("Invalid file type", response_json_file.get_json().get('error', ''))
+
+        # Empty CSV or missing headers
+        empty_csv_content = "header1,header2\nval1,val2" # Does not match expected headers
+        file_data_empty = {'file': (BytesIO(empty_csv_content.encode('utf-8')), 'empty.csv')}
+        response_empty = self.client.post('/api/admin/users/import/csv', data=file_data_empty, content_type='multipart/form-data')
+        self.assertEqual(response_empty.status_code, 400)
+        self.assertIn("Missing required CSV headers", response_empty.get_json().get('error', ''))
+
+        self.logout()
+
+    def test_import_users_csv_no_permission(self):
+        """Test CSV import endpoint without 'manage_users' permission."""
+        self.login(self.non_admin_user.username, 'userpass')
+        from io import BytesIO
+        csv_content = b"username,email,password\nuser,test@example.com,pass"
+        file_data = {'file': (BytesIO(csv_content), 'test.csv')}
+        response = self.client.post('/api/admin/users/import/csv', data=file_data, content_type='multipart/form-data')
+        self.assertEqual(response.status_code, 403)
+        self.logout()
+
+
+    # --- Tests for POST /api/admin/users/bulk_add_pattern ---
+    def test_bulk_add_pattern_success(self):
+        """Test successful user creation with pattern."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+        payload = {
+            "username_prefix": "pattern_u",
+            "start_number": 1,
+            "count": 3,
+            "email_domain": "pattern.test",
+            "default_password": "securePassword123",
+            "is_admin": False,
+            "role_ids": [self.role_user.id]
+        }
+        response = self.client.post('/api/admin/users/bulk_add_pattern', json=payload)
+        self.assertEqual(response.status_code, 201) # Expect 201 for successful creation batch
+        data = response.get_json()
+        self.assertEqual(data.get('users_added'), 3)
+        self.assertEqual(len(data.get('errors_warnings', [])), 0)
+
+        for i in range(1, 4):
+            user = User.query.filter_by(username=f"pattern_u{i}").first()
+            self.assertIsNotNone(user)
+            self.assertEqual(user.email, f"pattern_u{i}@pattern.test")
+            self.assertTrue(user.check_password("securePassword123"))
+            self.assertFalse(user.is_admin)
+            self.assertIn(self.role_user, user.roles)
+        self.logout()
+
+    def test_bulk_add_pattern_with_email_pattern_success(self):
+        """Test successful user creation with email_pattern."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+        payload = {
+            "username_prefix": "emailpat_u",
+            "start_number": 10,
+            "count": 2,
+            "email_pattern": "{username}+test@customdomain.com", # Using email_pattern
+            "default_password": "securePassword123",
+            "is_admin": True,
+            "role_ids": [self.role_admin_actual.id]
+        }
+        response = self.client.post('/api/admin/users/bulk_add_pattern', json=payload)
+        self.assertEqual(response.status_code, 201)
+        data = response.get_json()
+        self.assertEqual(data.get('users_added'), 2)
+
+        for i in range(10, 12):
+            user = User.query.filter_by(username=f"emailpat_u{i}").first()
+            self.assertIsNotNone(user)
+            self.assertEqual(user.email, f"emailpat_u{i}+test@customdomain.com")
+            self.assertTrue(user.is_admin)
+            self.assertIn(self.role_admin_actual, user.roles)
+        self.logout()
+
+
+    def test_bulk_add_pattern_with_conflicts(self):
+        """Test pattern bulk add where some generated users conflict with existing ones."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+
+        # Pre-create a conflicting user
+        conflicting_username = "conflict_pattern2"
+        conflicting_email_user = "conflict_email_user" # This username is fine, but its email will conflict
+
+        User.query.filter_by(username=conflicting_username).delete() # Clean before test
+        User.query.filter_by(email=f"{conflicting_email_user}@conflict.pattern.test").delete() # Clean before test
+        db.session.commit()
+
+        existing1 = User(username=conflicting_username, email="exist1@pattern.test")
+        existing1.set_password("pass")
+        db.session.add(existing1)
+
+        existing2 = User(username=conflicting_email_user, email=f"{conflicting_email_user}@conflict.pattern.test")
+        existing2.set_password("pass")
+        db.session.add(existing2)
+        db.session.commit()
+
+        payload = {
+            "username_prefix": "conflict_pattern",
+            "start_number": 1,
+            "count": 3, # conflict_pattern1, conflict_pattern2 (username conflict), conflict_pattern3
+            "email_domain": "pattern.test", # This means conflict_email_user@pattern.test will be generated for conflict_email_user
+            "default_password": "password"
+        }
+        # To make existing2's email conflict, we need the generated username to be 'conflict_email_user'
+        # and domain to be 'conflict.pattern.test'
+        # Let's adjust payload for a clear email conflict test:
+        payload_email_conflict = {
+            "username_prefix": conflicting_email_user, # Generates username "conflict_email_user0" if start_number=0
+            "start_number": 0, # To make generated username "conflict_email_user0"
+            "count": 1,
+            "email_domain": "conflict.pattern.test", # This will generate "conflict_email_user0@conflict.pattern.test"
+                                                     # This conflicts if existing2.email is "conflict_email_user0@conflict.pattern.test"
+                                                     # Let's rename existing2 to match this potential generated user.
+            "default_password": "password"
+        }
+        # Let's simplify the conflict test:
+        # existing1: username="conflict_pattern2", email="exist1@pattern.test"
+        # existing2: username="someotheruser", email="conflict_pattern3@pattern.test" (email conflict for 3rd generated user)
+        User.query.filter_by(username="someotheruser").delete()
+        db.session.commit()
+        existing2.username = "someotheruser" # Ensure this username is unique
+        existing2.email = "conflict_pattern3@pattern.test" # This email will conflict with generated user conflict_pattern3
+        db.session.commit()
+
+
+        response = self.client.post('/api/admin/users/bulk_add_pattern', json=payload)
+        self.assertEqual(response.status_code, 207) # Partial success
+        data = response.get_json()
+
+        self.assertEqual(data.get('users_added'), 1) # Only conflict_pattern1 should be added
+        self.assertEqual(len(data.get('errors_warnings', [])), 2) # conflict_pattern2 (username), conflict_pattern3 (email)
+
+        self.assertIsNotNone(User.query.filter_by(username="conflict_pattern1").first())
+        # Check that conflicting users were not overwritten / original ones remain
+        self.assertIsNotNone(User.query.filter_by(username=conflicting_username).first()) # existing1
+        self.assertIsNotNone(User.query.filter_by(username="someotheruser").first())   # existing2
+
+        errors = data.get('errors_warnings')
+        self.assertTrue(any(e['username'] == 'conflict_pattern2' and 'Username already exists' in e['error'] for e in errors))
+        self.assertTrue(any(e['username'] == 'conflict_pattern3' and 'Email already registered' in e['error'] for e in errors))
+
+        self.logout()
+
+    def test_bulk_add_pattern_invalid_params(self):
+        """Test pattern bulk add with various invalid parameters."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+
+        test_cases = [
+            ({"username_prefix": "", "start_number": 1, "count": 1, "email_domain": "d.com", "default_password": "p"}, "Username prefix is required"),
+            ({"username_prefix": "up", "start_number": -1, "count": 1, "email_domain": "d.com", "default_password": "p"}, "Start number must be a non-negative integer"),
+            ({"username_prefix": "up", "start_number": 1, "count": 0, "email_domain": "d.com", "default_password": "p"}, "Count must be an integer between 1 and 100"),
+            ({"username_prefix": "up", "start_number": 1, "count": 101, "email_domain": "d.com", "default_password": "p"}, "Count must be an integer between 1 and 100"),
+            ({"username_prefix": "up", "start_number": 1, "count": 1, "email_domain": "d.com"}, "Default password is required"),
+            ({"username_prefix": "up", "start_number": 1, "count": 1, "default_password": "p"}, "Either Email Domain or Email Pattern is required"),
+            ({"username_prefix": "up", "start_number": 1, "count": 1, "email_domain":"d.com", "email_pattern":"{username}@p.com", "default_password": "p"}, "Provide either Email Domain or Email Pattern, not both"),
+            ({"username_prefix": "up", "start_number": 1, "count": 1, "email_pattern":"user@p.com", "default_password": "p"}, "Email Pattern must contain \"{username}\" placeholder"),
+            ({"username_prefix": "up", "start_number": 1, "count": 1, "email_domain":"d.com", "default_password": "p", "role_ids": [9999]}, "Role with ID 9999 not found"),
+        ]
+
+        for payload, error_msg_part in test_cases:
+            with self.subTest(payload=payload):
+                response = self.client.post('/api/admin/users/bulk_add_pattern', json=payload)
+                self.assertEqual(response.status_code, 400)
+                data = response.get_json()
+                self.assertIn(error_msg_part, data.get('error', ''))
+
+        self.logout()
+
+    def test_bulk_add_pattern_no_permission(self):
+        """Test pattern bulk add endpoint without 'manage_users' permission."""
+        self.login(self.non_admin_user.username, 'userpass')
+        payload = {"username_prefix": "no_perm", "start_number": 1, "count": 1, "email_domain": "test.com", "default_password": "password"}
+        response = self.client.post('/api/admin/users/bulk_add_pattern', json=payload)
+        self.assertEqual(response.status_code, 403)
+        self.logout()
+
 
 class TestHomePage(AppTests):
     def test_home_page_not_authenticated(self):

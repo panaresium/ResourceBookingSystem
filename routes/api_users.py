@@ -539,6 +539,348 @@ def import_users():
         current_app.logger.exception("Error committing imported users/roles:")
         return jsonify({'error': f'Failed to commit imported users/roles due to a server error: {str(e_commit)}'}), 500
 
+@api_users_bp.route('/admin/users/export/csv', methods=['GET'])
+@login_required
+@permission_required('manage_users')
+def export_users_csv():
+    try:
+        users = User.query.all()
+
+        # Using StringIO to build CSV in memory
+        import csv
+        import io
+
+        si = io.StringIO()
+        cw = csv.writer(si)
+
+        # Header row
+        headers = ['id', 'username', 'email', 'is_admin', 'roles']
+        cw.writerow(headers)
+
+        for user in users:
+            role_names = ",".join(sorted([role.name for role in user.roles]))
+            row = [
+                user.id,
+                user.username,
+                user.email,
+                str(user.is_admin).lower(), # 'true' or 'false'
+                role_names
+            ]
+            cw.writerow(row)
+
+        output = si.getvalue()
+        si.close()
+
+        from flask import make_response
+        response = make_response(output)
+        response.headers["Content-Disposition"] = "attachment; filename=users_export.csv"
+        response.headers["Content-type"] = "text/csv"
+
+        add_audit_log(action="EXPORT_USERS_CSV", details=f"User {current_user.username} exported all users to CSV. Count: {len(users)}.")
+        current_app.logger.info(f"User {current_user.username} exported {len(users)} users to CSV.")
+        return response
+
+    except Exception as e:
+        current_app.logger.exception("Error exporting users to CSV:")
+        # Fallback error response if something goes wrong during CSV generation
+        return jsonify({'error': f'Failed to export users to CSV due to a server error: {str(e)}'}), 500
+
+
+@api_users_bp.route('/admin/users/import/csv', methods=['POST'])
+@login_required
+@permission_required('manage_users')
+def import_users_csv():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part in the request.'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected for upload.'}), 400
+
+    if not file.filename.lower().endswith('.csv') and file.mimetype != 'text/csv':
+        return jsonify({'error': 'Invalid file type. Please upload a CSV file.'}), 400
+
+    created_count = 0
+    updated_count = 0
+    errors = []
+
+    try:
+        import csv
+        import io
+
+        # Read the file content into a string buffer
+        stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+        csv_reader = csv.DictReader(stream) # Use DictReader for easy header access
+
+        if not csv_reader.fieldnames:
+            return jsonify({'error': 'CSV file is empty or has no headers.'}), 400
+
+        expected_headers = ['username', 'email'] # Password is required for new, optional for existing
+        missing_headers = [h for h in expected_headers if h not in csv_reader.fieldnames]
+        if missing_headers:
+            return jsonify({'error': f'Missing required CSV headers: {", ".join(missing_headers)}'}), 400
+
+        # Optional headers: password, is_admin, role_names
+
+        users_to_process = []
+        for row_num, row in enumerate(csv_reader, start=2): # Start from 2 because of header
+            users_to_process.append({'data': row, 'row_num': row_num})
+
+        # Note: For simplicity, this implementation processes one user at a time and commits.
+        # A more robust bulk operation might add all to session and commit once,
+        # but error handling for individual users within a large batch becomes more complex to map back.
+        # The existing JSON import also flushes per user/role, then one final commit. We'll follow a similar pattern.
+
+        for item in users_to_process:
+            row_data = item['data']
+            row_num = item['row_num']
+
+            username = row_data.get('username', '').strip()
+            email = row_data.get('email', '').strip()
+            password = row_data.get('password') # Keep as is, don't strip for now
+            is_admin_str = row_data.get('is_admin', '').strip().lower()
+            role_names_str = row_data.get('role_names', '').strip()
+
+            if not username:
+                errors.append({'row': row_num, 'error': 'Username is required.'})
+                continue
+            if not email:
+                errors.append({'row': row_num, 'error': 'Email is required.'})
+                continue
+
+            if '@' not in email or '.' not in email.split('@')[-1]:
+                errors.append({'row': row_num, 'username': username, 'error': 'Invalid email format.'})
+                continue
+
+            user = User.query.filter(func.lower(User.username) == func.lower(username)).first()
+            if not user: # Try by email if not found by username
+                user = User.query.filter(func.lower(User.email) == func.lower(email)).first()
+
+            is_new_user = user is None
+
+            if is_new_user:
+                if not password:
+                    errors.append({'row': row_num, 'username': username, 'error': 'Password is required for new users.'})
+                    continue
+                # Check for username/email uniqueness before creating
+                if User.query.filter(func.lower(User.username) == func.lower(username)).first():
+                     errors.append({'row': row_num, 'username': username, 'error': f"Username '{username}' already exists."})
+                     continue
+                if User.query.filter(func.lower(User.email) == func.lower(email)).first():
+                    errors.append({'row': row_num, 'username': username, 'error': f"Email '{email}' already registered."})
+                    continue
+
+                user = User(username=username, email=email)
+                user.set_password(password)
+                db.session.add(user)
+            else: # Existing user
+                # Email change validation
+                if user.email.lower() != email.lower():
+                    if User.query.filter(User.id != user.id).filter(func.lower(User.email) == func.lower(email)).first():
+                        errors.append({'row': row_num, 'username': username, 'error': f"Email '{email}' already registered by another user."})
+                        continue
+                    user.email = email
+                # Password update
+                if password: # Only update password if provided
+                    user.set_password(password)
+
+            # Set is_admin
+            if is_admin_str: # Only process if is_admin column is present and has a value
+                if is_admin_str == 'true':
+                    # Safeguard for demoting last admin
+                    if user.is_admin and not True: # if current user is admin and new value is False
+                         if user.id == current_user.id and User.query.filter_by(is_admin=True).count() == 1:
+                            errors.append({'row': row_num, 'username': username, 'error': 'Cannot remove your own admin status as the sole admin.'})
+                            db.session.rollback() # Rollback this specific user change
+                            continue
+                    user.is_admin = True
+                elif is_admin_str == 'false':
+                    user.is_admin = False
+                else:
+                    errors.append({'row': row_num, 'username': username, 'error': f"Invalid value for is_admin: '{is_admin_str}'. Use 'true' or 'false'."})
+                    # Potentially skip this user or just this field update. For now, let's skip user.
+                    db.session.rollback()
+                    continue
+
+            # Role handling
+            if role_names_str: # If role_names column is present and not empty
+                new_user_roles = []
+                role_names_list = [name.strip() for name in role_names_str.split(',') if name.strip()]
+                found_all_roles = True
+                for role_name in role_names_list:
+                    role_obj = Role.query.filter(func.lower(Role.name) == func.lower(role_name)).first()
+                    if not role_obj:
+                        errors.append({'row': row_num, 'username': username, 'error': f"Role '{role_name}' not found."})
+                        found_all_roles = False
+                        break
+                    new_user_roles.append(role_obj)
+
+                if not found_all_roles:
+                    db.session.rollback() # Rollback changes for this user if a role was not found
+                    continue
+
+                # Safeguard for removing last admin role
+                admin_role_db = Role.query.filter_by(name="Administrator").first()
+                if admin_role_db:
+                    is_removing_admin_role = admin_role_db in user.roles and admin_role_db not in new_user_roles
+                    if is_removing_admin_role and user.id == current_user.id:
+                        users_with_admin_role = User.query.filter(User.roles.any(id=admin_role_db.id)).count()
+                        if users_with_admin_role == 1:
+                            errors.append({'row': row_num, 'username': username, 'error': 'Cannot remove your own "Administrator" role as the sole holder.'})
+                            db.session.rollback()
+                            continue
+                user.roles = new_user_roles
+            elif 'role_names' in csv_reader.fieldnames: # If 'role_names' header exists but string is empty, clear roles
+                 user.roles = []
+
+
+            try:
+                db.session.flush() # Use flush to catch potential DB errors before final commit per user
+                if is_new_user:
+                    created_count += 1
+                else:
+                    updated_count += 1
+            except Exception as e_flush:
+                db.session.rollback()
+                errors.append({'row': row_num, 'username': username, 'error': f'DB error processing user: {str(e_flush)}'})
+                if is_new_user and user in db.session.new: db.session.expunge(user) # remove from session if new and failed
+
+        # Final commit for all processed users
+        db.session.commit()
+
+        action_details = f"CSV Import by {current_user.username}. Created: {created_count}, Updated: {updated_count}, Errors: {len(errors)}"
+        add_audit_log(action="IMPORT_USERS_CSV", details=action_details)
+        current_app.logger.info(action_details)
+
+        status_code = 200 if not errors else 207 # OK or Multi-Status
+        return jsonify({
+            'message': 'CSV import process finished.',
+            'users_created': created_count,
+            'users_updated': updated_count,
+            'errors': errors
+        }), status_code
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception(f"Error during CSV user import by {current_user.username}:")
+        add_audit_log(action="IMPORT_USERS_CSV_FAILED", details=f"CSV Import by {current_user.username} failed. Error: {str(e)}")
+        return jsonify({'error': f'Failed to import users from CSV due to a server error: {str(e)}'}), 500
+
+
+@api_users_bp.route('/admin/users/bulk_add_pattern', methods=['POST'])
+@login_required
+@permission_required('manage_users')
+def bulk_add_users_pattern():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+    username_prefix = data.get('username_prefix', '').strip()
+    username_suffix = data.get('username_suffix', '').strip() # Optional custom suffix for username
+    start_number = data.get('start_number')
+    count = data.get('count')
+    email_domain = data.get('email_domain', '').strip() # e.g., example.com
+    email_pattern = data.get('email_pattern', '').strip() # e.g., {username}@example.com
+    default_password = data.get('default_password')
+    is_admin = data.get('is_admin', False)
+    role_ids = data.get('role_ids', [])
+
+    # Basic Validations
+    if not username_prefix:
+        return jsonify({'error': 'Username prefix is required.'}), 400
+    if not isinstance(start_number, int) or start_number < 0:
+        return jsonify({'error': 'Start number must be a non-negative integer.'}), 400
+    if not isinstance(count, int) or not (1 <= count <= 100): # Max 100 users at a time
+        return jsonify({'error': 'Count must be an integer between 1 and 100.'}), 400
+    if not default_password:
+        return jsonify({'error': 'Default password is required.'}), 400
+    if not email_domain and not email_pattern:
+        return jsonify({'error': 'Either Email Domain or Email Pattern is required.'}), 400
+    if email_domain and email_pattern: # Only one should be provided
+        return jsonify({'error': 'Provide either Email Domain or Email Pattern, not both.'}), 400
+    if email_pattern and "{username}" not in email_pattern:
+        return jsonify({'error': 'Email Pattern must contain "{username}" placeholder.'}), 400
+
+
+    resolved_roles = []
+    if role_ids:
+        if not isinstance(role_ids, list):
+            return jsonify({'error': 'role_ids must be a list of integers.'}), 400
+        for r_id in role_ids:
+            if not isinstance(r_id, int):
+                return jsonify({'error': f'Invalid role ID type: {r_id}. Must be integer.'}), 400
+            role = Role.query.get(r_id)
+            if not role:
+                return jsonify({'error': f'Role with ID {r_id} not found.'}), 400
+            resolved_roles.append(role)
+
+    added_count = 0
+    errors_warnings = []
+    users_to_add_in_db = []
+
+    for i in range(count):
+        current_num = start_number + i
+        # Pad number if prefix suggests (e.g. user001 vs user1 - for now, simple concatenation)
+        # More complex padding (e.g. to 3 digits) could be added if username_prefix ends with digits itself
+        # For simplicity, using the number as is.
+        generated_username = f"{username_prefix}{current_num}{username_suffix}"
+
+        generated_email = ""
+        if email_domain:
+            generated_email = f"{generated_username}@{email_domain}"
+        elif email_pattern:
+            generated_email = email_pattern.replace("{username}", generated_username)
+
+        # Validate generated email format (basic check)
+        if '@' not in generated_email or '.' not in generated_email.split('@')[-1]:
+            errors_warnings.append({'username_attempt': generated_username, 'email_attempt': generated_email, 'error': 'Generated email is invalid.'})
+            continue
+
+        # Check for conflicts
+        if User.query.filter(func.lower(User.username) == func.lower(generated_username)).first():
+            errors_warnings.append({'username': generated_username, 'error': 'Username already exists.'})
+            continue
+        if User.query.filter(func.lower(User.email) == func.lower(generated_email)).first():
+            errors_warnings.append({'username': generated_username, 'email': generated_email, 'error': 'Email already registered.'})
+            continue
+
+        new_user = User(username=generated_username, email=generated_email, is_admin=is_admin)
+        new_user.set_password(default_password)
+        if resolved_roles:
+            new_user.roles = resolved_roles
+
+        users_to_add_in_db.append(new_user)
+
+    if users_to_add_in_db:
+        try:
+            db.session.add_all(users_to_add_in_db)
+            db.session.commit()
+            added_count = len(users_to_add_in_db)
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"Error committing pattern bulk add users: {str(e)}")
+            # Add errors for all users that were supposed to be added in this batch
+            for user_obj in users_to_add_in_db:
+                 errors_warnings.append({'username': user_obj.username, 'email': user_obj.email, 'error': f'Database error during final commit: {str(e)}'})
+            # Return immediately if the commit fails for the batch
+            add_audit_log(action="BULK_ADD_PATTERN_FAILED", details=f"Pattern bulk add by {current_user.username} failed during commit. Attempted: {len(users_to_add_in_db)}, Errors: {len(errors_warnings)}")
+            return jsonify({
+                'message': 'Bulk user add with pattern failed during commit.',
+                'users_added': 0,
+                'errors_warnings': errors_warnings
+            }), 500
+
+    action_details = f"Pattern Bulk Add by {current_user.username}. Target count: {count}, Added: {added_count}, Skipped/Errors: {len(errors_warnings)}"
+    add_audit_log(action="BULK_ADD_PATTERN", details=action_details)
+    current_app.logger.info(action_details)
+
+    status_code = 201 if added_count > 0 and not errors_warnings else 207 if errors_warnings else 200
+    return jsonify({
+        'message': 'Bulk user add with pattern operation completed.',
+        'users_added': added_count,
+        'errors_warnings': errors_warnings # Use 'errors_warnings' to indicate some might be skips not hard errors
+    }), status_code
+
 
 @api_users_bp.route('/admin/users/bulk_add', methods=['POST'])
 @login_required
