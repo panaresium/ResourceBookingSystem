@@ -998,7 +998,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     // if (bulkAddPatternModal && (!response.errors_warnings || response.errors_warnings.length === 0)) {
                     //    bulkAddPatternModal.style.display = 'none';
                     // }
-                }
                  if (bulkAddPatternModal && (!response.errors_warnings || response.errors_warnings.length === 0)) {
                     bulkAddPatternModal.style.display = 'none';
                 }
