@@ -79,6 +79,9 @@ def create_app(config_object=config):
     # 1. Load Configuration
     app.config.from_object(config_object)
 
+    # Initialize DB early for startup restore if needed
+    db.init_app(app)
+
     # Ensure UPLOAD_FOLDER and other paths from config are created if not existing
     # This logic was in app.py; it's better here or in config.py itself.
     # config.py now handles directory creation, so this might be redundant.
@@ -95,6 +98,7 @@ def create_app(config_object=config):
     app.logger.setLevel(app.config.get('LOG_LEVEL', 'INFO').upper())
 
     # New logic for startup restore
+    # db.init_app(app) has been moved before this block
     if azure_backup_available and callable(restore_latest_backup_set_on_startup):
         try:
             app.logger.info("Attempting to restore latest backup set from Azure on startup...")
@@ -104,6 +108,7 @@ def create_app(config_object=config):
             if downloaded_configs: # Check if restore returned any paths
                 app.logger.info(f"Startup restore downloaded config files: {downloaded_configs}")
                 with app.app_context(): # Ensure operations run within application context
+                    # db.init_app(app) should be called before this point so db operations can proceed.
                     
                     # Import resource configurations first
                     resource_configs_path = downloaded_configs.get('resource_configs_path')
@@ -165,7 +170,7 @@ def create_app(config_object=config):
         app.logger.info("Azure backup utilities not available (azure_backup or restore_latest_backup_set_on_startup not imported). Skipping startup restore from Azure.")
 
     # 3. Initialize Extensions
-    db.init_app(app)
+    # db.init_app(app) has been moved to earlier in the factory function
     mail.init_app(app)
     csrf.init_app(app)
     socketio.init_app(app, message_queue=app.config.get('SOCKETIO_MESSAGE_QUEUE')) # Add message_queue from config
