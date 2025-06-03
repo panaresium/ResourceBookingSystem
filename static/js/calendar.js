@@ -14,8 +14,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const cebmAvailableSlotsSelect = document.getElementById('cebm-available-slots-select');
     const cebmSaveChangesBtn = document.getElementById('cebm-save-changes-btn');
     const cebmStatusMessage = document.getElementById('cebm-status-message');
+    const cebmDeleteBookingBtn = document.getElementById('cebm-delete-booking-btn'); // Added
 
-    if (!calendarEl || !calendarResourceSelect || !calendarEditBookingModal) {
+    if (!calendarEl || !calendarResourceSelect || !calendarEditBookingModal || !cebmDeleteBookingBtn) { // Added !cebmDeleteBookingBtn
         console.error("Required calendar elements or modal not found.");
         return;
     }
@@ -318,6 +319,60 @@ document.addEventListener('DOMContentLoaded', () => {
                 // This case should ideally not be reached if cebmSaveChangesBtn was initially found.
                 // If it is reached, it means the original button was also null.
                 console.error("Error: Save changes button ('cebm-save-changes-btn') not found. Save functionality will be unavailable.");
+            }
+
+            // Logic for delete button
+            if (cebmDeleteBookingBtn && cebmDeleteBookingBtn.parentNode) {
+                const newDeleteBtn = cebmDeleteBookingBtn.cloneNode(true);
+                cebmDeleteBookingBtn.parentNode.replaceChild(newDeleteBtn, cebmDeleteBookingBtn);
+
+                newDeleteBtn.onclick = () => {
+                    if (confirm("Are you sure you want to delete this booking?")) {
+                        const bookingId = cebmBookingId.value;
+                        if (!bookingId) {
+                            cebmStatusMessage.textContent = 'Error: Booking ID not found.';
+                            cebmStatusMessage.className = 'status-message error-message';
+                            return;
+                        }
+
+                        // Disable button to prevent multiple clicks
+                        newDeleteBtn.disabled = true;
+                        newDeleteBtn.textContent = 'Deleting...';
+                        cebmStatusMessage.textContent = '';
+                        cebmStatusMessage.className = 'status-message';
+
+                        apiCall(`/api/bookings/${bookingId}`, { method: 'DELETE' })
+                            .then(response => {
+                                cebmStatusMessage.textContent = response.message || 'Booking deleted successfully!';
+                                cebmStatusMessage.className = 'status-message success-message';
+
+                                // Remove event from calendar
+                                const eventToRemove = calendar.getEventById(bookingId);
+                                if (eventToRemove) {
+                                    eventToRemove.remove();
+                                }
+
+                                // Close modal after a short delay
+                                setTimeout(() => {
+                                    calendarEditBookingModal.style.display = 'none';
+                                    cebmStatusMessage.textContent = '';
+                                    cebmStatusMessage.className = 'status-message';
+                                }, 1500);
+                            })
+                            .catch(error => {
+                                console.error('Error deleting booking:', error);
+                                cebmStatusMessage.textContent = error.message || 'Failed to delete booking.';
+                                cebmStatusMessage.className = 'status-message error-message';
+                            })
+                            .finally(() => {
+                                // Re-enable button
+                                newDeleteBtn.disabled = false;
+                                newDeleteBtn.textContent = 'Delete Booking';
+                            });
+                    }
+                };
+            } else {
+                console.error("Error: Could not find 'cebm-delete-booking-btn' or its parent node.");
             }
         },
         eventSources: [
