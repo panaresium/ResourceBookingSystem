@@ -511,10 +511,10 @@ def analytics_bookings_data():
         thirty_days_ago = datetime.utcnow().date() - timedelta(days=30)
         daily_counts_query = db.session.query(
             Resource.name.label("resource_name"),
-            func.date(Booking.start_time).label('booking_date'),
+            cast(func.date(Booking.start_time), db.Date).label('booking_date'), # Ensure booking_date is a Date object
             func.count(Booking.id).label('booking_count')
         ).join(Resource, Booking.resource_id == Resource.id) \
-        .filter(func.date(Booking.start_time) >= thirty_days_ago) \
+        .filter(cast(func.date(Booking.start_time), db.Date) >= thirty_days_ago) \
         .group_by(Resource.name, func.date(Booking.start_time)) \
         .order_by(Resource.name, func.date(Booking.start_time)) \
         .all()
@@ -522,6 +522,7 @@ def analytics_bookings_data():
         daily_counts_data = {}
         for row in daily_counts_query:
             resource_name = row.resource_name
+            # row.booking_date should now be a date object due to cast in query
             booking_date_str = row.booking_date.strftime('%Y-%m-%d')
             if resource_name not in daily_counts_data:
                 daily_counts_data[resource_name] = []
