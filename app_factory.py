@@ -24,7 +24,7 @@ from routes.api_system import init_api_system_routes
 
 # For scheduler
 from apscheduler.schedulers.background import BackgroundScheduler
-from scheduler_tasks import cancel_unchecked_bookings, apply_scheduled_resource_status_changes, run_scheduled_backup_job
+from scheduler_tasks import cancel_unchecked_bookings, apply_scheduled_resource_status_changes, run_scheduled_backup_job, run_scheduled_booking_csv_backup # Added new task
 # Conditional import for azure_backup
 try:
     from azure_backup import restore_latest_backup_set_on_startup, backup_if_changed as azure_backup_if_changed
@@ -244,6 +244,16 @@ def create_app(config_object=config):
             scheduler.add_job(apply_scheduled_resource_status_changes, 'interval', minutes=1, args=[app])
         if run_scheduled_backup_job:
             scheduler.add_job(run_scheduled_backup_job, 'interval', minutes=app.config.get('SCHEDULER_BACKUP_JOB_INTERVAL_MINUTES', 60), args=[app]) # New config option
+        
+        if run_scheduled_booking_csv_backup: # Check if the function exists
+            booking_csv_interval = app.config.get('BOOKINGS_CSV_BACKUP_INTERVAL_MINUTES', 60) # Default to 60 minutes
+            scheduler.add_job(
+                run_scheduled_booking_csv_backup,
+                'interval',
+                minutes=booking_csv_interval,
+                args=[app]
+            )
+            app.logger.info(f"Scheduled booking CSV backup job added with interval: {booking_csv_interval} minutes.")
 
         if azure_backup_if_changed: # Legacy Azure backup
              scheduler.add_job(azure_backup_if_changed, 'interval', minutes=app.config.get('AZURE_BACKUP_INTERVAL_MINUTES', 60))

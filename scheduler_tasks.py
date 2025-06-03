@@ -11,9 +11,10 @@ from utils import _load_schedule_from_json, _get_map_configuration_data, add_aud
 
 # Conditional import for azure_backup
 try:
-    from azure_backup import create_full_backup
+    from azure_backup import create_full_backup, backup_bookings_csv
 except ImportError:
     create_full_backup = None
+    backup_bookings_csv = None # Ensure it's defined even if import fails
 
 def cancel_unchecked_bookings(app):
     """
@@ -159,3 +160,27 @@ def run_scheduled_backup_job(app):
         except Exception as e:
             logger.exception("run_scheduled_backup_job: Error during scheduled backup job execution (JSON config).")
             add_audit_log(action="SCHEDULED_BACKUP_ERROR_JSON", details=f"Exception: {str(e)}", username="System")
+
+
+def run_scheduled_booking_csv_backup(app):
+    """
+    Runs the scheduled CSV backup for bookings.
+    """
+    with app.app_context():
+        logger = app.logger
+        logger.info("Starting scheduled booking CSV backup...")
+        try:
+            if not backup_bookings_csv:
+                logger.error("Scheduled booking CSV backup: backup_bookings_csv function not available/imported.")
+                return
+
+            success = backup_bookings_csv(app, socketio_instance=None, task_id=None)
+            if success:
+                logger.info("Scheduled booking CSV backup completed successfully.")
+                add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_SUCCESS", details="Scheduled booking CSV backup successful.", username="System")
+            else:
+                logger.error("Scheduled booking CSV backup failed.")
+                add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_FAILED", details="Scheduled booking CSV backup failed.", username="System")
+        except Exception as e:
+            logger.exception("Error during scheduled booking CSV backup execution.")
+            add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_ERROR", details=f"Exception: {str(e)}", username="System")

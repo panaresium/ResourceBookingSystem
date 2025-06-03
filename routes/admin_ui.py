@@ -1,6 +1,20 @@
-from flask import Blueprint, render_template, current_app, jsonify # Added jsonify
+from flask import Blueprint, render_template, current_app, jsonify, flash, redirect, url_for # Added flash, redirect, url_for
 from flask_login import login_required, current_user
 from sqlalchemy import func # For analytics_bookings_data if merged here, or general use
+import uuid # For task_id generation
+
+# Assuming Booking, Resource, User models are in models.py
+from models import Booking, Resource, User
+# Assuming db is in extensions.py
+from extensions import db, socketio # Try to import socketio
+# Assuming permission_required is in auth.py
+from auth import permission_required # Corrected: auth.py is at root
+from datetime import datetime, timedelta # Add datetime imports
+
+# Import backup/restore functions
+from azure_backup import list_available_backups, restore_full_backup, \
+                         list_available_booking_csv_backups, restore_bookings_from_csv_backup, \
+                         verify_backup_set, delete_backup_set
 
 # Assuming Booking, Resource, User models are in models.py
 from models import Booking, Resource, User
@@ -80,7 +94,54 @@ def serve_admin_bookings_page():
 @permission_required('manage_system')
 def serve_backup_restore_page():
     current_app.logger.info(f"User {current_user.username} accessed Backup/Restore admin page.")
-    return render_template('admin_backup_restore.html')
+    # Existing logic for full backups (if any, or add similarly)
+    full_backups = list_available_backups() # Assuming this lists full backup timestamps
+
+    # New logic for booking CSV backups
+    booking_csv_files = list_available_booking_csv_backups()
+    
+    return render_template(
+        'admin_backup_restore.html',
+        full_backups=full_backups, # Pass existing full backups if you have them
+        booking_csv_backups=booking_csv_files
+    )
+
+@admin_ui_bp.route('/admin/restore_booking_csv/<timestamp_str>', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def restore_booking_csv_route(timestamp_str):
+    current_app.logger.info(f"User {current_user.username} initiated restore for booking CSV backup: {timestamp_str}")
+    task_id = uuid.uuid4().hex
+    
+    # Use current_app._get_current_object() to pass the actual app instance
+    # Pass socketio instance if available and configured, else None
+    socketio_instance = None
+    if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
+        socketio_instance = current_app.extensions['socketio']
+    elif 'socketio' in globals() and socketio: # Check imported socketio from extensions
+        socketio_instance = socketio
+
+    summary = restore_bookings_from_csv_backup(
+        current_app._get_current_object(), 
+        timestamp_str, 
+        socketio_instance=socketio_instance, 
+        task_id=task_id
+    )
+
+    if summary['status'] == 'completed_successfully' or (summary['status'] == 'completed_with_errors' and not summary.get('errors')):
+        flash_msg = f"Booking CSV restore for {timestamp_str} completed. Processed: {summary.get('processed',0)}, Created: {summary.get('created',0)}, Skipped Duplicates: {summary.get('skipped_duplicates',0)}."
+        if summary.get('errors'): # Should not happen if status is completed_successfully, but good check
+             flash_msg += f" Warnings: {'; '.join(summary['errors'])}"
+        flash(flash_msg, 'success')
+    elif summary['status'] == 'completed_with_errors' and summary.get('errors'):
+        error_details = '; '.join(summary['errors'])
+        flash(f"Booking CSV restore for {timestamp_str} completed with errors. Errors: {error_details}. Processed: {summary.get('processed',0)}, Created: {summary.get('created',0)}, Skipped: {summary.get('skipped_duplicates',0)}.", 'danger')
+    else: # 'failed' or any other status
+        error_details = '; '.join(summary.get('errors', ['Unknown error']))
+        flash(f"Booking CSV restore for {timestamp_str} failed. Status: {summary.get('status','unknown')}. Message: {summary.get('message','N/A')}. Details: {error_details}", 'danger')
+
+    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+
 
 @admin_ui_bp.route('/analytics/') # Merged from analytics_bp
 @login_required
