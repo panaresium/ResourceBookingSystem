@@ -115,15 +115,23 @@ document.addEventListener('DOMContentLoaded', function () {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
+            console.log('API response for table names:', JSON.stringify(data, null, 2)); // Added console log
+
             if (data.success && data.tables) {
                 dbTableSelect.innerHTML = '<option value="">{{ _("-- Select a Table --") }}</option>'; // Clear existing options
-                data.tables.sort().forEach(tableName => {
+
+                // Sort tables by name
+                data.tables.sort((a, b) => a.name.localeCompare(b.name));
+
+                data.tables.forEach(tableInfo => {
                     const option = document.createElement('option');
-                    option.value = tableName;
-                    option.textContent = tableName;
+                    option.value = tableInfo.name;
+                    const recordText = tableInfo.count === 1 ? 'record' : 'records'; // Using plain English
+                    option.textContent = `${tableInfo.name} (${tableInfo.count} ${recordText})`;
                     dbTableSelect.appendChild(option);
                 });
                 updateDbViewStatus("{{ _('Table names loaded.') }}", false);
+                console.log('Generated dbTableSelect HTML:', dbTableSelect.innerHTML); // Added console log
             } else {
                 throw new Error(data.message || "{{ _('Failed to load table names.') }}");
             }
@@ -142,6 +150,7 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
         updateDbViewStatus(`{{ _('Loading schema for table:') }} ${tableName}...`);
+        dbFilterArea.style.display = 'block'; // Ensure parent is visible before querying children
 
         const dbFilterCol1 = document.getElementById('db-filter-col-1');
         const dbFilterCol2 = document.getElementById('db-filter-col-2');
@@ -212,7 +221,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         dbFilterCol2.appendChild(filterGroup);
                     }
                 });
-                dbFilterArea.style.display = 'block';
+                // dbFilterArea.style.display = 'block'; // Already set earlier if tableName is valid
                 updateDbViewStatus(`{{ _('Schema loaded for table:') }} ${tableName}. {{ _('Ready for filtering and data fetching.') }}`, false);
             } else {
                 throw new Error(data.message || `{{ _('Failed to load schema for table:') }} ${tableName}`);
@@ -398,8 +407,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     if (dbTableSelect) {
-        dbTableSelect.addEventListener('change', async function() {
-            dbViewState.selectedTable = this.value;
+        dbTableSelect.addEventListener('change', async function(event) { // Added 'event' parameter
+            dbViewState.selectedTable = event.target.value; // Changed to event.target.value
+            console.log('dbTableSelect changed. Selected table name:', dbViewState.selectedTable, 'Type:', typeof dbViewState.selectedTable);
             dbViewState.currentPage = 1;
             dbViewState.currentFilters = [];
             dbViewState.columns = []; // Reset columns, will be fetched by loadTableInfo or fetchAndDisplayTableData
