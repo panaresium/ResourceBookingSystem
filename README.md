@@ -1,7 +1,126 @@
 # GeminiTest
 # Smart Resource Booking System
 
-This project is a web application designed to help manage and book resources such as meeting rooms and equipment efficiently. It aims to provide a centralized view of resource availability and streamline the booking process. This initial version focuses on the front-end user interface.
+This project is a web application designed to help manage and book resources such as meeting rooms and equipment efficiently. It aims to provide a centralized view of resource availability and streamline the booking process.
+
+## Features
+
+This Smart Resource Booking System offers a comprehensive suite of features for users and administrators to manage and book resources efficiently.
+
+### User Features
+
+*   **Resource Discovery & Booking:**
+    *   View available resources with filtering options (capacity, equipment, tags).
+    *   Check real-time availability of resources for a specific date.
+    *   View available 30-minute time slots for booking.
+    *   Create new bookings for resources, including support for simple daily/weekly recurrence.
+    *   Receive conflict warnings for overlapping personal bookings or fully booked slots.
+*   **Booking Management ("My Bookings" & "My Calendar"):**
+    *   View a list of all personal bookings.
+    *   View personal bookings in a calendar format.
+    *   Update booking details (title, start/end time).
+    *   Cancel existing bookings.
+*   **Check-in/Check-out:**
+    *   Check into bookings within a defined grace period.
+    *   Check out of active bookings.
+*   **Waitlist:**
+    *   Automatically added to a resource's waitlist if attempting to book a conflicting slot (if waitlist capacity allows).
+    *   Receive notifications when a waitlisted slot becomes available (via email & Teams).
+*   **Profile Management:**
+    *   View and edit personal profile information (email, password).
+*   **Floor Map View:**
+    *   View resources visually placed on interactive floor maps.
+*   **Notifications:**
+    *   Email notifications for booking updates (requires admin configuration of Flask-Mail).
+    *   Microsoft Teams notifications for booking cancellations, check-in/out, and waitlist releases (requires admin configuration of Teams webhook).
+*   **Internationalization (i18n):**
+    *   User interface available in multiple languages (English, Spanish, Thai by default).
+    *   Language selection via UI.
+
+### Administrator Features
+
+*   **Dashboard & Overview:**
+    *   Admin sections for managing various aspects of the system.
+*   **User & Role Management:**
+    *   CRUD operations for users (create, view, update, delete).
+    *   CRUD operations for roles and their associated permissions.
+    *   Assign roles to users.
+    *   Bulk user operations: export, import (from JSON), and delete.
+    *   Assign Google Authentication to existing user accounts.
+*   **Resource Management:**
+    *   CRUD operations for resources.
+    *   Manage resource details: capacity, equipment, tags, booking restrictions, custom user/role permissions, maintenance status/schedule, max recurrence count, and scheduled status changes.
+    *   Upload and manage resource images.
+    *   Publish or unpublish resources.
+    *   Bulk resource creation and updates.
+*   **Booking Management (Admin Level):**
+    *   View all bookings in the system.
+    *   Approve or reject bookings that are in a 'pending' state.
+    *   Cancel any active booking.
+*   **Floor Map Management:**
+    *   Upload and manage floor map images and details (name, location, floor).
+    *   Delete floor maps (unassigns resources).
+    *   Export and import map configurations (map images and resource placements) as JSON.
+    *   Place and update resource coordinates on maps.
+*   **Waitlist Management:**
+    *   View all entries on the waitlist.
+    *   Manually remove entries from the waitlist.
+*   **Audit & Logging:**
+    *   View detailed audit logs of user and system actions with search and pagination.
+*   **Analytics:**
+    *   Access an analytics dashboard.
+    *   API endpoint to provide booking data for analytics.
+*   **System Backup & Restore (Azure File Share):**
+    *   **Full Backups:**
+        *   One-click manual full backup (database, all configurations, media files).
+        *   Scheduled automated full backups (daily/weekly).
+        *   Backup manifest creation for integrity.
+        *   Configurable backup retention policy.
+    *   **Booking CSV Backups:**
+        *   Manual CSV export/backup of booking data with date range filtering.
+        *   Scheduled automated CSV backups of booking data with configurable frequency and date ranges.
+    *   **Restore Operations:**
+        *   One-click full restore of a backup set.
+        *   Selective restore of components (database, map config, specific media).
+        *   Restore booking data from CSV backups.
+        *   Dry run capability for restore operations.
+        *   Verification of backup set integrity against manifest.
+    *   **Management:**
+        *   List available backup sets (full and CSV).
+        *   Delete backup sets (full and CSV).
+        *   Manage backup schedules via UI and JSON configuration files.
+*   **System Administration:**
+    *   Troubleshooting page.
+    *   System data cleanup (clear bookings, resources, maps, and uploaded files).
+    *   Raw database view (top 100 records from key tables).
+    *   Reload configurations (map config, backup schedule).
+
+### Technical & Backend Features
+
+*   **Authentication:**
+    *   Local username/password authentication with secure password hashing.
+    *   Google OAuth 2.0 for admin login (configurable).
+*   **Authorization:**
+    *   Role-based access control (RBAC) using permissions assigned to roles.
+    *   `is_admin` flag for legacy superuser access.
+*   **Database:**
+    *   SQLite database with SQLAlchemy ORM.
+    *   Optimized for WAL (Write-Ahead Logging) mode.
+*   **Scheduling:**
+    *   APScheduler for background tasks:
+        *   Auto-cancellation of unchecked bookings.
+        *   Applying scheduled resource status changes.
+        *   Automated full system backups.
+        *   Automated booking CSV backups.
+*   **Real-time Updates:**
+    *   Flask-SocketIO for real-time communication (e.g., booking updates, backup progress).
+*   **API-Driven:**
+    *   Comprehensive RESTful APIs for most user and admin functionalities.
+*   **Deployment:**
+    *   Ready for deployment (e.g., Azure Web App via GitHub Actions).
+    *   Configuration via environment variables.
+*   **Extensibility:**
+    *   Modular design with Blueprints.
 
 ## Getting Started
 
@@ -175,27 +294,6 @@ Translations are stored in simple JSON files under `locales/`. Each file is name
    ```
 3. Restart the application. The language selector in the footer will load strings from the JSON files without any compilation step.
 
-### Filtering Resources
-
-The `/api/resources` endpoint supports optional query parameters to narrow down
-results:
-
-- `capacity` – minimum capacity required (e.g. `?capacity=5`)
-- `equipment` – comma-separated equipment keywords (e.g. `?equipment=projector,whiteboard`)
-- `tags` – comma-separated tags assigned to a resource (e.g. `?tags=quiet`)
-
-These filters can be combined. Only resources with `status='published'` are returned.
-
-## Bulk User Management
-
-Admins can manage many users at once from the **User Management** screen.
-
-- **Export Users** – `GET /api/admin/users/export` returns a JSON payload containing all users and roles.
-- **Import Users** – `POST /api/admin/users/import` accepts the same structure to create or update users in bulk.
-- **Bulk Delete** – `DELETE /api/admin/users/bulk` removes multiple users by ID.
-
-These actions are also accessible via buttons on the User Management page.
-
 ## Deploying to Azure Web App
 
 This project includes a GitHub Actions workflow that can publish the application to Azure Web App. Configure these secrets in your repository settings:
@@ -226,19 +324,4 @@ All floor map and resource images from `static/` along with `data/site.db` will 
 
 ### Automatic Backups
 
-When the app runs, it will attempt to restore `site.db` and uploaded images from the configured Azure File Shares.  A background job then backs up the database and media files at regular intervals.
-
 Configure the interval via the `AZURE_BACKUP_INTERVAL_MINUTES` environment variable (default `60`).  Files are only uploaded when their content changes.
-
-
-## Bulk User Management
-
-Admins can manage users in batches using the provided APIs and UI tools.
-
-- **Export** all user accounts and roles via `GET /api/admin/users/export`.
-- **Import** users and roles from a JSON file with `POST /api/admin/users/import`. Existing users are updated when an `id` is provided.
-- **Delete** multiple users by sending their IDs to `DELETE /api/admin/users/bulk`.
-
-The user management page offers buttons to export, import and remove selected users.
-
-
