@@ -152,20 +152,3 @@ class AuditLog(db.Model):
 
     def __repr__(self):
         return f'<AuditLog {self.timestamp} - {self.username or "System"} - {self.action}>'
-
-class UserMessage(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True) # Changed to user_id
-    message_content = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    is_dismissed = db.Column(db.Boolean, nullable=False, default=False, index=True)
-
-    original_booking_title = db.Column(db.String(100), nullable=True)
-    original_resource_name = db.Column(db.String(100), nullable=True)
-    original_start_time = db.Column(db.DateTime, nullable=True)
-    original_end_time = db.Column(db.DateTime, nullable=True)
-
-    user = db.relationship('User', backref=db.backref('user_messages', lazy='dynamic')) # Changed backref name
-
-    def __repr__(self):
-        return f'<UserMessage {self.id} for User ID {self.user_id} - Dismissed: {self.is_dismissed}>'
