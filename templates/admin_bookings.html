@@ -77,42 +77,31 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.delete-booking-btn').forEach(button => {
         button.addEventListener('click', function() {
             const bookingId = this.dataset.bookingId;
-            const row = this.closest('tr');
+            const row = this.closest('tr'); // Get the table row
 
-            if (!confirm("{{ _('Are you sure you want to cancel this booking? This will mark it as cancelled by an administrator.') }}")) {
+            // Updated confirmation message
+            if (!confirm("{{ _('Are you sure you want to DELETE this booking? This action cannot be undone and the booking will be permanently removed.') }}")) {
                 return;
             }
             this.disabled = true;
             this.textContent = "{{ _('Processing...') }}";
 
-            fetch(`/api/admin/bookings/${bookingId}/cancel`, {
+            // Updated fetch URL
+            fetch(`/api/admin/bookings/${bookingId}/delete`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
             })
             .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, data })))
             .then(({ ok, status, data }) => {
                 if (ok) {
-                    statusDiv.textContent = data.message || "{{ _('Booking cancelled successfully.') }}";
+                    // Updated success logic
+                    statusDiv.textContent = data.message || "{{ _('Booking deleted successfully.') }}"; // Use message from response
                     statusDiv.className = 'alert alert-success';
-
-                    row.classList.add('table-warning');
-                    row.cells[6].innerHTML = `<span class="status-badge status-${data.new_status.toLowerCase()}">${data.new_status}</span>`;
-
-                    let titleCell = row.cells[3];
-                    let messageDiv = titleCell.querySelector('.alert.alert-warning');
-                    if (!messageDiv) {
-                        messageDiv = document.createElement('div');
-                        messageDiv.className = 'alert alert-warning p-1 my-1';
-                        titleCell.appendChild(messageDiv);
-                    }
-                    messageDiv.innerHTML = `<small><strong>{{ _('Admin Cancellation:') }}</strong> ${data.admin_message}</small>`;
-
-                    this.classList.remove('delete-booking-btn', 'button-danger');
-                    this.classList.add('dismiss-admin-message-btn', 'btn-outline-secondary');
-                    this.textContent = "{{ _('Dismiss Message') }}";
-                    this.disabled = false;
+                    row.remove(); // Remove the row from the table
+                    // No need to interact with the button further as it's removed with the row.
                 } else {
-                    throw new Error(data.error || `{{ _('Error cancelling booking (Status: ${status}).') }}`);
+                    // This part of the "else" is for the "then" block, not the catch block.
+                    throw new Error(data.error || `{{ _('Error deleting booking (Status: ${status}).') }}`);
                 }
             })
             .catch(error => {

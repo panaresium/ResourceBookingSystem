@@ -70,8 +70,7 @@ def serve_admin_bookings_page():
             User.username.label('user_username'),
             Resource.name.label('resource_name')
         ).join(Resource, Booking.resource_id == Resource.id)\
-         .join(User, Booking.user_name == User.username)\
-         .filter(Booking.status != 'cancelled_by_admin') # Add this line
+         .join(User, Booking.user_name == User.username)
 
         all_bookings = bookings_query.order_by(Booking.start_time.desc()).all()
 

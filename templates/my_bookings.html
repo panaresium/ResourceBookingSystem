@@ -13,6 +13,10 @@
 
     <div id="my-bookings-status" class="alert" style="display:none;"></div>
 
+    <div id="user-messages-list" class="mb-4">
+        <!-- User messages about admin-deleted bookings will be loaded here -->
+    </div>
+
     <div id="my-bookings-list">
         <!-- Bookings will be loaded here by JavaScript -->
         <p>{{ _('Loading your bookings...') }}</p>
@@ -34,6 +38,24 @@
                 <button class="btn btn-sm btn-success check-in-btn" data-booking-id="" style="display:none;">{{ _('Check In') }}</button>
                 <button class="btn btn-sm btn-secondary check-out-btn" data-booking-id="" style="display:none;">{{ _('Check Out') }}</button>
             </div>
+        </div>
+    </template>
+
+    <template id="user-message-item-template">
+        <div class="alert alert-info user-message-item" role="alert">
+            <h5 class="alert-heading">Notification</h5>
+            <p class="message-content"></p>
+            <div class="original-booking-details small text-muted">
+                <p>This message pertains to a previous booking:</p>
+                <ul style="list-style-type: none; padding-left: 0;">
+                    <li><strong>Title:</strong> <span class="original-title">N/A</span></li>
+                    <li><strong>Resource:</strong> <span class="original-resource">N/A</span></li>
+                    <li><strong>From:</strong> <span class="original-start">N/A</span></li>
+                    <li><strong>To:</strong> <span class="original-end">N/A</span></li>
+                </ul>
+            </div>
+            <hr>
+            <button class="btn btn-sm btn-outline-secondary dismiss-user-message-btn" data-message-id="">Dismiss</button>
         </div>
     </template>
 
