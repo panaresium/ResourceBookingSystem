@@ -6,8 +6,7 @@
     <h1>{{ _('Booking Settings') }}</h1>
 
     <form method="POST" action="{{ url_for('admin_ui.update_booking_settings') }}" class="form-stacked">
-        {# CSRF token if using Flask-WTF or similar #}
-        {# {{ form.csrf_token }} #}
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
         <div class="form-group">
             <input type="checkbox" id="allow_past_bookings" name="allow_past_bookings" {% if settings.allow_past_bookings %}checked{% endif %}>
