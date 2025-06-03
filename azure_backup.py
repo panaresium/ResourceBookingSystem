@@ -359,6 +359,31 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
 
     if os.path.exists(local_db_path):
         try:
+            # Perform WAL checkpoint before backup
+            logger.info(f"Attempting to perform WAL checkpoint on {local_db_path} before backup.")
+            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Performing database WAL checkpoint...', local_db_path)
+            try:
+                conn = sqlite3.connect(local_db_path)
+                # Set a timeout for the connection and checkpoint operations
+                conn.execute("PRAGMA busy_timeout = 5000;") # 5 seconds
+                # Try wal_checkpoint with TRUNCATE first.
+                # TRUNCATE is often preferred for backups as it commits and shrinks the WAL file.
+                # FULL or RESTART are other options if TRUNCATE causes issues or is not supported
+                # in some very old sqlite versions (though unlikely here).
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                conn.close()
+                logger.info(f"Successfully performed WAL checkpoint on {local_db_path}.")
+                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Database WAL checkpoint successful.')
+            except sqlite3.Error as e_sqlite:
+                # Log the error but proceed with backup attempt anyway,
+                # as the DB file might still be mostly consistent.
+                logger.error(f"Error during WAL checkpoint on {local_db_path}: {e_sqlite}. Proceeding with backup attempt.", exc_info=True)
+                _emit_progress(socketio_instance, task_id, 'backup_progress', f'Database WAL checkpoint failed: {e_sqlite}. Continuing backup.', 'WARNING')
+            except Exception as e_generic_checkpoint:
+                logger.error(f"A non-SQLite error occurred during WAL checkpoint on {local_db_path}: {e_generic_checkpoint}. Proceeding with backup attempt.", exc_info=True)
+                _emit_progress(socketio_instance, task_id, 'backup_progress', f'Database WAL checkpoint failed with a non-SQLite error: {e_generic_checkpoint}. Continuing backup.', 'WARNING')
+
+            # Existing code continues here:
             logger.info(f"Attempting database backup: Share='{db_share_client.share_name}', Path='{remote_db_path}', LocalSource='{local_db_path}'")
             upload_file(db_share_client, local_db_path, remote_db_path)
             logger.info(f"Successfully backed up database to '{db_share_name}/{remote_db_path}'.")
