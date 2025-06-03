@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta, time
 
 from flask import Blueprint, jsonify, request, current_app, url_for
 from flask_login import login_required, current_user
+from sqlalchemy import func # For count query
 # from sqlalchemy import or_ # For more complex queries if needed in get_audit_logs
 
 # Relative imports from project structure
@@ -663,15 +664,29 @@ def api_admin_view_db_raw_top100():
 @login_required
 @permission_required('manage_system')
 def api_admin_get_table_names():
-    """Fetches all table names from the database."""
-    current_app.logger.info(f"User {current_user.username} requested list of database table names.")
+    """Fetches all table names from the database with their record counts."""
+    current_app.logger.info(f"User {current_user.username} requested list of database table names with counts.")
     try:
-        table_names_list = list(db.metadata.tables.keys())
-        current_app.logger.info(f"Successfully retrieved {len(table_names_list)} table names for {current_user.username}.")
-        return jsonify({'success': True, 'tables': table_names_list}), 200
+        all_table_names = list(db.metadata.tables.keys())
+        tables_with_counts = []
+        for table_name in all_table_names:
+            table_obj = db.metadata.tables[table_name]
+            try:
+                # Construct a count query: SELECT count(*) FROM table_name
+                # Using func.count() without a specific column counts all rows.
+                # Using select_from(table_obj) ensures we are counting from the correct table.
+                count_query = db.session.query(func.count(1).label("row_count")).select_from(table_obj) # Use count(1) for efficiency
+                record_count = count_query.scalar()
+                tables_with_counts.append({'name': table_name, 'count': record_count})
+            except Exception as count_exc:
+                current_app.logger.error(f"Error fetching count for table {table_name} by {current_user.username}: {count_exc}", exc_info=True)
+                tables_with_counts.append({'name': table_name, 'count': -1}) # Indicate error for this table
+
+        current_app.logger.info(f"Successfully retrieved {len(tables_with_counts)} table names with counts for {current_user.username}.")
+        return jsonify({'success': True, 'tables': tables_with_counts}), 200
     except Exception as e:
-        current_app.logger.error(f"Error fetching database table names for {current_user.username}: {e}", exc_info=True)
-        return jsonify({'success': False, 'message': f'Failed to retrieve table names: {str(e)}'}), 500
+        current_app.logger.error(f"Error fetching database table names with counts for {current_user.username}: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': f'Failed to retrieve table names with counts: {str(e)}'}), 500
 
 @api_system_bp.route('/api/admin/db/table_info/<string:table_name>', methods=['GET'])
 @login_required

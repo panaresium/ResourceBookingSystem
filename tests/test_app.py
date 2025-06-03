@@ -712,8 +712,20 @@ class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusi
         self.assertIn('tables', data)
         self.assertIsInstance(data['tables'], list)
 
-        actual_table_names = sorted(list(db.metadata.tables.keys()))
-        self.assertEqual(sorted(data['tables']), actual_table_names)
+        # Verify structure of each item and extract names
+        response_table_names = []
+        if data['tables']:
+            self.assertIsInstance(data['tables'][0], dict)
+            for item in data['tables']:
+                self.assertIn('name', item)
+                self.assertIsInstance(item['name'], str)
+                self.assertIn('count', item)
+                self.assertIsInstance(item['count'], int)
+                self.assertTrue(item['count'] >= -1) # -1 for error, 0 or more for actual count
+                response_table_names.append(item['name'])
+
+        actual_table_names = list(db.metadata.tables.keys())
+        self.assertCountEqual(response_table_names, actual_table_names)
         self.logout()
 
     def test_get_db_table_info_valid_table(self):
