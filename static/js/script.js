@@ -157,6 +157,7 @@ async function updateAuthLink() {
     const analyticsNavLink = document.getElementById('analytics-nav-link');
     const adminBookingsNavLink = document.getElementById('admin-bookings-nav-link');
     const backupRestoreNavLink = document.getElementById('backup-restore-nav-link'); // Added
+    const troubleshootingNavLink = document.getElementById('troubleshooting-nav-link');
     const sidebar = document.getElementById('sidebar'); // Added for sidebar visibility
     const sidebarToggleBtn = document.getElementById('sidebar-toggle'); // Added for toggle button visibility
 
@@ -166,6 +167,7 @@ async function updateAuthLink() {
         const localSidebar = document.getElementById('sidebar'); // Ensure access within function
         const localSidebarToggleBtn = document.getElementById('sidebar-toggle'); // Ensure access
         const localBackupRestoreNavLink = document.getElementById('backup-restore-nav-link'); // Added for this scope
+        const localTroubleshootingNavLink = document.getElementById('troubleshooting-nav-link');
 
         sessionStorage.removeItem('loggedInUserUsername');
         sessionStorage.removeItem('loggedInUserIsAdmin');
@@ -191,6 +193,7 @@ async function updateAuthLink() {
         if (analyticsNavLink) analyticsNavLink.style.display = 'none';
         if (adminBookingsNavLink) adminBookingsNavLink.style.display = 'none';
         if (localBackupRestoreNavLink) localBackupRestoreNavLink.style.display = 'none'; // Added
+        if (localTroubleshootingNavLink) localTroubleshootingNavLink.style.display = 'none';
 
         if (localSidebar) localSidebar.style.display = 'none';
         if (localSidebarToggleBtn) localSidebarToggleBtn.style.display = 'none';
@@ -251,6 +254,9 @@ async function updateAuthLink() {
             }
             if (backupRestoreNavLink) { // Added
                 backupRestoreNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
+            }
+            if (troubleshootingNavLink) {
+                troubleshootingNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
             }
 
             // Sidebar and body class management based on admin status

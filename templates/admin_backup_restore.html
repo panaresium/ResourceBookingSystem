@@ -222,7 +222,7 @@
                                 </form>
                                 <form method="POST" action="{{ url_for('admin_ui.delete_booking_csv_backup_route', timestamp_str=backup_item.timestamp) }}" style="display: inline; margin-left: 5px;">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                    <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('{{ _('Are you sure you want to permanently delete the booking CSV backup for file %(filename)s?', filename=backup_item.filename) }}');">
+                                    <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('{{ _('Are you sure you want to permanently delete the booking CSV backup for file %(filename)s?', filename=backup_item.display_name) }}');">
                                         <i class="fas fa-trash-alt"></i> {{ _('Delete') }}
                                     </button>
                                 </form>
@@ -375,18 +375,7 @@
         const componentCheckboxes = document.querySelectorAll('#selective-restore-form input[name="components"]');
         const componentAllCheckbox = document.getElementById('component-all');
 
-        // Troubleshooting Tools Elements
-        // These elements are no longer in this file, but their JS might still be here.
-        // This will be handled in a subsequent step if necessary by removing unused JS.
-        const viewDbRecordsBtn = document.getElementById('view-db-records-btn');
-        const viewDbRecordsStatusEl = document.getElementById('view-db-records-status');
-        const viewDbRecordsOutputEl = document.getElementById('view-db-records-output');
-
-        const reloadConfigurationsBtn = document.getElementById('reload-configurations-btn');
-        const reloadConfigurationsStatusEl = document.getElementById('reload-configurations-status');
-
-        const cleanupSystemDataBtn = document.getElementById('cleanup-system-data-btn');
-        const cleanupSystemDataStatusEl = document.getElementById('cleanup-system-data-status');
+        // Troubleshooting Tools Elements are now in admin_troubleshooting.html
 
         let currentBackupTaskId = null;
         let currentRestoreTaskId = null;
@@ -1213,157 +1202,7 @@
         });
         loadBackupSchedule(); // Initial Load
 
-        // --- Troubleshooting Tools Event Listeners ---
-        if (viewDbRecordsBtn) {
-            viewDbRecordsBtn.addEventListener('click', function() {
-                viewDbRecordsStatusEl.textContent = "{{ _('Fetching DB records...') }}";
-                viewDbRecordsStatusEl.className = 'alert alert-info';
-                viewDbRecordsOutputEl.style.display = 'none';
-                viewDbRecordsOutputEl.textContent = '';
-                viewDbRecordsBtn.disabled = true;
-
-                fetch('/api/admin/view_db_raw_top100', {
-                    method: 'GET',
-                    headers: { 'X-CSRFToken': csrfToken, 'Accept': 'application/json' }
-                })
-                .then(response => response.json())
-                .then(data => {
-                if (data.success && data.data) {
-                    viewDbRecordsOutputEl.innerHTML = ''; // Clear previous content
-                        viewDbRecordsOutputEl.style.display = 'block';
-                    
-                    for (const tableName in data.data) {
-                        if (data.data.hasOwnProperty(tableName)) {
-                            const records = data.data[tableName];
-
-                            // Create a container for each table's data
-                            const tableContainer = document.createElement('div');
-                            tableContainer.className = 'db-table-container mb-3';
-
-                            // Create a button for the table name (for collapse/expand)
-                            const tableButton = document.createElement('button');
-                            tableButton.className = 'btn btn-outline-primary btn-sm mb-1 w-100 text-start';
-                            tableButton.textContent = `${tableName} (${records.length} records)`;
-                            
-                            // Create a div for the records, initially hidden
-                            const recordsDiv = document.createElement('div');
-                            recordsDiv.className = 'db-records-content'; 
-                            recordsDiv.style.display = 'none'; // Start collapsed
-
-                            if (records.length > 0) {
-                                const preFormattedRecords = document.createElement('pre');
-                                preFormattedRecords.style.whiteSpace = 'pre-wrap'; // Ensure wrapping
-                                preFormattedRecords.style.wordBreak = 'break-all'; // Break long strings
-                                preFormattedRecords.textContent = JSON.stringify(records, null, 2);
-                                recordsDiv.appendChild(preFormattedRecords);
-                            } else {
-                                recordsDiv.textContent = "{{ _('No records found for this table.') }}";
-                            }
-
-                            tableButton.addEventListener('click', function() {
-                                const isHidden = recordsDiv.style.display === 'none';
-                                recordsDiv.style.display = isHidden ? 'block' : 'none';
-                                tableButton.classList.toggle('active', isHidden); 
-                            });
-
-                            tableContainer.appendChild(tableButton);
-                            tableContainer.appendChild(recordsDiv);
-                            viewDbRecordsOutputEl.appendChild(tableContainer);
-                        }
-                    }
-                        viewDbRecordsStatusEl.textContent = "{{ _('DB records fetched successfully.') }}";
-                        viewDbRecordsStatusEl.className = 'alert alert-success';
-                    } else {
-                        viewDbRecordsStatusEl.textContent = "{{ _('Failed to fetch DB records:') }} " + (data.message || "{{ _('Unknown error.') }}");
-                        viewDbRecordsStatusEl.className = 'alert alert-danger';
-                    viewDbRecordsOutputEl.style.display = 'none';
-                    }
-                })
-                .catch(error => {
-                    console.error('View DB Records error:', error);
-                    viewDbRecordsStatusEl.textContent = "{{ _('Error fetching DB records:') }} " + error.toString();
-                    viewDbRecordsStatusEl.className = 'alert alert-danger';
-                })
-                .finally(() => {
-                    viewDbRecordsBtn.disabled = false;
-                });
-            });
-        }
-
-        if (reloadConfigurationsBtn) {
-            reloadConfigurationsBtn.addEventListener('click', function() {
-                reloadConfigurationsStatusEl.textContent = "{{ _('Attempting to reload configurations...') }}";
-                reloadConfigurationsStatusEl.className = 'alert alert-info';
-                reloadConfigurationsBtn.disabled = true;
-
-                fetch('/api/admin/reload_configurations', {
-                    method: 'POST',
-                    headers: { 'X-CSRFToken': csrfToken, 'Accept': 'application/json' }
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        reloadConfigurationsStatusEl.textContent = "{{ _('Configuration reload attempt finished.') }} " + (data.message || "");
-                        reloadConfigurationsStatusEl.className = 'alert alert-success';
-                    } else {
-                        reloadConfigurationsStatusEl.textContent = "{{ _('Failed to reload configurations:') }} " + (data.message || "{{ _('Unknown error.') }}");
-                        reloadConfigurationsStatusEl.className = 'alert alert-danger';
-                    }
-                })
-                .catch(error => {
-                    console.error('Reload Configurations error:', error);
-                    reloadConfigurationsStatusEl.textContent = "{{ _('Error reloading configurations:') }} " + error.toString();
-                    reloadConfigurationsStatusEl.className = 'alert alert-danger';
-                })
-                .finally(() => {
-                    reloadConfigurationsBtn.disabled = false;
-                });
-            });
-        }
-
-        if (cleanupSystemDataBtn) {
-            cleanupSystemDataBtn.addEventListener('click', function() {
-                const confirmationPrompt = "{{ _('Type CONFIRM to delete bookings, resources, floor maps, and all uploaded floor map/resource images. This action is irreversible.') }}";
-                const userInput = prompt(confirmationPrompt);
-
-                if (userInput === "CONFIRM") {
-                    cleanupSystemDataStatusEl.textContent = "{{ _('Processing cleanup...') }}";
-                    cleanupSystemDataStatusEl.className = 'alert alert-info';
-                    cleanupSystemDataBtn.disabled = true;
-
-                    fetch('/api/admin/cleanup_system_data', {
-                        method: 'POST',
-                        headers: { 'X-CSRFToken': csrfToken, 'Accept': 'application/json' }
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            cleanupSystemDataStatusEl.textContent = "{{ _('System data cleanup successful.') }} " + (data.message || "");
-                            cleanupSystemDataStatusEl.className = 'alert alert-success';
-                            // Optionally, refresh parts of the page or prompt user to refresh
-                            loadAvailableBackups(); // For example, if cleanup affects backup list display consistency
-                        } else {
-                            cleanupSystemDataStatusEl.textContent = "{{ _('Cleanup failed or partially failed:') }} " + (data.message || "{{ _('Unknown error.') }}");
-                            cleanupSystemDataStatusEl.className = 'alert alert-danger';
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Cleanup System Data error:', error);
-                        cleanupSystemDataStatusEl.textContent = "{{ _('Error during cleanup:') }} " + error.toString();
-                        cleanupSystemDataStatusEl.className = 'alert alert-danger';
-                    })
-                    .finally(() => {
-                        cleanupSystemDataBtn.disabled = false;
-                    });
-                } else if (userInput !== null) { // User typed something other than CONFIRM
-                    cleanupSystemDataStatusEl.textContent = "{{ _('Cleanup cancelled. Confirmation not received.') }}";
-                    cleanupSystemDataStatusEl.className = 'alert alert-warning';
-                } else { // User clicked cancel on the prompt
-                     cleanupSystemDataStatusEl.textContent = "{{ _('Cleanup cancelled.') }}";
-                     cleanupSystemDataStatusEl.className = 'alert alert-info';
-                }
-            });
-        }
+        // --- Troubleshooting Tools Event Listeners (Moved to admin_troubleshooting.html) ---
     });
 </script>
 {% endblock %}
