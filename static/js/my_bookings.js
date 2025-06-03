@@ -115,6 +115,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     bookingIdInfo.textContent = `(Regarding Booking ID: ${booking.id})`; // Assuming booking.id is still available
                     deletedBookingDiv.appendChild(bookingIdInfo);
 
+                    // Add the new button
+                    const clearMessageBtn = document.createElement('button');
+                    clearMessageBtn.classList.add('btn', 'btn-sm', 'btn-outline-secondary', 'clear-admin-message-btn', 'mt-2');
+                    clearMessageBtn.textContent = 'Dismiss Message';
+                    clearMessageBtn.dataset.bookingId = booking.id;
+                    deletedBookingDiv.appendChild(clearMessageBtn);
+
                     bookingsListDiv.appendChild(deletedBookingDiv);
 
                 } else {
@@ -261,6 +268,42 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (error) {
                 console.error('Check out failed:', error);
                 showError(statusDiv, error.message || 'Check out failed.');
+            }
+        }
+
+        if (target.classList.contains('clear-admin-message-btn')) {
+            const bookingId = target.dataset.bookingId;
+            if (!bookingId) {
+                console.error('Booking ID not found on dismiss button.');
+                showError(statusDiv, 'Could not identify booking to clear message.');
+                return;
+            }
+
+            // Optional: Add a confirmation dialog
+            // if (!confirm(`Are you sure you want to dismiss this message for booking ID ${bookingId}?`)) {
+            //     return;
+            // }
+
+            showLoading(statusDiv, `Dismissing message for booking ${bookingId}...`);
+            try {
+                await apiCall(`/api/bookings/${bookingId}/clear_admin_message`, { method: 'POST' });
+                showSuccess(statusDiv, `Message for booking ${bookingId} dismissed.`);
+
+                // Remove the entire admin-deleted-item div
+                const messageItemDiv = target.closest('.admin-deleted-item');
+                if (messageItemDiv) {
+                    messageItemDiv.remove();
+                } else {
+                    // Fallback if the structure is unexpected, try to remove the button's parent at least
+                    target.parentElement.remove();
+                }
+
+                if (bookingsListDiv.children.length === 0) {
+                    showStatusMessage(statusDiv, 'You have no active bookings or messages.', 'info');
+                }
+            } catch (error) {
+                console.error('Error dismissing admin message:', error);
+                showError(statusDiv, error.message || `Failed to dismiss message for booking ${bookingId}.`);
             }
         }
     });

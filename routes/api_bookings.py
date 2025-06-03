@@ -283,6 +283,7 @@ def get_my_bookings():
                 'end_time': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
                 'title': booking.title,
                 'recurrence_rule': booking.recurrence_rule,
+                'admin_deleted_message': booking.admin_deleted_message,
                 'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else None,
                 'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else None,
                 'can_check_in': can_check_in
@@ -957,3 +958,58 @@ def admin_cancel_booking(booking_id):
             details=f"Admin '{current_user.username}' failed to delete booking ID {booking_id}. Error: {str(e)}"
         )
         return jsonify({'error': 'Failed to delete booking due to a server error.'}), 500
+
+
+@api_bookings_bp.route('/bookings/<int:booking_id>/clear_admin_message', methods=['POST'])
+@login_required
+def clear_admin_deleted_message(booking_id):
+    """
+    Clears the admin_deleted_message for a specific booking.
+    Accessible by the booking owner or an admin with 'manage_bookings' permission.
+    """
+    current_app.logger.info(f"Attempt to clear admin_deleted_message for booking ID: {booking_id} by user '{current_user.username}'.")
+    try:
+        booking = Booking.query.get(booking_id)
+
+        if not booking:
+            current_app.logger.warning(f"Clear admin message attempt: Booking ID {booking_id} not found.")
+            return jsonify({'error': 'Booking not found.'}), 404
+
+        # Authorization check: User must be the owner or have 'manage_bookings' permission
+        if not (current_user.username == booking.user_name or current_user.has_permission('manage_bookings')):
+            current_app.logger.warning(
+                f"User '{current_user.username}' unauthorized to clear admin message for booking ID {booking_id} "
+                f"(Owner: '{booking.user_name}', User has manage_bookings: {current_user.has_permission('manage_bookings')})."
+            )
+            return jsonify({'error': 'You are not authorized to perform this action on this booking.'}), 403
+
+        if booking.admin_deleted_message is None:
+            current_app.logger.info(f"Admin message for booking ID {booking_id} is already clear. No action taken.")
+            return jsonify({'message': 'Admin message was already clear.'}), 200 # Or 304 Not Modified, but 200 is fine
+
+        booking.admin_deleted_message = None
+        db.session.commit()
+
+        add_audit_log(
+            action="CLEAR_ADMIN_MESSAGE",
+            details=f"User '{current_user.username}' cleared admin_deleted_message for booking ID {booking.id}."
+        )
+        current_app.logger.info(f"Admin message for booking ID {booking.id} cleared successfully by user '{current_user.username}'.")
+
+        # Optionally, emit a socket event if frontend needs to react to this change
+        socketio.emit('booking_updated', {
+            'action': 'admin_message_cleared',
+            'booking_id': booking.id,
+            'resource_id': booking.resource_id
+        })
+
+        return jsonify({'message': 'Admin message cleared successfully.'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception(f"Error clearing admin_deleted_message for booking ID {booking_id} by user '{current_user.username}':")
+        add_audit_log(
+            action="CLEAR_ADMIN_MESSAGE_FAILED",
+            details=f"User '{current_user.username}' failed to clear admin_deleted_message for booking ID {booking_id}. Error: {str(e)}"
+        )
+        return jsonify({'error': 'Failed to clear admin message due to a server error.'}), 500
