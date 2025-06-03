@@ -26,8 +26,9 @@
 
                         <div id="db-filter-area" class="mb-3" style="display: none;">
                             <h5>{{ _('Filters') }}</h5>
-                            <div id="db-filter-controls-container">
-                                 <p>{{ _('Select a table to see available filters.') }}</p>
+                            <div id="db-filter-controls-container" class="row">
+                                <div id="db-filter-col-1" class="col-md-6"></div>
+                                <div id="db-filter-col-2" class="col-md-6"></div>
                             </div>
                             <button id="db-apply-filters-btn" class="btn btn-primary mt-2">{{ _('Apply Filters') }}</button>
                             <button id="db-clear-filters-btn" class="btn btn-secondary mt-2">{{ _('Clear Filters') }}</button>
@@ -156,8 +157,10 @@ document.addEventListener('DOMContentLoaded', function () {
         const dbFilterCol2 = document.getElementById('db-filter-col-2');
 
         if (!dbFilterCol1 || !dbFilterCol2) {
-            console.error('Filter columns not found in DOM.');
-            updateDbViewStatus('{{ _("Internal UI error: Filter columns not found.") }}', true);
+            console.error('CRITICAL: Filter column elements (db-filter-col-1 or db-filter-col-2) are null/not found in DOM immediately after getElementById within loadTableInfoAndGenerateFilters.');
+            if (typeof updateDbViewStatus === 'function') {
+                updateDbViewStatus('Internal UI error: Filter layout components are missing. Please try refreshing.', true);
+            }
             return;
         }
 
