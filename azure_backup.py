@@ -579,6 +579,71 @@ def restore_bookings_from_csv_backup(app, timestamp_str, socketio_instance=None,
     return actions_summary
 
 
+def verify_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=None):
+    """
+    Verifies the existence of a specific Booking CSV backup file in Azure File Share.
+
+    Args:
+        timestamp_str (str): The timestamp of the booking CSV backup to verify.
+        socketio_instance: Optional SocketIO instance for progress emitting.
+        task_id: Optional task ID for SocketIO progress emitting.
+
+    Returns:
+        dict: A result dictionary with 'status', 'message', and 'file_path'.
+    """
+    event_name = 'booking_csv_verify_progress'
+    result = {
+        'status': 'unknown', # Possible: unknown, success, not_found, error
+        'message': '',
+        'file_path': ''
+    }
+
+    logger.info(f"Starting verification for booking CSV backup: {timestamp_str}")
+    _emit_progress(socketio_instance, task_id, event_name, 'Starting booking CSV verification...', f'Timestamp: {timestamp_str}')
+
+    try:
+        service_client = _get_service_client()
+        share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
+        share_client = service_client.get_share_client(share_name)
+
+        if not _client_exists(share_client):
+            result['status'] = 'error'
+            result['message'] = f"Azure share '{share_name}' not found."
+            logger.error(result['message'])
+            _emit_progress(socketio_instance, task_id, event_name, result['message'], 'ERROR')
+            return result
+
+        remote_csv_filename = f"{BOOKING_CSV_FILENAME_PREFIX}{timestamp_str}.csv"
+        remote_azure_path = f"{BOOKING_CSV_BACKUPS_DIR}/{remote_csv_filename}"
+        result['file_path'] = remote_azure_path
+
+        file_client = share_client.get_file_client(remote_azure_path)
+
+        if file_client.exists():
+            result['status'] = 'success' # Using 'success' to indicate file found, as per typical verification
+            result['message'] = f"Booking CSV backup file '{remote_csv_filename}' successfully found on Azure share '{share_name}' at path '{remote_azure_path}'."
+            logger.info(result['message'])
+            _emit_progress(socketio_instance, task_id, event_name, 'Verification successful: File found.', remote_azure_path)
+        else:
+            result['status'] = 'not_found'
+            result['message'] = f"Booking CSV backup file '{remote_csv_filename}' NOT found on Azure share '{share_name}' at path '{remote_azure_path}'."
+            logger.warning(result['message'])
+            _emit_progress(socketio_instance, task_id, event_name, 'Verification failed: File not found.', remote_azure_path)
+
+    except RuntimeError as rte: # Specifically catch RuntimeError from _get_service_client
+        result['status'] = 'error'
+        result['message'] = str(rte)
+        logger.error(f"Error during booking CSV verification for {timestamp_str}: {result['message']}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, result['message'], 'ERROR')
+    except Exception as e:
+        result['status'] = 'error'
+        result['message'] = f"An unexpected error occurred during verification: {str(e)}"
+        logger.error(f"Unexpected error during booking CSV verification for {timestamp_str}: {result['message']}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, result['message'], 'CRITICAL_ERROR')
+
+    return result
+
+
 def delete_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=None):
     """
     Deletes a specific Booking CSV backup file from Azure File Share.
