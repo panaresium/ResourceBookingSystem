@@ -551,7 +551,7 @@ def analytics_bookings_data():
             extract('month', Booking.start_time).label('booking_month')
         ).join(Resource, Booking.resource_id == Resource.id) \
          .join(User, Booking.user_name == User.username) \
-         .outerjoin(FloorMap, Resource.map_id == FloorMap.id) # Use outerjoin in case a resource is not mapped
+         .outerjoin(FloorMap, Resource.floor_map_id == FloorMap.id) # Use outerjoin in case a resource is not mapped
 
         all_bookings_for_aggregation = base_query.all()
 
