@@ -4,7 +4,7 @@ from sqlalchemy import func # For analytics_bookings_data if merged here, or gen
 import uuid # For task_id generation
 
 # Assuming Booking, Resource, User models are in models.py
-from models import Booking, Resource, User
+from models import Booking, Resource, User, BookingSettings
 # Assuming db is in extensions.py
 from extensions import db, socketio # Try to import socketio
 # Assuming permission_required is in auth.py
@@ -435,6 +435,63 @@ def serve_troubleshooting_page():
     current_app.logger.info(f"User {current_user.username} accessed System Troubleshooting page.")
     return render_template('admin_troubleshooting.html')
 
+@admin_ui_bp.route('/booking_settings', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def serve_booking_settings_page():
+    current_app.logger.info(f"User {current_user.username} accessed Booking Settings page.")
+    settings = BookingSettings.query.first()
+    if not settings:
+        # Create a default instance if no settings exist in DB, but don't save yet
+        settings = BookingSettings(
+            allow_past_bookings=False,
+            max_booking_days_in_future=30, # Default to 30 days
+            allow_multiple_resources_same_time=False,
+            max_bookings_per_user=None,
+            enable_check_in_out=False
+        )
+    return render_template('admin_booking_settings.html', settings=settings)
+
+@admin_ui_bp.route('/booking_settings/update', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def update_booking_settings():
+    current_app.logger.info(f"User {current_user.username} attempting to update Booking Settings.")
+    settings = BookingSettings.query.first()
+    if not settings:
+        settings = BookingSettings()
+        db.session.add(settings)
+
+    try:
+        settings.allow_past_bookings = request.form.get('allow_past_bookings') == 'on'
+
+        max_days_future_str = request.form.get('max_booking_days_in_future')
+        if max_days_future_str and max_days_future_str.strip():
+            settings.max_booking_days_in_future = int(max_days_future_str)
+        else:
+            settings.max_booking_days_in_future = None
+
+        settings.allow_multiple_resources_same_time = request.form.get('allow_multiple_resources_same_time') == 'on'
+
+        max_bookings_user_str = request.form.get('max_bookings_per_user')
+        if max_bookings_user_str and max_bookings_user_str.strip():
+            settings.max_bookings_per_user = int(max_bookings_user_str)
+        else:
+            settings.max_bookings_per_user = None
+
+        settings.enable_check_in_out = request.form.get('enable_check_in_out') == 'on'
+
+        db.session.commit()
+        flash(_('Booking settings updated successfully.'), 'success')
+    except ValueError:
+        db.session.rollback()
+        flash(_('Invalid input for numeric field. Please enter a valid number or leave it empty.'), 'danger')
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error updating booking settings: {e}", exc_info=True)
+        flash(_('An unexpected error occurred while updating booking settings.'), 'danger')
+
+    return redirect(url_for('admin_ui.serve_booking_settings_page'))
 
 @admin_ui_bp.route('/analytics/') # Merged from analytics_bp
 @login_required

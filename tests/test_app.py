@@ -6,6 +6,7 @@ from sqlalchemy import text
 from datetime import datetime, time, date, timedelta
 
 from app import app, db, User, Resource, Booking, WaitlistEntry, FloorMap, AuditLog, email_log, teams_log, slack_log
+from models import BookingSettings # Import the new model
 
 # from flask_login import current_user # Not directly used for assertions here
 
@@ -1740,6 +1741,137 @@ class TestAdminBookings(AppTests):
         self.assertIn(b'<li id="admin-bookings-nav-link"', response_admin.data)
         self.logout()
 
+    def test_admin_get_booking_settings_page_no_settings_exist(self):
+        """Test GET /admin/booking_settings when no settings exist in DB."""
+        admin = self._create_admin_user(username="settingsadmin1", email_ext="settings1")
+        self.login(admin.username, 'adminpass')
+
+        # Ensure no BookingSettings exist
+        BookingSettings.query.delete()
+        db.session.commit()
+
+        response = self.client.get('/admin/booking_settings')
+        self.assertEqual(response.status_code, 200)
+        html_content = response.data.decode('utf-8')
+
+        self.assertIn('<h1>Booking Settings</h1>', html_content) # Or translated version
+        # Check for default values being reflected in the form (e.g., checkboxes not checked, specific default for numbers)
+        self.assertIn('name="allow_past_bookings"', html_content)
+        self.assertNotIn('name="allow_past_bookings" checked', html_content) # Default is False
+        self.assertIn('name="max_booking_days_in_future" value="30"', html_content) # Default is 30 in route
+        self.assertIn('name="enable_check_in_out"', html_content)
+        self.logout()
+
+    def test_admin_get_booking_settings_page_existing_settings(self):
+        """Test GET /admin/booking_settings when settings exist in DB."""
+        admin = self._create_admin_user(username="settingsadmin2", email_ext="settings2")
+        self.login(admin.username, 'adminpass')
+
+        # Create and save specific settings
+        BookingSettings.query.delete() # Clear any previous
+        settings = BookingSettings(
+            allow_past_bookings=True,
+            max_booking_days_in_future=45,
+            allow_multiple_resources_same_time=True,
+            max_bookings_per_user=10,
+            enable_check_in_out=True
+        )
+        db.session.add(settings)
+        db.session.commit()
+
+        response = self.client.get('/admin/booking_settings')
+        self.assertEqual(response.status_code, 200)
+        html_content = response.data.decode('utf-8')
+
+        self.assertIn('name="allow_past_bookings" checked', html_content)
+        self.assertIn('name="max_booking_days_in_future" value="45"', html_content)
+        self.assertIn('name="allow_multiple_resources_same_time" checked', html_content)
+        self.assertIn('name="max_bookings_per_user" value="10"', html_content)
+        self.assertIn('name="enable_check_in_out" checked', html_content)
+        self.logout()
+
+    def test_admin_post_update_booking_settings_create_new(self):
+        """Test POST /admin/booking_settings/update to create settings."""
+        admin = self._create_admin_user(username="settingsadmin3", email_ext="settings3")
+        self.login(admin.username, 'adminpass')
+
+        BookingSettings.query.delete()
+        db.session.commit()
+        self.assertIsNone(BookingSettings.query.first())
+
+        form_data = {
+            'allow_past_bookings': 'on', # Checkbox 'on'
+            'max_booking_days_in_future': '90',
+            # allow_multiple_resources_same_time not sent (effectively False)
+            'max_bookings_per_user': '5',
+            'enable_check_in_out': 'on'
+        }
+        response = self.client.post('/admin/booking_settings/update', data=form_data, follow_redirects=True)
+        self.assertEqual(response.status_code, 200) # Should redirect to GET page
+        self.assertIn(b'Booking settings updated successfully.', response.data) # Check flash message
+
+        settings = BookingSettings.query.first()
+        self.assertIsNotNone(settings)
+        self.assertTrue(settings.allow_past_bookings)
+        self.assertEqual(settings.max_booking_days_in_future, 90)
+        self.assertFalse(settings.allow_multiple_resources_same_time) # Was not sent, so default False
+        self.assertEqual(settings.max_bookings_per_user, 5)
+        self.assertTrue(settings.enable_check_in_out)
+        self.logout()
+
+    def test_admin_post_update_booking_settings_update_existing(self):
+        """Test POST /admin/booking_settings/update to update existing settings."""
+        admin = self._create_admin_user(username="settingsadmin4", email_ext="settings4")
+        self.login(admin.username, 'adminpass')
+
+        BookingSettings.query.delete()
+        initial_settings = BookingSettings(allow_past_bookings=True, max_booking_days_in_future=30)
+        db.session.add(initial_settings)
+        db.session.commit()
+
+        form_data = {
+            # allow_past_bookings not sent (effectively False for checkbox)
+            'max_booking_days_in_future': '15',
+            'allow_multiple_resources_same_time': 'on',
+            'max_bookings_per_user': '', # Empty string should be None
+            'enable_check_in_out': 'on'
+        }
+        response = self.client.post('/admin/booking_settings/update', data=form_data, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'Booking settings updated successfully.', response.data)
+
+        settings = BookingSettings.query.first()
+        self.assertIsNotNone(settings)
+        self.assertFalse(settings.allow_past_bookings) # Checkbox not sent means False
+        self.assertEqual(settings.max_booking_days_in_future, 15)
+        self.assertTrue(settings.allow_multiple_resources_same_time)
+        self.assertIsNone(settings.max_bookings_per_user) # Empty string becomes None
+        self.assertTrue(settings.enable_check_in_out)
+        self.logout()
+
+    def test_admin_post_update_booking_settings_invalid_data(self):
+        """Test POST /admin/booking_settings/update with invalid data."""
+        admin = self._create_admin_user(username="settingsadmin5", email_ext="settings5")
+        self.login(admin.username, 'adminpass')
+
+        BookingSettings.query.delete()
+        initial_settings = BookingSettings(max_booking_days_in_future=30) # Keep a known state
+        db.session.add(initial_settings)
+        db.session.commit()
+
+        form_data = {
+            'max_booking_days_in_future': 'not-a-number',
+        }
+        response = self.client.post('/admin/booking_settings/update', data=form_data, follow_redirects=True)
+        self.assertEqual(response.status_code, 200) # Still lands on the page
+        self.assertIn(b'Invalid input for numeric field.', response.data) # Check flash error
+
+        settings = BookingSettings.query.first()
+        self.assertIsNotNone(settings)
+        # Value should not have changed from initial
+        self.assertEqual(settings.max_booking_days_in_future, 30)
+        self.logout()
+
 
 class TestHomePage(AppTests):
     def test_home_page_not_authenticated(self):
@@ -1811,6 +1943,358 @@ class TestHomePage(AppTests):
 
         self.assertNotIn('Quick Actions', content)
         self.assertNotIn('Book a Room', content)
+
+
+class TestBookingSettingsModel(AppTests):
+    def test_create_booking_settings_default_values(self):
+        """Test creation of BookingSettings with default values."""
+        settings = BookingSettings.query.first()
+        # If settings are created on app setup or first request, one might exist.
+        # For a clean model test, ensure no settings exist, then create one.
+        if settings:
+            db.session.delete(settings)
+            db.session.commit()
+
+        new_settings = BookingSettings()
+        db.session.add(new_settings)
+        db.session.commit()
+
+        self.assertIsNotNone(new_settings.id)
+        self.assertEqual(new_settings.allow_past_bookings, False)
+        self.assertIsNone(new_settings.max_booking_days_in_future)
+        self.assertEqual(new_settings.allow_multiple_resources_same_time, False)
+        self.assertIsNone(new_settings.max_bookings_per_user)
+        self.assertEqual(new_settings.enable_check_in_out, False)
+
+    def test_booking_settings_set_and_get_fields(self):
+        """Test setting and getting each field of the BookingSettings model."""
+        settings = BookingSettings.query.first()
+        if settings:
+            db.session.delete(settings)
+            db.session.commit()
+
+        settings = BookingSettings(
+            allow_past_bookings=True,
+            max_booking_days_in_future=60,
+            allow_multiple_resources_same_time=True,
+            max_bookings_per_user=5,
+            enable_check_in_out=True
+        )
+        db.session.add(settings)
+        db.session.commit()
+
+        retrieved_settings = BookingSettings.query.get(settings.id)
+        self.assertIsNotNone(retrieved_settings)
+        self.assertEqual(retrieved_settings.allow_past_bookings, True)
+        self.assertEqual(retrieved_settings.max_booking_days_in_future, 60)
+        self.assertEqual(retrieved_settings.allow_multiple_resources_same_time, True)
+        self.assertEqual(retrieved_settings.max_bookings_per_user, 5)
+        self.assertEqual(retrieved_settings.enable_check_in_out, True)
+
+        # Test modifying a single field
+        retrieved_settings.max_booking_days_in_future = None
+        db.session.commit()
+        modified_settings = BookingSettings.query.get(settings.id)
+        self.assertIsNone(modified_settings.max_booking_days_in_future)
+
+
+class TestBookingSettingsEnforcement(AppTests):
+    def setUp(self):
+        super().setUp()
+        # Helper to create a standard user for booking tests
+        self.book_user = User.query.filter_by(username='booktestuser').first()
+        if not self.book_user:
+            self.book_user = User(username='booktestuser', email='book@example.com')
+            self.book_user.set_password('password')
+            db.session.add(self.book_user)
+            db.session.commit()
+
+        # Ensure no BookingSettings exist by default for a clean test, or create one.
+        # Tests will explicitly create/modify BookingSettings as needed.
+        BookingSettings.query.delete()
+        db.session.commit()
+
+    def _make_booking_payload(self, resource_id, days_offset=0, start_time_str='10:00', end_time_str='11:00', title="Test Booking", user_name="booktestuser"):
+        booking_date = date.today() + timedelta(days=days_offset)
+        return {
+            'resource_id': resource_id,
+            'date_str': booking_date.strftime('%Y-%m-%d'),
+            'start_time_str': start_time_str,
+            'end_time_str': end_time_str,
+            'title': title,
+            'user_name': user_name
+        }
+
+    def test_allow_past_bookings_setting(self):
+        """Test enforcement of the 'allow_past_bookings' setting."""
+        self.login(self.book_user.username, 'password')
+        res_id = self.resource1.id
+
+        # Case 1: allow_past_bookings = False (default or explicitly set)
+        BookingSettings.query.delete() # Ensure no settings or use default
+        db.session.add(BookingSettings(allow_past_bookings=False))
+        db.session.commit()
+
+        # Attempt to book in the past (yesterday)
+        past_payload = self._make_booking_payload(res_id, days_offset=-1)
+        response_past = self.client.post('/api/bookings', json=past_payload)
+        self.assertEqual(response_past.status_code, 400)
+        self.assertIn('Booking in the past is not allowed', response_past.get_json().get('error', ''))
+
+        # Attempt to book for today (should succeed)
+        today_payload = self._make_booking_payload(res_id, days_offset=0)
+        response_today = self.client.post('/api/bookings', json=today_payload)
+        self.assertEqual(response_today.status_code, 201, f"Booking for today failed: {response_today.get_json()}")
+        # Clean up booking
+        if response_today.status_code == 201:
+            booking_id = response_today.get_json()['bookings'][0]['id']
+            Booking.query.filter_by(id=booking_id).delete()
+            db.session.commit()
+
+        # Case 2: allow_past_bookings = True
+        settings = BookingSettings.query.first()
+        settings.allow_past_bookings = True
+        db.session.commit()
+
+        # Attempt to book in the past (yesterday, should succeed now)
+        response_past_allowed = self.client.post('/api/bookings', json=past_payload)
+        self.assertEqual(response_past_allowed.status_code, 201, f"Past booking failed when allowed: {response_past_allowed.get_json()}")
+        if response_past_allowed.status_code == 201:
+            booking_id = response_past_allowed.get_json()['bookings'][0]['id']
+            Booking.query.filter_by(id=booking_id).delete()
+            db.session.commit()
+
+        self.logout()
+
+    def test_max_booking_days_in_future_setting(self):
+        """Test enforcement of the 'max_booking_days_in_future' setting."""
+        self.login(self.book_user.username, 'password')
+        res_id = self.resource1.id
+
+        # Case 1: max_booking_days_in_future = 30
+        BookingSettings.query.delete()
+        db.session.add(BookingSettings(max_booking_days_in_future=30))
+        db.session.commit()
+
+        # Attempt to book 29 days in future (should succeed)
+        payload_29_days = self._make_booking_payload(res_id, days_offset=29)
+        response_29 = self.client.post('/api/bookings', json=payload_29_days)
+        self.assertEqual(response_29.status_code, 201, f"Booking 29 days in future failed: {response_29.get_json()}")
+        if response_29.status_code == 201:
+            Booking.query.filter_by(id=response_29.get_json()['bookings'][0]['id']).delete()
+            db.session.commit()
+
+        # Attempt to book 30 days in future (should succeed - boundary condition)
+        payload_30_days = self._make_booking_payload(res_id, days_offset=30)
+        response_30 = self.client.post('/api/bookings', json=payload_30_days)
+        self.assertEqual(response_30.status_code, 201, f"Booking 30 days in future failed: {response_30.get_json()}")
+        if response_30.status_code == 201:
+            Booking.query.filter_by(id=response_30.get_json()['bookings'][0]['id']).delete()
+            db.session.commit()
+
+        # Attempt to book 31 days in future (should fail)
+        payload_31_days = self._make_booking_payload(res_id, days_offset=31)
+        response_31 = self.client.post('/api/bookings', json=payload_31_days)
+        self.assertEqual(response_31.status_code, 400)
+        self.assertIn('Bookings cannot be made more than 30 days in advance', response_31.get_json().get('error', ''))
+
+        # Case 2: max_booking_days_in_future = None (no limit)
+        settings = BookingSettings.query.first()
+        settings.max_booking_days_in_future = None
+        db.session.commit()
+
+        # Attempt to book 100 days in future (should succeed)
+        payload_100_days = self._make_booking_payload(res_id, days_offset=100)
+        response_100 = self.client.post('/api/bookings', json=payload_100_days)
+        self.assertEqual(response_100.status_code, 201, f"Booking 100 days in future failed with no limit: {response_100.get_json()}")
+        if response_100.status_code == 201:
+            Booking.query.filter_by(id=response_100.get_json()['bookings'][0]['id']).delete()
+            db.session.commit()
+
+        # Case 3: No BookingSettings record (should default to no limit as per create_booking logic)
+        BookingSettings.query.delete()
+        db.session.commit()
+
+        payload_far_future_no_settings = self._make_booking_payload(res_id, days_offset=200)
+        response_far_no_settings = self.client.post('/api/bookings', json=payload_far_future_no_settings)
+        # Default behavior in create_booking if no settings row is: max_booking_days_in_future_effective = None
+        self.assertEqual(response_far_no_settings.status_code, 201, f"Booking far in future failed with no settings row: {response_far_no_settings.get_json()}")
+        if response_far_no_settings.status_code == 201:
+            Booking.query.filter_by(id=response_far_no_settings.get_json()['bookings'][0]['id']).delete()
+            db.session.commit()
+
+        self.logout()
+
+    def test_max_bookings_per_user_setting(self):
+        """Test enforcement of the 'max_bookings_per_user' setting."""
+        self.login(self.book_user.username, 'password')
+        res_id1 = self.resource1.id
+        res_id2 = self.resource2.id # Use a second resource to avoid direct time conflicts for simplicity
+
+        # Ensure a clean slate for bookings by this user for this test
+        Booking.query.filter_by(user_name=self.book_user.username).delete()
+        BookingSettings.query.delete()
+        db.session.commit()
+
+        # Case 1: max_bookings_per_user = 2
+        db.session.add(BookingSettings(max_bookings_per_user=2))
+        db.session.commit()
+
+        # Create 1st booking (should succeed)
+        payload1 = self._make_booking_payload(res_id1, days_offset=1, title="UserLimitBook1")
+        resp1 = self.client.post('/api/bookings', json=payload1)
+        self.assertEqual(resp1.status_code, 201, f"UserLimitBook1 failed: {resp1.get_json()}")
+
+        # Create 2nd booking (should succeed)
+        payload2 = self._make_booking_payload(res_id2, days_offset=2, title="UserLimitBook2") # Different day/resource
+        resp2 = self.client.post('/api/bookings', json=payload2)
+        self.assertEqual(resp2.status_code, 201, f"UserLimitBook2 failed: {resp2.get_json()}")
+
+        # Attempt to create 3rd booking (should fail)
+        payload3_fail = self._make_booking_payload(res_id1, days_offset=3, title="UserLimitBook3Fail")
+        resp3_fail = self.client.post('/api/bookings', json=payload3_fail)
+        self.assertEqual(resp3_fail.status_code, 400)
+        self.assertIn('exceed the maximum of 2 bookings allowed per user', resp3_fail.get_json().get('error', ''))
+
+        # Test that past bookings are not counted
+        # Modify the first booking to be in the past
+        booking1_obj = Booking.query.filter_by(title="UserLimitBook1").first()
+        self.assertIsNotNone(booking1_obj)
+        booking1_obj.start_time = datetime.utcnow() - timedelta(days=2)
+        booking1_obj.end_time = datetime.utcnow() - timedelta(days=2, hours=-1)
+        db.session.commit()
+
+        # Attempt to create another booking (should succeed as one is now past)
+        payload4_past_ignored = self._make_booking_payload(res_id1, days_offset=4, title="UserLimitBook4PastIgnored")
+        resp4_past = self.client.post('/api/bookings', json=payload4_past_ignored)
+        self.assertEqual(resp4_past.status_code, 201, f"Booking after one became past failed: {resp4_past.get_json()}")
+
+        # Test that cancelled bookings are not counted
+        # Cancel the second booking (UserLimitBook2)
+        booking2_obj = Booking.query.filter_by(title="UserLimitBook2").first()
+        self.assertIsNotNone(booking2_obj)
+        booking2_obj.status = 'cancelled'
+        db.session.commit()
+
+        # Attempt to create another booking (should succeed as one is now cancelled)
+        payload5_cancelled_ignored = self._make_booking_payload(res_id2, days_offset=5, title="UserLimitBook5CancelledIgnored")
+        resp5_cancelled = self.client.post('/api/bookings', json=payload5_cancelled_ignored)
+        self.assertEqual(resp5_cancelled.status_code, 201, f"Booking after one was cancelled failed: {resp5_cancelled.get_json()}")
+
+        # Clean up: Remove all bookings for this user to reset for next case
+        Booking.query.filter_by(user_name=self.book_user.username).delete()
+        db.session.commit()
+
+        # Case 2: max_bookings_per_user = None (no limit)
+        settings = BookingSettings.query.first()
+        settings.max_bookings_per_user = None
+        db.session.commit()
+
+        for i in range(5): # Create 5 bookings
+            payload_no_limit = self._make_booking_payload(res_id1, days_offset=10 + i, title=f"NoLimitBook{i}")
+            resp_no_limit = self.client.post('/api/bookings', json=payload_no_limit)
+            self.assertEqual(resp_no_limit.status_code, 201, f"NoLimitBook{i} failed: {resp_no_limit.get_json()}")
+
+        self.assertEqual(Booking.query.filter_by(user_name=self.book_user.username).count(), 5)
+
+        # Clean up for the class
+        Booking.query.filter_by(user_name=self.book_user.username).delete()
+        BookingSettings.query.delete()
+        db.session.commit()
+        self.logout()
+
+    def test_allow_multiple_resources_same_time_setting(self):
+        """Test enforcement of the 'allow_multiple_resources_same_time' setting."""
+        self.login(self.book_user.username, 'password')
+        res_id1 = self.resource1.id
+        res_id2 = self.resource2.id
+
+        # Ensure a clean slate for bookings
+        Booking.query.filter_by(user_name=self.book_user.username).delete()
+        BookingSettings.query.delete()
+        db.session.commit()
+
+        # Common time slot for testing
+        slot_date_offset = 7 # Days in future to avoid other restrictions
+        slot_start_str = '14:00'
+        slot_end_str = '15:00'
+
+        # Case 1: allow_multiple_resources_same_time = False
+        db.session.add(BookingSettings(allow_multiple_resources_same_time=False))
+        db.session.commit()
+
+        # Book Resource A at Time X (should succeed)
+        payload_res1_timeX = self._make_booking_payload(res_id1, days_offset=slot_date_offset,
+                                                        start_time_str=slot_start_str, end_time_str=slot_end_str,
+                                                        title="MultiResFalse Book1")
+        resp_res1 = self.client.post('/api/bookings', json=payload_res1_timeX)
+        self.assertEqual(resp_res1.status_code, 201, f"Booking Res1 when MultiRes=False failed: {resp_res1.get_json()}")
+
+        # Attempt to book Resource B at Time X by the same user (should fail)
+        payload_res2_timeX_fail = self._make_booking_payload(res_id2, days_offset=slot_date_offset,
+                                                             start_time_str=slot_start_str, end_time_str=slot_end_str,
+                                                             title="MultiResFalse Book2 Fail")
+        resp_res2_fail = self.client.post('/api/bookings', json=payload_res2_timeX_fail)
+        self.assertEqual(resp_res2_fail.status_code, 409) # Conflict due to user already having a booking
+        self.assertIn('You already have a booking for resource', resp_res2_fail.get_json().get('error', ''))
+        self.assertIn(self.resource1.name, resp_res2_fail.get_json().get('error', '')) # Error should mention the conflicting resource
+
+        # Clean up booking
+        Booking.query.filter_by(user_name=self.book_user.username).delete()
+        db.session.commit()
+
+        # Case 2: allow_multiple_resources_same_time = True
+        settings = BookingSettings.query.first()
+        settings.allow_multiple_resources_same_time = True
+        db.session.commit()
+
+        # Book Resource A at Time X (should succeed)
+        payload_res1_timeX_allowed = self._make_booking_payload(res_id1, days_offset=slot_date_offset,
+                                                                start_time_str=slot_start_str, end_time_str=slot_end_str,
+                                                                title="MultiResTrue Book1")
+        resp_res1_allowed = self.client.post('/api/bookings', json=payload_res1_timeX_allowed)
+        self.assertEqual(resp_res1_allowed.status_code, 201, f"Booking Res1 when MultiRes=True failed: {resp_res1_allowed.get_json()}")
+
+        # Attempt to book Resource B at Time X by the same user (should succeed now)
+        payload_res2_timeX_allowed_success = self._make_booking_payload(res_id2, days_offset=slot_date_offset,
+                                                                        start_time_str=slot_start_str, end_time_str=slot_end_str,
+                                                                        title="MultiResTrue Book2 Success")
+        resp_res2_allowed_success = self.client.post('/api/bookings', json=payload_res2_timeX_allowed_success)
+        self.assertEqual(resp_res2_allowed_success.status_code, 201, f"Booking Res2 when MultiRes=True failed: {resp_res2_allowed_success.get_json()}")
+
+        # Standard conflict: Attempt to book Resource A at Time X AGAIN (should fail regardless of setting)
+        # First, ensure Resource A is booked by *another user* to make it a resource conflict, not user conflict
+        other_user = User(username='otherbooker', email='otherb@example.com')
+        other_user.set_password('password')
+        db.session.add(other_user)
+        db.session.commit()
+
+        # Clear previous bookings for res1 by self.book_user
+        Booking.query.filter_by(resource_id=res_id1, user_name=self.book_user.username).delete()
+        db.session.commit()
+
+        payload_res1_other_user = self._make_booking_payload(res_id1, days_offset=slot_date_offset,
+                                                              start_time_str=slot_start_str, end_time_str=slot_end_str,
+                                                              title="OtherUser Res1 Booking", user_name='otherbooker')
+        resp_res1_other_user = self.client.post('/api/bookings', json=payload_res1_other_user) # Login as other user not strictly needed for this API structure if user_name is in payload
+        self.assertEqual(resp_res1_other_user.status_code, 201, f"Other user booking Res1 failed: {resp_res1_other_user.get_json()}")
+
+
+        # Now self.book_user (still logged in) tries to book res_id1 which is taken by otherbooker
+        payload_res1_conflict_standard = self._make_booking_payload(res_id1, days_offset=slot_date_offset,
+                                                                    start_time_str=slot_start_str, end_time_str=slot_end_str,
+                                                                    title="StandardConflictTest")
+        resp_res1_conflict_standard = self.client.post('/api/bookings', json=payload_res1_conflict_standard)
+        self.assertEqual(resp_res1_conflict_standard.status_code, 409) # Standard resource conflict
+        self.assertIn(f"This time slot ({payload_res1_conflict_standard['date_str']} {slot_start_str}", resp_res1_conflict_standard.get_json().get('error', ''))
+        self.assertIn(f"on resource '{self.resource1.name}' is already booked", resp_res1_conflict_standard.get_json().get('error', ''))
+
+        # Clean up
+        Booking.query.delete() # Clear all bookings
+        BookingSettings.query.delete()
+        User.query.filter_by(username='otherbooker').delete()
+        db.session.commit()
+        self.logout()
 
 
 if __name__ == '__main__':
