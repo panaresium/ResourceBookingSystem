@@ -601,47 +601,54 @@ def api_admin_view_db_raw_top100():
     current_app.logger.info(f"User {current_user.username} requested raw top 100 DB records from all tables.")
     
     raw_data = {}
-    all_table_names = db.metadata.tables.keys()
-    model_registry = db.Model._decl_class_registry
 
-    # Create a mapping from table names to model classes for easier lookup
-    table_to_model_map = {}
-    for name, cls in model_registry.items():
-        if hasattr(cls, '__tablename__'):
-            table_to_model_map[cls.__tablename__] = cls
-            # Also handle cases where the class name might be used if __tablename__ is not the key
-            # This part might need adjustment based on how models are registered if not strictly by __tablename__
-            if name != cls.__tablename__ and name not in table_to_model_map: # Avoid overwriting if already mapped
-                 table_to_model_map[name] = cls
-
+    # Create a mapping from table names to SQLAlchemy Model classes
+    model_map = {mapper.class_.__tablename__: mapper.class_ for mapper in db.Model.registry.mappers if hasattr(mapper.class_, '__tablename__')}
 
     try:
-        for table_name in all_table_names:
-            ModelClass = table_to_model_map.get(table_name)
+        for table_name in db.metadata.tables.keys():
+            table_obj = db.metadata.tables[table_name]
+            ModelClass = model_map.get(table_name)
+            serialized_records = []
             
-            if ModelClass:
-                current_app.logger.debug(f"Querying table: {table_name} using model: {ModelClass.__name__}")
-                records = ModelClass.query.limit(100).all()
-                serialized_records = []
-                for record in records:
-                    record_dict = {}
-                    for column in record.__table__.columns:
-                        val = getattr(record, column.name)
-                        if isinstance(val, datetime):
-                            record_dict[column.name] = val.isoformat()
-                        elif isinstance(val, uuid.UUID):
-                            record_dict[column.name] = str(val)
-                        else:
-                            record_dict[column.name] = val
-                    serialized_records.append(record_dict)
+            try:
+                if ModelClass:
+                    current_app.logger.debug(f"Querying table: {table_name} using model: {ModelClass.__name__}")
+                    records = ModelClass.query.limit(100).all()
+                    for record in records:
+                        record_dict = {}
+                        for column in table_obj.columns: # Use table_obj.columns for consistency
+                            val = getattr(record, column.name)
+                            if isinstance(val, datetime):
+                                record_dict[column.name] = val.isoformat()
+                            elif isinstance(val, uuid.UUID):
+                                record_dict[column.name] = str(val)
+                            else:
+                                record_dict[column.name] = val
+                        serialized_records.append(record_dict)
+                else:
+                    current_app.logger.debug(f"Querying table: {table_name} using direct table object.")
+                    # Query using the table object directly
+                    records = db.session.query(table_obj).limit(100).all()
+                    for row in records: # These are RowProxy objects
+                        record_dict = {}
+                        # row._asdict() is convenient but ensure all column types are serializable
+                        # Or iterate through columns like in the model case for explicit type handling
+                        row_dict = row._asdict()
+                        for column_name, val in row_dict.items():
+                            if isinstance(val, datetime):
+                                record_dict[column_name] = val.isoformat()
+                            elif isinstance(val, uuid.UUID):
+                                record_dict[column_name] = str(val)
+                            else:
+                                record_dict[column_name] = val
+                        serialized_records.append(record_dict)
+
                 raw_data[table_name] = serialized_records
-            else:
-                # Handle tables that might not have a direct model class mapping
-                # For example, association tables or tables not managed by SQLAlchemy Model.
-                # These can be skipped or handled with raw SQL if necessary,
-                # but for this request, we'll log and skip.
-                current_app.logger.info(f"Skipping table '{table_name}': No direct SQLAlchemy Model class found in registry. This might be an association table or similar.")
-                raw_data[table_name] = [{"info": f"Skipped table '{table_name}'. No direct Model class found."}]
+
+            except Exception as query_exc:
+                current_app.logger.warning(f"Could not query or serialize table '{table_name}'. Error: {query_exc}", exc_info=True)
+                raw_data[table_name] = [{"info": f"Skipped table: {table_name} - Could not directly query or process (Error: {str(query_exc)[:100]}...). See logs."}]
 
         current_app.logger.info(f"Successfully fetched raw DB data from all tables for {current_user.username}.")
         return jsonify({'success': True, 'data': raw_data}), 200
