@@ -3,7 +3,7 @@
     --secondary-color: #55a9e0; /* Slightly darker blue */
     --accent-color: #4682B4; /* Steel Blue for accents */
     --text-color-dark: #333333;
-    --text-color-light: #FFFFFF;
+    --text-color-light: #000000;
     --background-color-light: #FFFFFF;
     --background-color-dark: var(--primary-color); /* Using primary light blue for nav/footer background */
     --border-color: #dddddd;
