@@ -252,8 +252,12 @@ def get_my_bookings():
     """
     Fetches all bookings for the currently authenticated user.
     Orders bookings by start_time descending (most recent/upcoming first).
+    Also includes a global setting `check_in_out_enabled`.
     """
     try:
+        booking_settings = BookingSettings.query.first()
+        enable_check_in_out = booking_settings.enable_check_in_out if booking_settings else False
+
         user_bookings = Booking.query.filter_by(user_name=current_user.username)\
                                      .order_by(Booking.start_time.desc())\
                                      .all()
@@ -289,8 +293,11 @@ def get_my_bookings():
                 'can_check_in': can_check_in
             })
 
-        current_app.logger.info(f"User '{current_user.username}' fetched their bookings. Count: {len(bookings_list)}")
-        return jsonify(bookings_list), 200
+        current_app.logger.info(f"User '{current_user.username}' fetched their bookings. Count: {len(bookings_list)}. Check-in/out enabled: {enable_check_in_out}")
+        return jsonify({
+            'bookings': bookings_list,
+            'check_in_out_enabled': enable_check_in_out
+        }), 200
 
     except Exception as e:
         current_app.logger.exception(f"Error fetching bookings for user '{current_user.username}':")
@@ -915,49 +922,52 @@ def admin_cancel_booking(booking_id):
             current_app.logger.warning(f"Admin cancel attempt: Booking ID {booking_id} not found.")
             return jsonify({'error': 'Booking not found.'}), 404
 
-        terminal_statuses = ['cancelled', 'rejected', 'completed', 'checked_out']
+        terminal_statuses = ['cancelled', 'rejected', 'completed', 'checked_out', 'cancelled_by_admin']
         if booking.status and booking.status.lower() in terminal_statuses:
-            # Still relevant to prevent deleting already finalized bookings if that's desired,
-            # but if hard delete is always allowed, this check might be removed or modified.
-            # For now, keeping it to prevent accidental deletion of e.g. a 'completed' record unless intended.
-            current_app.logger.warning(f"Admin delete attempt: Booking ID {booking_id} is in a terminal state: '{booking.status}'. Action aborted.")
-            return jsonify({'error': f'Booking is already in a terminal state ({booking.status}) and cannot be deleted this way.'}), 400
+            current_app.logger.warning(f"Admin cancel attempt: Booking ID {booking_id} is already in a terminal state: '{booking.status}'. Action aborted.")
+            return jsonify({'error': f'Booking is already in a terminal state ({booking.status}) and cannot be cancelled again.'}), 400
 
-        booking.admin_deleted_message = "This booking was deleted by an administrator."
-        # Retain original booking details for logging before deletion
         original_status = booking.status
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
         booking_title = booking.title or "N/A"
+        booking_date_str = booking.start_time.strftime('%Y-%m-%d')
         user_name_of_booking = booking.user_name
         resource_id_of_booking = booking.resource_id
 
+        booking.status = 'cancelled_by_admin'
+        booking.admin_deleted_message = f"This booking for '{booking_title}' on {booking_date_str} for resource '{resource_name}' was cancelled by an administrator."
+
+        db.session.commit()
+
         audit_details = (
-            f"Admin '{current_user.username}' deleted booking ID {booking_id}. "
-            f"Original status: '{original_status}'. "
+            f"Admin '{current_user.username}' cancelled booking ID {booking_id}. "
+            f"Original status: '{original_status}', New status: '{booking.status}'. "
             f"Booked by: '{user_name_of_booking}'. "
             f"Resource: '{resource_name}' (ID: {resource_id_of_booking}). "
             f"Title: '{booking_title}'. "
-            f"Deletion message: '{booking.admin_deleted_message}'."
+            f"Cancellation reason: '{booking.admin_deleted_message}'."
         )
+        add_audit_log(action="ADMIN_CANCEL_BOOKING", details=audit_details)
 
-        db.session.delete(booking)
-        db.session.commit()
+        socketio.emit('booking_updated', {
+            'action': 'cancelled_by_admin',
+            'booking_id': booking_id,
+            'resource_id': resource_id_of_booking,
+            'status': booking.status,
+            'admin_deleted_message': booking.admin_deleted_message
+        })
 
-        add_audit_log(action="ADMIN_DELETE_BOOKING", details=audit_details)
-        # Emit a general 'deleted' action, or a specific 'deleted_admin' if clients need to differentiate
-        socketio.emit('booking_updated', {'action': 'deleted_admin', 'booking_id': booking_id, 'resource_id': resource_id_of_booking})
-
-        current_app.logger.info(f"Admin user {current_user.username} successfully deleted booking ID: {booking_id}.")
-        return jsonify({'message': 'Booking deleted successfully by admin.', 'booking_id': booking_id}), 200
+        current_app.logger.info(f"Admin user {current_user.username} successfully cancelled booking ID: {booking_id}. New status: {booking.status}")
+        return jsonify({'message': 'Booking cancelled successfully by admin.', 'booking_id': booking_id, 'new_status': booking.status, 'admin_message': booking.admin_deleted_message}), 200
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.exception(f"Error during admin deletion of booking ID {booking_id}:")
         add_audit_log(
-            action="ADMIN_DELETE_BOOKING_FAILED",
-            details=f"Admin '{current_user.username}' failed to delete booking ID {booking_id}. Error: {str(e)}"
+            action="ADMIN_CANCEL_BOOKING_FAILED",
+            details=f"Admin '{current_user.username}' failed to cancel booking ID {booking_id}. Error: {str(e)}"
         )
-        return jsonify({'error': 'Failed to delete booking due to a server error.'}), 500
+        return jsonify({'error': 'Failed to cancel booking due to a server error.'}), 500
 
 
 @api_bookings_bp.route('/bookings/<int:booking_id>/clear_admin_message', methods=['POST'])
