@@ -1205,3 +1205,9 @@ a.fc-daygrid-event.fc-event { /* Targeting the <a> tag specifically */
     display: flex;         /* For internal alignment if its content needs it */
     align-items: center;   /* For internal alignment */
 }
+
+#welcome-message-container::before,
+#welcome-message-container::after {
+  content: none !important;
+  display: none !important;
+}
