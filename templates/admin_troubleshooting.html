@@ -14,11 +14,38 @@
 
                 <div class="card mb-3">
                     <div class="card-body">
-                        <h5 class="card-title">{{ _('View Database Records') }}</h5>
-                        <p class="card-text">{{ _('Fetch and display the top 100 records from key database tables.') }}</p>
-                        <button id="view-db-records-btn" class="btn btn-info">{{ _('View DB Records') }}</button>
-                        <div id="view-db-records-status" class="mt-2"></div>
-                        <pre id="view-db-records-output" class="log-area" style="display: none; max-height: 400px;"></pre>
+                        <h5 class="card-title">{{ _('Browse Database Tables') }}</h5>
+                        <p class="card-text">{{ _('Select a table to view its columns, filter records, and browse data with pagination.') }}</p>
+
+                        <div class="mb-3">
+                            <label for="db-table-select" class="form-label">{{ _('Select Table:') }}</label>
+                            <select id="db-table-select" class="form-select">
+                                <option value="">{{ _('-- Loading tables... --') }}</option>
+                            </select>
+                        </div>
+
+                        <div id="db-filter-area" class="mb-3" style="display: none;">
+                            <h5>{{ _('Filters') }}</h5>
+                            <div id="db-filter-controls-container">
+                                 <p>{{ _('Select a table to see available filters.') }}</p>
+                            </div>
+                            <button id="db-apply-filters-btn" class="btn btn-primary mt-2">{{ _('Apply Filters') }}</button>
+                            <button id="db-clear-filters-btn" class="btn btn-secondary mt-2">{{ _('Clear Filters') }}</button>
+                        </div>
+
+                        <div id="db-results-area" class="mt-3">
+                            <h5>{{ _('Records') }}</h5>
+                            <div id="db-records-output" class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                                <p>{{ _('Select a table and apply filters to view records.') }}</p>
+                                <!-- Table will be dynamically generated here -->
+                            </div>
+                        </div>
+
+                        <div id="db-pagination-controls" class="mt-3" style="display: none;">
+                            <!-- Pagination buttons will be dynamically added here -->
+                        </div>
+
+                        <div id="db-view-status" class="mt-2"></div>
                     </div>
                 </div>
 
@@ -48,97 +75,376 @@
 document.addEventListener('DOMContentLoaded', function () {
     // CSRF token will be handled by the global apiCall function.
 
-    // Troubleshooting Tools Elements
-    const viewDbRecordsBtn = document.getElementById('view-db-records-btn');
-    const viewDbRecordsStatusEl = document.getElementById('view-db-records-status');
-    const viewDbRecordsOutputEl = document.getElementById('view-db-records-output');
+    // --- New Database Browser UI Elements & Logic ---
+    const dbTableSelect = document.getElementById('db-table-select');
+    const dbFilterArea = document.getElementById('db-filter-area');
+    const dbFilterControlsContainer = document.getElementById('db-filter-controls-container');
+    const dbApplyFiltersBtn = document.getElementById('db-apply-filters-btn');
+    const dbClearFiltersBtn = document.getElementById('db-clear-filters-btn');
+    const dbResultsArea = document.getElementById('db-results-area');
+    const dbRecordsOutput = document.getElementById('db-records-output');
+    const dbPaginationControls = document.getElementById('db-pagination-controls');
+    const dbViewStatusEl = document.getElementById('db-view-status'); // Renamed from viewDbRecordsStatusEl
 
+    let dbViewState = {
+        selectedTable: null,
+        currentPage: 1,
+        currentFilters: [],
+        columns: [],
+        perPage: 30, // Default per page
+        sortBy: null,
+        sortOrder: 'asc'
+    };
+
+    function updateDbViewStatus(message, isError = false) {
+        if (!dbViewStatusEl) return;
+        dbViewStatusEl.textContent = message;
+        dbViewStatusEl.className = `alert ${isError ? 'alert-danger' : 'alert-success'}`;
+        if (!message) {
+            dbViewStatusEl.style.display = 'none';
+        } else {
+            dbViewStatusEl.style.display = 'block';
+        }
+    }
+
+    async function loadTableNames() {
+        updateDbViewStatus("{{ _('Loading table names...') }}");
+        try {
+            const response = await fetch('/api/admin/db/table_names');
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            if (data.success && data.tables) {
+                dbTableSelect.innerHTML = '<option value="">{{ _("-- Select a Table --") }}</option>'; // Clear existing options
+                data.tables.sort().forEach(tableName => {
+                    const option = document.createElement('option');
+                    option.value = tableName;
+                    option.textContent = tableName;
+                    dbTableSelect.appendChild(option);
+                });
+                updateDbViewStatus("{{ _('Table names loaded.') }}", false);
+            } else {
+                throw new Error(data.message || "{{ _('Failed to load table names.') }}");
+            }
+        } catch (error) {
+            console.error('Error loading table names:', error);
+            updateDbViewStatus(`{{ _('Error loading table names:') }} ${error.message}`, true);
+            dbTableSelect.innerHTML = '<option value="">{{ _("-- Error loading tables --") }}</option>';
+        }
+    }
+
+    async function loadTableInfoAndGenerateFilters(tableName) {
+        if (!tableName) {
+            dbFilterArea.style.display = 'none';
+            dbFilterControlsContainer.innerHTML = `<p>{{ _('Select a table to see available filters.') }}</p>`;
+            dbViewState.columns = [];
+            return;
+        }
+        updateDbViewStatus(`{{ _('Loading schema for table:') }} ${tableName}...`);
+        dbFilterControlsContainer.innerHTML = `<p>{{ _('Loading filters for ') }}${tableName}...</p>`;
+        try {
+            const response = await fetch(`/api/admin/db/table_info/${tableName}`);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const data = await response.json();
+
+            if (data.success && data.columns) {
+                dbViewState.columns = data.columns;
+                dbFilterControlsContainer.innerHTML = ''; // Clear loading message
+
+                data.columns.forEach(column => {
+                    const filterGroup = document.createElement('div');
+                    filterGroup.className = 'row mb-2 align-items-center';
+                    filterGroup.innerHTML = `
+                        <div class="col-md-3">
+                            <label class="form-label mb-0">${column.name} <small class="text-muted">(${column.type})</small></label>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select form-select-sm filter-op" data-column="${column.name}">
+                                <option value="">{{ _('-- Operator --') }}</option>
+                                <option value="eq">{{ _('Equals') }} (=)</option>
+                                <option value="neq">{{ _('Not Equals') }} (!=)</option>
+                                <option value="ilike">{{ _('Contains (case-insensitive)') }}</option>
+                                <option value="gt">{{ _('Greater Than') }} (&gt;)</option>
+                                <option value="gte">{{ _('Greater Than or Equal To') }} (&gt;=)</option>
+                                <option value="lt">{{ _('Less Than') }} (&lt;)</option>
+                                <option value="lte">{{ _('Less Than or Equal To') }} (&lt;=)</option>
+                                <option value="in">{{ _('In (comma-separated)') }}</option>
+                                <option value="notin">{{ _('Not In (comma-separated)') }}</option>
+                                <option value="is_null">{{ _('Is Null') }}</option>
+                                <option value="is_not_null">{{ _('Is Not Null') }}</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <input type="text" class="form-control form-control-sm filter-val" data-column="${column.name}" placeholder="{{ _('Value') }}">
+                        </div>
+                    `;
+                    const opSelect = filterGroup.querySelector('.filter-op');
+                    const valInput = filterGroup.querySelector('.filter-val');
+                    opSelect.addEventListener('change', function() {
+                        if (this.value === 'is_null' || this.value === 'is_not_null') {
+                            valInput.style.display = 'none';
+                            valInput.value = '';
+                        } else {
+                            valInput.style.display = 'block';
+                        }
+                    });
+                    dbFilterControlsContainer.appendChild(filterGroup);
+                });
+                dbFilterArea.style.display = 'block';
+                updateDbViewStatus(`{{ _('Schema loaded for table:') }} ${tableName}. {{ _('Ready for filtering and data fetching.') }}`, false);
+            } else {
+                throw new Error(data.message || `{{ _('Failed to load schema for table:') }} ${tableName}`);
+            }
+        } catch (error) {
+            console.error(`Error loading table info for ${tableName}:`, error);
+            updateDbViewStatus(`{{ _('Error loading schema for') }} ${tableName}: ${error.message}`, true);
+            dbFilterArea.style.display = 'none';
+            dbFilterControlsContainer.innerHTML = `<p class="text-danger">{{ _('Error loading filters.') }}</p>`;
+        }
+    }
+
+    function renderTable(columns, records) {
+        dbRecordsOutput.innerHTML = ''; // Clear previous
+        if (!columns || columns.length === 0) {
+             dbRecordsOutput.innerHTML = `<p>{{ _('No column information available to display table.') }}</p>`;
+             return;
+        }
+        if (!records || records.length === 0) {
+            dbRecordsOutput.innerHTML = `<p>{{ _('No records found for the current selection and filters.') }}</p>`;
+            return;
+        }
+
+        const table = document.createElement('table');
+        table.className = 'table table-striped table-bordered table-sm caption-top';
+
+        const caption = table.createCaption();
+        caption.textContent = `${dbViewState.selectedTable} - {{ _('Page') }} ${dbViewState.currentPage}`;
+
+
+        const thead = table.createTHead();
+        const headerRow = thead.insertRow();
+        columns.forEach(colDef => {
+            const th = document.createElement('th');
+            th.scope = 'col';
+            th.textContent = colDef.name;
+            // Basic sort indicator and functionality (can be enhanced)
+            let sortIndicator = '';
+            if (dbViewState.sortBy === colDef.name) {
+                sortIndicator = dbViewState.sortOrder === 'asc' ? ' &uarr;' : ' &darr;';
+            }
+            th.innerHTML = colDef.name + sortIndicator;
+            th.style.cursor = 'pointer';
+            th.addEventListener('click', () => {
+                if (dbViewState.sortBy === colDef.name) {
+                    dbViewState.sortOrder = dbViewState.sortOrder === 'asc' ? 'desc' : 'asc';
+                } else {
+                    dbViewState.sortBy = colDef.name;
+                    dbViewState.sortOrder = 'asc';
+                }
+                fetchAndDisplayTableData();
+            });
+            headerRow.appendChild(th);
+        });
+
+        const tbody = table.createTBody();
+        records.forEach(record => {
+            const row = tbody.insertRow();
+            columns.forEach(colDef => {
+                const cell = row.insertCell();
+                let value = record[colDef.name];
+                if (value === null || typeof value === 'undefined') {
+                    cell.textContent = 'NULL';
+                    cell.classList.add('text-muted', 'fst-italic');
+                } else if (typeof value === 'object') { // Handle potential JSON objects/arrays if not stringified by backend
+                    cell.textContent = JSON.stringify(value, null, 2);
+                } else {
+                    cell.textContent = value;
+                }
+            });
+        });
+        dbRecordsOutput.appendChild(table);
+    }
+
+    function renderPagination(paginationData) {
+        dbPaginationControls.innerHTML = '';
+        if (!paginationData || paginationData.total_pages <= 0) {
+            dbPaginationControls.style.display = 'none';
+            return;
+        }
+        dbPaginationControls.style.display = 'block';
+
+        let html = `<nav aria-label="Table navigation"><ul class="pagination pagination-sm justify-content-center">`;
+
+        // Previous button
+        html += `<li class="page-item ${paginationData.page === 1 ? 'disabled' : ''}">
+                    <a class="page-link" href="#" data-page="${paginationData.page - 1}">${("{{ _('Previous') }}")}</a>
+                 </li>`;
+
+        // Page numbers (simplified: first, current, last if far apart)
+        // This can be expanded to show more page numbers like typical pagination.
+        if (paginationData.page > 2) {
+             html += `<li class="page-item"><a class="page-link" href="#" data-page="1">1</a></li>`;
+             if (paginationData.page > 3) html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+        if (paginationData.page > 1) {
+            html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.page - 1}">${paginationData.page - 1}</a></li>`;
+        }
+        html += `<li class="page-item active"><span class="page-link">${paginationData.page}</span></li>`;
+        if (paginationData.page < paginationData.total_pages) {
+             html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.page + 1}">${paginationData.page + 1}</a></li>`;
+        }
+         if (paginationData.page < paginationData.total_pages - 2) {
+            if (paginationData.page < paginationData.total_pages - 3) html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.total_pages}">${paginationData.total_pages}</a></li>`;
+        } else if (paginationData.page === paginationData.total_pages - 2 && paginationData.total_pages > 2) {
+             html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.total_pages}">${paginationData.total_pages}</a></li>`;
+        }
+
+
+        // Next button
+        html += `<li class="page-item ${paginationData.page === paginationData.total_pages ? 'disabled' : ''}">
+                    <a class="page-link" href="#" data-page="${paginationData.page + 1}">${("{{ _('Next') }}")}</a>
+                 </li>`;
+        html += `</ul></nav>`;
+        html += `<p class="text-center text-muted small">${("{{ _('Page') }}")} ${paginationData.page} ${("{{ _('of') }}")} ${paginationData.total_pages}. ${("{{ _('Total records:') }}")} ${paginationData.total_records}</p>`;
+
+        dbPaginationControls.innerHTML = html;
+
+        dbPaginationControls.querySelectorAll('.page-link').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const pageNum = parseInt(this.dataset.page);
+                if (pageNum && pageNum !== dbViewState.currentPage) {
+                    handlePaginationClick(pageNum);
+                }
+            });
+        });
+    }
+
+    async function handlePaginationClick(newPage) {
+        if (newPage < 1) return; // Should be handled by disabled state, but good check
+        dbViewState.currentPage = newPage;
+        await fetchAndDisplayTableData();
+    }
+
+    async function fetchAndDisplayTableData() {
+        const { selectedTable, currentPage, currentFilters, perPage, sortBy, sortOrder } = dbViewState;
+
+        if (!selectedTable) {
+            dbRecordsOutput.innerHTML = `<p>{{ _('Please select a table first.') }}</p>`;
+            dbPaginationControls.style.display = 'none';
+            return;
+        }
+
+        updateDbViewStatus(`{{ _('Fetching data for table:') }} ${selectedTable}, {{ _('page:') }} ${currentPage}...`);
+
+        let queryParams = `page=${currentPage}&per_page=${perPage}`;
+        if (currentFilters.length > 0) {
+            queryParams += `&filters=${encodeURIComponent(JSON.stringify(currentFilters))}`;
+        }
+        if (sortBy) {
+            queryParams += `&sort_by=${encodeURIComponent(sortBy)}&sort_order=${encodeURIComponent(sortOrder)}`;
+        }
+
+        try {
+            const response = await fetch(`/api/admin/db/table_data/${selectedTable}?${queryParams}`);
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ message: `HTTP error! status: ${response.status}` }));
+                throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+
+            if (data.success && data.records) {
+                if (data.columns && dbViewState.columns.length === 0) { // Store column info if not already fetched by loadTableInfo
+                    dbViewState.columns = data.columns;
+                }
+                renderTable(dbViewState.columns, data.records);
+                renderPagination(data.pagination);
+                updateDbViewStatus(`{{ _('Data loaded for table:') }} ${selectedTable}.`, false);
+            } else {
+                throw new Error(data.message || `{{ _('Failed to fetch data for table:') }} ${selectedTable}`);
+            }
+        } catch (error) {
+            console.error(`Error fetching table data for ${selectedTable}:`, error);
+            updateDbViewStatus(`{{ _('Error fetching data for') }} ${selectedTable}: ${error.message}`, true);
+            dbRecordsOutput.innerHTML = `<p class="text-danger">{{ _('Error loading records.') }}</p>`;
+            dbPaginationControls.style.display = 'none';
+        }
+    }
+
+    if (dbTableSelect) {
+        dbTableSelect.addEventListener('change', async function() {
+            dbViewState.selectedTable = this.value;
+            dbViewState.currentPage = 1;
+            dbViewState.currentFilters = [];
+            dbViewState.columns = []; // Reset columns, will be fetched by loadTableInfo or fetchAndDisplayTableData
+            dbViewState.sortBy = null;
+            dbViewState.sortOrder = 'asc';
+
+            dbRecordsOutput.innerHTML = `<p>{{ _('Select a table and apply filters to view records.') }}</p>`;
+            dbPaginationControls.style.display = 'none';
+
+            if (dbViewState.selectedTable) {
+                await loadTableInfoAndGenerateFilters(dbViewState.selectedTable); // This also sets dbViewState.columns
+                await fetchAndDisplayTableData(); // Initial data load for the table
+            } else {
+                dbFilterArea.style.display = 'none';
+                dbFilterControlsContainer.innerHTML = `<p>{{ _('Select a table to see available filters.') }}</p>`;
+            }
+        });
+    }
+
+    if (dbApplyFiltersBtn) {
+        dbApplyFiltersBtn.addEventListener('click', async function() {
+            dbViewState.currentFilters = [];
+            const filterGroups = dbFilterControlsContainer.querySelectorAll('.row.mb-2');
+            filterGroups.forEach(group => {
+                const column = group.querySelector('.filter-op').dataset.column;
+                const op = group.querySelector('.filter-op').value;
+                let value = group.querySelector('.filter-val').value;
+
+                if (op) { // Only add filter if an operator is selected
+                    if (op === 'is_null' || op === 'is_not_null') {
+                        dbViewState.currentFilters.push({ column, op, value: null }); // Value is not used by backend for these
+                    } else if (value.trim() !== '') {
+                         dbViewState.currentFilters.push({ column, op, value: value.trim() });
+                    }
+                }
+            });
+            dbViewState.currentPage = 1;
+            await fetchAndDisplayTableData();
+        });
+    }
+
+    if (dbClearFiltersBtn) {
+        dbClearFiltersBtn.addEventListener('click', async function() {
+            const filterOps = dbFilterControlsContainer.querySelectorAll('.filter-op');
+            const filterVals = dbFilterControlsContainer.querySelectorAll('.filter-val');
+            filterOps.forEach(select => select.value = '');
+            filterVals.forEach(input => {
+                input.value = '';
+                input.style.display = 'block'; // Ensure value input is visible again
+            });
+            dbViewState.currentFilters = [];
+            dbViewState.currentPage = 1;
+            await fetchAndDisplayTableData();
+        });
+    }
+
+    // Load initial table names
+    loadTableNames();
+
+
+    // --- End of New Database Browser UI Logic ---
+
+
+    // Old Troubleshooting Tools Event Listeners (to be kept if they are for other cards)
     const reloadConfigurationsBtn = document.getElementById('reload-configurations-btn');
     const reloadConfigurationsStatusEl = document.getElementById('reload-configurations-status');
 
     const cleanupSystemDataBtn = document.getElementById('cleanup-system-data-btn');
     const cleanupSystemDataStatusEl = document.getElementById('cleanup-system-data-status');
-
-    // --- Troubleshooting Tools Event Listeners ---
-    if (viewDbRecordsBtn) {
-        viewDbRecordsBtn.addEventListener('click', function() {
-            viewDbRecordsStatusEl.textContent = "{{ _('Fetching DB records...') }}";
-            viewDbRecordsStatusEl.className = 'alert alert-info';
-            viewDbRecordsOutputEl.style.display = 'none';
-            viewDbRecordsOutputEl.textContent = '';
-            viewDbRecordsBtn.disabled = true;
-
-            fetch('/api/admin/view_db_raw_top100', { // Assuming apiCall will add CSRF if needed by default for GET too, or use apiCall
-                method: 'GET',
-                headers: { 'Accept': 'application/json' } // CSRF typically not needed for GET
-            })
-            .then(response => response.json())
-            .then(data => {
-            if (data.success && data.data) {
-                viewDbRecordsOutputEl.innerHTML = ''; // Clear previous content
-                viewDbRecordsOutputEl.style.display = 'block';
-
-                for (const tableName in data.data) {
-                    if (data.data.hasOwnProperty(tableName)) {
-                        const records = data.data[tableName];
-
-                        const tableContainer = document.createElement('div');
-                        tableContainer.className = 'db-table-container mb-3';
-
-                        const tableButton = document.createElement('button');
-                        tableButton.className = 'btn btn-outline-primary btn-sm mb-1 w-100 text-start';
-                        // Adjust button text based on whether records is an array or a message string
-                        tableButton.textContent = `${tableName} (${Array.isArray(records) ? records.length + ' ' + (records.length === 1 ? "{{ _('record') }}" : "{{ _('records') }}") : "{{ _('info') }}"})`;
-
-                        const recordsDiv = document.createElement('div');
-                        recordsDiv.className = 'db-records-content';
-                        recordsDiv.style.display = 'none';
-
-                        if (Array.isArray(records)) {
-                            if (records.length > 0) {
-                                const preFormattedRecords = document.createElement('pre');
-                                preFormattedRecords.style.whiteSpace = 'pre-wrap';
-                                preFormattedRecords.style.wordBreak = 'break-all';
-                                preFormattedRecords.textContent = JSON.stringify(records, null, 2);
-                                recordsDiv.appendChild(preFormattedRecords);
-                            } else {
-                                recordsDiv.textContent = "{{ _('No records found for this table.') }}";
-                            }
-                        } else if (typeof records === 'string') { // It's an informational message (e.g. for skipped tables)
-                            recordsDiv.textContent = records;
-                        } else { // Fallback for unexpected data type
-                            recordsDiv.textContent = "{{ _('Unexpected data format for this table.') }}";
-                        }
-
-                        tableButton.addEventListener('click', function() {
-                            const isHidden = recordsDiv.style.display === 'none';
-                            recordsDiv.style.display = isHidden ? 'block' : 'none';
-                            tableButton.classList.toggle('active', isHidden);
-                        });
-
-                        tableContainer.appendChild(tableButton);
-                        tableContainer.appendChild(recordsDiv);
-                        viewDbRecordsOutputEl.appendChild(tableContainer);
-                    }
-                }
-                viewDbRecordsStatusEl.textContent = "{{ _('DB records fetched successfully.') }}";
-                viewDbRecordsStatusEl.className = 'alert alert-success';
-                } else {
-                    viewDbRecordsStatusEl.textContent = "{{ _('Failed to fetch DB records:') }} " + (data.message || "{{ _('Unknown error.') }}");
-                    viewDbRecordsStatusEl.className = 'alert alert-danger';
-                    viewDbRecordsOutputEl.style.display = 'none';
-                }
-            })
-            .catch(error => {
-                console.error('View DB Records error:', error);
-                viewDbRecordsStatusEl.textContent = "{{ _('Error fetching DB records:') }} " + error.toString();
-                viewDbRecordsStatusEl.className = 'alert alert-danger';
-            })
-            .finally(() => {
-                viewDbRecordsBtn.disabled = false;
-            });
-        });
-    }
 
     if (reloadConfigurationsBtn) {
         reloadConfigurationsBtn.addEventListener('click', function() {
