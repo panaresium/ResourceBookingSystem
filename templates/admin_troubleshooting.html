@@ -358,7 +358,10 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
-        updateDbViewStatus(`{{ _('Fetching data for table:') }} ${selectedTable}, {{ _('page:') }} ${currentPage}...`);
+        const currentTableName = String(selectedTable); // Explicitly cast to string
+        console.log('Fetching data for table:', currentTableName, 'Type:', typeof currentTableName);
+
+        updateDbViewStatus(`{{ _('Fetching data for table:') }} ${currentTableName}, {{ _('page:') }} ${currentPage}...`);
 
         let queryParams = `page=${currentPage}&per_page=${perPage}`;
         if (currentFilters.length > 0) {
@@ -369,7 +372,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         try {
-            const response = await fetch(`/api/admin/db/table_data/${selectedTable}?${queryParams}`);
+            const response = await fetch(`/api/admin/db/table_data/${currentTableName}?${queryParams}`);
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ message: `HTTP error! status: ${response.status}` }));
                 throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
@@ -382,13 +385,13 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
                 renderTable(dbViewState.columns, data.records);
                 renderPagination(data.pagination);
-                updateDbViewStatus(`{{ _('Data loaded for table:') }} ${selectedTable}.`, false);
+                updateDbViewStatus(`{{ _('Data loaded for table:') }} ${currentTableName}.`, false);
             } else {
-                throw new Error(data.message || `{{ _('Failed to fetch data for table:') }} ${selectedTable}`);
+                throw new Error(data.message || `{{ _('Failed to fetch data for table:') }} ${currentTableName}`);
             }
         } catch (error) {
-            console.error(`Error fetching table data for ${selectedTable}:`, error);
-            updateDbViewStatus(`{{ _('Error fetching data for') }} ${selectedTable}: ${error.message}`, true);
+            console.error(`Error fetching table data for ${currentTableName}:`, error);
+            updateDbViewStatus(`{{ _('Error fetching data for') }} ${currentTableName}: ${error.message}`, true);
             dbRecordsOutput.innerHTML = `<p class="text-danger">{{ _('Error loading records.') }}</p>`;
             dbPaginationControls.style.display = 'none';
         }
