@@ -1195,4 +1195,85 @@ a.fc-daygrid-event.fc-event { /* Targeting the <a> tag specifically */
 
 /* Time part (text node) will inherit default text handling. */
 /* JavaScript truncation now manages its length. */
-```
+
+/* --------------- MAP RESOURCE AREA STYLES --------------- */
+.resource-area {
+    /* Existing styles from map_view.html: */
+    position: absolute;
+    /* border: 2px solid blue; */ /* Will be overridden by specific states */
+    /* background-color: rgba(0, 0, 255, 0.3); */ /* Will be overridden by specific states */
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    overflow: hidden;
+    /* color: #000; */ /* Will be overridden by specific states */
+    /* font-size: 12px; */ /* Will be overridden by new styles */
+
+    /* New/refined general styles: */
+    padding: 2px;
+    text-overflow: ellipsis;
+    white-space: nowrap; /* Prevent text wrapping that breaks small boxes */
+    font-size: 0.8em; /* Suitable small font size */
+    border-width: 2px; /* Consistent border width */
+    border-style: solid; /* Consistent border style */
+}
+
+/* Available State (Green) */
+.resource-area-available {
+    background-color: rgba(0, 255, 0, 0.15);
+    border-color: rgba(0, 200, 0, 0.6);
+    color: #333333; /* Darker text for light green background */
+}
+
+/* Partially Booked State (Dark Orange) */
+.resource-area-partially-booked {
+    background-color: rgba(255, 140, 0, 0.3); /* Dark Orange background */
+    border-color: rgba(204, 112, 0, 0.7); /* Darker Orange border */
+    color: #ffffff; /* White text for readability */
+}
+
+/* Fully Booked State (Red) */
+.resource-area-fully-booked {
+    background-color: rgba(255, 0, 0, 0.3); /* Red background */
+    border-color: rgba(200, 0, 0, 0.7); /* Darker Red border */
+    color: #ffffff; /* White text for readability */
+}
+
+/* User Conflict State (Red) - Same as Fully Booked */
+.resource-area-user-conflict {
+    background-color: rgba(255, 0, 0, 0.3); /* Red background */
+    border-color: rgba(200, 0, 0, 0.7); /* Darker Red border */
+    color: #ffffff; /* White text for readability */
+}
+
+/* Restricted State (Grey) */
+.resource-area-restricted {
+    background-color: rgba(128, 128, 128, 0.3); /* Grey background */
+    border-color: rgba(100, 100, 100, 0.7); /* Darker Grey border */
+    color: #ffffff; /* White text for readability */
+}
+
+/* Unknown State (Light Grey) */
+.resource-area-unknown {
+    background-color: rgba(200, 200, 200, 0.3); /* Light Grey background */
+    border-color: rgba(150, 150, 150, 0.7); /* Darker Grey border */
+    color: #333333; /* Darker text for light grey background */
+}
+
+/* Clickable Cue (already exists, ensure it's compatible) */
+.map-area-clickable:hover {
+    cursor: pointer;
+    filter: brightness(110%);
+}
+
+/* Selected on form (already exists, ensure it's compatible) */
+.resource-area-form-selected {
+    border-width: 3px; /* Keep slightly thicker for emphasis */
+    border-color: #007bff; /* A distinct highlight color, maybe make this a variable if used elsewhere */
+    box-shadow: 0 0 10px #007bff;
+    /* filter: drop-shadow(0 0 5px #007bff); Could be an alternative to box-shadow */
+}
+
+/* --------------- END MAP RESOURCE AREA STYLES --------------- */

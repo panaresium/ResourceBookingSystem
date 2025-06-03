@@ -309,17 +309,35 @@ document.addEventListener('DOMContentLoaded', function () {
 
                         areaDiv.classList.add(finalAvailabilityClass);
 
-                        // Make clickable if not fully booked, not unknown, not user conflict, and not restricted
+                        // Determine clickability based *only* on finalAvailabilityClass
+                        // Default to not clickable for restricted, fully-booked, user-conflict, partially-booked, and unknown states.
+                        isMapAreaClickable = false;
+                        if (finalAvailabilityClass === 'resource-area-available') {
+                            // Further check permissions if 'available' could be set despite restrictions (should not happen with current logic order)
+                            // For now, assume 'resource-area-available' implies it passed permission checks.
+                            isMapAreaClickable = true;
+                        }
+
                         if (isMapAreaClickable) {
                             areaDiv.classList.add('map-area-clickable');
+                            // Ensure to clone the node to remove previous listeners if any, before adding a new one.
+                            // However, since areaDiv is created new each time, cloning isn't strictly for listener removal here,
+                            // but good practice if the element were being reused.
+                            const newAreaDiv = areaDiv.cloneNode(true); // Clone to ensure fresh listeners
+                            areaDiv.parentNode.replaceChild(newAreaDiv, areaDiv);
+                            areaDiv = newAreaDiv;
+
                             areaDiv.addEventListener('click', function() {
                                 if (resourceSelectBooking) {
                                     resourceSelectBooking.value = resource.id;
                                     resourceSelectBooking.dispatchEvent(new Event('change'));
                                 }
-                                // Pass userBookingsForDate to openResourceDetailModal
                                 openResourceDetailModal(resource, dateString, userBookingsForDate);
                             });
+                        } else {
+                            areaDiv.classList.remove('map-area-clickable');
+                            // If there's a possibility of old listeners on a non-clickable div (e.g. if not cloned), remove them.
+                            // Since areaDiv is new, this is not an issue here.
                         }
                         // Highlight resource if it's the one selected in the main form
                         if (resourceSelectBooking && resourceSelectBooking.value === resource.id.toString()) {
