@@ -636,11 +636,11 @@ class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusi
         
         # Resources
         # Resource 1: On FloorMap 1, specific equipment, tags, status
-        res1 = Resource(id=301, name='Room 101', capacity=10, equipment='Projector,Whiteboard', tags='meeting,large', status='published', map_id=fm1.id)
+        res1 = Resource(id=301, name='Room 101', capacity=10, equipment='Projector,Whiteboard', tags='meeting,large', status='published', floor_map_id=fm1.id)
         # Resource 2: On FloorMap 2, different attributes
-        res2 = Resource(id=302, name='Room 202', capacity=4, equipment='TV', tags='small,focus', status='maintenance', map_id=fm2.id)
+        res2 = Resource(id=302, name='Room 202', capacity=4, equipment='TV', tags='small,focus', status='maintenance', floor_map_id=fm2.id)
         # Resource 3: Not on any map
-        res3 = Resource(id=303, name='Standalone Booth', capacity=1, equipment='Phone', tags='focus', status='published', map_id=None)
+        res3 = Resource(id=303, name='Standalone Booth', capacity=1, equipment='Phone', tags='focus', status='published', floor_map_id=None)
 
         # Bookings
         # Booking 1: User1, Res1. Start: today 10:00 for 1 hr. (For hour, DOW, month aggregation)
