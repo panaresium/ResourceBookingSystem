@@ -41,6 +41,8 @@ def get_public_floor_maps():
                 'image_filename': m.image_filename,
                 'location': m.location,
                 'floor': m.floor,
+                'offset_x': m.offset_x,
+                'offset_y': m.offset_y,
                 'image_url': url_for('static', filename=f'floor_map_uploads/{m.image_filename}', _external=False) # Ensure local URL
             })
         return jsonify(maps_list), 200
@@ -60,6 +62,17 @@ def upload_floor_map():
     map_name = request.form.get('map_name')
     location = request.form.get('location')
     floor = request.form.get('floor')
+    offset_x_str = request.form.get('offset_x', '0')
+    offset_y_str = request.form.get('offset_y', '0')
+
+    try:
+        offset_x = int(offset_x_str)
+    except ValueError:
+        offset_x = 0
+    try:
+        offset_y = int(offset_y_str)
+    except ValueError:
+        offset_y = 0
 
     if not map_name:
         current_app.logger.warning("Map name missing in upload request.")
@@ -100,14 +113,16 @@ def upload_floor_map():
                     # Decide if this is a critical failure or just a warning
 
             new_map = FloorMap(name=map_name, image_filename=filename,
-                               location=location, floor=floor)
+                               location=location, floor=floor,
+                               offset_x=offset_x, offset_y=offset_y)
             db.session.add(new_map)
             db.session.commit()
-            current_app.logger.info(f"Floor map '{map_name}' uploaded successfully by {current_user.username}.")
-            add_audit_log(action="CREATE_MAP_SUCCESS", details=f"Floor map '{map_name}' (ID: {new_map.id}) uploaded by {current_user.username}.")
+            current_app.logger.info(f"Floor map '{map_name}' with offsets ({offset_x},{offset_y}) uploaded successfully by {current_user.username}.")
+            add_audit_log(action="CREATE_MAP_SUCCESS", details=f"Floor map '{map_name}' (ID: {new_map.id}, Offsets: ({offset_x},{offset_y})) uploaded by {current_user.username}.")
             return jsonify({
                 'id': new_map.id, 'name': new_map.name, 'image_filename': new_map.image_filename,
                 'location': new_map.location, 'floor': new_map.floor,
+                'offset_x': new_map.offset_x, 'offset_y': new_map.offset_y,
                 'image_url': url_for('static', filename=f'floor_map_uploads/{new_map.image_filename}', _external=False)
             }), 201
         except Exception as e:
@@ -133,6 +148,7 @@ def get_floor_maps():
             maps_list.append({
                 'id': m.id, 'name': m.name, 'image_filename': m.image_filename,
                 'location': m.location, 'floor': m.floor,
+                'offset_x': m.offset_x, 'offset_y': m.offset_y,
                 'image_url': url_for('static', filename=f'floor_map_uploads/{m.image_filename}', _external=False)
             })
         current_app.logger.info(f"Admin {current_user.username} fetched all floor maps.")
@@ -242,7 +258,8 @@ def get_map_details(map_id):
         map_details_response = {
             'id': floor_map.id, 'name': floor_map.name,
             'image_url': url_for('static', filename=f'floor_map_uploads/{floor_map.image_filename}', _external=False),
-            'location': floor_map.location, 'floor': floor_map.floor
+            'location': floor_map.location, 'floor': floor_map.floor,
+            'offset_x': floor_map.offset_x, 'offset_y': floor_map.offset_y
         }
 
         mapped_resources_query = Resource.query.filter(

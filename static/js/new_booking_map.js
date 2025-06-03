@@ -131,7 +131,7 @@ document.addEventListener('DOMContentLoaded', function () {
      * @param {string} dateString - The date for which to check resource availability.
      */
     async function loadMapDetails(mapId, dateString) {
-        const VERTICAL_OFFSET = 5; // Define the vertical offset in pixels
+        // const VERTICAL_OFFSET = 5; // Define the vertical offset in pixels // Removed
 
         if (!mapId) {
             if (mapContainer) mapContainer.innerHTML = ''; // Clear map
@@ -156,45 +156,30 @@ document.addEventListener('DOMContentLoaded', function () {
             // Assuming apiCall and other helper functions are globally available from script.js
             const data = await apiCall(apiUrl, {}, mapLoadingStatusDiv);
 
+            const mapDetails = data.map_details;
+            const offsetX = parseInt(mapDetails.offset_x) || 0;
+            const offsetY = parseInt(mapDetails.offset_y) || 0;
+
             if (mapContainer) {
-                mapContainer.style.backgroundImage = `url(${data.map_details.image_url})`;
+                mapContainer.style.backgroundImage = `url(${mapDetails.image_url})`;
             }
 
             if (data.mapped_resources && data.mapped_resources.length > 0) {
                 data.mapped_resources.forEach(resource => {
                     if (resource.map_coordinates && resource.map_coordinates.type === 'rect') {
-                        // const coords = resource.map_coordinates; // First declaration, now potentially redundant
-                        // The following 'const coords' is the one introduced by the logging step.
-                        // We should use this one and ensure there's no prior 'const coords' in this specific block.
-                        // OR, if 'const coords' was already defined above this 'if', then this one should be removed.
-                        // Given the error is *at* 168, this implies this line or the one immediately after is the problem.
-
-                        // Corrected: Declare 'coords' once.
-                        // The previous logging step likely introduced 'const coords = resource.map_coordinates;'
-                        // and then the original code also had 'const coords = resource.map_coordinates;'.
-                        // The logging patch correctly had 'const coords = resource.map_coordinates;'
-                        // and then used it. The error implies a *second* 'const coords' or 'let coords'.
-                        // The issue was:
-                        // const coords = resource.map_coordinates; // Original or first one from logging
-                        // const areaDiv = document.createElement('div'); // This line is fine
-                        // const coords = resource.map_coordinates; // THIS WAS THE DUPLICATE from the merge error.
-
-                        // Corrected structure:
                         const coords = resource.map_coordinates; // Define it once for this resource.
-                        console.log('Processing Resource:', resource.name, 'Raw Coords:', coords);
 
-                        // Directly using coordinate values as pixel values, applying offset to top
-                        let topPosition = coords.y + VERTICAL_OFFSET;
-                        let leftPosition = coords.x;
+                        // Apply offsets from mapDetails
+                        let topPosition = coords.y + offsetY;
+                        let leftPosition = coords.x + offsetX;
                         let widthValue = coords.width;
                         let heightValue = coords.height;
 
+                        console.log('Processing Resource:', resource.name, 'Raw Coords:', coords, 'Applied Offsets X:', offsetX, 'Y:', offsetY);
                         console.log('Applying to CSS: top=', topPosition + 'px', 
                                     'left=', leftPosition + 'px', 
                                     'width=', widthValue + 'px', 
                                     'height=', heightValue + 'px');
-                        // const areaDiv = document.createElement('div'); // This was also duplicated by the faulty merge.
-                        // The areaDiv should be created *after* coordinates are established.
                         const areaDiv = document.createElement('div');
                         areaDiv.className = 'resource-area'; // Base class
                         areaDiv.style.left = `${leftPosition}px`;
