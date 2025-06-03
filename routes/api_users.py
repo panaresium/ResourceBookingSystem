@@ -4,7 +4,7 @@ from sqlalchemy import func # For func.lower in create_resource, and func.ilike 
 
 # Local imports
 from extensions import db
-from models import User, Role # Assuming Role is needed for export/import and updates
+from models import User, Role
 from utils import add_audit_log
 from auth import permission_required
 
@@ -358,6 +358,244 @@ def delete_users_bulk():
         current_app.logger.exception("Error deleting users in bulk:")
         add_audit_log(action="BULK_DELETE_USER_FAILED", details=f"Bulk user deletion by {current_user.username} failed. Error: {str(e)}")
         return jsonify({'error': 'Failed to delete users due to a server error.'}), 500
+
+@api_users_bp.route('/admin/users/bulk', methods=['PUT'])
+@login_required
+@permission_required('manage_users')
+def update_users_bulk():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+    user_ids = data.get('ids')
+    actions = data.get('actions')
+
+    if not isinstance(user_ids, list) or not all(isinstance(uid, int) for uid in user_ids):
+        return jsonify({'error': '"ids" must be a list of integers.'}), 400
+    if not isinstance(actions, dict):
+        return jsonify({'error': '"actions" must be an object.'}), 400
+
+    set_admin = actions.get('set_admin')
+    add_role_ids = actions.get('add_role_ids')
+    remove_role_ids = actions.get('remove_role_ids')
+
+    if set_admin is not None and not isinstance(set_admin, bool):
+        return jsonify({'error': '"set_admin" must be a boolean or null.'}), 400
+    if add_role_ids is not None and (not isinstance(add_role_ids, list) or not all(isinstance(rid, int) for rid in add_role_ids)):
+        return jsonify({'error': '"add_role_ids" must be a list of role IDs (integers) or null.'}), 400
+    if remove_role_ids is not None and (not isinstance(remove_role_ids, list) or not all(isinstance(rid, int) for rid in remove_role_ids)):
+        return jsonify({'error': '"remove_role_ids" must be a list of role IDs (integers) or null.'}), 400
+
+    updated_users_count = 0
+    errors = []
+
+    admin_role = Role.query.filter_by(name="Administrator").first()
+
+    for user_id in user_ids:
+        user = User.query.get(user_id)
+        if not user:
+            errors.append({'id': user_id, 'error': 'User not found.'})
+            continue
+
+        original_is_admin = user.is_admin
+        original_roles = set(user.roles)
+
+        # Handle set_admin
+        if set_admin is not None and user.is_admin != set_admin:
+            if user.id == current_user.id and not set_admin: # Current user trying to remove their own admin status
+                # Check if this user is the only admin (based on is_admin flag)
+                if User.query.filter_by(is_admin=True).count() == 1:
+                    errors.append({'id': user_id, 'error': 'Cannot remove admin status from the sole admin user (is_admin flag).'})
+                    continue # Skip this user for this action
+            user.is_admin = set_admin
+
+        # Handle add_role_ids
+        if add_role_ids:
+            for role_id in add_role_ids:
+                role = Role.query.get(role_id)
+                if not role:
+                    errors.append({'id': user_id, 'role_id': role_id, 'error': 'Role to add not found.'})
+                    continue
+                if role not in user.roles:
+                    user.roles.append(role)
+
+        # Handle remove_role_ids
+        if remove_role_ids:
+            for role_id in remove_role_ids:
+                role = Role.query.get(role_id)
+                if not role:
+                    # This case might be less critical if the role is already removed or doesn't exist
+                    # errors.append({'id': user_id, 'role_id': role_id, 'error': 'Role to remove not found.'})
+                    continue
+                if role in user.roles:
+                    # Prevent removing "Administrator" role from the sole holder of this role
+                    if role.id == admin_role.id and user.id == current_user.id:
+                         users_with_admin_role = User.query.filter(User.roles.any(id=admin_role.id)).all()
+                         if len(users_with_admin_role) == 1 and users_with_admin_role[0].id == user.id:
+                            errors.append({'id': user_id, 'error': 'Cannot remove the "Administrator" role from the only user holding it.'})
+                            continue # Skip this specific role removal for this user
+
+                    if role in user.roles: # Re-check because the previous block might have skipped
+                        user.roles.remove(role)
+
+        if db.session.is_modified(user):
+            updated_users_count += 1
+            # Log changes for this user
+            details = f"User '{user.username}' (ID: {user_id}) updated in bulk by {current_user.username}."
+            if set_admin is not None and original_is_admin != user.is_admin:
+                details += f" is_admin changed from {original_is_admin} to {user.is_admin}."
+
+            added_roles = set(user.roles) - original_roles
+            removed_roles = original_roles - set(user.roles)
+            if added_roles:
+                details += f" Added roles: {[r.name for r in added_roles]}."
+            if removed_roles:
+                details += f" Removed roles: {[r.name for r in removed_roles]}."
+            add_audit_log(action="BULK_UPDATE_USER", details=details)
+
+
+    if not errors and updated_users_count == 0:
+         return jsonify({'message': 'No users were updated. Check input data or user status.', 'updated_count': 0, 'errors': []}), 200
+
+    try:
+        db.session.commit()
+        current_app.logger.info(f"Bulk user update by {current_user.username}. Updated: {updated_users_count}, Errors: {len(errors)}")
+        return jsonify({'message': f'Bulk update processed. {updated_users_count} users affected.', 'updated_count': updated_users_count, 'errors': errors}), 200 if not errors else 207
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Error during bulk user update commit:")
+        add_audit_log(action="BULK_UPDATE_USER_FAILED", details=f"Bulk user update by {current_user.username} failed. Error: {str(e)}")
+        return jsonify({'error': 'Failed to update users due to a server error during commit.'}), 500
+
+
+@api_users_bp.route('/admin/users/bulk_add', methods=['POST'])
+@login_required
+@permission_required('manage_users')
+def bulk_add_users():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+    username_pattern = data.get('username_pattern')
+    start_index = data.get('start_index')
+    count = data.get('count')
+    default_password = data.get('default_password')
+    email_pattern = data.get('email_pattern') # Optional
+    is_admin = data.get('is_admin', False)
+    role_ids = data.get('role_ids', []) # Optional
+
+    # --- Input Validation ---
+    if not username_pattern or '###' not in username_pattern:
+        return jsonify({'error': 'Username pattern is required and must contain "###".'}), 400
+    if not isinstance(start_index, int) or start_index < 0: # Allow 0 for user000, user001 etc.
+        return jsonify({'error': 'Start index must be a non-negative integer.'}), 400
+    if not isinstance(count, int) or count <= 0:
+        return jsonify({'error': 'Count must be a positive integer.'}), 400
+    if not default_password or len(default_password) < 6: # Basic password check
+        return jsonify({'error': 'Default password is required and must be at least 6 characters.'}), 400
+    if email_pattern and '###' not in email_pattern:
+        return jsonify({'error': 'Email pattern must contain "###" if provided.'}), 400
+    if not isinstance(is_admin, bool):
+        return jsonify({'error': 'is_admin must be a boolean.'}), 400
+    if not isinstance(role_ids, list) or not all(isinstance(rid, int) for rid in role_ids):
+        return jsonify({'error': 'role_ids must be a list of integers.'}), 400
+
+    # Validate role_ids exist
+    roles_to_assign = []
+    if role_ids:
+        for r_id in role_ids:
+            role = Role.query.get(r_id)
+            if not role:
+                return jsonify({'error': f'Role with ID {r_id} not found.'}), 400
+            roles_to_assign.append(role)
+
+    created_users = []
+    failed_users = []
+
+    # Determine padding length from the '###' part of the pattern
+    # e.g., user### -> 3, test## -> 2
+    pattern_placeholder_len = username_pattern.count('#')
+    if pattern_placeholder_len == 0: # Should be caught by '###' check, but as a safeguard
+        return jsonify({'error': 'Username pattern placeholder "###" is invalid.'}), 400
+
+
+    for i in range(count):
+        current_num = start_index + i
+        # Format number with leading zeros to match placeholder length
+        num_str = str(current_num).zfill(pattern_placeholder_len)
+
+        username = username_pattern.replace('###', num_str, 1) # Replace only first instance if multiple "###"
+
+        email = ""
+        if email_pattern:
+            email = email_pattern.replace('###', num_str, 1)
+        else:
+            email_domain = current_app.config.get("DEFAULT_EMAIL_DOMAIN", "example.com")
+            email = f"{username}@{email_domain}"
+
+        # Validate email format
+        if '@' not in email or '.' not in email.split('@')[-1]:
+            failed_users.append({'username_attempt': username, 'email_attempt': email, 'error': f"Generated email '{email}' is invalid."})
+            continue
+
+        # Check for existing username
+        if User.query.filter(func.lower(User.username) == func.lower(username)).first():
+            failed_users.append({'username_attempt': username, 'email_attempt': email, 'error': f"Username '{username}' already exists."})
+            continue
+        # Check for existing email
+        if User.query.filter(func.lower(User.email) == func.lower(email)).first():
+            failed_users.append({'username_attempt': username, 'email_attempt': email, 'error': f"Email '{email}' already exists."})
+            continue
+
+        try:
+            new_user = User(username=username, email=email, is_admin=is_admin)
+            new_user.set_password(default_password)
+            if roles_to_assign:
+                new_user.roles = roles_to_assign
+
+            db.session.add(new_user)
+            # We will commit in batch later
+            created_users.append({'username': username, 'email': email})
+            # Audit log for each user creation will be done after successful commit
+        except Exception as e_user:
+            db.session.rollback() # Rollback this specific user attempt
+            current_app.logger.error(f"Error preparing user {username} for bulk add: {str(e_user)}")
+            failed_users.append({'username_attempt': username, 'email_attempt': email, 'error': f"Server error during user preparation: {str(e_user)}"})
+
+
+    if not created_users and not failed_users:
+         return jsonify({'message': 'No users were processed. Check parameters.', 'created_count': 0, 'failed_count': 0, 'errors': [] }), 400
+
+    try:
+        db.session.commit()
+        # Now that commit is successful, add audit logs for created users
+        for u_info in created_users:
+             # Fetch the user again to get ID, or ideally return ID upon creation if model allows immediate flush.
+             # For simplicity here, we log with username. A more robust log would include the new user ID.
+            add_audit_log(action="BULK_CREATE_USER_SUCCESS", details=f"User '{u_info['username']}' (Email: {u_info['email']}) created by {current_user.username} via bulk add. Admin: {is_admin}. Roles: {[r.name for r in roles_to_assign]}")
+
+        overall_details = f"{len(created_users)} users created via bulk add by {current_user.username} (Pattern: {username_pattern}, Start: {start_index}, Count: {count})."
+        if failed_users:
+            overall_details += f" {len(failed_users)} users failed."
+        add_audit_log(action="BULK_ADD_USERS_COMPLETED", details=overall_details)
+
+        if not failed_users:
+            return jsonify({'message': f'{len(created_users)} users created successfully.', 'created_count': len(created_users), 'users': created_users}), 201
+        else:
+            return jsonify({
+                'message': f'Bulk add partially completed. {len(created_users)} users created, {len(failed_users)} failed.',
+                'created_count': len(created_users),
+                'failed_count': len(failed_users),
+                'created_users': created_users,
+                'errors': failed_users
+            }), 207
+
+    except Exception as e_commit:
+        db.session.rollback()
+        current_app.logger.exception("Error committing bulk added users:")
+        add_audit_log(action="BULK_ADD_USERS_FAILED", details=f"Bulk add users by {current_user.username} failed during commit. Error: {str(e_commit)}")
+        return jsonify({'error': f'Failed to commit users due to a server error: {str(e_commit)}', 'created_count': 0, 'failed_count': len(created_users) + len(failed_users)}), 500
+
 
 @api_users_bp.route('/admin/users/export', methods=['GET'])
 @login_required
