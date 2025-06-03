@@ -538,3 +538,228 @@ def import_users():
         db.session.rollback()
         current_app.logger.exception("Error committing imported users/roles:")
         return jsonify({'error': f'Failed to commit imported users/roles due to a server error: {str(e_commit)}'}), 500
+
+
+@api_users_bp.route('/admin/users/bulk_add', methods=['POST'])
+@login_required
+@permission_required('manage_users')
+def bulk_add_users():
+    data = request.get_json()
+    if not data or not isinstance(data, list):
+        return jsonify({'error': 'Invalid input. JSON list of users expected.'}), 400
+
+    added_count = 0
+    errors = []
+    users_to_add = []
+
+    for user_data in data:
+        username = user_data.get('username')
+        email = user_data.get('email')
+        password = user_data.get('password')
+        is_admin = user_data.get('is_admin', False)
+        role_ids = user_data.get('role_ids', [])
+
+        if not username or not username.strip():
+            errors.append({'user_data': user_data, 'error': 'Username is required.'})
+            continue
+        if not email or not email.strip():
+            errors.append({'user_data': user_data, 'error': 'Email is required.'})
+            continue
+        if not password:
+            errors.append({'user_data': user_data, 'error': 'Password is required.'})
+            continue
+
+        username = username.strip()
+        email = email.strip()
+
+        if '@' not in email or '.' not in email.split('@')[-1]:
+            errors.append({'user_data': user_data, 'error': 'Invalid email format.'})
+            continue
+
+        if User.query.filter(func.lower(User.username) == func.lower(username)).first():
+            errors.append({'user_data': user_data, 'error': f"Username '{username}' already exists."})
+            continue
+        if User.query.filter(func.lower(User.email) == func.lower(email)).first():
+            errors.append({'user_data': user_data, 'error': f"Email '{email}' already registered."})
+            continue
+
+        if not isinstance(role_ids, list):
+            errors.append({'user_data': user_data, 'error': 'role_ids must be a list of integers.'})
+            continue
+
+        new_user = User(username=username, email=email, is_admin=is_admin)
+        new_user.set_password(password)
+
+        resolved_roles = []
+        valid_roles = True
+        for r_id in role_ids:
+            if not isinstance(r_id, int):
+                errors.append({'user_data': user_data, 'error': f'Invalid role ID type: {r_id}. Must be integer.'})
+                valid_roles = False
+                break
+            role = Role.query.get(r_id)
+            if not role:
+                errors.append({'user_data': user_data, 'error': f'Role with ID {r_id} not found.'})
+                valid_roles = False
+                break
+            resolved_roles.append(role)
+
+        if not valid_roles:
+            continue
+
+        new_user.roles = resolved_roles
+        users_to_add.append(new_user)
+
+    if users_to_add:
+        try:
+            db.session.add_all(users_to_add)
+            db.session.commit()
+            added_count = len(users_to_add)
+            add_audit_log(action="BULK_ADD_USERS_SUCCESS", details=f"{added_count} users added by {current_user.username}. Errors: {len(errors)}")
+        except Exception as e:
+            db.session.rollback()
+            # All users in this batch failed to commit, so add errors for them
+            for user_obj in users_to_add:
+                 errors.append({'user_data': {'username': user_obj.username, 'email': user_obj.email}, 'error': f'Database error during commit: {str(e)}'})
+            users_to_add.clear() # Clear the list as they were not added
+            add_audit_log(action="BULK_ADD_USERS_FAILED", details=f"Failed to add users in bulk by {current_user.username}. Error: {str(e)}. Initial errors: {len(errors) - len(users_to_add)}")
+            # Return immediately if the commit fails for the batch
+            return jsonify({
+                'message': 'Bulk user add operation failed during commit.',
+                'users_added': 0,
+                'errors': errors
+            }), 500
+
+    status_code = 201 if added_count > 0 and not errors else 207 if errors else 200
+    return jsonify({
+        'message': 'Bulk user add operation completed.',
+        'users_added': added_count,
+        'errors': errors
+    }), status_code
+
+
+@api_users_bp.route('/admin/users/bulk_edit', methods=['PUT'])
+@login_required
+@permission_required('manage_users')
+def bulk_edit_users():
+    data = request.get_json()
+    if not data or not isinstance(data, list):
+        return jsonify({'error': 'Invalid input. JSON list of user updates expected.'}), 400
+
+    updated_count = 0
+    errors = []
+    users_to_update_in_session = [] # Keep track of users modified in this batch for potential rollback
+
+    for user_data in data:
+        user_id = user_data.get('id')
+        if not user_id or not isinstance(user_id, int):
+            errors.append({'user_data': user_data, 'error': 'User ID is required and must be an integer.'})
+            continue
+
+        user_to_update = User.query.get(user_id)
+        if not user_to_update:
+            errors.append({'id': user_id, 'error': 'User not found.'})
+            continue
+
+        users_to_update_in_session.append(user_to_update) # Add to list for session management
+
+        # Username validation
+        if 'username' in user_data and user_data['username'] and user_data['username'].strip() and \
+           user_to_update.username != user_data['username'].strip():
+            new_username = user_data['username'].strip()
+            if User.query.filter(User.id != user_id).filter(func.lower(User.username) == func.lower(new_username)).first():
+                errors.append({'id': user_id, 'error': f"Username '{new_username}' already exists."})
+                continue
+            user_to_update.username = new_username
+
+        # Email validation
+        if 'email' in user_data and user_data['email'] and user_data['email'].strip() and \
+           user_to_update.email != user_data['email'].strip():
+            new_email = user_data['email'].strip()
+            if '@' not in new_email or '.' not in new_email.split('@')[-1]:
+                errors.append({'id': user_id, 'error': 'Invalid email format.'})
+                continue
+            if User.query.filter(User.id != user_id).filter(func.lower(User.email) == func.lower(new_email)).first():
+                errors.append({'id': user_id, 'error': f"Email '{new_email}' already registered."})
+                continue
+            user_to_update.email = new_email
+
+        # Password update
+        if 'password' in user_data and user_data['password']:
+            user_to_update.set_password(user_data['password'])
+
+        # is_admin update (with safeguards)
+        if 'is_admin' in user_data and isinstance(user_data['is_admin'], bool):
+            if user_to_update.id == current_user.id and not user_data['is_admin']:
+                num_admins_flag = User.query.filter_by(is_admin=True).count()
+                if num_admins_flag == 1:
+                    errors.append({'id': user_id, 'error': 'Cannot remove your own admin status (is_admin flag) as the sole admin.'})
+                    continue
+            user_to_update.is_admin = user_data['is_admin']
+
+        # Role updates (with safeguards)
+        if 'role_ids' in user_data:
+            role_ids = user_data.get('role_ids', [])
+            if not isinstance(role_ids, list):
+                errors.append({'id': user_id, 'error': 'role_ids must be a list of integers.'})
+                continue
+
+            new_roles = []
+            valid_roles = True
+            for r_id in role_ids:
+                if not isinstance(r_id, int):
+                    errors.append({'id': user_id, 'error': f'Invalid role ID type: {r_id}. Must be integer.'})
+                    valid_roles = False
+                    break
+                role = Role.query.get(r_id)
+                if not role:
+                    errors.append({'id': user_id, 'error': f'Role with ID {r_id} not found.'})
+                    valid_roles = False
+                    break
+                new_roles.append(role)
+
+            if not valid_roles:
+                continue
+
+            admin_role = Role.query.filter_by(name="Administrator").first()
+            if admin_role:
+                is_removing_admin_role_from_this_user = admin_role not in new_roles and admin_role in user_to_update.roles
+                if is_removing_admin_role_from_this_user and user_to_update.id == current_user.id:
+                    users_with_admin_role = User.query.filter(User.roles.any(id=admin_role.id)).all()
+                    if len(users_with_admin_role) == 1 and users_with_admin_role[0].id == user_to_update.id:
+                        errors.append({'id': user_id, 'error': 'Cannot remove your own "Administrator" role as the sole holder of this role.'})
+                        continue
+            user_to_update.roles = new_roles
+
+        # If no errors for this user so far, it's a successful update for counting purposes
+        # Note: errors list might contain errors for *other* users from previous iterations.
+        # We check if the current user_id is in any error dict.
+        if not any(err.get('id') == user_id for err in errors):
+            updated_count += 1
+            # db.session.add(user_to_update) # Not strictly necessary if object is already in session and modified
+
+    if updated_count > 0 : # Only commit if there were successful updates
+        try:
+            db.session.commit()
+            add_audit_log(action="BULK_EDIT_USERS_SUCCESS", details=f"{updated_count} users updated by {current_user.username}. Errors: {len(errors)}")
+        except Exception as e:
+            db.session.rollback()
+            # If commit fails, it affects all users attempted in this batch.
+            # We can't easily tell which specific user caused the commit failure without more granular checks.
+            # Add a general error message.
+            # For simplicity, we don't add individual errors for each user that was part of the failed batch here,
+            # as they might have passed individual validations.
+            current_app.logger.error(f"Bulk edit commit failed: {str(e)}")
+            add_audit_log(action="BULK_EDIT_USERS_FAILED", details=f"Failed to update users in bulk by {current_user.username} during commit. Error: {str(e)}. Attempted: {updated_count}, Initial errors: {len(errors)}")
+            return jsonify({
+                'message': 'Bulk user edit operation failed during commit.',
+                'users_updated': 0, # No users were truly updated if commit failed
+                'errors': errors + [{'id': 'general', 'error': f'Database error during commit: {str(e)}'}]
+            }), 500
+
+    status_code = 200 if not errors else 207
+    return jsonify({
+        'message': 'Bulk user edit operation completed.',
+        'users_updated': updated_count,
+        'errors': errors
+    }), status_code
