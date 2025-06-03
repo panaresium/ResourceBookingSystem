@@ -1917,44 +1917,43 @@ class TestAdminBookings(AppTests):
         self.assertIn(b'Admin Bookings Management', response_admin.data) # Check for page title/heading
         self.logout()
 
-    def test_admin_hard_delete_booking_success(self):
-        """Test successful hard deletion of a booking by an admin."""
-        admin_user = self._create_admin_user(username="adminharddeleteuser", email_ext="adminharddelete")
+    def test_admin_delete_booking_success(self):
+        """Test successful deletion of a booking by an admin."""
+        admin_user = self._create_admin_user(username="admindeleteuser", email_ext="admindelete")
         self.login(admin_user.username, 'adminpass')
 
+        # Create a booking to be deleted
         booking_owner = User.query.filter_by(username='testuser').first()
         self.assertIsNotNone(booking_owner, "Test user 'testuser' not found for booking creation.")
 
         booking_to_delete = self._create_booking(
             user_name=booking_owner.username,
             resource_id=self.resource1.id,
-            start_offset_hours=24,
-            title="Booking To Be Hard Deleted"
+            start_offset_hours=24, # Ensure it's in the future and not terminal
+            title="Booking Scheduled for Deletion"
         )
         booking_id_to_delete = booking_to_delete.id
-        original_booking_title = booking_to_delete.title
-        original_resource_name = self.resource1.name
-        original_user_name = booking_owner.username
+        self.assertIsNotNone(Booking.query.get(booking_id_to_delete), "Booking creation failed for delete test.")
 
-        self.assertIsNotNone(Booking.query.get(booking_id_to_delete), "Booking creation failed for hard delete test.")
-
-        response = self.client.post(f'/api/admin/bookings/{booking_id_to_delete}/delete')
+        # Call the admin delete endpoint (which is currently the 'cancel' route)
+        response = self.client.post(f'/api/admin/bookings/{booking_id_to_delete}/cancel')
 
         self.assertEqual(response.status_code, 200, f"API call failed: {response.get_data(as_text=True)}")
         response_data = response.get_json()
         self.assertEqual(response_data.get('message'), 'Booking deleted successfully by admin.')
         self.assertEqual(response_data.get('booking_id'), booking_id_to_delete)
 
+        # Verify booking is deleted from DB
         self.assertIsNone(Booking.query.get(booking_id_to_delete), "Booking was not deleted from the database.")
 
+        # Verify audit log
         audit_log = AuditLog.query.filter_by(action="ADMIN_DELETE_BOOKING", user_id=admin_user.id).order_by(AuditLog.id.desc()).first()
         self.assertIsNotNone(audit_log, "ADMIN_DELETE_BOOKING audit log not found.")
-        self.assertIn(f"Admin '{admin_user.username}' DELETED booking ID {booking_id_to_delete}", audit_log.details)
-        self.assertIn(f"Booked by: '{original_user_name}'", audit_log.details)
-        self.assertIn(f"Resource: '{original_resource_name}'", audit_log.details)
-        self.assertIn(f"Title: '{original_booking_title}'", audit_log.details)
-        self.assertNotIn("Deletion message:", audit_log.details) # Ensure no cancellation message part
-        self.assertNotIn("cancelled booking", audit_log.details.lower()) # Ensure it says deleted, not cancelled
+        self.assertIn(f"Admin '{admin_user.username}' deleted booking ID {booking_id_to_delete}", audit_log.details)
+        self.assertIn(f"Booked by: '{booking_owner.username}'", audit_log.details)
+        self.assertIn(f"Resource: '{self.resource1.name}'", audit_log.details)
+        self.assertIn(f"Title: '{booking_to_delete.title}'", audit_log.details)
+        self.assertIn("Deletion message: 'This booking was deleted by an administrator.'", audit_log.details)
 
         self.logout()
 
@@ -1964,7 +1963,7 @@ class TestAdminBookings(AppTests):
         self.login(admin_user.username, 'adminpass')
 
         non_existent_booking_id = 99999
-        response = self.client.post(f'/api/admin/bookings/{non_existent_booking_id}/delete')
+        response = self.client.post(f'/api/admin/bookings/{non_existent_booking_id}/cancel')
         self.assertEqual(response.status_code, 404)
         self.assertIn('Booking not found', response.get_json().get('error', ''))
 
@@ -1972,47 +1971,39 @@ class TestAdminBookings(AppTests):
 
     def test_admin_delete_booking_no_permission(self):
         """Test non-admin (or admin without permission) attempting to delete a booking."""
+        # Create a booking
         booking_to_delete = self._create_booking(user_name='testuser', resource_id=self.resource1.id, start_offset_hours=24)
 
-        self.login('testuser', 'password')
+        # Login as a non-admin user
+        self.login('testuser', 'password') # 'testuser' is not an admin and has no 'manage_bookings' permission
 
-        response = self.client.post(f'/api/admin/bookings/{booking_to_delete.id}/delete')
+        response = self.client.post(f'/api/admin/bookings/{booking_to_delete.id}/cancel')
         self.assertEqual(response.status_code, 403, "Non-admin user should be forbidden to delete bookings via admin route.")
 
+        # Verify booking still exists
         self.assertIsNotNone(Booking.query.get(booking_to_delete.id))
         self.logout()
 
-    def test_admin_delete_completed_booking_success(self):
-        """Test admin deleting a booking that is already 'completed'."""
-        admin_user = self._create_admin_user(username="admin_del_completed", email_ext="admindelcompleted")
+    def test_admin_delete_already_terminal_booking(self):
+        """Test admin attempting to delete a booking already in a terminal state."""
+        admin_user = self._create_admin_user(username="admin_del_terminal", email_ext="admindelterminal")
         self.login(admin_user.username, 'adminpass')
 
-        booking_owner = User.query.filter_by(username='testuser').first()
-        booking = self._create_booking(user_name=booking_owner.username, resource_id=self.resource1.id, start_offset_hours=1, title="Completed Deletable Test")
+        booking = self._create_booking(user_name='testuser', resource_id=self.resource1.id, start_offset_hours=1, title="Terminal Test")
         booking_id = booking.id
-        booking.status = 'completed' # Set to a terminal status
+
+        # Manually set booking to a terminal status, e.g., 'completed' or 'cancelled'
+        booking.status = 'completed'
         db.session.commit()
 
-        original_booking_title = booking.title
-        original_resource_name = self.resource1.name
+        response = self.client.post(f'/api/admin/bookings/{booking_id}/cancel') # Attempt delete
+        self.assertEqual(response.status_code, 400)
+        json_data = response.get_json()
+        self.assertIn(f"Booking is already in a terminal state ({booking.status}) and cannot be deleted this way.", json_data.get('error', ''))
 
-        self.assertIsNotNone(Booking.query.get(booking_id), "Booking setup failed.")
-
-        response = self.client.post(f'/api/admin/bookings/{booking_id}/delete')
-        self.assertEqual(response.status_code, 200, f"API call failed: {response.get_data(as_text=True)}")
-        response_data = response.get_json()
-        self.assertEqual(response_data.get('message'), 'Booking deleted successfully by admin.')
-        self.assertEqual(response_data.get('booking_id'), booking_id)
-
-        self.assertIsNone(Booking.query.get(booking_id), "Completed booking was not deleted from the database.")
-
-        audit_log = AuditLog.query.filter_by(action="ADMIN_DELETE_BOOKING", user_id=admin_user.id).order_by(AuditLog.id.desc()).first()
-        self.assertIsNotNone(audit_log, "ADMIN_DELETE_BOOKING audit log not found for completed booking.")
-        self.assertIn(f"Admin '{admin_user.username}' DELETED booking ID {booking_id}", audit_log.details)
-        self.assertIn(f"Original status was: 'completed'", audit_log.details)
-        self.assertIn(f"Booked by: '{booking_owner.username}'", audit_log.details)
-        self.assertIn(f"Resource: '{original_resource_name}'", audit_log.details)
-        self.assertIn(f"Title: '{original_booking_title}'", audit_log.details)
+        # Verify booking was not hard-deleted in this case
+        self.assertIsNotNone(Booking.query.get(booking_id))
+        self.assertEqual(Booking.query.get(booking_id).status, 'completed') # Status should remain 'completed'
 
         self.logout()
 
@@ -2036,28 +2027,140 @@ class TestAdminBookings(AppTests):
 
         self.assertIn(booking1.title, html_content)
         self.assertIn(booking1.user_name, html_content) # testuser
-        self.assertIn(self.resource1.name, html_content)
+        self.assertIn(self.resource1.name, html_content) # Room A
 
         self.assertIn(booking2.title, html_content)
-        self.assertIn(booking2.user_name, html_content)
-        self.assertIn(self.resource2.name, html_content)
+        self.assertIn(booking2.user_name, html_content) # testuser2
+        self.assertIn(self.resource2.name, html_content) # Room B
         self.logout()
 
-    def test_admin_delete_booking_permission(self):
-        """Test permissions for the admin delete booking API endpoint."""
+    def test_admin_cancel_booking_permission(self):
+        """Test permissions for the admin cancel booking API endpoint."""
         booking = self._create_booking(user_name='testuser', resource_id=self.resource1.id, start_offset_hours=1)
 
         # Unauthenticated
-        response_unauth = self.client.post(f'/api/admin/bookings/{booking.id}/delete')
-        self.assertEqual(response_unauth.status_code, 401)
+        response_unauth = self.client.post(f'/api/admin/bookings/{booking.id}/cancel')
+        self.assertEqual(response_unauth.status_code, 401) # Expect 401 for API if not logged in
 
         # Non-admin login
         self.login('testuser', 'password')
-        response_non_admin = self.client.post(f'/api/admin/bookings/{booking.id}/delete')
+        response_non_admin = self.client.post(f'/api/admin/bookings/{booking.id}/cancel')
         self.assertEqual(response_non_admin.status_code, 403)
         self.logout()
 
-        # Admin with permission is tested in test_admin_hard_delete_booking_success
+        # Admin with permission should be tested in functionality test
+
+    def test_admin_cancel_booking_functionality(self):
+        """Test functionality of admin cancelling a booking."""
+        admin = self._create_admin_user()
+        self.login(admin.username, 'adminpass')
+
+        booking_user = User.query.filter_by(username='testuser').first()
+        booking = self._create_booking(user_name=booking_user.username, resource_id=self.resource1.id, start_offset_hours=1, title="To Be Cancelled")
+        initial_status = booking.status
+        self.assertNotEqual(initial_status, 'cancelled')
+
+        response = self.client.post(f'/api/admin/bookings/{booking.id}/cancel')
+        self.assertEqual(response.status_code, 200)
+        json_data = response.get_json()
+        self.assertTrue(json_data.get('message'), 'Booking cancelled successfully')
+        self.assertEqual(json_data.get('new_status'), 'cancelled')
+
+        # Verify booking status in DB
+        updated_booking = Booking.query.get(booking.id)
+        self.assertEqual(updated_booking.status, 'cancelled')
+
+        # Verify audit log
+        audit_log = AuditLog.query.filter(
+            AuditLog.action == "ADMIN_CANCEL_BOOKING",
+            AuditLog.user_id == admin.id
+        ).order_by(AuditLog.id.desc()).first()
+
+        self.assertIsNotNone(audit_log)
+        self.assertIn(f"Admin '{admin.username}' cancelled booking ID {booking.id}", audit_log.details)
+        self.assertIn(f"Booked by: '{booking_user.username}'", audit_log.details)
+        self.assertIn(f"Resource: '{self.resource1.name}'", audit_log.details)
+        self.assertIn(f"Title: '{booking.title}'", audit_log.details)
+        # The admin_deleted_message is set on the object before deletion, so the old audit log details for cancellation
+        # would not have included it. The new ADMIN_DELETE_BOOKING action does.
+        # If we were testing the old cancel, this assertion would be fine.
+        # The admin_deleted_message is now part of the cancellation process.
+        self.assertIn(f"Cancellation reason: 'This booking for '{booking.title}'", audit_log.details)
+        self.assertIn("was cancelled by an administrator.'", audit_log.details)
+
+        self.logout()
+
+    def test_admin_cancel_booking_retains_record(self):
+        """Test that admin cancelling a booking retains the record and sets status."""
+        admin_user = self._create_admin_user(username="admin_retain_user", email_ext="adminretain")
+        self.login(admin_user.username, 'adminpass')
+
+        regular_user = User.query.filter_by(username='testuser').first()
+        booking_to_cancel = self._create_booking(
+            user_name=regular_user.username,
+            resource_id=self.resource1.id,
+            start_offset_hours=24,
+            title="Booking for Status Check"
+        )
+        booking_id = booking_to_cancel.id
+        original_title = booking_to_cancel.title
+        booking_date_str = booking_to_cancel.start_time.strftime('%Y-%m-%d')
+
+
+        response = self.client.post(f'/api/admin/bookings/{booking_id}/cancel')
+
+        self.assertEqual(response.status_code, 200)
+        json_data = response.get_json()
+        self.assertEqual(json_data.get('new_status'), 'cancelled_by_admin')
+
+        # Verify booking still exists in DB
+        cancelled_booking_db = Booking.query.get(booking_id)
+        self.assertIsNotNone(cancelled_booking_db)
+
+        # Verify status and message
+        self.assertEqual(cancelled_booking_db.status, 'cancelled_by_admin')
+        self.assertIsNotNone(cancelled_booking_db.admin_deleted_message)
+        expected_message_part = f"This booking for '{original_title}' on {booking_date_str} for resource '{self.resource1.name}' was cancelled by an administrator."
+        self.assertEqual(cancelled_booking_db.admin_deleted_message, expected_message_part)
+
+        # Verify audit log
+        audit_log = AuditLog.query.filter(
+            AuditLog.action == "ADMIN_CANCEL_BOOKING",
+            AuditLog.user_id == admin_user.id
+        ).order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log)
+        self.assertIn(f"Admin '{admin_user.username}' cancelled booking ID {booking_id}", audit_log.details)
+        self.assertIn(f"New status: 'cancelled_by_admin'", audit_log.details)
+        self.assertIn(f"Cancellation reason: '{expected_message_part}'", audit_log.details)
+
+        self.logout()
+
+    def test_admin_cancel_already_cancelled_booking(self):
+        """Test attempting to cancel/delete an already cancelled booking by admin."""
+        admin = self._create_admin_user(username="admin_cancel_cancelled", email_ext="admincancelcancelled")
+        self.login(admin.username, 'adminpass')
+
+        booking = self._create_booking(user_name='testuser', resource_id=self.resource1.id, start_offset_hours=1)
+        booking_id = booking.id
+
+        # Set status to 'cancelled' to simulate an already cancelled booking
+        booking.status = 'cancelled'
+        db.session.commit()
+
+        # Attempt to "cancel" (which is now delete) this booking
+        response = self.client.post(f'/api/admin/bookings/{booking_id}/cancel')
+
+        # The endpoint logic checks for terminal status.
+        self.assertEqual(response.status_code, 400)
+        json_data = response.get_json()
+        # The error message might have changed if the action is 'cancel' vs 'delete'
+        self.assertIn(f"Booking is already in a terminal state (cancelled) and cannot be cancelled again.", json_data.get('error', ''))
+
+        # Verify booking was not modified further
+        self.assertIsNotNone(Booking.query.get(booking_id))
+        self.assertEqual(Booking.query.get(booking_id).status, 'cancelled') # Should remain 'cancelled'
+        self.assertIsNone(Booking.query.get(booking_id).admin_deleted_message) # Should not have admin message if it was user-cancelled
+        self.logout()
 
     def test_admin_clear_booking_message_success(self):
         """Test admin clearing a 'cancelled_by_admin' booking's message."""
