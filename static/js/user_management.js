@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const bulkEditUserModal = document.getElementById('bulk-edit-user-modal'); // New
     const bulkEditUserForm = document.getElementById('bulk-edit-user-form'); // New
     const bulkSetAdminSelect = document.getElementById('bulk-set-admin'); // New
-    const bulkAddRolesContainer = document.getElementById('bulk-add-roles-container'); // New
+    const bulkEdit_addRolesContainer = document.getElementById('bulk-add-roles-container'); // Renamed for clarity and to avoid collision
     const bulkRemoveRolesContainer = document.getElementById('bulk-remove-roles-container'); // New
     const bulkEditUserModalStatusDiv = document.getElementById('bulk-edit-user-modal-status'); // New
     const bulkEditSelectedCountSpan = document.getElementById('bulk-edit-selected-count'); // New
@@ -40,7 +40,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const bulkAddDefaultPasswordInput = document.getElementById('bulk-add-default-password'); // New
     const bulkAddEmailPatternInput = document.getElementById('bulk-add-email-pattern'); // New
     const bulkAddIsAdminCheckbox = document.getElementById('bulk-add-is-admin'); // New
-    const bulkAddRolesContainer = document.getElementById('bulk-add-roles-container'); // New
+    // Assumes HTML ID will be changed to 'bulk-add-pattern-roles-container' for this distinct element
+    const bulkAddPattern_rolesContainer = document.getElementById('bulk-add-pattern-roles-container'); // Renamed and ID corrected
     const bulkAddUserModalStatusDiv = document.getElementById('bulk-add-user-modal-status'); // New
     const closeBulkAddModalBtn = bulkAddUserModal ? bulkAddUserModal.querySelector('.close-modal-btn') : null; // New
 
@@ -584,9 +585,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Bulk User Edit Functionality ---
     function populateRolesForBulkEditModal(selectedAddIds = [], selectedRemoveIds = []) {
-        if (!bulkAddRolesContainer || !bulkRemoveRolesContainer) return;
+        if (!bulkEdit_addRolesContainer || !bulkRemoveRolesContainer) return; // Use renamed variable
 
-        showLoading(bulkAddRolesContainer, 'Loading roles...');
+        showLoading(bulkEdit_addRolesContainer, 'Loading roles...'); // Use renamed variable
         showLoading(bulkRemoveRolesContainer, 'Loading roles...');
 
         // Use cached roles if available, otherwise fetch
@@ -597,12 +598,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 allAvailableRolesCache = roles; // Cache them if fetched now
             }
 
-            bulkAddRolesContainer.innerHTML = ''; // Clear previous
+            bulkEdit_addRolesContainer.innerHTML = ''; // Clear previous - Use renamed variable
             bulkRemoveRolesContainer.innerHTML = '';
 
             if (!roles || roles.length === 0) {
                 const noRolesMsg = '<small>No roles available.</small>';
-                bulkAddRolesContainer.innerHTML = noRolesMsg;
+                bulkEdit_addRolesContainer.innerHTML = noRolesMsg; // Use renamed variable
                 bulkRemoveRolesContainer.innerHTML = noRolesMsg;
                 return;
             }
@@ -613,31 +614,31 @@ document.addEventListener('DOMContentLoaded', function() {
                 addCheckboxDiv.classList.add('checkbox-item');
                 const addCheckbox = document.createElement('input');
                 addCheckbox.type = 'checkbox';
-                addCheckbox.id = `bulk-add-role-${role.id}`;
+                addCheckbox.id = `bulk-edit-add-role-${role.id}`; // Changed ID prefix for uniqueness
                 addCheckbox.value = role.id;
-                addCheckbox.name = 'bulk_add_role_ids';
+                addCheckbox.name = 'bulk_edit_add_role_ids'; // Changed name for clarity
                 if (selectedAddIds.includes(role.id)) addCheckbox.checked = true;
 
                 const addLabel = document.createElement('label');
-                addLabel.htmlFor = `bulk-add-role-${role.id}`;
+                addLabel.htmlFor = `bulk-edit-add-role-${role.id}`; // Changed ID prefix
                 addLabel.textContent = role.name;
 
                 addCheckboxDiv.appendChild(addCheckbox);
                 addCheckboxDiv.appendChild(addLabel);
-                bulkAddRolesContainer.appendChild(addCheckboxDiv);
+                bulkEdit_addRolesContainer.appendChild(addCheckboxDiv); // Use renamed variable
 
                 // Populate Remove Roles Container
                 const removeCheckboxDiv = document.createElement('div');
                 removeCheckboxDiv.classList.add('checkbox-item');
                 const removeCheckbox = document.createElement('input');
                 removeCheckbox.type = 'checkbox';
-                removeCheckbox.id = `bulk-remove-role-${role.id}`;
+                removeCheckbox.id = `bulk-edit-remove-role-${role.id}`; // Changed ID prefix for uniqueness
                 removeCheckbox.value = role.id;
-                removeCheckbox.name = 'bulk_remove_role_ids';
+                removeCheckbox.name = 'bulk_edit_remove_role_ids'; // Changed name for clarity
                 if (selectedRemoveIds.includes(role.id)) removeCheckbox.checked = true;
 
                 const removeLabel = document.createElement('label');
-                removeLabel.htmlFor = `bulk-remove-role-${role.id}`;
+                removeLabel.htmlFor = `bulk-edit-remove-role-${role.id}`; // Changed ID prefix
                 removeLabel.textContent = role.name;
 
                 removeCheckboxDiv.appendChild(removeCheckbox);
@@ -645,7 +646,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 bulkRemoveRolesContainer.appendChild(removeCheckboxDiv);
             });
         }).catch(error => {
-            showError(bulkAddRolesContainer, 'Failed to load roles.');
+            showError(bulkEdit_addRolesContainer, 'Failed to load roles.'); // Use renamed variable
             showError(bulkRemoveRolesContainer, 'Failed to load roles.');
             console.error("Error populating roles for bulk edit:", error);
         });
@@ -709,9 +710,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (setAdminValue === "true") setAdmin = true;
             else if (setAdminValue === "false") setAdmin = false;
 
-            const addRoleIds = Array.from(bulkAddRolesContainer.querySelectorAll('input[name="bulk_add_role_ids"]:checked'))
+            const addRoleIds = Array.from(bulkEdit_addRolesContainer.querySelectorAll('input[name="bulk_edit_add_role_ids"]:checked')) // Use renamed variable and name
                                     .map(cb => parseInt(cb.value, 10));
-            const removeRoleIds = Array.from(bulkRemoveRolesContainer.querySelectorAll('input[name="bulk_remove_role_ids"]:checked'))
+            const removeRoleIds = Array.from(bulkRemoveRolesContainer.querySelectorAll('input[name="bulk_edit_remove_role_ids"]:checked')) // Use changed name
                                      .map(cb => parseInt(cb.value, 10));
 
             // Client-side validation for overlapping roles
@@ -933,7 +934,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // This reuses the logic from populateRolesForUserForm or a new generic one
             try {
                 // If roles aren't cached, populateRolesInContainer will fetch them.
-                await populateRolesInContainer(bulkAddRolesContainer, 'bulk-add', []);
+                await populateRolesInContainer(bulkAddPattern_rolesContainer, 'bulk-add-pattern', []); // Use renamed variable
             } catch (error) {
                 showError(bulkAddUserModalStatusDiv, `Failed to load roles for selection: ${error.message}`);
                 // Optionally, don't open modal if roles fail to load, or open with error.
@@ -961,7 +962,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const defaultPassword = bulkAddDefaultPasswordInput.value; // No trim for password
             const emailPattern = bulkAddEmailPatternInput.value.trim(); // Optional
             const isAdmin = bulkAddIsAdminCheckbox.checked;
-            const selectedRoleIds = Array.from(bulkAddRolesContainer.querySelectorAll('input[name="bulk-add_role_ids"]:checked'))
+            const selectedRoleIds = Array.from(bulkAddPattern_rolesContainer.querySelectorAll('input[name="bulk-add-pattern_role_ids"]:checked')) // Use renamed variable and name
                                        .map(cb => parseInt(cb.value, 10));
 
             // --- Client-side Validation ---
@@ -1053,3 +1054,5 @@ document.addEventListener('DOMContentLoaded', function() {
 
     fetchAndDisplayRoles(); // This also populates allAvailableRolesCache for user forms
 });
+
+[end of static/js/user_management.js]
