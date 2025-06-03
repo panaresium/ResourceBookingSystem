@@ -2391,6 +2391,58 @@ class TestAdminBookings(AppTests):
         self.assertEqual(settings.max_booking_days_in_future, 30)
         self.logout()
 
+    def test_admin_booking_settings_visibility_toggle_setup(self):
+        """Test the HTML structure and JS setup for past booking adjustment visibility."""
+        admin = self._create_admin_user(username="settingsadmin_visibility", email_ext="settings_visibility")
+        self.login(admin.username, 'adminpass')
+
+        # Ensure BookingSettings exists
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings()
+            db.session.add(settings)
+
+        # Case 1: allow_past_bookings is False (adjustment field should be hidden by style attribute)
+        settings.allow_past_bookings = False
+        settings.past_booking_time_adjustment_hours = 5 # Value should not affect visibility if parent is off
+        db.session.commit()
+
+        response_hidden = self.client.get('/admin/booking_settings')
+        self.assertEqual(response_hidden.status_code, 200)
+        html_hidden = response_hidden.data.decode('utf-8')
+
+        self.assertIn('id="allow_past_bookings"', html_hidden)
+        self.assertNotIn('id="allow_past_bookings" checked', html_hidden)
+        self.assertIn('id="past_booking_time_adjustment_hours_group" style="display: none;"', html_hidden)
+        self.assertIn('name="past_booking_time_adjustment_hours" value="5"', html_hidden) # Value should still be rendered
+
+        # Case 2: allow_past_bookings is True (adjustment field should be visible)
+        settings.allow_past_bookings = True
+        settings.past_booking_time_adjustment_hours = -2
+        db.session.commit()
+
+        response_visible = self.client.get('/admin/booking_settings')
+        self.assertEqual(response_visible.status_code, 200)
+        html_visible = response_visible.data.decode('utf-8')
+
+        self.assertIn('id="allow_past_bookings" checked', html_visible)
+        # When visible, the style attribute might be empty or 'display: block/inline-block'.
+        # The JS sets it to display: ''
+        self.assertIn('id="past_booking_time_adjustment_hours_group" style="display: \'\';"', html_visible.replace(" ", "")) # Remove spaces for robust check
+        self.assertIn('name="past_booking_time_adjustment_hours" value="-2"', html_visible)
+
+        # Verify JavaScript snippet is present and seems correct
+        self.assertIn("var allowPastBookingsCheckbox = document.getElementById('allow_past_bookings');", html_visible)
+        self.assertIn("var adjustmentGroup = document.getElementById('past_booking_time_adjustment_hours_group');", html_visible)
+        self.assertIn("function toggleAdjustmentField() {", html_visible)
+        self.assertIn("if (allowPastBookingsCheckbox.checked)", html_visible)
+        self.assertIn("adjustmentGroup.style.display = '';", html_visible)
+        self.assertIn("adjustmentGroup.style.display = 'none';", html_visible)
+        self.assertIn("toggleAdjustmentField();", html_visible) # Initial call
+        self.assertIn("allowPastBookingsCheckbox.addEventListener('change', toggleAdjustmentField);", html_visible)
+
+        self.logout()
+
 
 class TestBulkUserOperationsAPI(AppTests):
     def setUp(self):
