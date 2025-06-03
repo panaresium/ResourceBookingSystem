@@ -4,7 +4,7 @@ from sqlalchemy import func # For func.lower in create_resource, and func.ilike 
 
 # Local imports
 from extensions import db
-from models import User, Role # Assuming Role is needed for export/import and updates
+from models import User, Role, UserMessage # Assuming Role is needed for export/import and updates
 from utils import add_audit_log
 from auth import permission_required
 
@@ -358,6 +358,65 @@ def delete_users_bulk():
         current_app.logger.exception("Error deleting users in bulk:")
         add_audit_log(action="BULK_DELETE_USER_FAILED", details=f"Bulk user deletion by {current_user.username} failed. Error: {str(e)}")
         return jsonify({'error': 'Failed to delete users due to a server error.'}), 500
+
+@api_users_bp.route('/user/messages', methods=['GET'])
+@login_required
+def get_user_messages():
+    try:
+        # Fetch messages for the current user that are not dismissed
+        messages = UserMessage.query.filter_by(user_id=current_user.id, is_dismissed=False)\
+                                    .order_by(UserMessage.created_at.desc())\
+                                    .all()
+
+        messages_data = []
+        for msg in messages:
+            messages_data.append({
+                'id': msg.id,
+                'message_content': msg.message_content,
+                'created_at': msg.created_at.isoformat(),
+                'original_booking_title': msg.original_booking_title,
+                'original_resource_name': msg.original_resource_name,
+                'original_start_time': msg.original_start_time.isoformat() if msg.original_start_time else None,
+                'original_end_time': msg.original_end_time.isoformat() if msg.original_end_time else None,
+            })
+
+        current_app.logger.info(f"User '{current_user.username}' fetched {len(messages_data)} non-dismissed messages.")
+        return jsonify(messages_data), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error fetching messages for user '{current_user.username}': {e}", exc_info=True)
+        return jsonify({'error': 'Failed to fetch messages due to a server error.'}), 500
+
+@api_users_bp.route('/user/messages/<int:message_id>/dismiss', methods=['POST'])
+@login_required
+def dismiss_user_message(message_id):
+    try:
+        message = UserMessage.query.get(message_id)
+
+        if not message:
+            current_app.logger.warning(f"User '{current_user.username}' attempt to dismiss non-existent message ID: {message_id}")
+            return jsonify({'error': 'Message not found.'}), 404
+
+        # Verify the message belongs to the current user
+        if message.user_id != current_user.id:
+            current_app.logger.warning(f"User '{current_user.username}' (ID: {current_user.id}) unauthorized attempt to dismiss message ID: {message_id} owned by user ID: {message.user_id}.")
+            return jsonify({'error': 'You are not authorized to dismiss this message.'}), 403
+
+        if message.is_dismissed:
+            current_app.logger.info(f"Message ID: {message_id} for user '{current_user.username}' is already dismissed. No action taken.")
+            return jsonify({'message': 'Message already dismissed.'}), 200
+
+        message.is_dismissed = True
+        db.session.commit()
+
+        current_app.logger.info(f"User '{current_user.username}' dismissed message ID: {message_id}.")
+        # add_audit_log(action="DISMISS_USER_MESSAGE", details=f"User '{current_user.username}' dismissed message ID {message_id}.")
+        return jsonify({'message': 'Message dismissed successfully.'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error dismissing message ID {message_id} for user '{current_user.username}': {e}", exc_info=True)
+        return jsonify({'error': 'Failed to dismiss message due to a server error.'}), 500
 
 @api_users_bp.route('/admin/users/export', methods=['GET'])
 @login_required
