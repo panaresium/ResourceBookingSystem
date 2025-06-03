@@ -631,6 +631,3 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 console.log('new_booking_map.js script execution finished.');
 
-[end of static/js/new_booking_map.js]
-
-[end of static/js/new_booking_map.js]

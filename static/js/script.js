@@ -223,7 +223,7 @@ async function updateAuthLink() {
                 welcomeMessageContainer.style.display = 'list-item';
             }
 
-            if (userDropdownContainer) userDropdownContainer.style.display = 'list-item';
+            if (userDropdownContainer) userDropdownContainer.style.display = 'block';
             if (userDropdownButton) {
                 userDropdownButton.innerHTML = `<span class="user-icon">&#x1F464;</span><span class="dropdown-arrow"> &#9662;</span>`;
                 userDropdownButton.setAttribute('aria-expanded', 'false');
