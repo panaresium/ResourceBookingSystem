@@ -59,22 +59,28 @@
     <p>{{ _('Current UTC Time:') }} <span id="utc-clock">Loading...</span></p>
     <hr>
 
-    <section id="backup-section" class="mb-5">
-        <h2>{{ _('One Click Backup') }}</h2>
-        <p>{{ _('Perform a full backup of the database, map configurations, and uploaded media files.') }}</p>
-        <button id="one-click-backup-btn" class="btn btn-primary">{{ _('Perform Full Backup Now') }}</button>
-        <div id="backup-status-message" class="mt-2"></div>
-        <pre id="backup-log-area" class="log-area" style="display: none;"></pre>
-    </section>
+    <!-- Full System Backup & Restore Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="card-title h5">{{ _('Full System Backup & Restore') }}</h2>
+        </div>
+        <div class="card-body">
+            <section id="backup-section" class="mb-4"> <!-- mb-5 to mb-4 as it's inside a card -->
+                <h5>{{ _('One Click Backup') }}</h5>
+                <p>{{ _('Perform a full backup of the database, map configurations, and uploaded media files.') }}</p>
+                <button id="one-click-backup-btn" class="btn btn-primary"><i class="fas fa-cloud-upload-alt"></i> {{ _('Perform Full Backup Now') }}</button>
+                <div id="backup-status-message" class="mt-2"></div>
+                <pre id="backup-log-area" class="log-area" style="display: none;"></pre>
+            </section>
 
-    <hr>
+            <hr> <!-- Kept HR for separation within the same card -->
 
-    <section id="restore-section">
-        <h2>{{ _('One Click Restore') }}</h2>
-        <p>{{ _('Restore the system from a previously created full backup. This will overwrite current data.') }}</p>
-        <button id="list-backups-btn" class="btn btn-info mb-3">{{ _('Refresh Available Backups') }}</button>
-        <div id="restore-status-message" class="mt-2 mb-3"></div>
-        <pre id="restore-log-area" class="log-area" style="display: none;"></pre>
+            <section id="restore-section">
+                <h5>{{ _('One Click Restore') }}</h5>
+                <p>{{ _('Restore the system from a previously created full backup. This will overwrite current data.') }}</p>
+                <button id="list-backups-btn" class="btn btn-info mb-3"><i class="fas fa-sync-alt"></i> {{ _('Refresh Available Backups') }}</button>
+                <div id="restore-status-message" class="mt-2 mb-3"></div>
+                <pre id="restore-log-area" class="log-area" style="display: none;"></pre>
 
         <table id="available-backups-table" class="table table-striped">
             <thead>
@@ -95,10 +101,10 @@
             <p class="text-center" id="backup-page-info"></p>
         </nav>
     </section>
+        </div> <!-- End card-body for Full System Backup & Restore -->
+    </div> <!-- End card for Full System Backup & Restore -->
 
-    <hr>
-
-    <!-- Selective Restore Modal -->
+    <!-- Selective Restore Modal (remains outside card structure as it's a modal) -->
     <div id="selective-restore-modal" class="modal" style="display: none !important;">
         <div class="modal-content">
             <span class="close-modal-btn" id="close-selective-restore-modal">&times;</span>
@@ -132,68 +138,78 @@
         </div>
     </div>
 
-    <h2>{{ _('Scheduled Full Backups') }}</h2>
-    <div id="schedule-status-message" class="status-message my-2" role="alert"></div>
-    <form id="backup-schedule-form" class="mb-4">
-        <div class="form-group mb-2">
-            <div class="form-check">
-                <input type="checkbox" class="form-check-input" id="schedule-enabled" name="is_enabled">
-                <label class="form-check-label" for="schedule-enabled">{{ _('Enable Scheduled Backups') }}</label>
-            </div>
+    <!-- Scheduled Full System Backups Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="card-title h5">{{ _('Scheduled Full System Backups') }}</h2>
         </div>
-        <div class="form-group mb-2">
-            <label for="schedule-type">{{ _('Schedule Type') }}</label>
-            <select id="schedule-type" name="schedule_type" class="form-control form-select">
-                <option value="daily">{{ _('Daily') }}</option>
-                <option value="weekly">{{ _('Weekly') }}</option>
-            </select>
-        </div>
-        <div class="form-group mb-2" id="day-of-week-group" style="display: none;"> <!-- Hidden by default -->
-            <label for="schedule-day-of-week">{{ _('Day of Week') }}</label>
-            <select id="schedule-day-of-week" name="day_of_week" class="form-control form-select">
-                <option value="0">{{ _('Monday') }}</option>
-                <option value="1">{{ _('Tuesday') }}</option>
-                <option value="2">{{ _('Wednesday') }}</option>
-                <option value="3">{{ _('Thursday') }}</option>
-                <option value="4">{{ _('Friday') }}</option>
-                <option value="5">{{ _('Saturday') }}</option>
-                <option value="6">{{ _('Sunday') }}</option>
-            </select>
-        </div>
-        <div class="form-group mb-2">
-            <label for="schedule-time-of-day">{{ _('Time of Day (UTC)') }}</label>
-            <input type="time" id="schedule-time-of-day" name="time_of_day" class="form-control" required>
-        </div>
-        <button type="submit" id="save-schedule-btn" class="btn btn-success">{{ _('Save Schedule') }}</button>
-    </form>
-
-    <hr>
-
-    <section id="booking-csv-restore-section" class="mb-5">
-        <h2>{{ _('Booking CSV Backups') }}</h2>
-        <p>{{ _('Restore bookings from a previously generated CSV export. This will add new bookings from the CSV, skipping any that appear to be duplicates based on resource, user, and time.') }}</p>
-
-        <form method="POST" action="{{ url_for('admin_ui.manual_backup_bookings_csv_route') }}" style="margin-bottom: 15px;">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-            <div class="form-row align-items-center">
-                <div class="col-auto">
-                    <label class="sr-only" for="booking_backup_range">{{ _('Select Backup Range') }}</label>
-                    <select class="custom-select mr-sm-2" id="booking_backup_range" name="backup_range_type">
-                        <option value="all" selected>{{ _('All Bookings') }}</option>
-                        <option value="1day">{{ _('Last 1 Day') }}</option>
-                        <option value="3days">{{ _('Last 3 Days') }}</option>
-                        <option value="7days">{{ _('Last 7 Days') }}</option>
+        <div class="card-body">
+            <div id="schedule-status-message" class="status-message my-2" role="alert"></div>
+            <form id="backup-schedule-form"> <!-- Removed mb-4 from form as card has mb-4 -->
+                <div class="form-group mb-2">
+                    <div class="form-check">
+                        <input type="checkbox" class="form-check-input" id="schedule-enabled" name="is_enabled">
+                        <label class="form-check-label" for="schedule-enabled">{{ _('Enable Scheduled Backups') }}</label>
+                    </div>
+                </div>
+                <div class="form-group mb-2">
+                    <label for="schedule-type">{{ _('Schedule Type') }}</label>
+                    <select id="schedule-type" name="schedule_type" class="form-control form-select">
+                        <option value="daily">{{ _('Daily') }}</option>
+                        <option value="weekly">{{ _('Weekly') }}</option>
                     </select>
                 </div>
-                <div class="col-auto">
-                    <button type="submit" class="btn btn-primary" onclick="return confirm('{{ _('Are you sure you want to manually back up bookings for the selected range to a new CSV file?') }}');">
-                        <i class="fas fa-cloud-upload-alt"></i> {{ _('Backup Bookings to CSV') }}
-                    </button>
+                <div class="form-group mb-2" id="day-of-week-group" style="display: none;"> <!-- Hidden by default -->
+                    <label for="schedule-day-of-week">{{ _('Day of Week') }}</label>
+                    <select id="schedule-day-of-week" name="day_of_week" class="form-control form-select">
+                        <option value="0">{{ _('Monday') }}</option>
+                        <option value="1">{{ _('Tuesday') }}</option>
+                        <option value="2">{{ _('Wednesday') }}</option>
+                        <option value="3">{{ _('Thursday') }}</option>
+                        <option value="4">{{ _('Friday') }}</option>
+                        <option value="5">{{ _('Saturday') }}</option>
+                        <option value="6">{{ _('Sunday') }}</option>
+                    </select>
                 </div>
-            </div>
-        </form>
+                <div class="form-group mb-2">
+                    <label for="schedule-time-of-day">{{ _('Time of Day (UTC)') }}</label>
+                    <input type="time" id="schedule-time-of-day" name="time_of_day" class="form-control" required>
+                </div>
+                <button type="submit" id="save-schedule-btn" class="btn btn-success"><i class="fas fa-save"></i> {{ _('Save Schedule') }}</button>
+            </form>
+        </div> <!-- End card-body for Scheduled Full System Backups -->
+    </div> <!-- End card for Scheduled Full System Backups -->
 
-        {% if booking_csv_backups and booking_csv_backups|length > 0 %}
+    <!-- Booking CSV Backups Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="card-title h5">{{ _('Booking CSV Backups') }}</h2>
+        </div>
+        <div class="card-body">
+            <section id="booking-csv-restore-section"> <!-- Removed mb-5 -->
+                <p>{{ _('Restore bookings from a previously generated CSV export. This will add new bookings from the CSV, skipping any that appear to be duplicates based on resource, user, and time.') }}</p>
+
+                <form method="POST" action="{{ url_for('admin_ui.manual_backup_bookings_csv_route') }}" style="margin-bottom: 15px;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <div class="form-row align-items-center">
+                        <div class="col-auto">
+                            <label class="sr-only" for="booking_backup_range">{{ _('Select Backup Range') }}</label>
+                            <select class="custom-select mr-sm-2" id="booking_backup_range" name="backup_range_type">
+                                <option value="all" selected>{{ _('All Bookings') }}</option>
+                                <option value="1day">{{ _('Last 1 Day') }}</option>
+                                <option value="3days">{{ _('Last 3 Days') }}</option>
+                                <option value="7days">{{ _('Last 7 Days') }}</option>
+                            </select>
+                        </div>
+                        <div class="col-auto">
+                            <button type="submit" class="btn btn-primary" onclick="return confirm('{{ _('Are you sure you want to manually back up bookings for the selected range to a new CSV file?') }}');">
+                                <i class="fas fa-file-csv"></i> {{ _('Backup Bookings to CSV') }}
+                            </button>
+                        </div>
+                    </div>
+                </form>
+
+                {% if booking_csv_backups and booking_csv_backups|length > 0 %}
             <table class="table table-striped">
                 <thead>
                     <tr>
@@ -265,53 +281,61 @@
         </nav>
         {% endif %}
     </section>
+        </div> <!-- End card-body for Booking CSV Backups -->
+    </div> <!-- End card for Booking CSV Backups -->
 
-    <hr>
-    <section id="booking-csv-schedule-section" class="mb-5">
-        {# Ensure the route name 'admin_ui.save_booking_csv_schedule_route' is what will be created later #}
-        <form method="POST" action="{{ url_for('admin_ui.save_booking_csv_schedule_route') }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-            <h3>{{ _('Schedule Periodic Booking CSV Backups') }}</h3>
+    <!-- Scheduled Booking CSV Backups Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="card-title h5">{{ _('Scheduled Booking CSV Backups') }}</h2>
+        </div>
+        <div class="card-body">
+            <section id="booking-csv-schedule-section"> <!-- Removed mb-5 -->
+                {# Ensure the route name 'admin_ui.save_booking_csv_schedule_route' is what will be created later #}
+                <form method="POST" action="{{ url_for('admin_ui.save_booking_csv_schedule_route') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <!-- h3 removed as card-title is used -->
+                    <div class="form-group">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="booking_csv_schedule_enabled" name="booking_csv_schedule_enabled" value="true">
+                            <label class="form-check-label" for="booking_csv_schedule_enabled">
+                                {{ _('Enable Scheduled Booking CSV Backups') }}
+                            </label>
+                        </div>
+                    </div>
 
-            <div class="form-group">
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="booking_csv_schedule_enabled" name="booking_csv_schedule_enabled" value="true">
-                    <label class="form-check-label" for="booking_csv_schedule_enabled">
-                        {{ _('Enable Scheduled Booking CSV Backups') }}
-                    </label>
-                </div>
-            </div>
+                    <div class="form-row">
+                        <div class="form-group col-md-3">
+                            <label for="booking_csv_schedule_interval_value">{{ _('Backup Interval Value') }}</label>
+                            <input type="number" class="form-control" id="booking_csv_schedule_interval_value" name="booking_csv_schedule_interval_value" value="24" min="1">
+                        </div>
+                        <div class="form-group col-md-3">
+                            <label for="booking_csv_schedule_interval_unit">{{ _('Interval Unit') }}</label>
+                            <select class="custom-select" id="booking_csv_schedule_interval_unit" name="booking_csv_schedule_interval_unit">
+                                <option value="hours" selected>{{ _('Hours') }}</option>
+                                <option value="days">{{ _('Days') }}</option>
+                                <option value="minutes">{{ _('Minutes') }}</option>
+                            </select>
+                        </div>
+                    </div>
 
-            <div class="form-row">
-                <div class="form-group col-md-3">
-                    <label for="booking_csv_schedule_interval_value">{{ _('Backup Interval Value') }}</label>
-                    <input type="number" class="form-control" id="booking_csv_schedule_interval_value" name="booking_csv_schedule_interval_value" value="24" min="1">
-                </div>
-                <div class="form-group col-md-3">
-                    <label for="booking_csv_schedule_interval_unit">{{ _('Interval Unit') }}</label>
-                    <select class="custom-select" id="booking_csv_schedule_interval_unit" name="booking_csv_schedule_interval_unit">
-                        <option value="hours" selected>{{ _('Hours') }}</option>
-                        <option value="days">{{ _('Days') }}</option>
-                        <option value="minutes">{{ _('Minutes') }}</option>
-                    </select>
-                </div>
-            </div>
+                    <div class="form-group">
+                        <label for="booking_csv_schedule_range_type">{{ _('Backup Data Range for Schedule') }}</label>
+                        <select class="custom-select" id="booking_csv_schedule_range_type" name="booking_csv_schedule_range_type">
+                            <option value="all" selected>{{ _('All Bookings') }}</option>
+                            <option value="1day">{{ _('Last 1 Day') }}</option>
+                            <option value="3days">{{ _('Last 3 Days') }}</option>
+                            <option value="7days">{{ _('Last 7 Days') }}</option>
+                        </select>
+                    </div>
 
-            <div class="form-group">
-                <label for="booking_csv_schedule_range_type">{{ _('Backup Data Range for Schedule') }}</label>
-                <select class="custom-select" id="booking_csv_schedule_range_type" name="booking_csv_schedule_range_type">
-                    <option value="all" selected>{{ _('All Bookings') }}</option>
-                    <option value="1day">{{ _('Last 1 Day') }}</option>
-                    <option value="3days">{{ _('Last 3 Days') }}</option>
-                    <option value="7days">{{ _('Last 7 Days') }}</option>
-                </select>
-            </div>
-
-            <button type="submit" class="btn btn-success">
-                <i class="fas fa-save"></i> {{ _('Save Schedule Settings') }}
-            </button>
-        </form>
-    </section>
+                    <button type="submit" class="btn btn-success">
+                        <i class="fas fa-save"></i> {{ _('Save Schedule Settings') }}
+                    </button>
+                </form>
+            </section>
+        </div> <!-- End card-body for Scheduled Booking CSV Backups -->
+    </div> <!-- End card for Scheduled Booking CSV Backups -->
 
     {# The System Troubleshooting Tools section that was here has been moved to admin_troubleshooting.html #}
     {# Ensure the <hr> that was above it is also removed if it's now redundant, or kept if it separates from the above section. #}
@@ -325,6 +349,71 @@
     document.addEventListener('DOMContentLoaded', function () {
         const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
         const socket = io();
+
+        // --- Global Interactive Element Selectors ---
+        const interactiveElementSelectors = [
+            '#one-click-backup-btn',
+            '#list-backups-btn',
+            '#save-schedule-btn',
+            '.restore-btn', // Dynamically generated
+            '.restore-dry-run-btn', // Dynamically generated
+            '.delete-backup-btn', // Dynamically generated
+            'form[action^="/admin/verify_full_backup/"] button[type="submit"]', // Dynamically generated
+            '#confirm-selective-restore-btn',
+            // Booking CSV buttons (some might be static, some dynamic if list is paginated by Flask)
+            'form[action*="manual_backup_bookings_csv_route"] button[type="submit"]',
+            'form[action*="restore_booking_csv_route"] button[type="submit"]',
+            'form[action*="verify_booking_csv_backup_route"] button[type="submit"]',
+            'form[action*="delete_booking_csv_backup_route"] button[type="submit"]',
+            'form[action*="save_booking_csv_schedule_route"] button[type="submit"]',
+            // Pagination buttons for full backups
+            '#backup-prev-page a.page-link',
+            '#backup-next-page a.page-link',
+            // Pagination for booking CSV backups (these are direct links, less critical to disable, but for consistency)
+            // 'nav[aria-label="Booking CSV Backup Pagination"] a.page-link', // These are <a> tags, not buttons. Disabling might be complex or not standard.
+            // Schedule form inputs
+            '#schedule-enabled',
+            '#schedule-type',
+            '#schedule-day-of-week',
+            '#schedule-time-of-day',
+            // Selective restore checkboxes (disabling these during operation might be good)
+            '#selective-restore-form input.component-checkbox',
+            '#selective-restore-form input#component-all'
+        ];
+
+        function disablePageInteractions() {
+            console.log("Disabling page interactions.");
+            interactiveElementSelectors.forEach(selector => {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach(el => {
+                    if (el.tagName === 'A' && el.classList.contains('page-link')) {
+                        el.classList.add('disabled'); // Bootstrap way to disable pagination links
+                        el.setAttribute('aria-disabled', 'true');
+                        el.onclick = (event) => event.preventDefault(); // Prevent navigation
+                    } else {
+                        el.disabled = true;
+                    }
+                });
+            });
+        }
+
+        function enablePageInteractions() {
+            console.log("Enabling page interactions.");
+            interactiveElementSelectors.forEach(selector => {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach(el => {
+                    if (el.tagName === 'A' && el.classList.contains('page-link')) {
+                        el.classList.remove('disabled');
+                        el.removeAttribute('aria-disabled');
+                        el.onclick = null; // Restore default behavior
+                    } else {
+                        el.disabled = false;
+                    }
+                });
+            });
+            // Special handling for pagination list items if needed (e.g. 'disabled' class on <li>)
+            // This is generally handled by Bootstrap's JS or by the logic that adds/removes 'disabled' on the <a> tag.
+        }
 
         // --- UTC Clock ---
         function updateUtcClock() {
@@ -444,12 +533,11 @@
 
 
             if (data.status === "Backup completed with overall success: True" || data.status.startsWith("Backup completed with overall success: False")) {
-                // backupButton.disabled = false; // Re-enable all relevant buttons
-                document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
+                enablePageInteractions();
                 console.log('Final backup status displayed:', backupStatusMessageEl.textContent);
                 currentBackupTaskId = null; // Clear task ID after processing final message
                 if (messageType === 'success' || (data.detail && data.detail.toUpperCase().includes("SUCCESS"))) { // also check data.detail for success for loadAvailableBackups
-                    loadAvailableBackups();
+                    loadAvailableBackups(); // This might re-trigger enable/disable if it has its own calls, be mindful
                 }
             }
         });
@@ -468,8 +556,7 @@
 
             const lowerStatus = data.status.toLowerCase();
             if (lowerStatus.includes("fully completed") || lowerStatus.includes("failed") || lowerStatus.includes("error") || lowerStatus.includes("critical error") || lowerStatus.includes("finished")) {
-                document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
-                // backupButton.disabled = false;
+                enablePageInteractions();
                 console.log('Final restore status displayed:', restoreStatusMessageEl.textContent);
                 currentRestoreTaskId = null; // Clear task ID after processing final message
             }
@@ -505,8 +592,7 @@
             backupLogAreaEl.style.display = 'block'; // Show log area
             restoreLogAreaEl.style.display = 'none'; // Hide other log area
             appendLog('backup-log-area', "{{ _('Initiating backup request...') }}", '', 'info');
-            // Disable all relevant buttons during one-click backup
-            document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = true);
+            disablePageInteractions();
 
             backupStatusMessageEl.textContent = "{{ _('Initiating backup...') }}";
             backupStatusMessageEl.className = 'alert alert-info';
@@ -524,9 +610,7 @@
                 backupStatusMessageEl.className = `alert alert-${messageType}`;
 
                 if (!data.success) {
-                    // backupButton.disabled = false;
-                    // document.querySelectorAll('.restore-btn').forEach(btn => btn.disabled = false);
-                    document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
+                    enablePageInteractions();
                 }
             })
             .catch(error => {
@@ -534,9 +618,7 @@
                 appendLog('backup-log-area', "{{ _('Backup request failed:') }}", error.message, 'error');
                 backupStatusMessageEl.textContent = "{{ _('Backup request failed:') }} " + error.toString();
                 backupStatusMessageEl.className = 'alert alert-danger';
-                // backupButton.disabled = false;
-                // document.querySelectorAll('.restore-btn').forEach(btn => btn.disabled = false);
-                document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
+                enablePageInteractions();
             });
         });
 
@@ -559,11 +641,7 @@
             backupLogAreaEl.style.display = 'none';
             appendLog('restore-log-area', `{{ _('Initiating selective restore for') }} ${backupTimestamp}...`, `Components: ${selectedComponents.join(', ')}`, 'info');
 
-            // Disable buttons
-            confirmSelectiveRestoreBtn.disabled = true;
-            // document.querySelectorAll('.restore-btn, .restore-dry-run-btn').forEach(btn => btn.disabled = true);
-            // backupButton.disabled = true;
-            document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = true);
+            disablePageInteractions();
 
 
             restoreStatusMessageEl.textContent = `{{ _('Initiating selective restore...') }}`;
@@ -600,11 +678,7 @@
                 if (data.success) {
                     selectiveRestoreModal.style.display = 'none'; // Close modal on successful initiation
                 } else {
-                    // Re-enable buttons if initiation failed
-                    // confirmSelectiveRestoreBtn.disabled = false;
-                    // document.querySelectorAll('.restore-btn, .restore-dry-run-btn').forEach(btn => btn.disabled = false);
-                    // backupButton.disabled = false;
-                    document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn, #confirm-selective-restore-btn').forEach(btn => btn.disabled = false);
+                    enablePageInteractions();
                 }
             })
             .catch(error => {
@@ -615,16 +689,14 @@
                 restoreStatusMessageEl.className = 'alert alert-danger';
                 selectiveRestoreModalStatusEl.textContent = errorMsg;
                 selectiveRestoreModalStatusEl.className = 'alert alert-danger';
-
-                // Re-enable buttons on catch
-                // confirmSelectiveRestoreBtn.disabled = false;
-                // document.querySelectorAll('.restore-btn, .restore-dry-run-btn').forEach(btn => btn.disabled = false);
-                // backupButton.disabled = false;
-                document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn, #confirm-selective-restore-btn').forEach(btn => btn.disabled = false);
+                enablePageInteractions();
             });
         });
 
         function loadAvailableBackups() {
+            // It's possible this is called when other operations are finishing.
+            // To prevent premature re-enabling or conflicting states, disable first.
+            disablePageInteractions();
             restoreStatusMessageEl.textContent = "{{ _('Fetching available backups...') }}";
             restoreStatusMessageEl.className = 'alert alert-info';
             availableBackupsTbody.innerHTML = '<tr><td colspan="2">{{ _("Loading...") }}</td></tr>';
@@ -662,6 +734,9 @@
                 restoreStatusMessageEl.textContent = "{{ _('Error fetching backups:') }} " + error.toString();
                 restoreStatusMessageEl.className = 'alert alert-danger';
                 document.getElementById('backup-pagination-nav').style.display = 'none';
+            })
+            .finally(() => {
+                enablePageInteractions(); // Re-enable after loading, regardless of outcome
             });
         }
 
@@ -793,7 +868,7 @@
                 backupLogAreaEl.style.display = 'none';
                 appendLog('restore-log-area', `VERIFY: Initiating for ${timestampToVerify}...`, '', 'info');
 
-                document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = true);
+                disablePageInteractions();
                 
                 restoreStatusMessageEl.textContent = `{{ _('Initiating verification for') }} ${timestampToVerify}...`;
                 restoreStatusMessageEl.className = 'alert alert-info';
@@ -816,7 +891,7 @@
                     restoreStatusMessageEl.className = `alert alert-${messageType}`;
 
                     if (!data.success) { 
-                        document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
+                        enablePageInteractions();
                         currentVerifyTaskId = null; 
                     }
                 })
@@ -826,7 +901,7 @@
                     appendLog('restore-log-area', errorMsg, '', 'error');
                     restoreStatusMessageEl.textContent = errorMsg;
                     restoreStatusMessageEl.className = 'alert alert-danger';
-                    document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
+                    enablePageInteractions();
                     currentVerifyTaskId = null; 
                 });
 
@@ -854,7 +929,7 @@
                 backupLogAreaEl.style.display = 'none';
                 appendLog('restore-log-area', "{{ _('Initiating delete request for') }} " + displayTimestamp + "...", '', 'info');
 
-                document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = true);
+                disablePageInteractions();
 
                 restoreStatusMessageEl.textContent = "{{ _('Deleting backup...') }}";
                 restoreStatusMessageEl.className = 'alert alert-info';
@@ -872,7 +947,7 @@
                     restoreStatusMessageEl.className = `alert alert-${messageType}`;
 
                     if (!data.success) { // If API call itself fails to initiate
-                         document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
+                         enablePageInteractions();
                          currentDeleteTaskId = null;
                     }
                     // Socket listener 'backup_delete_progress' will handle final re-enable and list refresh
@@ -882,7 +957,7 @@
                     appendLog('restore-log-area', `{{ _('Delete request for ${displayTimestamp} failed:') }}`, error.message, 'error');
                     restoreStatusMessageEl.textContent = `{{ _('Delete request for ${displayTimestamp} failed:') }} ${error.toString()}`;
                     restoreStatusMessageEl.className = 'alert alert-danger';
-                    document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
+                    enablePageInteractions();
                     currentDeleteTaskId = null;
                 });
 
@@ -926,8 +1001,7 @@
                 backupLogAreaEl.style.display = 'none';
                 appendLog('restore-log-area', `{{ _('Initiating') }} ${actionVerb} ${displayTimestamp}...`, '', 'info');
 
-                document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = true);
-                // backupButton.disabled = true; // Covered by above selector
+                disablePageInteractions();
                 restoreStatusMessageEl.textContent = `{{ _('Initiating') }} ${actionVerb} ${displayTimestamp}... {{ _('This may take a while. Please do not navigate away.') }}`;
                 restoreStatusMessageEl.className = 'alert alert-info';
 
@@ -951,9 +1025,7 @@
                     restoreStatusMessageEl.className = `alert alert-${messageType}`;
 
                     if (!data.success) {
-                        // document.querySelectorAll('.restore-btn, .restore-dry-run-btn').forEach(btn => btn.disabled = false);
-                        // backupButton.disabled = false;
-                        document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
+                        enablePageInteractions();
                     }
                     // If it's a dry run and successful, display actions from HTTP response for immediate feedback
                     if (isDryRun && data.success && data.actions && Array.isArray(data.actions)) {
@@ -974,11 +1046,11 @@
                     appendLog('restore-log-area', `{{ _('Request for ${actionVerb} ${displayTimestamp} failed:') }}`, error.message, 'error');
                     restoreStatusMessageEl.textContent = `{{ _('Request for ${actionVerb} ${displayTimestamp} failed:') }} ${error.toString()}`;
                     restoreStatusMessageEl.className = 'alert alert-danger';
-                    // document.querySelectorAll('.restore-btn, .restore-dry-run-btn').forEach(btn => btn.disabled = false);
-                    // backupButton.disabled = false;
-                    document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
+                    enablePageInteractions();
                 });
             } else if (targetButton.classList.contains('restore-btn')) { // This is now the entry point for Selective Restore Modal
+                // For opening the modal, we don't disable all page interactions yet.
+                // That will happen when "Proceed with Selected Restore" is clicked.
                 const timestampToRestore = targetButton.getAttribute('data-timestamp');
                 let displayTimestamp = timestampToRestore;
                  try { // Format for display
@@ -1075,14 +1147,10 @@
                         appendLog('restore-log-area', `  - ${err}`, '', 'error');
                     });
                 }
-                // Re-enable buttons on completion
-                document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
-                // backupButton.disabled = false; // Covered by above
+                enablePageInteractions();
                 currentVerifyTaskId = null;
             } else if (data.status && (data.status.toLowerCase().includes("failed") || data.status.toLowerCase().includes("error") || data.status.toLowerCase().includes("missing") || data.status.toLowerCase().includes("critical") )) {
-                 // Re-enable buttons if an intermediate error message implies failure for the task
-                document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
-                // backupButton.disabled = false; // Covered by above
+                enablePageInteractions();
                 currentVerifyTaskId = null;
             }
         });
@@ -1106,7 +1174,7 @@
             const lowerDetail = data.detail ? data.detail.toLowerCase() : "";
 
             if (lowerStatus.includes("finished") || lowerStatus.includes("failed") || lowerStatus.includes("error") || lowerDetail.includes("success") || lowerDetail.includes("failure") || lowerDetail.includes("critical_error")) {
-                document.querySelectorAll('.restore-btn, .restore-dry-run-btn, .verify-backup-btn, .delete-backup-btn, #one-click-backup-btn').forEach(btn => btn.disabled = false);
+                enablePageInteractions();
                 console.log('Final delete status displayed:', restoreStatusMessageEl.textContent);
                 currentDeleteTaskId = null;
                 if (messageType === 'success' || (data.detail && data.detail.toUpperCase().includes("SUCCESS"))) {
@@ -1125,7 +1193,8 @@
         }
         scheduleTypeSelect.addEventListener('change', toggleDayOfWeekVisibility);
 
-        function loadBackupSchedule() { /* ... existing ... */
+        function loadBackupSchedule() {
+            disablePageInteractions(); // Disable while loading
             scheduleStatusMessage.textContent = "{{ _('Loading schedule...') }}";
             scheduleStatusMessage.className = 'alert alert-info';
             fetch('/api/admin/backup_schedule', {
@@ -1159,11 +1228,15 @@
                 console.error('Load schedule error:', error);
                 scheduleStatusMessage.textContent = "{{ _('Error loading schedule:') }} " + error.toString();
                 scheduleStatusMessage.className = 'alert alert-danger';
+            })
+            .finally(() => {
+                enablePageInteractions(); // Re-enable after loading
             });
         }
-        scheduleForm.addEventListener('submit', function(event) { /* ... existing ... */
+        scheduleForm.addEventListener('submit', function(event) {
             event.preventDefault();
-            saveScheduleButton.disabled = true;
+            disablePageInteractions(); // Disable during save
+            // saveScheduleButton.disabled = true; // This will be handled by disablePageInteractions
             scheduleStatusMessage.textContent = "{{ _('Saving schedule...') }}";
             scheduleStatusMessage.className = 'alert alert-info';
             const payload = {
@@ -1197,7 +1270,8 @@
                 scheduleStatusMessage.className = 'alert alert-danger';
             })
             .finally(() => {
-                saveScheduleButton.disabled = false;
+                enablePageInteractions(); // Re-enable after save attempt
+                // saveScheduleButton.disabled = false; // Handled by enablePageInteractions
             });
         });
         loadBackupSchedule(); // Initial Load
