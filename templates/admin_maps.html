@@ -376,12 +376,98 @@
                     console.error('Error updating map offsets:', error);
                     showStatus(adminMapsListStatus, `{{ _("Error updating offsets: ${error.message}") }}`, true);
                 }
-            }
-            // Note: Logic for Define Areas and Delete buttons might be in other JS files (admin_resource_edit.js?) or needs to be handled here too.
-            // This subtask focuses on the "Update Offsets" button.
-            // Define Areas and Delete button functionality might be handled by existing scripts like admin_resource_edit.js or similar,
-            // as they interact with elements beyond just map offsets.
-            // The select-map-btn and delete-map-btn classes are standard across the admin interface.
+            } // End of update-map-offsets-btn logic
+
+            else if (event.target.classList.contains('select-map-btn')) {
+                const button = event.target;
+                const mapId = button.dataset.mapId;
+                const mapName = button.dataset.mapName;
+                const imageUrl = button.dataset.imageUrl;
+                const offsetX = parseInt(button.dataset.offsetX || '0');
+                const offsetY = parseInt(button.dataset.offsetY || '0');
+
+                console.log(`Define Areas clicked for map ID: ${mapId}, Name: ${mapName}, Image: ${imageUrl}, OffsetX: ${offsetX}, OffsetY: ${offsetY}`);
+
+                const defineAreasSection = document.getElementById('define-areas-section');
+                if (defineAreasSection) defineAreasSection.style.display = 'block';
+
+                const selectedMapNameEl = document.getElementById('selected-map-name');
+                if (selectedMapNameEl) selectedMapNameEl.textContent = mapName || 'N/A';
+
+                const selectedMapImageEl = document.getElementById('selected-map-image');
+                if (selectedMapImageEl) {
+                    selectedMapImageEl.src = imageUrl || '#';
+                    selectedMapImageEl.alt = mapName || 'Selected Map';
+                }
+
+                const selectedFloorMapIdInput = document.getElementById('selected-floor-map-id');
+                if (selectedFloorMapIdInput) selectedFloorMapIdInput.value = mapId;
+
+                window.currentMapContext = { mapId, mapName, imageUrl, offsetX, offsetY };
+
+                if (typeof window.populateResourcesForMapping === 'function') {
+                    window.populateResourcesForMapping(mapId);
+                } else {
+                    console.warn('populateResourcesForMapping function not found.');
+                }
+                if (typeof window.fetchAndDrawExistingMapAreas === 'function') {
+                    window.fetchAndDrawExistingMapAreas(mapId);
+                } else {
+                    console.warn('fetchAndDrawExistingMapAreas function not found.');
+                }
+                if(defineAreasSection) defineAreasSection.scrollIntoView({ behavior: 'smooth' });
+            } // End of select-map-btn logic
+
+            else if (event.target.classList.contains('delete-map-btn')) {
+                const mapId = event.target.dataset.mapId;
+                const mapRow = event.target.closest('tr');
+                const mapName = mapRow ? (mapRow.cells[0] ? mapRow.cells[0].textContent : `Map ID ${mapId}`) : `Map ID ${mapId}`;
+
+                if (!confirm(`{{ _("Are you sure you want to delete map '${mapName}' (ID: ${mapId})? This will also remove any associated resource area mappings.") }}`)) {
+                    return;
+                }
+
+                showStatus(adminMapsListStatus, `{{ _("Deleting map ${mapName}...") }}`, false);
+                const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+                if (!csrfToken) {
+                    showStatus(adminMapsListStatus, '{{ _("CSRF token not found. Cannot delete.") }}', true);
+                    console.error('CSRF token not found for delete operation.');
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`/api/admin/maps/${mapId}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'X-CSRFToken': csrfToken
+                        }
+                    });
+                    const result = await response.json();
+                    if (!response.ok) {
+                        const errorDetail = result && result.error ? result.error : response.statusText;
+                        throw new Error(errorDetail || `HTTP error! status: ${response.status}`);
+                    }
+                    showStatus(adminMapsListStatus, result.message || `{{ _("Map '${mapName}' deleted successfully.") }}`, false);
+                    if (mapRow) mapRow.remove();
+
+                    const defineAreasSection = document.getElementById('define-areas-section');
+                    const selectedFloorMapIdInput = document.getElementById('selected-floor-map-id');
+                    if (defineAreasSection && selectedFloorMapIdInput && selectedFloorMapIdInput.value === mapId) {
+                        defineAreasSection.style.display = 'none';
+                        selectedFloorMapIdInput.value = '';
+                        document.getElementById('selected-map-name').textContent = '';
+                        document.getElementById('selected-map-image').src = '#';
+                        const canvas = document.getElementById('drawing-canvas');
+                        if (canvas) {
+                            const context = canvas.getContext('2d');
+                            context.clearRect(0, 0, canvas.width, canvas.height);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error deleting map:', error);
+                    showStatus(adminMapsListStatus, `{{ _("Error deleting map '${mapName}': ${error.message}") }}`, true);
+                }
+            } // End of delete-map-btn logic
         });
 
         // Initial load of maps
@@ -393,6 +479,8 @@
         if (uploadMapForm) {
             uploadMapForm.addEventListener('submit', async function(event) {
                 event.preventDefault();
+                event.stopImmediatePropagation(); // Prevent other listeners on this form
+
                 showStatus(uploadStatusDiv, '{{ _("Uploading map...") }}');
                 const formData = new FormData(uploadMapForm);
                 try {
