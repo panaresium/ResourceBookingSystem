@@ -597,42 +597,57 @@ def init_api_system_routes(app):
 @login_required
 @permission_required('manage_system')
 def api_admin_view_db_raw_top100():
-    """Fetches top 100 records from key database tables."""
-    current_app.logger.info(f"User {current_user.username} requested raw top 100 DB records.")
-    
-    models_to_query = {
-        "User": User,
-        "Booking": Booking,
-        "Resource": Resource,
-        "FloorMap": FloorMap,
-        "AuditLog": AuditLog,
-        "Role": Role
-    }
+    """Fetches top 100 records from all database tables."""
+    current_app.logger.info(f"User {current_user.username} requested raw top 100 DB records from all tables.")
     
     raw_data = {}
-    
+    all_table_names = db.metadata.tables.keys()
+    model_registry = db.Model._decl_class_registry
+
+    # Create a mapping from table names to model classes for easier lookup
+    table_to_model_map = {}
+    for name, cls in model_registry.items():
+        if hasattr(cls, '__tablename__'):
+            table_to_model_map[cls.__tablename__] = cls
+            # Also handle cases where the class name might be used if __tablename__ is not the key
+            # This part might need adjustment based on how models are registered if not strictly by __tablename__
+            if name != cls.__tablename__ and name not in table_to_model_map: # Avoid overwriting if already mapped
+                 table_to_model_map[name] = cls
+
+
     try:
-        for model_name, ModelClass in models_to_query.items():
-            records = ModelClass.query.limit(100).all()
-            serialized_records = []
-            for record in records:
-                record_dict = {}
-                for column in record.__table__.columns:
-                    val = getattr(record, column.name)
-                    if isinstance(val, datetime):
-                        record_dict[column.name] = val.isoformat()
-                    elif isinstance(val, (uuid.UUID)):
-                        record_dict[column.name] = str(val)
-                    else:
-                        record_dict[column.name] = val
-                serialized_records.append(record_dict)
-            raw_data[model_name] = serialized_records
+        for table_name in all_table_names:
+            ModelClass = table_to_model_map.get(table_name)
             
-        current_app.logger.info(f"Successfully fetched raw DB data for {current_user.username}.")
+            if ModelClass:
+                current_app.logger.debug(f"Querying table: {table_name} using model: {ModelClass.__name__}")
+                records = ModelClass.query.limit(100).all()
+                serialized_records = []
+                for record in records:
+                    record_dict = {}
+                    for column in record.__table__.columns:
+                        val = getattr(record, column.name)
+                        if isinstance(val, datetime):
+                            record_dict[column.name] = val.isoformat()
+                        elif isinstance(val, uuid.UUID):
+                            record_dict[column.name] = str(val)
+                        else:
+                            record_dict[column.name] = val
+                    serialized_records.append(record_dict)
+                raw_data[table_name] = serialized_records
+            else:
+                # Handle tables that might not have a direct model class mapping
+                # For example, association tables or tables not managed by SQLAlchemy Model.
+                # These can be skipped or handled with raw SQL if necessary,
+                # but for this request, we'll log and skip.
+                current_app.logger.info(f"Skipping table '{table_name}': No direct SQLAlchemy Model class found in registry. This might be an association table or similar.")
+                raw_data[table_name] = [{"info": f"Skipped table '{table_name}'. No direct Model class found."}]
+
+        current_app.logger.info(f"Successfully fetched raw DB data from all tables for {current_user.username}.")
         return jsonify({'success': True, 'data': raw_data}), 200
         
     except Exception as e:
-        current_app.logger.error(f"Error fetching raw DB data for {current_user.username}: {e}", exc_info=True)
+        current_app.logger.error(f"Error fetching raw DB data from all tables for {current_user.username}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': f'Failed to fetch raw database data: {str(e)}'}), 500
 
 # --- System Data Cleanup Route ---

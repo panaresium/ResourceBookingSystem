@@ -87,20 +87,27 @@ document.addEventListener('DOMContentLoaded', function () {
 
                         const tableButton = document.createElement('button');
                         tableButton.className = 'btn btn-outline-primary btn-sm mb-1 w-100 text-start';
-                        tableButton.textContent = `${tableName} (${records.length} records)`;
+                        // Adjust button text based on whether records is an array or a message string
+                        tableButton.textContent = `${tableName} (${Array.isArray(records) ? records.length + ' ' + (records.length === 1 ? "{{ _('record') }}" : "{{ _('records') }}") : "{{ _('info') }}"})`;
 
                         const recordsDiv = document.createElement('div');
                         recordsDiv.className = 'db-records-content';
                         recordsDiv.style.display = 'none';
 
-                        if (records.length > 0) {
-                            const preFormattedRecords = document.createElement('pre');
-                            preFormattedRecords.style.whiteSpace = 'pre-wrap';
-                            preFormattedRecords.style.wordBreak = 'break-all';
-                            preFormattedRecords.textContent = JSON.stringify(records, null, 2);
-                            recordsDiv.appendChild(preFormattedRecords);
-                        } else {
-                            recordsDiv.textContent = "{{ _('No records found for this table.') }}";
+                        if (Array.isArray(records)) {
+                            if (records.length > 0) {
+                                const preFormattedRecords = document.createElement('pre');
+                                preFormattedRecords.style.whiteSpace = 'pre-wrap';
+                                preFormattedRecords.style.wordBreak = 'break-all';
+                                preFormattedRecords.textContent = JSON.stringify(records, null, 2);
+                                recordsDiv.appendChild(preFormattedRecords);
+                            } else {
+                                recordsDiv.textContent = "{{ _('No records found for this table.') }}";
+                            }
+                        } else if (typeof records === 'string') { // It's an informational message (e.g. for skipped tables)
+                            recordsDiv.textContent = records;
+                        } else { // Fallback for unexpected data type
+                            recordsDiv.textContent = "{{ _('Unexpected data format for this table.') }}";
                         }
 
                         tableButton.addEventListener('click', function() {
