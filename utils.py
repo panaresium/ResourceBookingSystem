@@ -535,27 +535,44 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
     return summary, status_code
 
 
-def export_bookings_to_csv_string(bookings_iterable) -> str:
+def export_bookings_to_csv_string(app, start_date=None, end_date=None) -> str:
     """
-    Exports an iterable of Booking model objects to a CSV formatted string.
+    Exports Booking model objects to a CSV formatted string, optionally filtered by date range.
 
     Args:
-        bookings_iterable: An iterable of Booking model objects.
+        app: The Flask application object.
+        start_date (datetime.datetime, optional): Filter for bookings starting on or after this date.
+        end_date (datetime.datetime, optional): Filter for bookings starting strictly before this date.
 
     Returns:
         A string containing the CSV data.
     """
-    output = io.StringIO()
-    writer = csv.writer(output)
-
-    # Define CSV header
     header = [
         'id', 'resource_id', 'user_name', 'start_time', 'end_time',
         'title', 'checked_in_at', 'checked_out_at', 'status', 'recurrence_rule'
     ]
+
+    bookings_to_export = []
+    with app.app_context():
+        query = Booking.query
+        if start_date:
+            query = query.filter(Booking.start_time >= start_date)
+        if end_date:
+            # Ensure end_date is exclusive for start_time
+            query = query.filter(Booking.start_time < end_date)
+        bookings_to_export = query.order_by(Booking.start_time).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
     writer.writerow(header)
 
-    for booking in bookings_iterable:
+    if not bookings_to_export:
+        # Return CSV with only header if no bookings match
+        csv_data = output.getvalue()
+        output.close()
+        return csv_data
+
+    for booking in bookings_to_export:
         row = [
             booking.id,
             booking.resource_id,

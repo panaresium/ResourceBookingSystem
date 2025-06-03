@@ -5,6 +5,7 @@ import sqlite3
 import json
 from datetime import datetime
 import tempfile # Added for temporary file
+import re # Added for regex parsing of CSV filenames
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError # Added HttpResponseError
 
 # Assuming models.py is in the same directory or accessible via PYTHONPATH
@@ -337,35 +338,43 @@ def main():
     print('Backup completed.')
 
 
-def backup_bookings_csv(app, socketio_instance=None, task_id=None):
+def backup_bookings_csv(app, socketio_instance=None, task_id=None, start_date_dt=None, end_date_dt=None, range_label=None):
     """
-    Creates a CSV backup of all bookings and uploads it to Azure File Share.
+    Creates a CSV backup of bookings, optionally filtered by date range, and uploads it to Azure File Share.
 
     Args:
         app: The Flask application object (for app context).
         socketio_instance: Optional SocketIO instance for progress emitting.
         task_id: Optional task ID for SocketIO progress emitting.
+        start_date_dt (datetime.datetime, optional): Start date for filtering bookings.
+        end_date_dt (datetime.datetime, optional): End date for filtering bookings.
+        range_label (str, optional): A label for the date range (e.g., "1day", "all").
     Returns:
         bool: True if backup was successful, False otherwise.
     """
-    logger.info("Starting booking CSV backup process.")
-    _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', 'Starting booking CSV backup...')
+    if range_label and range_label.strip():
+        effective_range_label = range_label.strip()
+    else:
+        effective_range_label = "all"
+
+    log_msg_detail = f"range: {effective_range_label}"
+    if start_date_dt:
+        log_msg_detail += f", from: {start_date_dt.strftime('%Y-%m-%d %H:%M:%S') if start_date_dt else 'any'}"
+    if end_date_dt:
+        log_msg_detail += f", to: {end_date_dt.strftime('%Y-%m-%d %H:%M:%S') if end_date_dt else 'any'}"
+
+    logger.info(f"Starting booking CSV backup process ({log_msg_detail}). Task ID: {task_id}")
+    _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', f'Starting booking CSV backup ({effective_range_label})...', log_msg_detail)
 
     try:
         timestamp_str = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-        remote_filename = f"{BOOKING_CSV_FILENAME_PREFIX}{timestamp_str}.csv"
+        remote_filename = f"{BOOKING_CSV_FILENAME_PREFIX}{effective_range_label}_{timestamp_str}.csv"
 
         csv_data_string = ""
-        with app.app_context():
-            all_bookings = Booking.query.all()
-            if not all_bookings:
-                logger.info("No bookings found in the database. Skipping CSV backup.")
-                _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', 'No bookings to backup.', 'INFO')
-                return True # Considered success as there's nothing to backup
-
-            logger.info(f"Exporting {len(all_bookings)} bookings to CSV format.")
-            _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', f'Exporting {len(all_bookings)} bookings...')
-            csv_data_string = export_bookings_to_csv_string(all_bookings)
+        # The export_bookings_to_csv_string function now handles app_context and querying
+        logger.info(f"Exporting bookings ({log_msg_detail}) to CSV format for backup file {remote_filename}.")
+        _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', f'Exporting bookings ({effective_range_label})...', log_msg_detail)
+        csv_data_string = export_bookings_to_csv_string(app, start_date=start_date_dt, end_date=end_date_dt)
 
         # Check if csv_data_string is empty or only contains the header
         # (A simple check for number of newlines; header + 1 data row means at least 2 newlines)
@@ -421,13 +430,14 @@ def list_available_booking_csv_backups():
     Lists available booking CSV backup timestamps from Azure File Share.
 
     Returns:
-        list: A sorted list of unique timestamp strings (YYYYMMDD_HHMMSS), most recent first.
+        list: A sorted list of dictionaries, each representing a backup file.
+              Each dictionary contains 'timestamp', 'range_label', 'filename', 'display_name'.
               Returns an empty list if no backups are found or if there's an error.
     """
-    logger.info("Attempting to list available booking CSV backups.")
+    logger.info("Attempting to list available booking CSV backups with range labels.")
+    backup_items = []
     try:
         service_client = _get_service_client()
-        # Using AZURE_CONFIG_SHARE as per backup_bookings_csv
         share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
         share_client = service_client.get_share_client(share_name)
 
@@ -436,32 +446,88 @@ def list_available_booking_csv_backups():
             return []
 
         backup_dir_client = share_client.get_directory_client(BOOKING_CSV_BACKUPS_DIR)
-
         if not _client_exists(backup_dir_client):
             logger.warning(f"Booking CSV backup directory '{BOOKING_CSV_BACKUPS_DIR}' does not exist on share '{share_name}'. No backups to list.")
             return []
 
-        timestamps = set()
+        # Regex to capture range_label (optional) and timestamp
+        # Assumes BOOKING_CSV_FILENAME_PREFIX is 'bookings_'
+        # Example: bookings_3days_20230101_100000.csv -> range_label '3days', timestamp '20230101_100000'
+        # Example: bookings_all_20230101_100000.csv -> range_label 'all', timestamp '20230101_100000'
+        # Example: bookings_20230101_100000.csv -> range_label 'all' (implicit), timestamp '20230101_100000'
+        pattern = re.compile(
+            rf"^{re.escape(BOOKING_CSV_FILENAME_PREFIX)}(?P<range_label_part>[a-zA-Z0-9]+_)?(?P<timestamp>\d{{8}}_\d{{6}})\.csv$"
+        )
+        # A more robust pattern that assumes if range_label_part is not present, then it's an older format without explicit "all"
+        # This regex matches:
+        #   bookings_all_20230101_100000.csv -> range_label_part='all_', timestamp='20230101_100000'
+        #   bookings_3days_20230101_100000.csv -> range_label_part='3days_', timestamp='20230101_100000'
+        #   bookings_20230101_100000.csv -> range_label_part=None, timestamp='20230101_100000'
+
+        # Corrected regex to handle files that might not have range_label part
+        # e.g. bookings_YYYYMMDD_HHMMSS.csv or bookings_somelabel_YYYYMMDD_HHMMSS.csv
+        # The key is that range_label part must end with an underscore if present.
+        # If BOOKING_CSV_FILENAME_PREFIX is "bookings_", then:
+        # filename_part = filename[len(BOOKING_CSV_FILENAME_PREFIX):-len('.csv')] # e.g., "all_20230101_100000" or "3days_20230101_100000" or "20230101_100000"
+
         for item in backup_dir_client.list_directories_and_files():
             if item['is_directory']:
                 continue
-            filename = item['name']
-            if filename.startswith(BOOKING_CSV_FILENAME_PREFIX) and filename.endswith('.csv'):
-                try:
-                    # Extract YYYYMMDD_HHMMSS part
-                    timestamp_str = filename[len(BOOKING_CSV_FILENAME_PREFIX):-len('.csv')]
-                    # Basic validation of timestamp format (15 chars, YYYYMMDD_HHMMSS)
-                    if len(timestamp_str) == 15 and timestamp_str[8] == '_':
-                        datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S') # Validate format
-                        timestamps.add(timestamp_str)
-                    else:
-                        logger.warning(f"Skipping booking CSV file with unexpected name format: {filename}")
-                except ValueError:
-                    logger.warning(f"Skipping booking CSV file with invalid timestamp format: {filename}")
 
-        sorted_timestamps = sorted(list(timestamps), reverse=True)
-        logger.info(f"Found {len(sorted_timestamps)} available booking CSV backup timestamps.")
-        return sorted_timestamps
+            filename = item['name']
+
+            # Simplified parsing based on structure: {PREFIX}{label}_{TIMESTAMP}.csv
+            # Or for older/implicit 'all': {PREFIX}{TIMESTAMP}.csv
+            if not filename.startswith(BOOKING_CSV_FILENAME_PREFIX) or not filename.endswith('.csv'):
+                logger.warning(f"Skipping file with incorrect prefix/suffix: {filename}")
+                continue
+
+            name_part = filename[len(BOOKING_CSV_FILENAME_PREFIX):-len('.csv')]
+
+            parts = name_part.split('_')
+            timestamp_str = ""
+            range_label = "all" # Default
+
+            if len(parts) >= 2 and len(parts[-2]) == 8 and len(parts[-1]) == 6: # Checks if last two parts form YYYYMMDD_HHMMSS
+                try:
+                    timestamp_str = f"{parts[-2]}_{parts[-1]}"
+                    datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S') # Validate format
+
+                    label_parts = parts[:-2]
+                    if label_parts:
+                        range_label = "_".join(label_parts)
+                    # If label_parts is empty, range_label remains "all" (e.g. bookings_YYYYMMDD_HHMMSS.csv)
+                except ValueError:
+                    logger.warning(f"Skipping CSV backup with invalid timestamp in name: {filename} (parsed as {timestamp_str})")
+                    continue # Invalid timestamp format
+            else:
+                logger.warning(f"Skipping CSV backup with unexpected filename format after prefix: {name_part} from {filename}")
+                continue
+
+            # Create a user-friendly display name
+            display_range = range_label.replace("_", " ").replace("day", " Day").replace("days", " Days").title()
+            if display_range == "All":
+                display_range = "All Bookings"
+
+            try:
+                ts_datetime = datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
+                display_timestamp = ts_datetime.strftime('%Y-%m-%d %H:%M:%S')
+            except ValueError: # Should not happen due to earlier validation, but as safety
+                display_timestamp = timestamp_str.replace("_", " ") # Basic fallback display
+
+            backup_item = {
+                'timestamp': timestamp_str,
+                'range_label': range_label,
+                'filename': filename,
+                'display_name': f"Bookings ({display_range}) - {display_timestamp} UTC"
+            }
+            backup_items.append(backup_item)
+
+        # Sort by timestamp, newest first
+        backup_items.sort(key=lambda x: x['timestamp'], reverse=True)
+
+        logger.info(f"Found {len(backup_items)} available booking CSV backup items.")
+        return backup_items
 
     except Exception as e:
         logger.error(f"Error listing available booking CSV backups: {e}", exc_info=True)
@@ -508,7 +574,46 @@ def restore_bookings_from_csv_backup(app, timestamp_str, socketio_instance=None,
             _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], 'ERROR')
             return actions_summary
 
-        remote_csv_filename = f"{BOOKING_CSV_FILENAME_PREFIX}{timestamp_str}.csv"
+        # Filename might now include a range label.
+        # To restore, we need the exact filename. The timestamp_str alone is not enough.
+        # This function will need to find the filename that matches the timestamp_str.
+        # For now, assume timestamp_str IS the unique identifier and older files (without range_label in name)
+        # are implicitly 'all'. This means the filename construction needs to be smarter or
+        # this function needs the full filename or the parsed range_label.
+        # Let's assume for now the route passes the full filename or enough info.
+        # The current subtask is about LISTING. This function's modification is not the primary focus here,
+        # but its call signature implies it might need adjustment later if timestamp_str is not unique.
+        # For now, the existing logic for finding the file is based on timestamp_str only.
+        # If all new files have {PREFIX}{label}_{TIMESTAMP}.csv, then the old logic
+        # of {PREFIX}{TIMESTAMP}.csv will fail for new files.
+        # The simplest fix here is to iterate and find the matching file if timestamp_str is just the time part.
+        # However, the calling route `restore_booking_csv_route` uses `timestamp_str` from the URL,
+        # which will be the pure timestamp. So, we need to find the actual filename.
+        # This part needs careful thought for compatibility.
+        # For now, let's assume the filename is uniquely identified by the timestamp_str (which is how it was before ranges)
+        # OR that the calling route will be updated to pass the full filename.
+        # The prompt for THIS task is about LISTING, so I will focus on that.
+        # The `restore_booking_csv_route` will pass the `backup_item.timestamp` which is `YYYYMMDD_HHMMSS`.
+        # So, this function needs to find the correct file.
+        # This is a significant change from just `f"{BOOKING_CSV_FILENAME_PREFIX}{timestamp_str}.csv"`
+
+        # Get all backup items to find the one matching the timestamp_str
+        all_backup_files_details = list_available_booking_csv_backups() # This now returns list of dicts
+        target_backup_item = None
+        for item_detail in all_backup_files_details:
+            if item_detail['timestamp'] == timestamp_str:
+                target_backup_item = item_detail
+                break
+
+        if not target_backup_item:
+            actions_summary['status'] = 'failed'
+            actions_summary['message'] = f"Booking CSV backup for timestamp '{timestamp_str}' not found in available list."
+            actions_summary['errors'].append(actions_summary['message'])
+            logger.error(actions_summary['message'])
+            _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], 'ERROR')
+            return actions_summary
+
+        remote_csv_filename = target_backup_item['filename'] # Use the actual filename
         remote_azure_path = f"{BOOKING_CSV_BACKUPS_DIR}/{remote_csv_filename}"
 
         file_client = share_client.get_file_client(remote_azure_path)
@@ -613,15 +718,30 @@ def verify_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=Non
             _emit_progress(socketio_instance, task_id, event_name, result['message'], 'ERROR')
             return result
 
-        remote_csv_filename = f"{BOOKING_CSV_FILENAME_PREFIX}{timestamp_str}.csv"
+        # Similar logic adjustment needed for verify_booking_csv_backup as in restore
+        all_backup_files_details_verify = list_available_booking_csv_backups()
+        target_backup_item_verify = None
+        for item_detail_v in all_backup_files_details_verify:
+            if item_detail_v['timestamp'] == timestamp_str:
+                target_backup_item_verify = item_detail_v
+                break
+
+        if not target_backup_item_verify:
+            result['status'] = 'error' # Changed from not_found to error, as it implies an issue if called for a non-listed ts
+            result['message'] = f"Booking CSV backup for timestamp '{timestamp_str}' not found in available list for verification."
+            logger.error(result['message'])
+            _emit_progress(socketio_instance, task_id, event_name, result['message'], 'ERROR')
+            return result
+
+        remote_csv_filename = target_backup_item_verify['filename']
         remote_azure_path = f"{BOOKING_CSV_BACKUPS_DIR}/{remote_csv_filename}"
         result['file_path'] = remote_azure_path
 
         file_client = share_client.get_file_client(remote_azure_path)
 
-        if file_client.exists():
-            result['status'] = 'success' # Using 'success' to indicate file found, as per typical verification
-            result['message'] = f"Booking CSV backup file '{remote_csv_filename}' successfully found on Azure share '{share_name}' at path '{remote_azure_path}'."
+        if file_client.exists(): # This check remains valid
+            result['status'] = 'success'
+            result['message'] = f"Booking CSV backup file '{remote_csv_filename}' verified successfully (found) on share '{share_name}' at path '{remote_azure_path}'."
             logger.info(result['message'])
             _emit_progress(socketio_instance, task_id, event_name, 'Verification successful: File found.', remote_azure_path)
         else:
@@ -641,6 +761,73 @@ def verify_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=Non
         logger.error(f"Unexpected error during booking CSV verification for {timestamp_str}: {result['message']}", exc_info=True)
         _emit_progress(socketio_instance, task_id, event_name, result['message'], 'CRITICAL_ERROR')
 
+    return result
+
+
+def verify_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=None):
+    """
+    Verifies the existence of a specific Booking CSV backup file in Azure File Share.
+
+    Args:
+        timestamp_str (str): The timestamp of the booking CSV backup to verify.
+        socketio_instance: Optional SocketIO instance for progress emitting.
+        task_id: Optional task ID for SocketIO progress emitting.
+
+    Returns:
+        dict: A result dictionary with 'status', 'message', and 'file_path'.
+    """
+    event_name = 'booking_csv_verify_progress' # Specific event name for this type of verification
+    result = {
+        'status': 'unknown', # Possible: unknown, success (found), not_found, error
+        'message': '',
+        'file_path': ''
+    }
+
+    logger.info(f"Starting verification for booking CSV backup: {timestamp_str}. Task ID: {task_id}")
+    _emit_progress(socketio_instance, task_id, event_name, 'Starting booking CSV verification...', f'Timestamp: {timestamp_str}')
+
+    try:
+        service_client = _get_service_client()
+        # Booking CSVs are stored in AZURE_CONFIG_SHARE, under BOOKING_CSV_BACKUPS_DIR
+        share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
+        share_client = service_client.get_share_client(share_name)
+
+        if not _client_exists(share_client):
+            result['status'] = 'error'
+            result['message'] = f"Azure share '{share_name}' not found for booking CSV backups."
+            logger.error(result['message'])
+            _emit_progress(socketio_instance, task_id, event_name, result['message'], 'ERROR')
+            return result
+
+        remote_csv_filename = f"{BOOKING_CSV_FILENAME_PREFIX}{timestamp_str}.csv"
+        remote_azure_path = f"{BOOKING_CSV_BACKUPS_DIR}/{remote_csv_filename}"
+        result['file_path'] = remote_azure_path
+
+        file_client = share_client.get_file_client(remote_azure_path)
+
+        if file_client.exists():
+            result['status'] = 'success'
+            result['message'] = f"Booking CSV backup file '{remote_csv_filename}' verified successfully (found) on share '{share_name}' at path '{remote_azure_path}'."
+            logger.info(result['message'])
+            _emit_progress(socketio_instance, task_id, event_name, 'Verification successful: File found.', remote_azure_path)
+        else:
+            result['status'] = 'not_found'
+            result['message'] = f"Booking CSV backup file '{remote_csv_filename}' NOT found on share '{share_name}' at path '{remote_azure_path}'."
+            logger.warning(result['message'])
+            _emit_progress(socketio_instance, task_id, event_name, 'Verification failed: File not found.', remote_azure_path)
+
+    except RuntimeError as rte:
+        result['status'] = 'error'
+        result['message'] = str(rte)
+        logger.error(f"Configuration error during booking CSV verification for {timestamp_str}: {result['message']}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, result['message'], 'ERROR')
+    except Exception as e:
+        result['status'] = 'error'
+        result['message'] = f"An unexpected error occurred during booking CSV verification: {str(e)}"
+        logger.error(f"Unexpected error during booking CSV verification for {timestamp_str}: {result['message']}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, result['message'], 'CRITICAL_ERROR')
+
+    _emit_progress(socketio_instance, task_id, event_name, f"Verification for {timestamp_str} finished. Status: {result['status']}.", result['status'].upper())
     return result
 
 
@@ -670,7 +857,22 @@ def delete_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=Non
             _emit_progress(socketio_instance, task_id, event_name, f"Share '{share_name}' not found.", 'ERROR')
             return False
 
-        remote_csv_filename = f"{BOOKING_CSV_FILENAME_PREFIX}{timestamp_str}.csv"
+        # Similar logic adjustment needed for delete_booking_csv_backup as in restore and verify
+        all_backup_files_details_delete = list_available_booking_csv_backups()
+        target_backup_item_delete = None
+        for item_detail_d in all_backup_files_details_delete:
+            if item_detail_d['timestamp'] == timestamp_str:
+                target_backup_item_delete = item_detail_d
+                break
+
+        if not target_backup_item_delete:
+            # If we are asked to delete a timestamp that's not listed, it might mean it's already gone
+            # or the list is stale. For deletion, this is usually fine.
+            logger.info(f"Booking CSV backup for timestamp '{timestamp_str}' not found in available list. Assuming already deleted.")
+            _emit_progress(socketio_instance, task_id, event_name, f"Backup for '{timestamp_str}' not found. Assuming already deleted.", 'INFO')
+            return True # Effectively deleted
+
+        remote_csv_filename = target_backup_item_delete['filename']
         remote_azure_path = f"{BOOKING_CSV_BACKUPS_DIR}/{remote_csv_filename}"
 
         file_client = share_client.get_file_client(remote_azure_path)
@@ -688,9 +890,11 @@ def delete_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=Non
                 _emit_progress(socketio_instance, task_id, event_name, f"Error deleting file '{remote_csv_filename}': {str(e_delete)}", 'ERROR')
                 return False
         else:
-            logger.info(f"Booking CSV backup '{remote_azure_path}' not found on share '{share_name}'. No action needed.")
-            _emit_progress(socketio_instance, task_id, event_name, f"File '{remote_csv_filename}' not found. Already deleted or never existed.", 'INFO')
-            return True # If file not found, it's effectively 'deleted' or achieved the desired state
+            # This case should ideally be covered by the check against all_backup_files_details_delete
+            # But if it occurs due to a race condition or inconsistency:
+            logger.info(f"Booking CSV backup '{remote_azure_path}' confirmed not found on share '{share_name}' by _client_exists. No action needed.")
+            _emit_progress(socketio_instance, task_id, event_name, f"File '{remote_csv_filename}' not found by _client_exists. Already deleted or never existed.", 'INFO')
+            return True
 
     except Exception as e:
         logger.error(f"An unexpected error occurred during deletion of booking CSV backup for {timestamp_str}: {e}", exc_info=True)
