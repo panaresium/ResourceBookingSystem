@@ -5,7 +5,7 @@ import logging
 
 # Import configurations, extensions, and initialization functions
 import config
-from extensions import db, login_manager, oauth, mail, csrf, socketio
+from extensions import db, login_manager, oauth, mail, csrf, socketio, migrate
 from models import User # Needed for load_user, others loaded via db object
 
 from translations import init_translations # SimpleTranslator is used internally by init_translations now
@@ -228,6 +228,7 @@ def create_app(config_object=config):
     mail.init_app(app)
     csrf.init_app(app)
     socketio.init_app(app, message_queue=app.config.get('SOCKETIO_MESSAGE_QUEUE')) # Add message_queue from config
+    migrate.init_app(app, db)
 
     # login_manager and oauth are initialized within init_auth
 
