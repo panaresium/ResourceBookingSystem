@@ -913,7 +913,11 @@ body.high-contrast footer {
 
 .map-controls div { margin-bottom: 10px; }
 .map-controls label { margin-right: 5px; }
-.resource-area-form-selected { outline: 3px solid #ffc107; outline-offset: 2px; filter: brightness(120%); }
+.resource-area-form-selected {
+    border-width: 3px;
+    border-color: #007bff; /* A distinct highlight color */
+    box-shadow: 0 0 10px #007bff;
+}
 
 /* Styles for the /resources page resource buttons */
 .resource-buttons-grid { display: flex; flex-wrap: wrap; gap: 10px; width: 100%; padding: 10px 0; }
