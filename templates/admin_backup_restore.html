@@ -56,6 +56,8 @@
 <div class="container mt-4">
     <h1>{{ _('Admin - Backup & Restore') }}</h1>
     <hr>
+    <p>{{ _('Current UTC Time:') }} <span id="utc-clock">Loading...</span></p>
+    <hr>
 
     <section id="backup-section" class="mb-5">
         <h2>{{ _('One Click Backup') }}</h2>
@@ -170,6 +172,13 @@
     <section id="booking-csv-restore-section" class="mb-5">
         <h2>{{ _('Booking CSV Backups') }}</h2>
         <p>{{ _('Restore bookings from a previously generated CSV export. This will add new bookings from the CSV, skipping any that appear to be duplicates based on resource, user, and time.') }}</p>
+
+        <form method="POST" action="{{ url_for('admin_ui.manual_backup_bookings_csv_route') }}" style="margin-bottom: 15px;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <button type="submit" class="btn btn-primary" onclick="return confirm('{{ _('Are you sure you want to manually back up all bookings to a new CSV file?') }}');">
+                <i class="fas fa-cloud-upload-alt"></i> {{ _('Backup All Bookings to CSV Now') }}
+            </button>
+        </form>
         
         {% if booking_csv_backups and booking_csv_backups|length > 0 %}
             <table class="table table-striped">
@@ -198,6 +207,12 @@
                                         {{ _('Restore Bookings from this CSV') }}
                                     </button>
                                 </form>
+                                <form method="POST" action="{{ url_for('admin_ui.delete_booking_csv_backup_route', timestamp_str=backup_ts) }}" style="display: inline; margin-left: 5px;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('{{ _('Are you sure you want to permanently delete the booking CSV backup for timestamp %(timestamp)s?', timestamp=backup_ts) }}');">
+                                        <i class="fas fa-trash-alt"></i> {{ _('Delete') }}
+                                    </button>
+                                </form>
                             </td>
                         </tr>
                     {% endfor %}
@@ -205,6 +220,36 @@
             </table>
         {% else %}
             <p>{{ _('No booking CSV backups found.') }}</p>
+        {% endif %}
+
+        {% if booking_csv_pagination_total_pages > 1 %}
+        <nav aria-label="Booking CSV Backup Pagination" class="mt-3">
+            <ul class="pagination justify-content-center">
+                {% if booking_csv_pagination_has_prev %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('admin_ui.serve_backup_restore_page', page=booking_csv_page - 1) }}">{{ _('Previous') }}</a>
+                    </li>
+                {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">{{ _('Previous') }}</span>
+                    </li>
+                {% endif %}
+
+                <li class="page-item disabled">
+                    <span class="page-link">{{ _('Page %(page)s of %(total_pages)s', page=booking_csv_page, total_pages=booking_csv_pagination_total_pages) }}</span>
+                </li>
+
+                {% if booking_csv_pagination_has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('admin_ui.serve_backup_restore_page', page=booking_csv_page + 1) }}">{{ _('Next') }}</a>
+                    </li>
+                {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">{{ _('Next') }}</span>
+                    </li>
+                {% endif %}
+            </ul>
+        </nav>
         {% endif %}
     </section>
 
@@ -246,6 +291,26 @@
     document.addEventListener('DOMContentLoaded', function () {
         const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
         const socket = io();
+
+        // --- UTC Clock ---
+        function updateUtcClock() {
+            const clockElement = document.getElementById('utc-clock');
+            if (clockElement) {
+                const now = new Date();
+                // Using a more custom format: YYYY-MM-DD HH:MM:SS UTC
+                const year = now.getUTCFullYear();
+                const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(now.getUTCDate()).padStart(2, '0');
+                const hours = String(now.getUTCHours()).padStart(2, '0');
+                const minutes = String(now.getUTCMinutes()).padStart(2, '0');
+                const seconds = String(now.getUTCSeconds()).padStart(2, '0');
+                const customUtcString = `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
+                clockElement.textContent = customUtcString;
+            }
+        }
+        setInterval(updateUtcClock, 1000);
+        updateUtcClock(); // Initial call
+        // --- End UTC Clock ---
 
         const backupButton = document.getElementById('one-click-backup-btn');
         const backupStatusMessageEl = document.getElementById('backup-status-message'); // Renamed for clarity

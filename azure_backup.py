@@ -579,6 +579,60 @@ def restore_bookings_from_csv_backup(app, timestamp_str, socketio_instance=None,
     return actions_summary
 
 
+def delete_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=None):
+    """
+    Deletes a specific Booking CSV backup file from Azure File Share.
+
+    Args:
+        timestamp_str (str): The timestamp of the booking CSV backup to delete.
+        socketio_instance: Optional SocketIO instance for progress emitting.
+        task_id: Optional task ID for SocketIO progress emitting.
+
+    Returns:
+        bool: True if deletion was successful or file was not found, False if an error occurred.
+    """
+    event_name = 'booking_csv_delete_progress' # Could be a more generic event if preferred
+    logger.info(f"Attempting to delete booking CSV backup for timestamp: {timestamp_str}")
+    _emit_progress(socketio_instance, task_id, event_name, f"Starting deletion of booking CSV backup: {timestamp_str}")
+
+    try:
+        service_client = _get_service_client()
+        share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups') # Same share as backup
+        share_client = service_client.get_share_client(share_name)
+
+        if not _client_exists(share_client):
+            logger.error(f"Azure share '{share_name}' not found. Cannot delete booking CSV backup.")
+            _emit_progress(socketio_instance, task_id, event_name, f"Share '{share_name}' not found.", 'ERROR')
+            return False
+
+        remote_csv_filename = f"{BOOKING_CSV_FILENAME_PREFIX}{timestamp_str}.csv"
+        remote_azure_path = f"{BOOKING_CSV_BACKUPS_DIR}/{remote_csv_filename}"
+        
+        file_client = share_client.get_file_client(remote_azure_path)
+
+        if _client_exists(file_client):
+            logger.info(f"Booking CSV backup '{remote_azure_path}' found on share '{share_name}'. Attempting deletion.")
+            _emit_progress(socketio_instance, task_id, event_name, f"File '{remote_csv_filename}' found. Deleting...")
+            try:
+                file_client.delete_file()
+                logger.info(f"Successfully deleted booking CSV backup '{remote_azure_path}'.")
+                _emit_progress(socketio_instance, task_id, event_name, f"File '{remote_csv_filename}' deleted successfully.", 'SUCCESS')
+                return True
+            except Exception as e_delete:
+                logger.error(f"Failed to delete booking CSV backup '{remote_azure_path}': {e_delete}", exc_info=True)
+                _emit_progress(socketio_instance, task_id, event_name, f"Error deleting file '{remote_csv_filename}': {str(e_delete)}", 'ERROR')
+                return False
+        else:
+            logger.info(f"Booking CSV backup '{remote_azure_path}' not found on share '{share_name}'. No action needed.")
+            _emit_progress(socketio_instance, task_id, event_name, f"File '{remote_csv_filename}' not found. Already deleted or never existed.", 'INFO')
+            return True # If file not found, it's effectively 'deleted' or achieved the desired state
+
+    except Exception as e:
+        logger.error(f"An unexpected error occurred during deletion of booking CSV backup for {timestamp_str}: {e}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, f"Unexpected error deleting CSV backup: {str(e)}", 'CRITICAL_ERROR')
+        return False
+
+
 def create_full_backup(timestamp_str, map_config_data=None, resource_configs_data=None, user_configs_data=None, socketio_instance=None, task_id=None):
     """
     Creates a full backup of the database, map configuration, and media files.
