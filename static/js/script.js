@@ -158,6 +158,7 @@ async function updateAuthLink() {
     const adminBookingsNavLink = document.getElementById('admin-bookings-nav-link');
     const backupRestoreNavLink = document.getElementById('backup-restore-nav-link'); // Added
     const troubleshootingNavLink = document.getElementById('troubleshooting-nav-link');
+    const bookingSettingsNavLink = document.getElementById('booking-settings-nav-link'); // Added for Booking Settings
     const sidebar = document.getElementById('sidebar'); // Added for sidebar visibility
     const sidebarToggleBtn = document.getElementById('sidebar-toggle'); // Added for toggle button visibility
 
@@ -168,6 +169,7 @@ async function updateAuthLink() {
         const localSidebarToggleBtn = document.getElementById('sidebar-toggle'); // Ensure access
         const localBackupRestoreNavLink = document.getElementById('backup-restore-nav-link'); // Added for this scope
         const localTroubleshootingNavLink = document.getElementById('troubleshooting-nav-link');
+        const localBookingSettingsNavLink = document.getElementById('booking-settings-nav-link'); // Added for Booking Settings
 
         sessionStorage.removeItem('loggedInUserUsername');
         sessionStorage.removeItem('loggedInUserIsAdmin');
@@ -194,6 +196,7 @@ async function updateAuthLink() {
         if (adminBookingsNavLink) adminBookingsNavLink.style.display = 'none';
         if (localBackupRestoreNavLink) localBackupRestoreNavLink.style.display = 'none'; // Added
         if (localTroubleshootingNavLink) localTroubleshootingNavLink.style.display = 'none';
+        if (localBookingSettingsNavLink) localBookingSettingsNavLink.style.display = 'none'; // Added for Booking Settings
 
         if (localSidebar) localSidebar.style.display = 'none';
         if (localSidebarToggleBtn) localSidebarToggleBtn.style.display = 'none';
@@ -257,6 +260,9 @@ async function updateAuthLink() {
             }
             if (troubleshootingNavLink) {
                 troubleshootingNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
+            }
+            if (bookingSettingsNavLink) { // Added for Booking Settings
+                bookingSettingsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
             }
 
             // Sidebar and body class management based on admin status

@@ -1741,6 +1741,30 @@ class TestAdminBookings(AppTests):
         self.assertIn(b'<li id="admin-bookings-nav-link"', response_admin.data)
         self.logout()
 
+    def test_admin_menu_contains_booking_settings_link(self):
+        """Test that the 'Booking Settings' link is present in the admin menu for admin users."""
+        admin_user = self._create_admin_user(username="navtestadmin", email_ext="navtest")
+        self.login(admin_user.username, "adminpass")
+
+        # Access a page that includes the admin sidebar
+        response = self.client.get('/admin/users_manage') # Using a known admin page
+        self.assertEqual(response.status_code, 200)
+
+        html_content = response.data.decode('utf-8')
+
+        # Check for the link's href
+        from flask import url_for # Import url_for if not already available at class/module level
+        expected_href = url_for('admin_ui.serve_booking_settings_page')
+        self.assertIn(f'href="{expected_href}"', html_content)
+
+        # Check for the link's text
+        self.assertIn(">Booking Settings<", html_content) # Simple string match
+
+        # Check that the li element itself is present (JS might control display style)
+        self.assertIn('id="booking-settings-nav-link"', html_content)
+
+        self.logout()
+
     def test_admin_get_booking_settings_page_no_settings_exist(self):
         """Test GET /admin/booking_settings when no settings exist in DB."""
         admin = self._create_admin_user(username="settingsadmin1", email_ext="settings1")
@@ -1943,6 +1967,7 @@ class TestHomePage(AppTests):
 
         self.assertNotIn('Quick Actions', content)
         self.assertNotIn('Book a Room', content)
+
 
 class TestBookingSettingsModel(AppTests):
     def test_create_booking_settings_default_values(self):
@@ -2294,6 +2319,7 @@ class TestBookingSettingsEnforcement(AppTests):
         User.query.filter_by(username='otherbooker').delete()
         db.session.commit()
         self.logout()
+
 
 if __name__ == '__main__':
     unittest.main()
