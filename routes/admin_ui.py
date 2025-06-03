@@ -70,7 +70,7 @@ def serve_admin_bookings_page():
             User.username.label('user_username'),
             Resource.name.label('resource_name')
         ).join(Resource, Booking.resource_id == Resource.id)\
-         .join(User, Booking.user_name == User.username)
+         .join(User, Booking.user_name == User.username) # Ensure User model is imported
 
         all_bookings = bookings_query.order_by(Booking.start_time.desc()).all()
 

@@ -98,9 +98,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     statusDiv.textContent = data.message || "{{ _('Booking deleted successfully.') }}"; // Use message from response
                     statusDiv.className = 'alert alert-success';
                     row.remove(); // Remove the row from the table
-                    // No need to interact with the button further as it's removed with the row.
+                    // No need to interact with the button further as it's removed with the row
                 } else {
-                    // This part of the "else" is for the "then" block, not the catch block.
+                    // Error handling remains largely the same
                     throw new Error(data.error || `{{ _('Error deleting booking (Status: ${status}).') }}`);
                 }
             })
@@ -108,7 +108,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 statusDiv.textContent = `{{ _('Error') }}: ${error.message}`;
                 statusDiv.className = 'alert alert-danger';
                 this.disabled = false;
-                this.textContent = "{{ _('Delete') }}";
+                this.textContent = "{{ _('Delete') }}"; // Ensure button text reverts correctly
             });
         });
     });

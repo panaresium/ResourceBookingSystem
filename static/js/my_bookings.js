@@ -102,56 +102,92 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             bookings.forEach(booking => {
-                // Existing logic for rendering active bookings (admin_deleted_message logic removed)
-                const bookingItemClone = bookingItemTemplate.content.cloneNode(true);
-                const bookingItemDiv = bookingItemClone.querySelector('.booking-item');
+                // Bookings with status 'cancelled_by_admin' will have an admin_deleted_message.
+                // This existing block should correctly handle them by displaying the message
+                // and not proceeding to the 'else' block which renders action buttons.
+                if (booking.admin_deleted_message) {
+                    // Create a specific display for admin-deleted bookings
+                    const deletedBookingDiv = document.createElement('div');
+                    deletedBookingDiv.classList.add('booking-item', 'admin-deleted-item', 'alert', 'alert-warning'); // Added 'admin-deleted-item' for potential specific styling
+                    deletedBookingDiv.setAttribute('role', 'alert');
 
-                bookingItemDiv.dataset.bookingId = booking.id; // Store booking ID on the item div
-                bookingItemDiv.dataset.resourceId = booking.resource_id; // Store resource ID
-                bookingItemDiv.dataset.startTime = booking.start_time; // Store full start time
-                bookingItemDiv.dataset.endTime = booking.end_time; // Store full end time
+                    const messageHeader = document.createElement('h5');
+                    messageHeader.classList.add('alert-heading');
+                    messageHeader.textContent = 'Booking Notice'; // Or "Booking Deleted by Admin"
 
-                bookingItemClone.querySelector('.resource-name').textContent = booking.resource_name;
-                const titleSpan = bookingItemClone.querySelector('.booking-title');
-                titleSpan.textContent = booking.title || 'N/A';
-                titleSpan.dataset.originalTitle = booking.title || ''; // Store original title
+                    const messageParagraph = document.createElement('p');
+                    messageParagraph.textContent = booking.admin_deleted_message;
 
-                const startTimeSpan = bookingItemClone.querySelector('.start-time');
-                startTimeSpan.textContent = new Date(booking.start_time).toUTCString();
-                startTimeSpan.dataset.originalStartTime = booking.start_time;
+                    deletedBookingDiv.appendChild(messageHeader);
+                    deletedBookingDiv.appendChild(messageParagraph);
 
-                const endTimeSpan = bookingItemClone.querySelector('.end-time');
-                endTimeSpan.textContent = new Date(booking.end_time).toUTCString();
-                endTimeSpan.dataset.originalEndTime = booking.end_time;
+                    // Optionally, add original booking ID if useful for user reference
+                    const bookingIdInfo = document.createElement('p');
+                    bookingIdInfo.classList.add('text-muted', 'small');
+                    bookingIdInfo.textContent = `(Regarding Booking ID: ${booking.id})`; // Assuming booking.id is still available
+                    deletedBookingDiv.appendChild(bookingIdInfo);
 
-                bookingItemClone.querySelector('.recurrence-rule').textContent = booking.recurrence_rule || '';
+                    // Add the new button
+                    const clearMessageBtn = document.createElement('button');
+                    clearMessageBtn.classList.add('btn', 'btn-sm', 'btn-outline-secondary', 'clear-admin-message-btn', 'mt-2');
+                    clearMessageBtn.textContent = 'Dismiss Message';
+                    clearMessageBtn.dataset.bookingId = booking.id;
+                    deletedBookingDiv.appendChild(clearMessageBtn);
 
-                const updateBtn = bookingItemClone.querySelector('.update-booking-btn');
-                updateBtn.dataset.bookingId = booking.id;
+                    bookingsListDiv.appendChild(deletedBookingDiv);
 
-                const cancelBtn = bookingItemClone.querySelector('.cancel-booking-btn');
-                cancelBtn.dataset.bookingId = booking.id;
+                } else {
+                    // Existing logic for rendering active bookings
+                    const bookingItemClone = bookingItemTemplate.content.cloneNode(true);
+                    const bookingItemDiv = bookingItemClone.querySelector('.booking-item');
 
-                const checkInBtn = bookingItemClone.querySelector('.check-in-btn');
-                const checkOutBtn = bookingItemClone.querySelector('.check-out-btn');
-                checkInBtn.dataset.bookingId = booking.id;
-                checkOutBtn.dataset.bookingId = booking.id;
+                    bookingItemDiv.dataset.bookingId = booking.id; // Store booking ID on the item div
+                    bookingItemDiv.dataset.resourceId = booking.resource_id; // Store resource ID
+                    bookingItemDiv.dataset.startTime = booking.start_time; // Store full start time
+                    bookingItemDiv.dataset.endTime = booking.end_time; // Store full end time
 
-                // Ensure buttons are hidden by default (if not already by CSS/template)
-                checkInBtn.style.display = 'none';
-                checkOutBtn.style.display = 'none';
+                    bookingItemClone.querySelector('.resource-name').textContent = booking.resource_name;
+                    const titleSpan = bookingItemClone.querySelector('.booking-title');
+                    titleSpan.textContent = booking.title || 'N/A';
+                    titleSpan.dataset.originalTitle = booking.title || ''; // Store original title
 
-                if (checkInOutEnabled) {
-                    if (booking.can_check_in) {
-                        checkInBtn.style.display = 'inline-block';
+                    const startTimeSpan = bookingItemClone.querySelector('.start-time');
+                    startTimeSpan.textContent = new Date(booking.start_time).toUTCString();
+                    startTimeSpan.dataset.originalStartTime = booking.start_time;
+
+                    const endTimeSpan = bookingItemClone.querySelector('.end-time');
+                    endTimeSpan.textContent = new Date(booking.end_time).toUTCString();
+                    endTimeSpan.dataset.originalEndTime = booking.end_time;
+
+                    bookingItemClone.querySelector('.recurrence-rule').textContent = booking.recurrence_rule || '';
+
+                    const updateBtn = bookingItemClone.querySelector('.update-booking-btn');
+                    updateBtn.dataset.bookingId = booking.id;
+
+                    const cancelBtn = bookingItemClone.querySelector('.cancel-booking-btn');
+                    cancelBtn.dataset.bookingId = booking.id;
+
+                    const checkInBtn = bookingItemClone.querySelector('.check-in-btn');
+                    const checkOutBtn = bookingItemClone.querySelector('.check-out-btn');
+                    checkInBtn.dataset.bookingId = booking.id;
+                    checkOutBtn.dataset.bookingId = booking.id;
+
+                    // Ensure buttons are hidden by default (if not already by CSS/template)
+                    checkInBtn.style.display = 'none';
+                    checkOutBtn.style.display = 'none';
+
+                    if (checkInOutEnabled) {
+                        if (booking.can_check_in) {
+                            checkInBtn.style.display = 'inline-block';
+                        }
+                        if (booking.checked_in_at && !booking.checked_out_at) {
+                            checkOutBtn.style.display = 'inline-block';
+                        }
                     }
-                    if (booking.checked_in_at && !booking.checked_out_at) {
-                        checkOutBtn.style.display = 'inline-block';
-                    }
+                    // If checkInOutEnabled is false, buttons remain hidden.
+
+                    bookingsListDiv.appendChild(bookingItemClone);
                 }
-                // If checkInOutEnabled is false, buttons remain hidden.
-
-                bookingsListDiv.appendChild(bookingItemClone);
             });
             hideStatusMessage(statusDiv);
         } catch (error) {
@@ -254,99 +290,43 @@ document.addEventListener('DOMContentLoaded', () => {
                 showError(statusDiv, error.message || 'Check out failed.');
             }
         }
-    });
 
-    async function fetchAndDisplayUserMessages() {
-        const messagesListDiv = document.getElementById('user-messages-list');
-        const messageItemTemplate = document.getElementById('user-message-item-template');
-        // const statusDiv is already defined globally in the script
-
-        if (!messagesListDiv || !messageItemTemplate) {
-            console.warn('User messages container or template not found.');
-            return;
-        }
-
-        // No specific loading message for this section for now, or use statusDiv
-        try {
-            const messages = await apiCall('/api/user/messages'); // GET is default
-
-            messagesListDiv.innerHTML = ''; // Clear previous messages
-
-            if (!messages || messages.length === 0) {
-                // Optionally hide messagesListDiv or show a "No new notifications" message
-                messagesListDiv.style.display = 'none';
+        if (target.classList.contains('clear-admin-message-btn')) {
+            const bookingId = target.dataset.bookingId;
+            if (!bookingId) {
+                console.error('Booking ID not found on dismiss button.');
+                showError(statusDiv, 'Could not identify booking to clear message.');
                 return;
             }
-            messagesListDiv.style.display = 'block';
 
-            messages.forEach(msg => {
-                const messageClone = messageItemTemplate.content.cloneNode(true);
-                const messageItemDiv = messageClone.querySelector('.user-message-item');
+            // Optional: Add a confirmation dialog
+            // if (!confirm(`Are you sure you want to dismiss this message for booking ID ${bookingId}?`)) {
+            //     return;
+            // }
 
-                messageClone.querySelector('.message-content').textContent = msg.message_content;
+            showLoading(statusDiv, `Dismissing message for booking ${bookingId}...`);
+            try {
+                await apiCall(`/api/bookings/${bookingId}/clear_admin_message`, { method: 'POST' });
+                showSuccess(statusDiv, `Message for booking ${bookingId} dismissed.`);
 
-                // Populate original booking details
-                const detailsDiv = messageClone.querySelector('.original-booking-details');
-                if (msg.original_booking_title || msg.original_resource_name || msg.original_start_time) {
-                    messageClone.querySelector('.original-title').textContent = msg.original_booking_title || 'N/A';
-                    messageClone.querySelector('.original-resource').textContent = msg.original_resource_name || 'N/A';
-                    messageClone.querySelector('.original-start').textContent = msg.original_start_time ? new Date(msg.original_start_time).toLocaleString() : 'N/A';
-                    messageClone.querySelector('.original-end').textContent = msg.original_end_time ? new Date(msg.original_end_time).toLocaleString() : 'N/A';
-                    detailsDiv.style.display = 'block';
+                // Remove the entire admin-deleted-item div
+                const messageItemDiv = target.closest('.admin-deleted-item');
+                if (messageItemDiv) {
+                    messageItemDiv.remove();
                 } else {
-                    detailsDiv.style.display = 'none'; // Hide if no original details
+                    // Fallback if the structure is unexpected, try to remove the button's parent at least
+                    target.parentElement.remove();
                 }
 
-                const dismissBtn = messageClone.querySelector('.dismiss-user-message-btn');
-                dismissBtn.dataset.messageId = msg.id;
-
-                messagesListDiv.appendChild(messageClone);
-            });
-
-        } catch (error) {
-            console.error('Error fetching user messages:', error);
-            // Optionally show an error in messagesListDiv or statusDiv
-            if (messagesListDiv) {
-                 messagesListDiv.innerHTML = '<div class="alert alert-danger">Could not load notifications.</div>';
-                 messagesListDiv.style.display = 'block';
+                if (bookingsListDiv.children.length === 0) {
+                    showStatusMessage(statusDiv, 'You have no active bookings or messages.', 'info');
+                }
+            } catch (error) {
+                console.error('Error dismissing admin message:', error);
+                showError(statusDiv, error.message || `Failed to dismiss message for booking ${bookingId}.`);
             }
         }
-    }
-
-    const messagesListDivGlobal = document.getElementById('user-messages-list');
-    if (messagesListDivGlobal) {
-        messagesListDivGlobal.addEventListener('click', async (event) => {
-            if (event.target.classList.contains('dismiss-user-message-btn')) {
-                const messageId = event.target.dataset.messageId;
-                const messageItemDiv = event.target.closest('.user-message-item');
-
-                event.target.disabled = true;
-                event.target.textContent = 'Dismissing...';
-
-                try {
-                    await apiCall(`/api/user/messages/${messageId}/dismiss`, { method: 'POST' });
-                    if (messageItemDiv) {
-                        messageItemDiv.remove(); // Remove the message from the UI
-                    }
-                    // Optionally, show a global success message in statusDiv
-                    showStatusMessage(statusDiv, 'Notification dismissed.', 'success');
-                    setTimeout(() => hideStatusMessage(statusDiv), 3000);
-
-                    // Check if messagesListDiv is now empty
-                    if (messagesListDivGlobal.children.length === 0) {
-                        messagesListDivGlobal.style.display = 'none';
-                    }
-
-                } catch (error) {
-                    console.error('Error dismissing message:', error);
-                    event.target.disabled = false;
-                    event.target.textContent = 'Dismiss';
-                    // Optionally, show an error message near the button or globally
-                    showStatusMessage(statusDiv, `Error: ${error.message || 'Could not dismiss notification.'}`, 'danger');
-                }
-            }
-        });
-    }
+    });
 
     // Handle modal form submission for updating booking
     saveBookingTitleBtn.addEventListener('click', async () => {
@@ -648,5 +628,4 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initial fetch of bookings
     fetchAndDisplayBookings();
-    fetchAndDisplayUserMessages();
 });
