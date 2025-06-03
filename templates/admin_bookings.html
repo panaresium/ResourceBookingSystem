@@ -77,55 +77,38 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.delete-booking-btn').forEach(button => {
         button.addEventListener('click', function() {
             const bookingId = this.dataset.bookingId;
-            const row = this.closest('tr');
+            const row = this.closest('tr'); // Get the table row
 
-            if (!confirm("{{ _('Are you sure you want to cancel this booking? This action cannot be undone.') }}")) { // Message changed to 'cancel'
+            // Updated confirmation message
+            if (!confirm("{{ _('Are you sure you want to DELETE this booking? This action cannot be undone and the booking will be permanently removed.') }}")) {
                 return;
             }
             this.disabled = true;
-            this.textContent = "{{ _('Processing...') }}"; // Changed text
+            this.textContent = "{{ _('Processing...') }}";
 
-            fetch(`/api/admin/bookings/${bookingId}/cancel`, {
+            // Updated fetch URL
+            fetch(`/api/admin/bookings/${bookingId}/delete`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
             })
             .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, data })))
             .then(({ ok, status, data }) => {
                 if (ok) {
-                    statusDiv.textContent = data.message || "{{ _('Booking action processed successfully.') }}";
+                    // Updated success logic
+                    statusDiv.textContent = data.message || "{{ _('Booking deleted successfully.') }}"; // Use message from response
                     statusDiv.className = 'alert alert-success';
-                    // Update row content instead of removing, to show new status and message
-                    row.classList.add('table-warning'); // Add warning class
-                    row.cells[6].innerHTML = `<span class="status-badge status-${data.new_status.toLowerCase()}">${data.new_status}</span>`; // Update status cell
-
-                    // Add admin deleted message to title cell or a new dedicated cell if layout changes
-                    let titleCell = row.cells[3]; // Assuming title is the 4th cell
-                    let messageDiv = titleCell.querySelector('.alert.alert-warning');
-                    if (!messageDiv) {
-                        messageDiv = document.createElement('div');
-                        messageDiv.className = 'alert alert-warning p-1 my-1';
-                        titleCell.appendChild(messageDiv);
-                    }
-                    messageDiv.innerHTML = `<small><strong>{{ _('Admin Cancellation:') }}</strong> ${data.admin_message}</small>`;
-
-                    // Change button to "Dismiss Message"
-                    this.classList.remove('delete-booking-btn', 'button-danger');
-                    this.classList.add('dismiss-admin-message-btn', 'btn-outline-secondary');
-                    this.textContent = "{{ _('Dismiss Message') }}";
-                    this.disabled = false; // Re-enable as dismiss button
-                    // No longer a 'delete' button, so don't remove its event listener directly,
-                    // but its original functionality won't run again if it's not a .delete-booking-btn.
-                    // The new 'dismiss' functionality will be handled by a separate listener.
-
+                    row.remove(); // Remove the row from the table
+                    // No need to interact with the button further as it's removed with the row
                 } else {
-                    throw new Error(data.error || `{{ _('Error processing booking action (Status: ${status}).') }}`);
+                    // Error handling remains largely the same
+                    throw new Error(data.error || `{{ _('Error deleting booking (Status: ${status}).') }}`);
                 }
             })
             .catch(error => {
                 statusDiv.textContent = `{{ _('Error') }}: ${error.message}`;
                 statusDiv.className = 'alert alert-danger';
                 this.disabled = false;
-                this.textContent = "{{ _('Delete') }}"; // Revert text on error
+                this.textContent = "{{ _('Delete') }}"; // Ensure button text reverts correctly
             });
         });
     });
