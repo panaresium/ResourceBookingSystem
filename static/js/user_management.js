@@ -868,6 +868,200 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // --- Bulk User Edit Functionality ---
+    function populateRolesForBulkEditModal(selectedAddIds = [], selectedRemoveIds = []) {
+        if (!bulkEdit_addRolesContainer || !bulkRemoveRolesContainer) return; // Use renamed variable
+
+        showLoading(bulkEdit_addRolesContainer, 'Loading roles...'); // Use renamed variable
+        showLoading(bulkRemoveRolesContainer, 'Loading roles...');
+
+        // Use cached roles if available, otherwise fetch
+        const rolesPromise = allAvailableRolesCache ? Promise.resolve(allAvailableRolesCache) : apiCall('/api/admin/roles');
+
+        rolesPromise.then(roles => {
+            if (!allAvailableRolesCache) {
+                allAvailableRolesCache = roles; // Cache them if fetched now
+            }
+
+            bulkEdit_addRolesContainer.innerHTML = ''; // Clear previous - Use renamed variable
+            bulkRemoveRolesContainer.innerHTML = '';
+
+            if (!roles || roles.length === 0) {
+                const noRolesMsg = '<small>No roles available.</small>';
+                bulkEdit_addRolesContainer.innerHTML = noRolesMsg; // Use renamed variable
+                bulkRemoveRolesContainer.innerHTML = noRolesMsg;
+                return;
+            }
+
+            roles.forEach(role => {
+                // Populate Add Roles Container
+                const addCheckboxDiv = document.createElement('div');
+                addCheckboxDiv.classList.add('checkbox-item');
+                const addCheckbox = document.createElement('input');
+                addCheckbox.type = 'checkbox';
+                addCheckbox.id = `bulk-edit-add-role-${role.id}`; // Changed ID prefix for uniqueness
+                addCheckbox.value = role.id;
+                addCheckbox.name = 'bulk_edit_add_role_ids'; // Changed name for clarity
+                if (selectedAddIds.includes(role.id)) addCheckbox.checked = true;
+
+                const addLabel = document.createElement('label');
+                addLabel.htmlFor = `bulk-edit-add-role-${role.id}`; // Changed ID prefix
+                addLabel.textContent = role.name;
+
+                addCheckboxDiv.appendChild(addCheckbox);
+                addCheckboxDiv.appendChild(addLabel);
+                bulkEdit_addRolesContainer.appendChild(addCheckboxDiv); // Use renamed variable
+
+                // Populate Remove Roles Container
+                const removeCheckboxDiv = document.createElement('div');
+                removeCheckboxDiv.classList.add('checkbox-item');
+                const removeCheckbox = document.createElement('input');
+                removeCheckbox.type = 'checkbox';
+                removeCheckbox.id = `bulk-edit-remove-role-${role.id}`; // Changed ID prefix for uniqueness
+                removeCheckbox.value = role.id;
+                removeCheckbox.name = 'bulk_edit_remove_role_ids'; // Changed name for clarity
+                if (selectedRemoveIds.includes(role.id)) removeCheckbox.checked = true;
+
+                const removeLabel = document.createElement('label');
+                removeLabel.htmlFor = `bulk-edit-remove-role-${role.id}`; // Changed ID prefix
+                removeLabel.textContent = role.name;
+
+                removeCheckboxDiv.appendChild(removeCheckbox);
+                removeCheckboxDiv.appendChild(removeLabel);
+                bulkRemoveRolesContainer.appendChild(removeCheckboxDiv);
+            });
+        }).catch(error => {
+            showError(bulkEdit_addRolesContainer, 'Failed to load roles.'); // Use renamed variable
+            showError(bulkRemoveRolesContainer, 'Failed to load roles.');
+            console.error("Error populating roles for bulk edit:", error);
+        });
+    }
+
+    if (bulkEditUsersBtn) {
+        bulkEditUsersBtn.addEventListener('click', async () => {
+            const selectedUserIds = Array.from(usersTableBody.querySelectorAll('.select-user-checkbox:checked'))
+                                       .map(cb => parseInt(cb.dataset.userId, 10));
+
+            if (selectedUserIds.length === 0) {
+                showError(userManagementStatusDiv, 'No users selected for bulk edit.');
+                return;
+            }
+
+            if (bulkEditUserForm) bulkEditUserForm.reset();
+            if (bulkEditUserModalStatusDiv) hideMessage(bulkEditUserModalStatusDiv);
+            if (bulkSetAdminSelect) bulkSetAdminSelect.value = ""; // Reset to "No Change"
+            if (bulkEditSelectedCountSpan) bulkEditSelectedCountSpan.textContent = selectedUserIds.length;
+
+
+            // Populate roles (this will also fetch if cache is empty)
+            // Ensure roles are loaded before showing the modal if they aren't cached
+            if (!allAvailableRolesCache) {
+                try {
+                    showLoading(userManagementStatusDiv, "Loading roles for bulk edit...");
+                    allAvailableRolesCache = await apiCall('/api/admin/roles');
+                    hideMessage(userManagementStatusDiv);
+                } catch (error) {
+                    showError(userManagementStatusDiv, `Failed to load roles: ${error.message}. Please try again.`);
+                    return;
+                }
+            }
+            populateRolesForBulkEditModal([], []); // Populate with no roles pre-selected
+
+            if (bulkEditUserModal) bulkEditUserModal.style.display = 'block';
+        });
+    }
+
+    if (closeBulkEditModalBtn) {
+        closeBulkEditModalBtn.addEventListener('click', () => {
+            if (bulkEditUserModal) bulkEditUserModal.style.display = 'none';
+        });
+    }
+
+    if (bulkEditUserForm) {
+        bulkEditUserForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            showLoading(bulkEditUserModalStatusDiv, 'Applying bulk changes...');
+
+            const selectedUserIds = Array.from(usersTableBody.querySelectorAll('.select-user-checkbox:checked'))
+                                       .map(cb => parseInt(cb.dataset.userId, 10));
+
+            if (selectedUserIds.length === 0) {
+                showError(bulkEditUserModalStatusDiv, 'No users selected. Please select users from the table first.');
+                return; // Should not happen if modal was opened correctly, but as a safeguard
+            }
+
+            const setAdminValue = bulkSetAdminSelect.value;
+            let setAdmin = null;
+            if (setAdminValue === "true") setAdmin = true;
+            else if (setAdminValue === "false") setAdmin = false;
+
+            const addRoleIds = Array.from(bulkEdit_addRolesContainer.querySelectorAll('input[name="bulk_edit_add_role_ids"]:checked')) // Use renamed variable and name
+                                    .map(cb => parseInt(cb.value, 10));
+            const removeRoleIds = Array.from(bulkRemoveRolesContainer.querySelectorAll('input[name="bulk_edit_remove_role_ids"]:checked')) // Use changed name
+                                     .map(cb => parseInt(cb.value, 10));
+
+            // Client-side validation for overlapping roles
+            const commonRoles = addRoleIds.filter(id => removeRoleIds.includes(id));
+            if (commonRoles.length > 0) {
+                const commonRoleNames = allAvailableRolesCache
+                    .filter(role => commonRoles.includes(role.id))
+                    .map(role => role.name)
+                    .join(', ');
+                showError(bulkEditUserModalStatusDiv, `Cannot add and remove the same roles in one operation. Conflicting roles: ${commonRoleNames}.`);
+                return;
+            }
+
+            // Ensure at least one action is selected
+            if (setAdmin === null && addRoleIds.length === 0 && removeRoleIds.length === 0) {
+                showError(bulkEditUserModalStatusDiv, 'No changes specified. Please select an admin status or roles to add/remove.');
+                return;
+            }
+
+
+            const actions = {
+                set_admin: setAdmin,
+                add_role_ids: addRoleIds.length > 0 ? addRoleIds : null,
+                remove_role_ids: removeRoleIds.length > 0 ? removeRoleIds : null
+            };
+
+            try {
+                const response = await apiCall('/api/admin/users/bulk', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: selectedUserIds, actions: actions })
+                }, bulkEditUserModalStatusDiv); // Pass status div to apiCall
+
+                // Check if apiCall handled the message display based on its logic.
+                // If not, or if we want a more specific message for 207:
+                if (response) { // apiCall returns response on success
+                    let message = response.message || `Bulk update processed. ${response.updated_count || 0} users affected.`;
+                    if (response.errors && response.errors.length > 0) {
+                        message += ` Some operations had issues: ${response.errors.map(e => `User ${e.id || 'N/A'}: ${e.error}`).join(', ')}`;
+                        showError(userManagementStatusDiv, message); // Show detailed errors on main page status
+                    } else {
+                        showSuccess(userManagementStatusDiv, message);
+                    }
+                }
+                // If apiCall showed a message in bulkEditUserModalStatusDiv and it was an error,
+                // we might not want to immediately hide the modal. But for now, let's assume success leads to hiding.
+
+                if (bulkEditUserModal && (!bulkEditUserModalStatusDiv.textContent || bulkEditUserModalStatusDiv.style.color === 'green' || bulkEditUserModalStatusDiv.style.color === 'var(--success-color)')) {
+                    bulkEditUserModal.style.display = 'none';
+                }
+                fetchAndDisplayUsers(currentFilters); // Refresh user list
+                if (selectAllUsersCheckbox) selectAllUsersCheckbox.checked = false; // Uncheck select all
+
+            } catch (error) {
+                // apiCall should have displayed the error in bulkEditUserModalStatusDiv.
+                // If for some reason it didn't, or for additional logging:
+                console.error("Bulk edit submission failed:", error);
+                if (!bulkEditUserModalStatusDiv.textContent || bulkEditUserModalStatusDiv.style.display === 'none') {
+                    showError(bulkEditUserModalStatusDiv, `Operation failed: ${error.message}`);
+                }
+            }
+        });
+    }
+
     // Event Delegation for Edit/Delete Role buttons
     if (rolesTableBody) {
         rolesTableBody.addEventListener('click', (event) => {
@@ -961,5 +1155,190 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initial load for roles
     if (roleFormModal) roleFormModal.style.display = 'none';
-    fetchAndDisplayRoles();
+    if (bulkEditUserModal) bulkEditUserModal.style.display = 'none'; // Ensure bulk modal hidden initially
+    if (bulkAddUserModal) bulkAddUserModal.style.display = 'none'; // Ensure bulk add modal hidden initially
+
+
+    // --- Bulk Add Users (Pattern) Functionality ---
+
+    // Helper to populate roles in a generic container (used by bulk add)
+    async function populateRolesInContainer(containerElement, checkboxNamePrefix, selectedRoleIds = []) {
+        if (!containerElement) return;
+        showLoading(containerElement, 'Loading roles...');
+
+        try {
+            if (!allAvailableRolesCache) { // Ensure cache is populated
+                allAvailableRolesCache = await apiCall('/api/admin/roles');
+            }
+            containerElement.innerHTML = ''; // Clear previous
+
+            if (!allAvailableRolesCache || allAvailableRolesCache.length === 0) {
+                containerElement.innerHTML = '<small>No roles available.</small>';
+                return;
+            }
+
+            allAvailableRolesCache.forEach(role => {
+                const checkboxDiv = document.createElement('div');
+                checkboxDiv.classList.add('checkbox-item');
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `${checkboxNamePrefix}-role-${role.id}`;
+                checkbox.value = role.id;
+                checkbox.name = `${checkboxNamePrefix}_role_ids`;
+                if (selectedRoleIds.includes(role.id)) {
+                    checkbox.checked = true;
+                }
+
+                const label = document.createElement('label');
+                label.htmlFor = `${checkboxNamePrefix}-role-${role.id}`;
+                label.textContent = role.name;
+
+                checkboxDiv.appendChild(checkbox);
+                checkboxDiv.appendChild(label);
+                containerElement.appendChild(checkboxDiv);
+            });
+        } catch (error) {
+            showError(containerElement, 'Failed to load roles.');
+            console.error(`Error populating roles for ${checkboxNamePrefix}:`, error);
+        }
+    }
+
+
+    if (bulkAddUsersBtn) {
+        bulkAddUsersBtn.addEventListener('click', async () => {
+            if (bulkAddUserForm) bulkAddUserForm.reset(); // Reset form fields to default/empty
+            if (bulkAddUserModalStatusDiv) hideMessage(bulkAddUserModalStatusDiv);
+
+            // Set default values for pattern fields if needed (or ensure they are in HTML)
+            if(bulkAddUsernamePatternInput) bulkAddUsernamePatternInput.value = 'user###';
+            if(bulkAddStartIndexInput) bulkAddStartIndexInput.value = '1';
+            if(bulkAddCountInput) bulkAddCountInput.value = '10';
+
+
+            // Ensure roles are loaded and populate checkboxes
+            // This reuses the logic from populateRolesForUserForm or a new generic one
+            try {
+                // If roles aren't cached, populateRolesInContainer will fetch them.
+                await populateRolesInContainer(bulkAddPattern_rolesContainer, 'bulk-add-pattern', []); // Use renamed variable
+            } catch (error) {
+                showError(bulkAddUserModalStatusDiv, `Failed to load roles for selection: ${error.message}`);
+                // Optionally, don't open modal if roles fail to load, or open with error.
+                // For now, it will open with the error message in the roles container.
+            }
+
+            if (bulkAddUserModal) bulkAddUserModal.style.display = 'block';
+        });
+    }
+
+    if (closeBulkAddModalBtn) {
+        closeBulkAddModalBtn.addEventListener('click', () => {
+            if (bulkAddUserModal) bulkAddUserModal.style.display = 'none';
+        });
+    }
+
+    if (bulkAddUserForm) {
+        bulkAddUserForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            showLoading(bulkAddUserModalStatusDiv, 'Processing bulk user creation...');
+
+            const usernamePattern = bulkAddUsernamePatternInput.value.trim();
+            const startIndex = parseInt(bulkAddStartIndexInput.value, 10);
+            const count = parseInt(bulkAddCountInput.value, 10);
+            const defaultPassword = bulkAddDefaultPasswordInput.value; // No trim for password
+            const emailPattern = bulkAddEmailPatternInput.value.trim(); // Optional
+            const isAdmin = bulkAddIsAdminCheckbox.checked;
+            const selectedRoleIds = Array.from(bulkAddPattern_rolesContainer.querySelectorAll('input[name="bulk-add-pattern_role_ids"]:checked')) // Use renamed variable and name
+                                       .map(cb => parseInt(cb.value, 10));
+
+            // --- Client-side Validation ---
+            if (!usernamePattern || !usernamePattern.includes('###')) {
+                showError(bulkAddUserModalStatusDiv, 'Username pattern is required and must include "###".');
+                return;
+            }
+            if (isNaN(startIndex) || startIndex < 0) {
+                showError(bulkAddUserModalStatusDiv, 'Start index must be a non-negative number.');
+                return;
+            }
+            if (isNaN(count) || count <= 0) {
+                showError(bulkAddUserModalStatusDiv, 'Number of users must be a positive number.');
+                return;
+            }
+            if (count > 200) { // Safety limit
+                showError(bulkAddUserModalStatusDiv, 'Cannot create more than 200 users at once.');
+                return;
+            }
+            if (!defaultPassword || defaultPassword.length < 6) {
+                showError(bulkAddUserModalStatusDiv, 'Default password is required and must be at least 6 characters long.');
+                return;
+            }
+            if (emailPattern && !emailPattern.includes('###') && !emailPattern.includes('@')) { // Basic check if pattern looks like an email pattern or just a fixed email
+                 showError(bulkAddUserModalStatusDiv, 'Email pattern, if provided, should ideally include "###" or be a valid email structure.');
+                 // This is a soft warning, backend will do stricter validation if needed or derive email.
+            }
+
+
+            const payload = {
+                username_pattern: usernamePattern,
+                start_index: startIndex,
+                count: count,
+                default_password: defaultPassword,
+                is_admin: isAdmin,
+                role_ids: selectedRoleIds
+            };
+            if (emailPattern) {
+                payload.email_pattern = emailPattern;
+            }
+
+            try {
+                const response = await apiCall('/api/admin/users/bulk_add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }, bulkAddUserModalStatusDiv); // Pass status div
+
+                if (response) {
+                    let message = response.message || `Bulk add operation processed.`;
+                    let isError = false;
+
+                    if (response.created_count > 0) {
+                        message += ` Successfully created: ${response.created_count}.`;
+                    }
+                    if (response.failed_count && response.failed_count > 0) {
+                        message += ` Failed: ${response.failed_count}.`;
+                        isError = true; // Consider partial success an error for message styling
+                        if (response.errors && response.errors.length > 0) {
+                            message += " Errors: " + response.errors.map(err => `${err.username_attempt || 'N/A'}: ${err.error}`).join("; ");
+                        }
+                    }
+
+                    if (isError || (response.failed_count && response.failed_count > 0)) {
+                        showError(userManagementStatusDiv, message); // Show detailed errors on main page status
+                    } else {
+                        showSuccess(userManagementStatusDiv, message);
+                    }
+
+                    // Close modal only on full success (HTTP 201 from backend, or if no failures reported in 207)
+                    if (response.created_count > 0 && (!response.failed_count || response.failed_count === 0)) {
+                         if (bulkAddUserModal) bulkAddUserModal.style.display = 'none';
+                    }
+                    fetchAndDisplayUsers(currentFilters); // Refresh user list
+                }
+                // If apiCall itself threw an error, it would be caught below
+                // and displayed in bulkAddUserModalStatusDiv
+
+            } catch (error) {
+                // This catch block is primarily for network errors or if apiCall itself throws
+                console.error("Bulk add submission failed:", error);
+                // apiCall should have already displayed the error in bulkAddUserModalStatusDiv
+                if (!bulkAddUserModalStatusDiv.textContent || bulkAddUserModalStatusDiv.style.display === 'none') {
+                     showError(bulkAddUserModalStatusDiv, `Operation failed: ${error.message}`);
+                }
+            }
+        });
+    }
+
+    fetchAndDisplayRoles(); // This also populates allAvailableRolesCache for user forms
+
 });
+
+[end of static/js/user_management.js]
