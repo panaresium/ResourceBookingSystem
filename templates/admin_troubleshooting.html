@@ -43,4 +43,162 @@
         </div>
     </div>
 </div>
+
+<script type="text/javascript">
+document.addEventListener('DOMContentLoaded', function () {
+    // CSRF token will be handled by the global apiCall function.
+
+    // Troubleshooting Tools Elements
+    const viewDbRecordsBtn = document.getElementById('view-db-records-btn');
+    const viewDbRecordsStatusEl = document.getElementById('view-db-records-status');
+    const viewDbRecordsOutputEl = document.getElementById('view-db-records-output');
+
+    const reloadConfigurationsBtn = document.getElementById('reload-configurations-btn');
+    const reloadConfigurationsStatusEl = document.getElementById('reload-configurations-status');
+
+    const cleanupSystemDataBtn = document.getElementById('cleanup-system-data-btn');
+    const cleanupSystemDataStatusEl = document.getElementById('cleanup-system-data-status');
+
+    // --- Troubleshooting Tools Event Listeners ---
+    if (viewDbRecordsBtn) {
+        viewDbRecordsBtn.addEventListener('click', function() {
+            viewDbRecordsStatusEl.textContent = "{{ _('Fetching DB records...') }}";
+            viewDbRecordsStatusEl.className = 'alert alert-info';
+            viewDbRecordsOutputEl.style.display = 'none';
+            viewDbRecordsOutputEl.textContent = '';
+            viewDbRecordsBtn.disabled = true;
+
+            fetch('/api/admin/view_db_raw_top100', { // Assuming apiCall will add CSRF if needed by default for GET too, or use apiCall
+                method: 'GET',
+                headers: { 'Accept': 'application/json' } // CSRF typically not needed for GET
+            })
+            .then(response => response.json())
+            .then(data => {
+            if (data.success && data.data) {
+                viewDbRecordsOutputEl.innerHTML = ''; // Clear previous content
+                viewDbRecordsOutputEl.style.display = 'block';
+
+                for (const tableName in data.data) {
+                    if (data.data.hasOwnProperty(tableName)) {
+                        const records = data.data[tableName];
+
+                        const tableContainer = document.createElement('div');
+                        tableContainer.className = 'db-table-container mb-3';
+
+                        const tableButton = document.createElement('button');
+                        tableButton.className = 'btn btn-outline-primary btn-sm mb-1 w-100 text-start';
+                        tableButton.textContent = `${tableName} (${records.length} records)`;
+
+                        const recordsDiv = document.createElement('div');
+                        recordsDiv.className = 'db-records-content';
+                        recordsDiv.style.display = 'none';
+
+                        if (records.length > 0) {
+                            const preFormattedRecords = document.createElement('pre');
+                            preFormattedRecords.style.whiteSpace = 'pre-wrap';
+                            preFormattedRecords.style.wordBreak = 'break-all';
+                            preFormattedRecords.textContent = JSON.stringify(records, null, 2);
+                            recordsDiv.appendChild(preFormattedRecords);
+                        } else {
+                            recordsDiv.textContent = "{{ _('No records found for this table.') }}";
+                        }
+
+                        tableButton.addEventListener('click', function() {
+                            const isHidden = recordsDiv.style.display === 'none';
+                            recordsDiv.style.display = isHidden ? 'block' : 'none';
+                            tableButton.classList.toggle('active', isHidden);
+                        });
+
+                        tableContainer.appendChild(tableButton);
+                        tableContainer.appendChild(recordsDiv);
+                        viewDbRecordsOutputEl.appendChild(tableContainer);
+                    }
+                }
+                viewDbRecordsStatusEl.textContent = "{{ _('DB records fetched successfully.') }}";
+                viewDbRecordsStatusEl.className = 'alert alert-success';
+                } else {
+                    viewDbRecordsStatusEl.textContent = "{{ _('Failed to fetch DB records:') }} " + (data.message || "{{ _('Unknown error.') }}");
+                    viewDbRecordsStatusEl.className = 'alert alert-danger';
+                    viewDbRecordsOutputEl.style.display = 'none';
+                }
+            })
+            .catch(error => {
+                console.error('View DB Records error:', error);
+                viewDbRecordsStatusEl.textContent = "{{ _('Error fetching DB records:') }} " + error.toString();
+                viewDbRecordsStatusEl.className = 'alert alert-danger';
+            })
+            .finally(() => {
+                viewDbRecordsBtn.disabled = false;
+            });
+        });
+    }
+
+    if (reloadConfigurationsBtn) {
+        reloadConfigurationsBtn.addEventListener('click', function() {
+            reloadConfigurationsStatusEl.textContent = "{{ _('Attempting to reload configurations...') }}";
+            reloadConfigurationsStatusEl.className = 'alert alert-info';
+            reloadConfigurationsBtn.disabled = true;
+
+            // Using global apiCall which handles CSRF
+            apiCall('/api/admin/reload_configurations', {
+                method: 'POST'
+                // headers: { 'X-CSRFToken': csrfToken, 'Accept': 'application/json' } // csrfToken handled by apiCall
+            }, reloadConfigurationsStatusEl)
+            .then(data => { // apiCall resolves with data on success (2xx status)
+                // Message is already set by apiCall on success if data.message exists
+                if (!data.message && data.success) { // if apiCall's default success message isn't enough
+                     showSuccess(reloadConfigurationsStatusEl, "{{ _('Configuration reload attempt finished successfully.') }}");
+                }
+            })
+            .catch(error => { // apiCall rejects on network error or non-2xx status, message already set
+                console.error('Reload Configurations error:', error);
+                // showError is already called by apiCall
+            })
+            .finally(() => {
+                reloadConfigurationsBtn.disabled = false;
+            });
+        });
+    }
+
+    if (cleanupSystemDataBtn) {
+        cleanupSystemDataBtn.addEventListener('click', function() {
+            const confirmationPrompt = "{{ _('Type CONFIRM to delete bookings, resources, floor maps, and all uploaded floor map/resource images. This action is irreversible.') }}";
+            const userInput = prompt(confirmationPrompt);
+
+            if (userInput === "CONFIRM") {
+                cleanupSystemDataStatusEl.textContent = "{{ _('Processing cleanup...') }}";
+                cleanupSystemDataStatusEl.className = 'alert alert-info';
+                cleanupSystemDataBtn.disabled = true;
+
+                // Using global apiCall which handles CSRF
+                apiCall('/api/admin/cleanup_system_data', {
+                    method: 'POST'
+                    // headers: { 'X-CSRFToken': csrfToken, 'Accept': 'application/json' } // csrfToken handled by apiCall
+                }, cleanupSystemDataStatusEl)
+                .then(data => {
+                     if (!data.message && data.success) {
+                        showSuccess(cleanupSystemDataStatusEl, "{{ _('System data cleanup successful.') }}");
+                     }
+                    // Optionally, refresh parts of the page or prompt user to refresh
+                    // Example: if you have a function to reload backups on the Backup/Restore page,
+                    // and this cleanup affects it, you might call it here.
+                    // For now, no specific refresh action after cleanup on this page.
+                })
+                .catch(error => {
+                    console.error('Cleanup System Data error:', error);
+                })
+                .finally(() => {
+                    cleanupSystemDataBtn.disabled = false;
+                });
+            } else if (userInput !== null) {
+                cleanupSystemDataStatusEl.textContent = "{{ _('Cleanup cancelled. Confirmation not received.') }}";
+                cleanupSystemDataStatusEl.className = 'alert alert-warning';
+            } else {
+                 cleanupSystemDataStatusEl.textContent = "{{ _('Cleanup cancelled.') }}";
+                 cleanupSystemDataStatusEl.className = 'alert alert-info';
+            }
+        });
+    }
+});
+</script>
 {% endblock %}
