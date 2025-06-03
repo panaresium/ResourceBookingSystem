@@ -43,7 +43,7 @@
                     <td><span class="status-badge status-{{ booking.status | lower }}">{{ _(booking.status) }}</span></td>
                     <td>
                         {% if booking.status and booking.status.lower() not in ['cancelled', 'rejected', 'completed', 'checked_out'] %}
-                        <button class="button button-danger cancel-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel') }}</button>
+                        <button class="button button-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Delete') }}</button>
                         {% else %}
                         -
                         {% endif %}
@@ -61,16 +61,18 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const statusDiv = document.getElementById('admin-booking-status');
-    const cancelButtons = document.querySelectorAll('.cancel-booking-btn');
+    const deleteButtons = document.querySelectorAll('.delete-booking-btn'); // Changed selector
     const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
-    cancelButtons.forEach(button => {
+    deleteButtons.forEach(button => { // Changed variable name
         button.addEventListener('click', function() {
             const bookingId = this.dataset.bookingId;
             const row = this.closest('tr'); // Get the table row
 
             if (!bookingId) {
                 console.error('Booking ID not found on button');
+                statusDiv.textContent = 'Error: Booking ID missing.';
+                statusDiv.style.color = 'red';
                 return;
             }
 
@@ -81,51 +83,53 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
+            // Confirmation dialog
+            if (!confirm("{{ _('Are you sure you want to delete this booking? This action cannot be undone.') }}")) {
+                return; // Stop if user cancels
+            }
+
             // Optimistically disable the button
             this.disabled = true;
-            this.textContent = 'Processing...';
+            this.textContent = "{{ _('Deleting...') }}";
 
-            fetch(`/api/admin/bookings/${bookingId}/cancel`, {
+            fetch(`/api/admin/bookings/${bookingId}/cancel`, { // Endpoint remains the same as it now handles deletion
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': csrfToken
                 },
-                // body: JSON.stringify({}) // No body needed for this request as per typical cancel actions
             })
             .then(response => {
                 if (response.ok) {
                     return response.json();
                 } else {
-                    return response.json().then(err => Promise.reject(err));
+                    // Try to parse error, but provide a fallback
+                    return response.json().catch(() => ({ error: 'Failed to parse error response.' })).then(err => Promise.reject(err));
                 }
             })
             .then(data => {
-                statusDiv.textContent = data.message || 'Booking cancelled successfully.';
+                statusDiv.textContent = data.message || "{{ _('Booking deleted successfully.') }}";
                 statusDiv.style.color = 'green';
 
-                // Update booking status in the table
-                const statusCell = row.querySelector('td:nth-child(7) span'); // 7th cell for status
-                if (statusCell) {
-                    statusCell.textContent = 'Cancelled';
-                    statusCell.className = 'status-badge status-cancelled';
-                }
-
-                // Update button state
-                this.textContent = 'Cancelled';
-                this.disabled = true; // Keep it disabled
+                // Remove the row from the table
+                row.remove();
             })
             .catch(error => {
-                const errorMessage = error.message || error.error || 'An unknown error occurred.';
-                statusDiv.textContent = `Error: ${errorMessage}`;
+                const errorMessage = error.message || error.error || "{{ _('An unknown error occurred during deletion.') }}";
+                statusDiv.textContent = `{{ _('Error') }}: ${errorMessage}`;
                 statusDiv.style.color = 'red';
 
-                // Re-enable the button if the operation failed, unless it was a 404 or similar
-                if (error.status !== 404) {
+                // Re-enable the button if the operation failed, unless it was a 404 (booking not found)
+                // or other specific statuses where re-enabling isn't logical.
+                if (error.status !== 404 && error.status !== 400) { // 400 might be for already terminal state
                      this.disabled = false;
-                     this.textContent = 'Cancel';
+                     this.textContent = "{{ _('Delete') }}";
                 } else {
-                    this.textContent = 'Error'; // Or some other indication that it failed terminally
+                    // For 404 or 400 (e.g. already terminal), the button might stay disabled or removed
+                    // If row wasn't removed due to error, button text indicates error
+                    this.textContent = "{{ _('Error') }}";
+                    // Optionally, if the row is still there and it's a 404, remove it.
+                    if (error.status === 404) row.remove();
                 }
             });
         });
