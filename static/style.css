@@ -1196,3 +1196,9 @@ a.fc-daygrid-event.fc-event { /* Targeting the <a> tag specifically */
 /* Time part (text node) will inherit default text handling. */
 /* JavaScript truncation now manages its length. */
 ```
+
+#welcome-message-container {
+    color: black;
+    margin-left: auto;
+    margin-right: 10px;
+}
