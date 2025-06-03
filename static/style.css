@@ -59,6 +59,7 @@ body {
     align-items: center;
     z-index: 1030;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    font-weight: bold; /* Added this line */
 }
 
 .header-content {
@@ -1200,4 +1201,7 @@ a.fc-daygrid-event.fc-event { /* Targeting the <a> tag specifically */
 #welcome-message-container {
     color: black;
     margin-right: 10px;
+    padding: 0.5em 0.75em; /* Ensure it has padding like other header items */
+    display: flex;         /* For internal alignment if its content needs it */
+    align-items: center;   /* For internal alignment */
 }
