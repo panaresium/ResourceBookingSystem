@@ -46,39 +46,40 @@
             
             {# Container for Admin Maps link - shown by JS if admin #}
 
-        <li id="admin-menu-item" style="display:none;">
+        <li id="admin-menu-item" style="display:none;"> <!-- Container for Configuration -->
             <details id="admin-section" open>
-                <summary><span class="menu-icon" aria-hidden="true">⚙️</span><span class="menu-text">{{ _('Admin') }}</span></summary>
+                <summary><span class="menu-text">{{ _('Configuration') }}</span></summary> <!-- Icon removed, text changed -->
                 <ul class="admin-menu">
+                    <li id="user-management-nav-link" style="display: none;">
+                        <a href="{{ url_for('admin_ui.serve_user_management_page') }}">{{ _('Users') }}</a> <!-- Icon removed, text changed -->
+                    </li>
                     <li id="resource-management-nav-link" style="display: none;">
-                        <a href="{{ url_for('admin_ui.serve_resource_management_page') }}"><i class="fas fa-cubes mr-2"></i>{{ _('Resource Management') }}</a>
+                        <a href="{{ url_for('admin_ui.serve_resource_management_page') }}">{{ _('Resources') }}</a> <!-- Icon removed, text changed -->
                     </li>
                     <li id="admin-maps-nav-link" style="display: none;">
-                        <a href="{{ url_for('admin_ui.serve_admin_maps') }}"><i class="fas fa-map-marked-alt mr-2"></i>{{ _('Admin Maps') }}</a>
-                    </li>
-                    <li id="booking-settings-nav-link" style="display: none;">
-                        <a href="{{ url_for('admin_ui.serve_booking_settings_page') }}"><i class="fas fa-cogs mr-2"></i>{{ _('Booking Settings') }}</a>
-                    </li>
-                    <li id="user-management-nav-link" style="display: none;">
-                        <a href="{{ url_for('admin_ui.serve_user_management_page') }}"><i class="fas fa-users-cog mr-2"></i>{{ _('User Management') }}</a>
+                        <a href="{{ url_for('admin_ui.serve_admin_maps') }}">{{ _('Maps') }}</a> <!-- Icon removed, text changed -->
                     </li>
                     <li id="admin-bookings-nav-link" style="display: none;">
-                        <a href="{{ url_for('admin_ui.serve_admin_bookings_page') }}"><i class="fas fa-calendar-check mr-2"></i>{{ _('Admin Bookings') }}</a>
+                        <a href="{{ url_for('admin_ui.serve_admin_bookings_page') }}">{{ _('Booking Records') }}</a> <!-- Icon removed, text changed -->
                     </li>
-                    <li id="analytics-nav-link" style="display: none;">
-                        <a href="{{ url_for('admin_ui.analytics_dashboard') }}"><i class="fas fa-chart-line mr-2"></i>{{ _('Analytics') }}</a>
-                    </li>
-                    <li id="log-nav-link" style="display: none;">
-                        <a href="{{ url_for('admin_ui.serve_audit_log_page') }}"><i class="fas fa-clipboard-list mr-2"></i>{{ _('Audit Logs') }}</a>
-                    </li>
-                    <li id="backup-restore-nav-link" style="display: none;">
-                        <a href="{{ url_for('admin_ui.serve_backup_restore_page') }}"><i class="fas fa-history mr-2"></i>{{ _('Backup & Restore') }}</a>
-                    </li>
-                    <li id="troubleshooting-nav-link" style="display: none;">
-                        <a href="{{ url_for('admin_ui.serve_troubleshooting_page') }}"><i class="fas fa-wrench mr-2"></i>{{ _('Troubleshooting') }}</a>
+                    <li id="booking-settings-nav-link" style="display: none;">
+                        <a href="{{ url_for('admin_ui.serve_booking_settings_page') }}">{{ _('Booking Options') }}</a> <!-- Icon removed, text changed -->
                     </li>
                 </ul>
             </details>
+        </li>
+        <!-- Other Admin links - now as direct siblings -->
+        <li id="analytics-nav-link" style="display: none;">
+            <a href="{{ url_for('admin_ui.analytics_dashboard') }}">{{ _('Analytics') }}</a> <!-- Icon removed -->
+        </li>
+        <li id="log-nav-link" style="display: none;">
+            <a href="{{ url_for('admin_ui.serve_audit_log_page') }}">{{ _('Audit Logs') }}</a> <!-- Icon removed -->
+        </li>
+        <li id="backup-restore-nav-link" style="display: none;">
+            <a href="{{ url_for('admin_ui.serve_backup_restore_page') }}">{{ _('Backup & Restore') }}</a> <!-- Icon removed -->
+        </li>
+        <li id="troubleshooting-nav-link" style="display: none;">
+            <a href="{{ url_for('admin_ui.serve_troubleshooting_page') }}">{{ _('Troubleshooting') }}</a> <!-- Icon removed -->
         </li>
         </ul>
     </nav>
