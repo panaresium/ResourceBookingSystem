@@ -307,6 +307,8 @@ def get_map_details(map_id):
                 'published_at': resource.published_at.isoformat() if resource.published_at else None,
                 'allowed_user_ids': resource.allowed_user_ids,
                 'roles': [{'id': role.id, 'name': role.name} for role in resource.roles],
+                'is_under_maintenance': resource.is_under_maintenance,
+                'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
                 'bookings_on_date': bookings_info
             }
             mapped_resources_list.append(resource_info)
