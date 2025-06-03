@@ -1027,3 +1027,60 @@ def clear_admin_deleted_message(booking_id):
             details=f"User '{current_user.username}' failed to clear admin_deleted_message for booking ID {booking_id}. Error: {str(e)}"
         )
         return jsonify({'error': 'Failed to clear admin message due to a server error.'}), 500
+
+
+@api_bookings_bp.route('/admin/bookings/<int:booking_id>/clear_admin_message', methods=['POST'])
+@login_required
+@permission_required('manage_bookings')
+def admin_clear_booking_message(booking_id):
+    current_app.logger.info(f"Admin user '{current_user.username}' attempting to clear admin message for booking ID: {booking_id}")
+    try:
+        booking = Booking.query.get(booking_id)
+
+        if not booking:
+            current_app.logger.warning(f"Admin clear message attempt: Booking ID {booking_id} not found.")
+            return jsonify({'error': 'Booking not found.'}), 404
+
+        if booking.status != 'cancelled_by_admin':
+            current_app.logger.warning(
+                f"Admin clear message attempt: Booking ID {booking_id} is not in 'cancelled_by_admin' state (current: '{booking.status}')."
+            )
+            return jsonify({'error': "Message can only be cleared for bookings cancelled by an admin."}), 400
+
+        booking.admin_deleted_message = None
+        booking.status = 'cancelled_admin_acknowledged' # New status
+        db.session.commit()
+
+        add_audit_log(
+            action="ADMIN_CLEAR_BOOKING_MESSAGE",
+            details=(
+                f"Admin '{current_user.username}' cleared cancellation message for booking ID {booking.id}. "
+                f"Status changed to 'cancelled_admin_acknowledged'."
+            )
+        )
+        current_app.logger.info(
+            f"Admin '{current_user.username}' cleared message for booking ID {booking.id}. Status set to 'cancelled_admin_acknowledged'."
+        )
+
+        # Emit a socket event to inform clients (e.g., admin dashboard) about the update
+        socketio.emit('booking_updated', {
+            'action': 'admin_message_cleared_by_admin', # More specific action name
+            'booking_id': booking.id,
+            'resource_id': booking.resource_id,
+            'new_status': booking.status,
+            'admin_deleted_message': None # Explicitly send None
+        })
+
+        return jsonify({
+            'message': 'Admin message cleared and booking acknowledged.',
+            'new_status': booking.status
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception(f"Error during admin clearing message for booking ID {booking_id}:")
+        add_audit_log(
+            action="ADMIN_CLEAR_BOOKING_MESSAGE_FAILED",
+            details=f"Admin '{current_user.username}' failed to clear message for booking ID {booking_id}. Error: {str(e)}"
+        )
+        return jsonify({'error': 'Failed to clear admin message due to a server error.'}), 500

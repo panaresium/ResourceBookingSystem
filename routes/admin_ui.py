@@ -66,6 +66,7 @@ def serve_admin_bookings_page():
             Booking.start_time,
             Booking.end_time,
             Booking.status,
+            Booking.admin_deleted_message, # Added admin_deleted_message to query
             User.username.label('user_username'),
             Resource.name.label('resource_name')
         ).join(Resource, Booking.resource_id == Resource.id)\
@@ -82,7 +83,8 @@ def serve_admin_bookings_page():
                 'end_time': booking_row.end_time,
                 'status': booking_row.status,
                 'user_username': booking_row.user_username,
-                'resource_name': booking_row.resource_name
+                'resource_name': booking_row.resource_name,
+                'admin_deleted_message': booking_row.admin_deleted_message # Added admin_deleted_message to dict
             })
         return render_template("admin_bookings.html", bookings=bookings_list)
     except Exception as e:
