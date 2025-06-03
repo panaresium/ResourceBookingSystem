@@ -969,13 +969,13 @@ def admin_delete_booking(booking_id):
         })
 
         current_app.logger.info(f"Admin user {current_user.username} successfully DELETED booking ID: {booking_id}.")
-        base_response_message = "Booking deleted successfully by admin."
+        response_message = 'Booking deleted successfully.'
         if user_message_created:
-            final_response_message = f"{base_response_message} User has been notified."
+            response_message += ' User has been notified.'
         else:
-            final_response_message = f"{base_response_message} User notification failed (user not found)."
+            response_message += ' User notification failed (user not found).'
 
-        return jsonify({'message': final_response_message, 'booking_id': booking_id}), 200
+        return jsonify({'message': response_message, 'booking_id': booking_id}), 200
 
     except Exception as e:
         db.session.rollback()
