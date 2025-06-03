@@ -207,6 +207,12 @@
                                         {{ _('Restore Bookings from this CSV') }}
                                     </button>
                                 </form>
+                                <form method="POST" action="{{ url_for('admin_ui.verify_booking_csv_backup_route', timestamp_str=backup_ts) }}" style="display: inline; margin-left: 5px;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <button type="submit" class="btn btn-info btn-sm">
+                                        <i class="fas fa-check-circle"></i> {{ _('Verify') }}
+                                    </button>
+                                </form>
                                 <form method="POST" action="{{ url_for('admin_ui.delete_booking_csv_backup_route', timestamp_str=backup_ts) }}" style="display: inline; margin-left: 5px;">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('{{ _('Are you sure you want to permanently delete the booking CSV backup for timestamp %(timestamp)s?', timestamp=backup_ts) }}');">
@@ -658,11 +664,34 @@
                 dryRunBtn.setAttribute('data-timestamp', timestamp);
                 cellAction.appendChild(dryRunBtn);
 
-                const verifyBtn = document.createElement('button');
-                verifyBtn.textContent = "{{ _('Verify') }}";
-                verifyBtn.className = 'btn btn-sm btn-secondary verify-backup-btn me-2'; // Added me-2
-                verifyBtn.setAttribute('data-timestamp', timestamp);
-                cellAction.appendChild(verifyBtn);
+                // const verifyBtn = document.createElement('button'); // Original simple button
+                // verifyBtn.textContent = "{{ _('Verify') }}";
+                // verifyBtn.className = 'btn btn-sm btn-secondary verify-backup-btn me-2';
+                // verifyBtn.setAttribute('data-timestamp', timestamp);
+                // cellAction.appendChild(verifyBtn);
+
+                // New Verify Form for Full Backups
+                const verifyForm = document.createElement('form');
+                verifyForm.method = 'POST';
+                // IMPORTANT: Constructing URL for Flask's url_for in JS is tricky.
+                // This will be a literal string. The route needs to match this.
+                verifyForm.action = `/admin/verify_full_backup/${timestamp}`;
+                verifyForm.style.display = 'inline';
+                verifyForm.style.marginLeft = '5px';
+
+                const csrfInputVerify = document.createElement('input');
+                csrfInputVerify.type = 'hidden';
+                csrfInputVerify.name = 'csrf_token';
+                csrfInputVerify.value = csrfToken; // Assumes csrfToken is available in this scope
+                verifyForm.appendChild(csrfInputVerify);
+
+                const verifySubmitBtn = document.createElement('button');
+                verifySubmitBtn.type = 'submit';
+                verifySubmitBtn.className = 'btn btn-info btn-sm';
+                verifySubmitBtn.innerHTML = '<i class="fas fa-check-circle"></i> {{ _("Verify") }}'; // Use innerHTML for icon
+                // No onclick confirmation for verify, as it's not directly destructive.
+                verifyForm.appendChild(verifySubmitBtn);
+                cellAction.appendChild(verifyForm);
 
                 const deleteBtn = document.createElement('button');
                 deleteBtn.textContent = "{{ _('Delete') }}";

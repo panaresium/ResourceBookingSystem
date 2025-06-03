@@ -16,7 +16,7 @@ from datetime import datetime, timedelta # Add datetime imports
 from azure_backup import list_available_backups, restore_full_backup, \
                          list_available_booking_csv_backups, restore_bookings_from_csv_backup, \
                          backup_bookings_csv, verify_backup_set, delete_backup_set, \
-                         delete_booking_csv_backup
+                         delete_booking_csv_backup, verify_booking_csv_backup
 # Removed duplicate model, db, auth, datetime imports that were already covered above or are standard
 
 admin_ui_bp = Blueprint('admin_ui', __name__, url_prefix='/admin', template_folder='../templates')
@@ -203,6 +203,80 @@ def delete_booking_csv_backup_route(timestamp_str):
     except Exception as e:
         app_instance.logger.error(f"Exception during booking CSV backup deletion for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
         flash(_('An unexpected error occurred while deleting the booking CSV backup for %(timestamp)s. Check server logs.', timestamp=timestamp_str), 'danger')
+
+    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+
+
+@admin_ui_bp.route('/admin/verify_booking_csv/<timestamp_str>', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def verify_booking_csv_backup_route(timestamp_str):
+    task_id = uuid.uuid4().hex
+    socketio_instance = None
+    if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
+        socketio_instance = current_app.extensions['socketio']
+    elif 'socketio' in globals() and socketio:
+        socketio_instance = socketio
+
+    app_instance = current_app._get_current_object()
+    app_instance.logger.info(f"Booking CSV backup verification for {timestamp_str} triggered by user {current_user.username if current_user else 'Unknown User'} with task ID {task_id}.")
+
+    try:
+        verification_result = verify_booking_csv_backup(timestamp_str, socketio_instance=socketio_instance, task_id=task_id)
+
+        status = verification_result.get('status', 'unknown')
+        message = verification_result.get('message', 'No details provided.')
+        file_path = verification_result.get('file_path', 'N/A')
+
+        if status == 'success':
+            flash(_('Booking CSV Backup Verification for "%(timestamp)s": File found at "%(path)s".', timestamp=timestamp_str, path=file_path), 'success')
+        elif status == 'not_found':
+            flash(_('Booking CSV Backup Verification for "%(timestamp)s": File NOT found at "%(path)s".', timestamp=timestamp_str, path=file_path), 'warning')
+        else: # 'error' or 'unknown'
+            flash(_('Booking CSV Backup Verification for "%(timestamp)s" FAILED: %(message)s', timestamp=timestamp_str, message=message), 'danger')
+
+    except Exception as e:
+        app_instance.logger.error(f"Exception during Booking CSV backup verification for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
+        flash(_('An unexpected error occurred while verifying Booking CSV backup %(timestamp)s. Check server logs.', timestamp=timestamp_str), 'danger')
+
+    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+
+
+@admin_ui_bp.route('/admin/verify_full_backup/<timestamp_str>', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def verify_full_backup_route(timestamp_str):
+    task_id = uuid.uuid4().hex
+    socketio_instance = None
+    if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
+        socketio_instance = current_app.extensions['socketio']
+    elif 'socketio' in globals() and socketio:
+        socketio_instance = socketio
+
+    app_instance = current_app._get_current_object()
+    app_instance.logger.info(f"Full backup verification for {timestamp_str} triggered by user {current_user.username if current_user else 'Unknown User'} with task ID {task_id}.")
+
+    try:
+        verification_summary = verify_backup_set(timestamp_str, socketio_instance=socketio_instance, task_id=task_id)
+
+        status_message = verification_summary.get('status', 'unknown').replace('_', ' ').title()
+        errors = verification_summary.get('errors', [])
+        # checks = verification_summary.get('checks', []) # For more detailed logging if needed
+
+        if verification_summary.get('status') == 'verified_present':
+            flash(_('Backup set %(timestamp)s verified successfully. Status: %(status)s', timestamp=timestamp_str, status=status_message), 'success')
+        elif verification_summary.get('status') in ['manifest_missing', 'manifest_corrupt', 'failed_verification', 'critical_error']:
+            error_details = "; ".join(errors)
+            flash(_('Backup set %(timestamp)s verification FAILED. Status: %(status)s. Errors: %(details)s', timestamp=timestamp_str, status=status_message, details=error_details), 'danger')
+            # Log detailed checks for failed verifications
+            # for check_item in checks:
+            #     app_instance.logger.debug(f"Verification check for {timestamp_str} ({task_id}): {check_item}")
+        else: # e.g. 'pending' or other statuses if verify_backup_set is asynchronous (currently it's synchronous)
+            flash(_('Backup set %(timestamp)s verification status: %(status)s. Issues: %(errors)s', timestamp=timestamp_str, status=status_message, errors='; '.join(errors)), 'warning')
+
+    except Exception as e:
+        app_instance.logger.error(f"Exception during full backup verification for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
+        flash(_('An unexpected error occurred while verifying backup set %(timestamp)s. Check server logs.', timestamp=timestamp_str), 'danger')
 
     return redirect(url_for('admin_ui.serve_backup_restore_page'))
 
