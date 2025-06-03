@@ -17,6 +17,7 @@ from models import (
     Role,
     AuditLog,
     FloorMap,
+    WaitlistEntry,
     resource_roles_table, # Assuming these are still relevant and defined in models.py
     user_roles_table    # or directly in extensions.py if preferred for table instances
 )
@@ -206,17 +207,14 @@ def init_db(force=False):
         # If it doesn't exist, create_all makes them, then we might not need these.
         # For robustness, call ensure_all_migrations. If tables don't exist, they'll error gracefully.
         # This is better handled by proper migration tools like Alembic usually.
-        if DB_PATH.exists():
-             current_app.logger.info("Database file exists. Ensuring all schema elements (columns) are present before ORM operations.")
-             ensure_all_migrations()
-
-
         current_app.logger.info("Creating database tables (db.create_all())...")
         db.create_all() # This creates tables based on models if they don't exist.
         current_app.logger.info("Database tables creation/verification step completed.")
 
-        # If tables were newly created by create_all, ensure_all_migrations might be more relevant AFTER it.
-        # This part is tricky without a full migration system. For now, this order.
+        # Now that tables are guaranteed to exist, run migrations/column checks.
+        # This is relevant whether the DB file existed before or was just created.
+        current_app.logger.info("Ensuring all schema elements (columns) are present after table creation.")
+        ensure_all_migrations()
 
         if not force:
             # Check if any of the core tables have data
