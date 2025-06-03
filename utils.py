@@ -6,6 +6,8 @@ from datetime import datetime, date, timedelta, time, timezone
 from flask import url_for, jsonify, current_app
 from flask_login import current_user
 from flask_mail import Message # For send_email
+import csv
+import io
 
 # Assuming db and mail are initialized in extensions.py
 from extensions import db, mail
@@ -531,6 +533,229 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
     username_for_audit_final = current_user.username if current_user and current_user.is_authenticated else "System_Startup"
     add_audit_log(action="IMPORT_MAP_CONFIGURATION_COMPLETED", details=f"User {username_for_audit_final} completed map config import. Summary: {str(summary)}")
     return summary, status_code
+
+
+def export_bookings_to_csv_string(bookings_iterable) -> str:
+    """
+    Exports an iterable of Booking model objects to a CSV formatted string.
+
+    Args:
+        bookings_iterable: An iterable of Booking model objects.
+
+    Returns:
+        A string containing the CSV data.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Define CSV header
+    header = [
+        'id', 'resource_id', 'user_name', 'start_time', 'end_time',
+        'title', 'checked_in_at', 'checked_out_at', 'status', 'recurrence_rule'
+    ]
+    writer.writerow(header)
+
+    for booking in bookings_iterable:
+        row = [
+            booking.id,
+            booking.resource_id,
+            booking.user_name,
+            booking.start_time.isoformat() if booking.start_time else '',
+            booking.end_time.isoformat() if booking.end_time else '',
+            booking.title,
+            booking.checked_in_at.isoformat() if booking.checked_in_at else '',
+            booking.checked_out_at.isoformat() if booking.checked_out_at else '',
+            booking.status,
+            booking.recurrence_rule if booking.recurrence_rule is not None else ''
+        ]
+        writer.writerow(row)
+
+    csv_data = output.getvalue()
+    output.close()
+    return csv_data
+
+# Helper function for parsing ISO datetime strings
+def _parse_iso_datetime(dt_str):
+    if not dt_str:
+        return None
+    try:
+        # Handle 'Z' for UTC explicitly
+        if dt_str.endswith('Z'):
+            # Python's fromisoformat in some versions doesn't like 'Z' directly for parsing,
+            # but it's fine for output. Replace 'Z' with '+00:00' for robust parsing.
+            return datetime.fromisoformat(dt_str[:-1] + '+00:00')
+        dt_obj = datetime.fromisoformat(dt_str)
+        # If the datetime object is naive, assume UTC.
+        # This might be needed if strings like "2023-01-01T12:00:00" (without Z or offset) are possible.
+        # However, if all inputs are strictly ISO 8601 with offset/Z, this might not be necessary.
+        # For now, let's assume inputs will have timezone info if not UTC 'Z'.
+        # if dt_obj.tzinfo is None:
+        #     return dt_obj.replace(tzinfo=timezone.utc) # Or handle as an error/log warning
+        return dt_obj
+    except ValueError:
+        # Log error or handle as per requirements. For now, returning None.
+        # Consider logging: logger.warning(f"Could not parse datetime string: {dt_str}", exc_info=True)
+        return None
+
+def import_bookings_from_csv_file(csv_file_path, app):
+    """
+    Imports bookings from a CSV file.
+
+    Args:
+        csv_file_path (str): The path to the CSV file.
+        app: The Flask application object for app context.
+
+    Returns:
+        dict: A summary of the import process.
+    """
+    logger = app.logger # Use app's logger
+
+    bookings_processed = 0
+    bookings_created = 0
+    bookings_skipped_duplicate = 0
+    errors = []
+
+    try:
+        with open(csv_file_path, mode='r', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            # Expected header: id,resource_id,user_name,start_time,end_time,title,checked_in_at,checked_out_at,status,recurrence_rule
+            # The 'id' column from CSV will be ignored for new bookings.
+
+            with app.app_context():
+                for row in reader:
+                    bookings_processed += 1
+                    line_num = reader.line_num
+
+                    try:
+                        resource_id_str = row.get('resource_id')
+                        if not resource_id_str:
+                            errors.append(f"Row {line_num}: Missing resource_id.")
+                            continue
+                        try:
+                            resource_id = int(resource_id_str)
+                        except ValueError:
+                            errors.append(f"Row {line_num}: Invalid resource_id '{resource_id_str}'. Must be an integer.")
+                            continue
+
+                        user_name = row.get('user_name', '').strip()
+                        if not user_name: # user_name is mandatory for a booking
+                            errors.append(f"Row {line_num}: Missing user_name.")
+                            continue
+                            
+                        title = row.get('title', '').strip()
+                        if not title: # title is mandatory for a booking
+                            errors.append(f"Row {line_num}: Missing title.")
+                            continue
+
+                        start_time_str = row.get('start_time')
+                        end_time_str = row.get('end_time')
+
+                        start_time = _parse_iso_datetime(start_time_str)
+                        end_time = _parse_iso_datetime(end_time_str)
+
+                        if not start_time or not end_time:
+                            errors.append(f"Row {line_num}: Invalid or missing start_time or end_time format.")
+                            continue
+                        
+                        if start_time >= end_time:
+                            errors.append(f"Row {line_num}: Start time must be before end time.")
+                            continue
+
+                        status = row.get('status', 'approved').strip().lower()
+                        # Basic validation for status, can be expanded
+                        if status not in ['pending', 'approved', 'cancelled', 'rejected', 'completed']:
+                             errors.append(f"Row {line_num}: Invalid status value '{row.get('status')}'. Defaulting to 'approved' if not critical, or skip.")
+                             status = 'approved' # Or skip: continue
+
+                        recurrence_rule = row.get('recurrence_rule')
+                        if recurrence_rule == '': # Treat empty string as None
+                            recurrence_rule = None
+                        
+                        # Optional datetime fields
+                        checked_in_at = _parse_iso_datetime(row.get('checked_in_at'))
+                        checked_out_at = _parse_iso_datetime(row.get('checked_out_at'))
+
+                        # Check for existing resource
+                        resource = db.session.get(Resource, resource_id)
+                        if not resource:
+                            errors.append(f"Row {line_num}: Resource with ID {resource_id} not found.")
+                            continue
+
+                        # Check for duplicate booking (based on resource, user, start, and end time)
+                        # This is a simple check; more complex rules might be needed (e.g., overlapping bookings)
+                        existing_booking = Booking.query.filter_by(
+                            resource_id=resource_id,
+                            user_name=user_name,
+                            start_time=start_time,
+                            end_time=end_time
+                        ).first()
+
+                        if existing_booking:
+                            bookings_skipped_duplicate += 1
+                            logger.info(f"Row {line_num}: Skipping duplicate booking for resource {resource_id}, user '{user_name}' at {start_time}.")
+                            continue
+                        
+                        # Create new booking
+                        new_booking = Booking(
+                            resource_id=resource_id,
+                            user_name=user_name,
+                            start_time=start_time,
+                            end_time=end_time,
+                            title=title,
+                            status=status,
+                            recurrence_rule=recurrence_rule,
+                            checked_in_at=checked_in_at,
+                            checked_out_at=checked_out_at
+                            # id is auto-generated by DB
+                        )
+                        db.session.add(new_booking)
+                        bookings_created += 1
+                        logger.info(f"Row {line_num}: Staged new booking for resource {resource_id}, user '{user_name}' from {start_time} to {end_time}.")
+
+                    except Exception as e_row:
+                        # Catch any other unexpected error during row processing
+                        errors.append(f"Row {line_num}: Unexpected error processing row: {str(e_row)}")
+                        logger.error(f"Row {line_num}: Unexpected error processing row: {row} - {str(e_row)}", exc_info=True)
+                        # Depending on severity, may or may not want to rollback here or just skip the row
+                        continue # Skip to next row
+
+                if bookings_created > 0: # Only commit if new bookings were added
+                    try:
+                        db.session.commit()
+                        logger.info(f"Successfully committed {bookings_created} new bookings to the database.")
+                    except Exception as e_commit:
+                        db.session.rollback()
+                        errors.append(f"Database commit failed: {str(e_commit)}")
+                        logger.error(f"Database commit failed after processing CSV: {str(e_commit)}", exc_info=True)
+                        # Reset bookings_created if commit fails, as they weren't actually saved.
+                        bookings_created = 0 # Or adjust based on how to report this
+                elif not errors: # No new bookings created, and no errors encountered during processing
+                    logger.info("No new bookings to create from CSV file.")
+
+
+    except FileNotFoundError:
+        error_msg = f"CSV file not found at path: {csv_file_path}"
+        errors.append(error_msg)
+        logger.error(error_msg)
+    except Exception as e_file:
+        # Catch other potential errors like permission issues, CSV parsing errors not caught by row loop
+        error_msg = f"Error opening or reading CSV file {csv_file_path}: {str(e_file)}"
+        errors.append(error_msg)
+        logger.error(error_msg, exc_info=True)
+        # If db session was active and an error occurs here, ensure rollback
+        if 'app' in locals() and app: # Check if app context was even reached
+             with app.app_context():
+                 db.session.rollback()
+
+
+    summary = {
+        'processed': bookings_processed,
+        'created': bookings_created,
+        'skipped_duplicates': bookings_skipped_duplicate,
+        'errors': errors
+    }
+    logger.info(f"Booking CSV import summary: {summary}")
+    return summary
 
 def _load_schedule_from_json():
     logger = current_app.logger if current_app else logging.getLogger(__name__)

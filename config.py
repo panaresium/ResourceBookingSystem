@@ -85,6 +85,8 @@ AZURE_CONTAINER_NAME = os.environ.get('AZURE_CONTAINER_NAME', 'roombookingbackup
 AZURE_DB_SHARE = os.environ.get('AZURE_DB_SHARE', 'db-backups')
 AZURE_CONFIG_SHARE = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
 AZURE_MEDIA_SHARE = os.environ.get('AZURE_MEDIA_SHARE', 'media')
+# Interval for the scheduled booking CSV backup job
+BOOKINGS_CSV_BACKUP_INTERVAL_MINUTES = int(os.environ.get('BOOKINGS_CSV_BACKUP_INTERVAL_MINUTES', '60')) # Default to 60 minutes
 
 
 # --- Notification Webhooks ---

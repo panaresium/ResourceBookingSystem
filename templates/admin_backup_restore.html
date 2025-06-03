@@ -166,6 +166,49 @@
     </form>
 
     <hr>
+
+    <section id="booking-csv-restore-section" class="mb-5">
+        <h2>{{ _('Booking CSV Backups') }}</h2>
+        <p>{{ _('Restore bookings from a previously generated CSV export. This will add new bookings from the CSV, skipping any that appear to be duplicates based on resource, user, and time.') }}</p>
+        
+        {% if booking_csv_backups and booking_csv_backups|length > 0 %}
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>{{ _('Backup Timestamp (UTC)') }}</th>
+                        <th>{{ _('Actions') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for backup_ts in booking_csv_backups %}
+                        <tr>
+                            <td>
+                                {% set year = backup_ts[:4] %}
+                                {% set month = backup_ts[4:6] %}
+                                {% set day = backup_ts[6:8] %}
+                                {% set hour = backup_ts[9:11] %}
+                                {% set minute = backup_ts[11:13] %}
+                                {% set second = backup_ts[13:15] %}
+                                {{ year }}-{{ month }}-{{ day }} {{ hour }}:{{ minute }}:{{ second }}
+                            </td>
+                            <td>
+                                <form method="POST" action="{{ url_for('admin_ui.restore_booking_csv_route', timestamp_str=backup_ts) }}" style="display: inline;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <button type="submit" class="btn btn-warning btn-sm" onclick="return confirm('{{ _('Are you sure you want to restore bookings from CSV backup') }} {{ backup_ts }}? {{ _('This may add new bookings or skip duplicates based on existing data.') }}');">
+                                        {{ _('Restore Bookings from this CSV') }}
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p>{{ _('No booking CSV backups found.') }}</p>
+        {% endif %}
+    </section>
+
+    <hr>
     <section id="troubleshooting-tools-section" class="mb-5">
         <h2>{{ _('System Troubleshooting Tools') }}</h2>
 
