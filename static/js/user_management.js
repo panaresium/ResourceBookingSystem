@@ -1196,14 +1196,13 @@ document.addEventListener('DOMContentLoaded', function() {
             const id = roleIdInput.value;
             const name = roleNameInput.value.trim();
             const description = roleDescriptionInput.value.trim();
-            const permissions = getSelectedPermissions().join(',');
 
             if (!name) {
                 showError(roleFormModalStatusDiv, 'Role Name is required.');
                 return;
             }
 
-            const roleData = { name, description, permissions };
+            const roleData = { name, description, permissions: getSelectedPermissions() };
             let response;
             try {
                 if (id) { // Edit Role
@@ -1213,6 +1212,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         body: JSON.stringify(roleData)
                     }, roleFormModalStatusDiv);
                 } else { // Add Role
+                    console.log('Role Data being sent:', JSON.stringify(roleData)); // Added for debugging
                     response = await apiCall('/api/admin/roles', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
