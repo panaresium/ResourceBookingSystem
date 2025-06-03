@@ -616,29 +616,260 @@ class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusi
         self.login(admin_user.username, 'adminpass')
         resp_admin = self.client.get('/admin/analytics/', follow_redirects=False)
         self.assertEqual(resp_admin.status_code, 200)
-        self.assertIn(b'Resource Usage Analytics', resp_admin.data) # Check for some content
+        self.assertIn(b'Analytics Dashboard', resp_admin.data) # Updated title
+        # Further checks for new elements can be added in a dedicated page rendering test
 
-    def test_analytics_bookings_data_endpoint(self):
-        """Validate JSON structure returned by bookings data endpoint."""
-        admin_user = self._create_admin_user(username="analyticsadmin2", email_ext="analytics2")
+    @unittest.mock.patch('routes.admin_ui.db.session')
+    def test_admin_analytics_data_endpoint_new_structure(self, mock_db_session):
+        """Validate the new JSON structure and aggregations from /admin/analytics/data."""
+        admin_user = self._create_admin_user(username="analyticsadmin_new", email_ext="analytics_new")
         self.login(admin_user.username, 'adminpass')
-        
-        # Create a booking for analytics data (ensure resource1 is used from AppTests setup)
-        start = datetime.utcnow()
-        end = start + timedelta(hours=1)
-        booking = Booking(resource_id=self.resource1.id, user_name='adminuser', start_time=start, end_time=end, title='Analytics Test')
-        db.session.add(booking)
-        db.session.commit()
 
-        resp = self.client.get('/admin/analytics/data/bookings')
-        self.assertEqual(resp.status_code, 200)
-        data = resp.get_json()
-        self.assertIn(self.resource1.name, data)
-        self.assertIsInstance(data[self.resource1.name], list)
-        first_entry = data[self.resource1.name][0]
-        self.assertIsInstance(first_entry, dict)
-        self.assertIn('date', first_entry)
-        self.assertIn('count', first_entry)
+        # --- Mock Data Setup ---
+        # Users
+        user1 = User(id=101, username='user_alpha')
+        user2 = User(id=102, username='user_beta')
+
+        # FloorMaps
+        fm1 = FloorMap(id=201, name="Main Building", image_filename="main.png", location="Campus A", floor="1")
+        fm2 = FloorMap(id=202, name="Annex B", image_filename="annex.png", location="Campus A", floor="2")
+        
+        # Resources
+        # Resource 1: On FloorMap 1, specific equipment, tags, status
+        res1 = Resource(id=301, name='Room 101', capacity=10, equipment='Projector,Whiteboard', tags='meeting,large', status='published', map_id=fm1.id)
+        # Resource 2: On FloorMap 2, different attributes
+        res2 = Resource(id=302, name='Room 202', capacity=4, equipment='TV', tags='small,focus', status='maintenance', map_id=fm2.id)
+        # Resource 3: Not on any map
+        res3 = Resource(id=303, name='Standalone Booth', capacity=1, equipment='Phone', tags='focus', status='published', map_id=None)
+
+        # Bookings
+        # Booking 1: User1, Res1. Start: today 10:00 for 1 hr. (For hour, DOW, month aggregation)
+        # Let's fix 'today' for predictable DOW/Month. Say, 2023-10-26 (Thursday)
+        fixed_today = datetime(2023, 10, 26) # A Thursday
+
+        booking1_start = fixed_today.replace(hour=10, minute=0, second=0, microsecond=0)
+        booking1_end = booking1_start + timedelta(hours=1)
+        b1 = Booking(id=1, user_name=user1.username, resource_id=res1.id, start_time=booking1_start, end_time=booking1_end, title='Morning Meeting')
+
+        # Booking 2: User2, Res1. Start: today 14:00 for 2 hrs. (Same resource, different user/time)
+        booking2_start = fixed_today.replace(hour=14, minute=0, second=0, microsecond=0)
+        booking2_end = booking2_start + timedelta(hours=2)
+        b2 = Booking(id=2, user_name=user2.username, resource_id=res1.id, start_time=booking2_start, end_time=booking2_end, title='Afternoon Session')
+
+        # Booking 3: User1, Res2. Start: tomorrow 09:00 for 1.5 hrs. (Different resource, map, day)
+        booking3_start = (fixed_today + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+        booking3_end = booking3_start + timedelta(hours=1, minutes=30)
+        b3 = Booking(id=3, user_name=user1.username, resource_id=res2.id, start_time=booking3_start, end_time=booking3_end, title='Focus Work')
+
+        # Booking 4: User1, Res3 (no map). Start: 2 days ago, 11:00 for 1 hr.
+        booking4_start = (fixed_today - timedelta(days=2)).replace(hour=11, minute=0, second=0, microsecond=0)
+        booking4_end = booking4_start + timedelta(hours=1)
+        b4 = Booking(id=4, user_name=user1.username, resource_id=res3.id, start_time=booking4_start, end_time=booking4_end, title='Quick Call')
+
+
+        # --- Mocking DB Query Results ---
+        # 1. For `daily_counts_query`
+        # Simulates: Resource.name, func.date(Booking.start_time), func.count(Booking.id)
+        # For the last 30 days from 'fixed_today' (our reference 'now' for the endpoint)
+        # Let's assume the endpoint calculates 'thirty_days_ago' based on a mocked datetime.utcnow()
+
+        # Mock for `datetime.utcnow()` used in the route to determine `thirty_days_ago`
+        with unittest.mock.patch('routes.admin_ui.datetime') as mock_route_datetime:
+            mock_route_datetime.utcnow.return_value = fixed_today # Endpoint will calculate based on this 'now'
+            mock_route_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw) # Allow other datetime uses
+
+            # Expected results for daily_counts_query (simplified for this example)
+            # Booking 1: Res1, fixed_today
+            # Booking 2: Res1, fixed_today
+            # Booking 3: Res2, fixed_today + 1 day
+            # Booking 4: Res3, fixed_today - 2 days
+            # So, Res1 has 2 bookings on fixed_today. Res2 has 1 on fixed_today+1. Res3 has 1 on fixed_today-2.
+
+            mock_daily_counts_results = [
+                unittest.mock.Mock(resource_name=res1.name, booking_date=fixed_today.date(), booking_count=2),
+                unittest.mock.Mock(resource_name=res2.name, booking_date=(fixed_today + timedelta(days=1)).date(), booking_count=1),
+                # Booking 4 is > 30 days ago if fixed_today is recent, let's assume it's within 30 days for simplicity
+                unittest.mock.Mock(resource_name=res3.name, booking_date=(fixed_today - timedelta(days=2)).date(), booking_count=1),
+            ]
+
+            # 2. For `base_query` (all_bookings_for_aggregation)
+            # Simulates joined data: Booking.*, Resource.*, FloorMap.*, User.*, time extracts
+            mock_base_query_results = []
+
+            # For b1 (User1, Res1 on FM1, 2023-10-26 10:00, Thursday, October)
+            mock_base_query_results.append(unittest.mock.Mock(
+                id=b1.id, start_time=b1.start_time, end_time=b1.end_time,
+                resource_name=res1.name, resource_capacity=res1.capacity, resource_equipment=res1.equipment, resource_tags=res1.tags, resource_status=res1.status,
+                floor_location=fm1.location, floor_number=fm1.floor,
+                user_username=user1.username,
+                booking_hour=10, booking_day_of_week=3, booking_month=10 # Thursday is 3 for dow if Sunday is 0
+            ))
+            # For b2 (User2, Res1 on FM1, 2023-10-26 14:00, Thursday, October)
+            mock_base_query_results.append(unittest.mock.Mock(
+                id=b2.id, start_time=b2.start_time, end_time=b2.end_time,
+                resource_name=res1.name, resource_capacity=res1.capacity, resource_equipment=res1.equipment, resource_tags=res1.tags, resource_status=res1.status,
+                floor_location=fm1.location, floor_number=fm1.floor,
+                user_username=user2.username,
+                booking_hour=14, booking_day_of_week=3, booking_month=10
+            ))
+            # For b3 (User1, Res2 on FM2, 2023-10-27 09:00, Friday, October)
+            mock_base_query_results.append(unittest.mock.Mock(
+                id=b3.id, start_time=b3.start_time, end_time=b3.end_time,
+                resource_name=res2.name, resource_capacity=res2.capacity, resource_equipment=res2.equipment, resource_tags=res2.tags, resource_status=res2.status,
+                floor_location=fm2.location, floor_number=fm2.floor,
+                user_username=user1.username,
+                booking_hour=9, booking_day_of_week=4, booking_month=10 # Friday is 4
+            ))
+            # For b4 (User1, Res3 no map, 2023-10-24 11:00, Tuesday, October)
+            mock_base_query_results.append(unittest.mock.Mock(
+                id=b4.id, start_time=b4.start_time, end_time=b4.end_time,
+                resource_name=res3.name, resource_capacity=res3.capacity, resource_equipment=res3.equipment, resource_tags=res3.tags, resource_status=res3.status,
+                floor_location=None, floor_number=None, # No map
+                user_username=user1.username,
+                booking_hour=11, booking_day_of_week=1, booking_month=10 # Tuesday is 1
+            ))
+
+            # Configure the mock session query chain
+            # This needs to differentiate between the two queries made in the route.
+            # We can use side_effect if the query objects are distinct enough, or inspect args.
+            # For simplicity, let's assume the first query is daily_counts, second is base_query.
+            mock_query_obj = unittest.mock.Mock()
+            mock_query_obj.join.return_value = mock_query_obj
+            mock_query_obj.outerjoin.return_value = mock_query_obj
+            mock_query_obj.filter.return_value = mock_query_obj
+            mock_query_obj.group_by.return_value = mock_query_obj
+            mock_query_obj.order_by.return_value = mock_query_obj
+
+            # Use side_effect to return different results for the two `.all()` calls
+            mock_query_obj.all.side_effect = [mock_daily_counts_results, mock_base_query_results]
+            mock_db_session.query.return_value = mock_query_obj
+
+            # --- Make Request ---
+            response = self.client.get('/admin/analytics/data') # New URL
+
+            # --- Assertions ---
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.content_type, 'application/json')
+            data = response.get_json()
+
+            self.assertIn('daily_counts_last_30_days', data)
+            self.assertIn('aggregations', data)
+
+            # Validate daily_counts_last_30_days (basic check)
+            daily_counts = data['daily_counts_last_30_days']
+            self.assertIn(res1.name, daily_counts)
+            self.assertEqual(len(daily_counts[res1.name]), 1) # One entry for fixed_today.date()
+            self.assertEqual(daily_counts[res1.name][0]['count'], 2)
+            self.assertEqual(daily_counts[res1.name][0]['date'], fixed_today.strftime('%Y-%m-%d'))
+
+            # Validate aggregations
+            aggs = data['aggregations']
+
+            # by_resource_attributes
+            self.assertIn('by_resource_attributes', aggs)
+            self.assertIn(res1.name, aggs['by_resource_attributes'])
+            self.assertEqual(aggs['by_resource_attributes'][res1.name]['count'], 2) # b1, b2
+            self.assertAlmostEqual(aggs['by_resource_attributes'][res1.name]['total_duration_hours'], 1.0 + 2.0)
+            self.assertIn(res3.name, aggs['by_resource_attributes']) # Res3 from b4
+            self.assertEqual(aggs['by_resource_attributes'][res3.name]['count'], 1)
+            self.assertAlmostEqual(aggs['by_resource_attributes'][res3.name]['total_duration_hours'], 1.0)
+
+
+            # by_floor_attributes
+            self.assertIn('by_floor_attributes', aggs)
+            fm1_key = f"Floor: {fm1.floor}, Location: {fm1.location}"
+            fm2_key = f"Floor: {fm2.floor}, Location: {fm2.location}"
+            self.assertIn(fm1_key, aggs['by_floor_attributes'])
+            self.assertEqual(aggs['by_floor_attributes'][fm1_key]['count'], 2) # b1, b2 on FM1
+            self.assertAlmostEqual(aggs['by_floor_attributes'][fm1_key]['total_duration_hours'], 1.0 + 2.0)
+            self.assertIn(fm2_key, aggs['by_floor_attributes'])
+            self.assertEqual(aggs['by_floor_attributes'][fm2_key]['count'], 1) # b3 on FM2
+            self.assertAlmostEqual(aggs['by_floor_attributes'][fm2_key]['total_duration_hours'], 1.5)
+
+            # by_user
+            self.assertIn('by_user', aggs)
+            self.assertIn(user1.username, aggs['by_user'])
+            self.assertEqual(aggs['by_user'][user1.username]['count'], 3) # b1, b3, b4
+            self.assertAlmostEqual(aggs['by_user'][user1.username]['total_duration_hours'], 1.0 + 1.5 + 1.0)
+            self.assertIn(user2.username, aggs['by_user'])
+            self.assertEqual(aggs['by_user'][user2.username]['count'], 1) # b2
+            self.assertAlmostEqual(aggs['by_user'][user2.username]['total_duration_hours'], 2.0)
+
+            # by_time_attributes
+            time_aggs = aggs['by_time_attributes']
+            self.assertIn('hour_of_day', time_aggs)
+            self.assertEqual(time_aggs['hour_of_day']['10']['count'], 1) # b1
+            self.assertAlmostEqual(time_aggs['hour_of_day']['10']['total_duration_hours'], 1.0)
+            self.assertEqual(time_aggs['hour_of_day']['14']['count'], 1) # b2
+            self.assertAlmostEqual(time_aggs['hour_of_day']['14']['total_duration_hours'], 2.0)
+            self.assertEqual(time_aggs['hour_of_day']['9']['count'], 1) # b3
+            self.assertAlmostEqual(time_aggs['hour_of_day']['9']['total_duration_hours'], 1.5)
+
+
+            self.assertIn('day_of_week', time_aggs)
+            self.assertEqual(time_aggs['day_of_week']['Thursday']['count'], 2) # b1, b2
+            self.assertAlmostEqual(time_aggs['day_of_week']['Thursday']['total_duration_hours'], 1.0 + 2.0)
+            self.assertEqual(time_aggs['day_of_week']['Friday']['count'], 1) # b3
+            self.assertAlmostEqual(time_aggs['day_of_week']['Friday']['total_duration_hours'], 1.5)
+            self.assertEqual(time_aggs['day_of_week']['Tuesday']['count'], 1) # b4
+
+            self.assertIn('month', time_aggs)
+            self.assertEqual(time_aggs['month']['October']['count'], 4) # All bookings are in October
+            self.assertAlmostEqual(time_aggs['month']['October']['total_duration_hours'], 1.0 + 2.0 + 1.5 + 1.0)
+
+        self.logout()
+
+    @unittest.mock.patch('routes.admin_ui.analytics_bookings_data') # Mock the data-providing function
+    def test_admin_analytics_page_renders_new_elements(self, mock_analytics_data_func):
+        """Test that the /admin/analytics/ page renders with new filter and chart elements."""
+        admin_user = self._create_admin_user(username="analytics_page_admin", email_ext="analyticspage")
+        self.login(admin_user.username, 'adminpass')
+
+        # Define a minimal valid structure for the mocked data endpoint
+        mock_analytics_data_func.return_value = jsonify({
+            "daily_counts_last_30_days": {
+                "SampleResource": [{"date": "2023-01-01", "count": 5}]
+            },
+            "aggregations": {
+                "by_resource_attributes": {"SampleResource": {"count": 10, "total_duration_hours": 20}},
+                "by_floor_attributes": {"Floor: 1, Location: Test": {"count": 5, "total_duration_hours": 10}},
+                "by_user": {"testuser": {"count": 15, "total_duration_hours": 30}},
+                "by_time_attributes": {
+                    "hour_of_day": {"10": {"count": 3, "total_duration_hours": 3}},
+                    "day_of_week": {"Monday": {"count": 4, "total_duration_hours": 8}},
+                    "month": {"January": {"count": 20, "total_duration_hours": 40}}
+                }
+            }
+        })
+
+        response = self.client.get('/admin/analytics/')
+        self.assertEqual(response.status_code, 200)
+        html_content = response.data.decode('utf-8')
+
+        self.assertIn("<h1>{{ _('Analytics Dashboard') }}</h1>", html_content) # Using raw string for template tag
+
+        # Check for filter dropdowns
+        self.assertIn('id="filterResourceTag"', html_content)
+        self.assertIn('id="filterResourceStatus"', html_content)
+        self.assertIn('id="filterUser"', html_content)
+        self.assertIn('id="filterLocation"', html_content)
+        self.assertIn('id="filterFloor"', html_content)
+        self.assertIn('id="filterMonth"', html_content)
+        self.assertIn('id="filterDayOfWeek"', html_content)
+        self.assertIn('id="filterHourOfDay"', html_content)
+        self.assertIn('id="applyFiltersBtn"', html_content)
+        self.assertIn('id="resetFiltersBtn"', html_content)
+
+        # Check for chart canvases
+        self.assertIn('id="dailyUsageChart"', html_content)
+        self.assertIn('id="bookingsPerUserChart"', html_content)
+        self.assertIn('id="bookingsPerResourceChart"', html_content)
+        self.assertIn('id="bookingsByHourChart"', html_content)
+        self.assertIn('id="bookingsByDayOfWeekChart"', html_content)
+        self.assertIn('id="bookingsByMonthChart"', html_content)
+        self.assertIn('id="resourceDistributionChart"', html_content)
+
+        self.logout()
 
 
     def test_calendar_page_and_api(self):

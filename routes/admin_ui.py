@@ -1,10 +1,10 @@
 from flask import Blueprint, render_template, current_app, jsonify, flash, redirect, url_for, request # Added request
 from flask_login import login_required, current_user
-from sqlalchemy import func # For analytics_bookings_data if merged here, or general use
+from sqlalchemy import func, cast, Date, Time, extract # For analytics_bookings_data if merged here, or general use
 import uuid # For task_id generation
 
 # Assuming Booking, Resource, User models are in models.py
-from models import Booking, Resource, User, BookingSettings
+from models import Booking, Resource, User, FloorMap, BookingSettings # Added FloorMap
 # Assuming db is in extensions.py
 from extensions import db, socketio # Try to import socketio
 # Assuming permission_required is in auth.py
@@ -507,14 +507,10 @@ def analytics_bookings_data():
     try:
         current_app.logger.info(f"User {current_user.username} requested analytics bookings data.")
 
-        # Calculate the date 30 days ago
+        # Existing functionality: Daily counts per resource for the last 30 days
         thirty_days_ago = datetime.utcnow().date() - timedelta(days=30)
-
-        # Query to get booking counts per resource per day for the last 30 days
-        # We need to join Booking with Resource to get the resource name
-        # We also need to group by resource name and the date part of start_time
-        query_results = db.session.query(
-            Resource.name,
+        daily_counts_query = db.session.query(
+            Resource.name.label("resource_name"),
             func.date(Booking.start_time).label('booking_date'),
             func.count(Booking.id).label('booking_count')
         ).join(Resource, Booking.resource_id == Resource.id) \
@@ -523,18 +519,119 @@ def analytics_bookings_data():
         .order_by(Resource.name, func.date(Booking.start_time)) \
         .all()
 
-        analytics_data = {}
-        for resource_name, booking_date_obj, booking_count in query_results:
-            booking_date_str = booking_date_obj.strftime('%Y-%m-%d')
-            if resource_name not in analytics_data:
-                analytics_data[resource_name] = []
-            analytics_data[resource_name].append({
+        daily_counts_data = {}
+        for row in daily_counts_query:
+            resource_name = row.resource_name
+            booking_date_str = row.booking_date.strftime('%Y-%m-%d')
+            if resource_name not in daily_counts_data:
+                daily_counts_data[resource_name] = []
+            daily_counts_data[resource_name].append({
                 "date": booking_date_str,
-                "count": booking_count
+                "count": row.booking_count
             })
 
-        current_app.logger.info(f"Successfully processed analytics data. Resources found: {len(analytics_data)}")
-        return jsonify(analytics_data)
+        # New aggregations
+        # Base query for new aggregations
+        base_query = db.session.query(
+            Booking.id,
+            Booking.start_time,
+            Booking.end_time,
+            Resource.name.label('resource_name'),
+            Resource.capacity.label('resource_capacity'),
+            Resource.equipment.label('resource_equipment'),
+            Resource.tags.label('resource_tags'),
+            Resource.status.label('resource_status'),
+            FloorMap.location.label('floor_location'),
+            FloorMap.floor.label('floor_number'),
+            User.username.label('user_username'),
+            # Time attributes
+            extract('hour', Booking.start_time).label('booking_hour'),
+            extract('dow', Booking.start_time).label('booking_day_of_week'), # Sunday=0, Saturday=6
+            extract('month', Booking.start_time).label('booking_month')
+        ).join(Resource, Booking.resource_id == Resource.id) \
+         .join(User, Booking.user_name == User.username) \
+         .outerjoin(FloorMap, Resource.map_id == FloorMap.id) # Use outerjoin in case a resource is not mapped
+
+        all_bookings_for_aggregation = base_query.all()
+
+        aggregated_data = {
+            "by_resource_attributes": {},
+            "by_floor_attributes": {},
+            "by_user": {},
+            "by_time_attributes": {
+                "hour_of_day": {},
+                "day_of_week": {},
+                "month": {}
+            }
+        }
+
+        for booking in all_bookings_for_aggregation:
+            duration_seconds = (booking.end_time - booking.start_time).total_seconds()
+            duration_hours = duration_seconds / 3600
+
+            # --- Aggregation by Resource Attributes ---
+            # By resource name
+            res_name_key = booking.resource_name
+            if res_name_key not in aggregated_data["by_resource_attributes"]:
+                aggregated_data["by_resource_attributes"][res_name_key] = {'count': 0, 'total_duration_hours': 0}
+            aggregated_data["by_resource_attributes"][res_name_key]['count'] += 1
+            aggregated_data["by_resource_attributes"][res_name_key]['total_duration_hours'] += duration_hours
+
+            # You can add more detailed breakdowns if needed, e.g., by equipment, capacity, etc.
+            # For simplicity, this example primarily groups by resource name.
+            # Consider if equipment, tags should be sub-keys or if each unique combination is a primary key.
+
+            # --- Aggregation by FloorMap Attributes ---
+            if booking.floor_location and booking.floor_number: # Ensure map data exists
+                floor_key = f"Floor: {booking.floor_number}, Location: {booking.floor_location}"
+                if floor_key not in aggregated_data["by_floor_attributes"]:
+                    aggregated_data["by_floor_attributes"][floor_key] = {'count': 0, 'total_duration_hours': 0}
+                aggregated_data["by_floor_attributes"][floor_key]['count'] += 1
+                aggregated_data["by_floor_attributes"][floor_key]['total_duration_hours'] += duration_hours
+
+            # --- Aggregation by User ---
+            user_key = booking.user_username
+            if user_key not in aggregated_data["by_user"]:
+                aggregated_data["by_user"][user_key] = {'count': 0, 'total_duration_hours': 0}
+            aggregated_data["by_user"][user_key]['count'] += 1
+            aggregated_data["by_user"][user_key]['total_duration_hours'] += duration_hours
+
+            # --- Aggregation by Time Attributes ---
+            # Hour of Day
+            hour_key = str(booking.booking_hour)
+            if hour_key not in aggregated_data["by_time_attributes"]["hour_of_day"]:
+                aggregated_data["by_time_attributes"]["hour_of_day"][hour_key] = {'count': 0, 'total_duration_hours': 0}
+            aggregated_data["by_time_attributes"]["hour_of_day"][hour_key]['count'] += 1
+            aggregated_data["by_time_attributes"]["hour_of_day"][hour_key]['total_duration_hours'] += duration_hours
+
+            # Day of Week (0=Sunday, 1=Monday, ..., 6=Saturday for PostgreSQL's DOW)
+            # Adjust if your DB uses a different convention or if you want specific day names
+            dow_map = {0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 4: "Thursday", 5: "Friday", 6: "Saturday"}
+            dow_key = dow_map.get(booking.booking_day_of_week, "Unknown")
+            if dow_key not in aggregated_data["by_time_attributes"]["day_of_week"]:
+                aggregated_data["by_time_attributes"]["day_of_week"][dow_key] = {'count': 0, 'total_duration_hours': 0}
+            aggregated_data["by_time_attributes"]["day_of_week"][dow_key]['count'] += 1
+            aggregated_data["by_time_attributes"]["day_of_week"][dow_key]['total_duration_hours'] += duration_hours
+
+            # Month
+            month_map = {
+                1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June",
+                7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December"
+            }
+            month_key = month_map.get(booking.booking_month, "Unknown")
+            if month_key not in aggregated_data["by_time_attributes"]["month"]:
+                aggregated_data["by_time_attributes"]["month"][month_key] = {'count': 0, 'total_duration_hours': 0}
+            aggregated_data["by_time_attributes"]["month"][month_key]['count'] += 1
+            aggregated_data["by_time_attributes"]["month"][month_key]['total_duration_hours'] += duration_hours
+
+        # Combine existing daily counts with new aggregated data
+        final_response = {
+            "daily_counts_last_30_days": daily_counts_data,
+            "aggregations": aggregated_data
+        }
+
+        current_app.logger.info(f"Successfully processed analytics data. Daily counts resources: {len(daily_counts_data)}, Aggregation items processed: {len(all_bookings_for_aggregation)}")
+        return jsonify(final_response)
 
     except Exception as e:
         current_app.logger.error(f"Error generating analytics bookings data: {e}", exc_info=True)
