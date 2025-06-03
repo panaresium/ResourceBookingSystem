@@ -286,6 +286,7 @@ def get_my_bookings():
                 'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
                 'end_time': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
                 'title': booking.title,
+                'status': booking.status,
                 'recurrence_rule': booking.recurrence_rule,
                 'admin_deleted_message': booking.admin_deleted_message,
                 'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else None,
@@ -294,6 +295,9 @@ def get_my_bookings():
             })
 
         current_app.logger.info(f"User '{current_user.username}' fetched their bookings. Count: {len(bookings_list)}. Check-in/out enabled: {enable_check_in_out}")
+        current_app.logger.info(f"User '{current_user.username}' - Bookings prepared for JSON: {bookings_list}")
+        current_app.logger.info(f"User '{current_user.username}' - Check-in/out setting: {enable_check_in_out}")
+        current_app.logger.info(f"User '{current_user.username}' - Number of bookings being returned: {len(bookings_list)}")
         return jsonify({
             'bookings': bookings_list,
             'check_in_out_enabled': enable_check_in_out
