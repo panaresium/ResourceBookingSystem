@@ -1813,5 +1813,367 @@ class TestHomePage(AppTests):
         self.assertNotIn('Book a Room', content)
 
 
+@unittest.mock.patch('app.add_audit_log') # Mock add_audit_log for all tests in this class
+class TestAdminBulkUserOperations(AppTests):
+    def setUp(self):
+        super().setUp()
+        # Create an admin user with manage_users permission
+        self.admin_user = User(username='bulk_admin', email='bulk_admin@example.com', is_admin=True)
+        self.admin_user.set_password('adminpass')
+
+        # Ensure 'Administrator' role exists and has 'manage_users' (or 'all_permissions')
+        admin_role = Role.query.filter_by(name="Administrator").first()
+        if not admin_role:
+            admin_role = Role(name="Administrator", permissions="all_permissions") # Assuming all_permissions grants manage_users
+            db.session.add(admin_role)
+            db.session.commit() # Commit role first
+
+        self.admin_user.roles.append(admin_role)
+        db.session.add(self.admin_user)
+        db.session.commit()
+
+        # Create some regular users for testing bulk edits
+        self.user1 = User(username='bulk_user1', email='bulk_user1@example.com')
+        self.user1.set_password('pass1')
+        self.user2 = User(username='bulk_user2', email='bulk_user2@example.com')
+        self.user2.set_password('pass2')
+        self.user3 = User(username='bulk_user3', email='bulk_user3@example.com', is_admin=True) # One admin user
+        self.user3.set_password('pass3')
+        db.session.add_all([self.user1, self.user2, self.user3])
+
+        # Create some roles for assignment tests
+        self.role_editor = Role(name='Editor', permissions='edit_content')
+        self.role_viewer = Role(name='Viewer', permissions='view_content')
+        self.role_publisher = Role(name='Publisher', permissions='publish_content')
+        db.session.add_all([self.role_editor, self.role_viewer, self.role_publisher])
+
+        db.session.commit()
+
+        # Login as the admin user for these tests
+        self.login(self.admin_user.username, 'adminpass')
+
+    # --- Tests for PUT /api/admin/users/bulk (Bulk Edit) ---
+
+    def test_bulk_edit_set_admin_status_success(self, mock_audit_log):
+        payload = {
+            "ids": [self.user1.id, self.user2.id],
+            "actions": {"set_admin": True}
+        }
+        response = self.client.put('/api/admin/users/bulk', json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data['updated_count'], 2)
+        self.assertTrue(User.query.get(self.user1.id).is_admin)
+        self.assertTrue(User.query.get(self.user2.id).is_admin)
+        self.assertTrue(mock_audit_log.called)
+
+    def test_bulk_edit_add_roles_success(self, mock_audit_log):
+        payload = {
+            "ids": [self.user1.id, self.user2.id],
+            "actions": {"add_role_ids": [self.role_editor.id, self.role_viewer.id]}
+        }
+        response = self.client.put('/api/admin/users/bulk', json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data['updated_count'], 2)
+
+        user1_roles = {role.id for role in User.query.get(self.user1.id).roles}
+        user2_roles = {role.id for role in User.query.get(self.user2.id).roles}
+        self.assertIn(self.role_editor.id, user1_roles)
+        self.assertIn(self.role_viewer.id, user1_roles)
+        self.assertIn(self.role_editor.id, user2_roles)
+        self.assertIn(self.role_viewer.id, user2_roles)
+
+    def test_bulk_edit_remove_roles_success(self, mock_audit_log):
+        # First, assign roles to user1
+        self.user1.roles.extend([self.role_editor, self.role_viewer])
+        db.session.commit()
+
+        payload = {
+            "ids": [self.user1.id],
+            "actions": {"remove_role_ids": [self.role_editor.id]}
+        }
+        response = self.client.put('/api/admin/users/bulk', json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data['updated_count'], 1)
+
+        user1_roles = {role.id for role in User.query.get(self.user1.id).roles}
+        self.assertNotIn(self.role_editor.id, user1_roles)
+        self.assertIn(self.role_viewer.id, user1_roles) # Viewer role should remain
+
+    def test_bulk_edit_combined_actions_success(self, mock_audit_log):
+        self.user1.roles.append(self.role_publisher) # Existing role to be removed later
+        db.session.commit()
+
+        payload = {
+            "ids": [self.user1.id, self.user2.id],
+            "actions": {
+                "set_admin": True,
+                "add_role_ids": [self.role_editor.id],
+                "remove_role_ids": [self.role_publisher.id] # Should only affect user1
+            }
+        }
+        response = self.client.put('/api/admin/users/bulk', json=payload)
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data['updated_count'], 2) # Both users affected by set_admin or role changes
+
+        user1_db = User.query.get(self.user1.id)
+        user2_db = User.query.get(self.user2.id)
+
+        self.assertTrue(user1_db.is_admin)
+        self.assertTrue(user2_db.is_admin)
+        self.assertIn(self.role_editor, user1_db.roles)
+        self.assertNotIn(self.role_publisher, user1_db.roles)
+        self.assertIn(self.role_editor, user2_db.roles) # user2 also gets editor role
+
+    def test_bulk_edit_partial_success_invalid_user_id(self, mock_audit_log):
+        payload = {
+            "ids": [self.user1.id, 9999], # 9999 is an invalid ID
+            "actions": {"set_admin": False}
+        }
+        response = self.client.put('/api/admin/users/bulk', json=payload)
+        self.assertEqual(response.status_code, 207) # Multi-Status
+        data = response.get_json()
+        self.assertEqual(data['updated_count'], 1)
+        self.assertEqual(len(data['errors']), 1)
+        self.assertEqual(data['errors'][0]['id'], 9999)
+        self.assertIn('User not found', data['errors'][0]['error'])
+        self.assertFalse(User.query.get(self.user1.id).is_admin) # user1 should be updated
+
+    def test_bulk_edit_partial_success_invalid_role_id(self, mock_audit_log):
+        payload = {
+            "ids": [self.user1.id],
+            "actions": {"add_role_ids": [self.role_editor.id, 8888]} # 8888 is invalid role ID
+        }
+        response = self.client.put('/api/admin/users/bulk', json=payload)
+        self.assertEqual(response.status_code, 207)
+        data = response.get_json()
+        # updated_count might be 1 if user1 got role_editor, or 0 if transaction aborted early by role error.
+        # Backend logic: it processes roles per user, so if one role is bad, others for that user might still apply or not.
+        # Current backend: it appends role if found, and adds error if not.
+        # So user1 should get role_editor.
+        self.assertEqual(data['updated_count'], 1)
+        self.assertEqual(len(data['errors']), 1)
+        self.assertEqual(data['errors'][0]['role_id'], 8888)
+        self.assertIn('Role to add not found', data['errors'][0]['error'])
+        self.assertIn(self.role_editor, User.query.get(self.user1.id).roles)
+
+
+    def test_bulk_edit_failure_no_ids(self, mock_audit_log):
+        payload = {"ids": [], "actions": {"set_admin": True}}
+        response = self.client.put('/api/admin/users/bulk', json=payload)
+        self.assertEqual(response.status_code, 400) # Or could be 200 with updated_count 0
+        # Current backend returns 200 with updated_count:0 if no errors and no updates.
+        # This is slightly different from other 400s. If ids is empty, it's more like a "no operation" than bad request.
+        # Let's align with current backend:
+        if response.status_code == 200: # If backend treats empty ids as "0 updates"
+            data = response.get_json()
+            self.assertEqual(data.get('updated_count', -1), 0) # updated_count should be 0
+        else: # If backend treats empty ids as bad request
+            self.assertEqual(response.status_code, 400)
+
+
+    def test_bulk_edit_failure_no_actions(self, mock_audit_log):
+        payload = {"ids": [self.user1.id]} # No "actions" field
+        response = self.client.put('/api/admin/users/bulk', json=payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("actions", response.get_json().get('error', '').lower())
+
+    def test_bulk_edit_failure_invalid_actions_type(self, mock_audit_log):
+        payload = {"ids": [self.user1.id], "actions": "not-an-object"}
+        response = self.client.put('/api/admin/users/bulk', json=payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("actions", response.get_json().get('error', '').lower())
+
+    def test_bulk_edit_failure_invalid_set_admin_type(self, mock_audit_log):
+        payload = {"ids": [self.user1.id], "actions": {"set_admin": "not-a-boolean"}}
+        response = self.client.put('/api/admin/users/bulk', json=payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("set_admin", response.get_json().get('error', '').lower())
+
+    def test_bulk_edit_unauthenticated(self, mock_audit_log):
+        self.logout()
+        payload = {"ids": [self.user1.id], "actions": {"set_admin": True}}
+        response = self.client.put('/api/admin/users/bulk', json=payload)
+        self.assertEqual(response.status_code, 401)
+
+    def test_bulk_edit_unauthorized_no_permission(self, mock_audit_log):
+        # Create a user without manage_users permission
+        regular_user = User(username='no_perm_user', email='noperm@example.com')
+        regular_user.set_password('password')
+        db.session.add(regular_user)
+        db.session.commit()
+        self.logout() # Log out admin
+        self.login(regular_user.username, 'password') # Log in as regular user
+
+        payload = {"ids": [self.user1.id], "actions": {"set_admin": True}}
+        response = self.client.put('/api/admin/users/bulk', json=payload)
+        self.assertEqual(response.status_code, 403)
+
+    def test_bulk_edit_add_existing_role(self, mock_audit_log):
+        self.user1.roles.append(self.role_editor)
+        db.session.commit()
+        initial_role_count = len(self.user1.roles)
+
+        payload = {
+            "ids": [self.user1.id],
+            "actions": {"add_role_ids": [self.role_editor.id]} # Adding role user1 already has
+        }
+        response = self.client.put('/api/admin/users/bulk', json=payload)
+        self.assertEqual(response.status_code, 200)
+        # updated_count will be 0 if this is the only action and no change occurs.
+        # Or 1 if the backend counts it as an "attempted" update that results in same state.
+        # Current backend: if db.session.is_modified(user) is false, updated_users_count is not incremented.
+        # So, if adding an existing role is the *only* action, updated_count should be 0.
+        # data = response.get_json()
+        # self.assertEqual(data['updated_count'], 0) # This depends on whether other fields were "changed"
+
+        user1_db = User.query.get(self.user1.id)
+        self.assertEqual(len(user1_db.roles), initial_role_count) # Role count should not increase
+        self.assertIn(self.role_editor, user1_db.roles)
+
+
+    def test_bulk_edit_remove_non_existing_role(self, mock_audit_log):
+        initial_role_count = len(self.user1.roles)
+        payload = {
+            "ids": [self.user1.id],
+            "actions": {"remove_role_ids": [self.role_publisher.id]} # Removing role user1 does not have
+        }
+        response = self.client.put('/api/admin/users/bulk', json=payload)
+        self.assertEqual(response.status_code, 200)
+        # data = response.get_json()
+        # self.assertEqual(data['updated_count'], 0) # No actual change to roles
+        self.assertEqual(len(User.query.get(self.user1.id).roles), initial_role_count)
+
+    # --- Tests for POST /api/admin/users/bulk_add (Bulk Add with Pattern) ---
+
+    def test_bulk_add_simple_success(self, mock_audit_log):
+        payload = {
+            "username_pattern": "new_user###",
+            "start_index": 1,
+            "count": 3,
+            "default_password": "password123",
+        }
+        response = self.client.post('/api/admin/users/bulk_add', json=payload)
+        self.assertEqual(response.status_code, 201)
+        data = response.get_json()
+        self.assertEqual(data['created_count'], 3)
+        self.assertEqual(len(data['users']), 3)
+
+        for i in range(1, 4):
+            username = f"new_user{str(i).zfill(3)}"
+            user = User.query.filter_by(username=username).first()
+            self.assertIsNotNone(user)
+            self.assertTrue(user.check_password("password123"))
+            self.assertFalse(user.is_admin)
+            self.assertIn(username, [u['username'] for u in data['users']])
+        self.assertEqual(mock_audit_log.call_count, 3 + 1) # 3 individual, 1 overall
+
+    def test_bulk_add_with_roles_and_admin_status(self, mock_audit_log):
+        payload = {
+            "username_pattern": "admin_u##",
+            "start_index": 10,
+            "count": 2,
+            "default_password": "securePassword",
+            "is_admin": True,
+            "role_ids": [self.role_editor.id, self.role_viewer.id]
+        }
+        response = self.client.post('/api/admin/users/bulk_add', json=payload)
+        self.assertEqual(response.status_code, 201)
+        data = response.get_json()
+        self.assertEqual(data['created_count'], 2)
+
+        for i in range(10, 12):
+            username = f"admin_u{str(i).zfill(2)}"
+            user = User.query.filter_by(username=username).first()
+            self.assertIsNotNone(user)
+            self.assertTrue(user.is_admin)
+            user_roles = {role.id for role in user.roles}
+            self.assertIn(self.role_editor.id, user_roles)
+            self.assertIn(self.role_viewer.id, user_roles)
+
+    def test_bulk_add_with_email_pattern(self, mock_audit_log):
+        payload = {
+            "username_pattern": "email_user###",
+            "start_index": 1,
+            "count": 1,
+            "default_password": "password123",
+            "email_pattern": "email_###_test@example.com"
+        }
+        response = self.client.post('/api/admin/users/bulk_add', json=payload)
+        self.assertEqual(response.status_code, 201)
+        data = response.get_json()
+        self.assertEqual(data['created_count'], 1)
+
+        user = User.query.filter_by(username="email_user001").first()
+        self.assertIsNotNone(user)
+        self.assertEqual(user.email, "email_001_test@example.com")
+
+    def test_bulk_add_partial_success_username_conflict(self, mock_audit_log):
+        # Pre-create a user that will conflict
+        User.query.filter_by(username='conflict_user002').delete() # Clean if exists from other test
+        db.session.commit()
+        conflicting_user = User(username='conflict_user002', email='conflict@example.com')
+        conflicting_user.set_password('password')
+        db.session.add(conflicting_user)
+        db.session.commit()
+
+        payload = {
+            "username_pattern": "conflict_user###",
+            "start_index": 1,
+            "count": 3, # user001, user002 (conflict), user003
+            "default_password": "password123",
+        }
+        response = self.client.post('/api/admin/users/bulk_add', json=payload)
+        self.assertEqual(response.status_code, 207) # Multi-Status
+        data = response.get_json()
+        self.assertEqual(data['created_count'], 2)
+        self.assertEqual(data['failed_count'], 1)
+        self.assertIn('conflict_user001', [u['username'] for u in data['created_users']])
+        self.assertIn('conflict_user003', [u['username'] for u in data['created_users']])
+
+        failed_info = data['errors'][0]
+        self.assertEqual(failed_info['username_attempt'], 'conflict_user002')
+        self.assertIn('already exists', failed_info['error'])
+
+    def test_bulk_add_failure_invalid_pattern(self, mock_audit_log):
+        payload = {"username_pattern": "invaliduser", "start_index": 1, "count": 1, "default_password": "password"}
+        response = self.client.post('/api/admin/users/bulk_add', json=payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("must contain \"###\"", response.get_json()['error'])
+
+    def test_bulk_add_failure_invalid_role_id(self, mock_audit_log):
+        payload = {
+            "username_pattern": "role_fail###", "start_index": 1, "count": 1,
+            "default_password": "password", "role_ids": [9999] # Non-existent role
+        }
+        response = self.client.post('/api/admin/users/bulk_add', json=payload)
+        self.assertEqual(response.status_code, 400) # This is a setup error, not partial.
+        self.assertIn("Role with ID 9999 not found", response.get_json()['error'])
+
+    def test_bulk_add_failure_password_too_short(self, mock_audit_log):
+        payload = {"username_pattern": "shortpw###", "start_index": 1, "count": 1, "default_password": "pw"}
+        response = self.client.post('/api/admin/users/bulk_add', json=payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("must be at least 6 characters", response.get_json()['error'])
+
+    def test_bulk_add_unauthenticated(self, mock_audit_log):
+        self.logout()
+        payload = {"username_pattern": "test###", "start_index": 1, "count": 1, "default_password": "password123"}
+        response = self.client.post('/api/admin/users/bulk_add', json=payload)
+        self.assertEqual(response.status_code, 401)
+
+    def test_bulk_add_unauthorized_no_permission(self, mock_audit_log):
+        self.logout()
+        regular_user = User.query.filter_by(username='testuser').first() # From AppTests setup
+        self.login(regular_user.username, 'password')
+
+        payload = {"username_pattern": "test###", "start_index": 1, "count": 1, "default_password": "password123"}
+        response = self.client.post('/api/admin/users/bulk_add', json=payload)
+        self.assertEqual(response.status_code, 403)
+
+
 if __name__ == '__main__':
     unittest.main()
