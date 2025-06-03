@@ -6,9 +6,13 @@
     <h1>{{ _('User Management') }}</h1>
     <button id="add-new-user-btn" class="button">{{ _('Add New User') }}</button>
     <button id="bulk-add-users-btn" class="button">{{ _('Bulk Add Users') }}</button> {# New Button #}
-    <button id="export-users-btn" class="button">{{ _('Export Users') }}</button>
-    <button id="import-users-btn" class="button">{{ _('Import Users') }}</button>
+    <button id="export-users-btn" class="button">{{ _('Export Users (JSON)') }}</button> {# Clarified existing button #}
+    <button id="export-users-csv-btn" class="button">{{ _('Export Users to CSV') }}</button> {# New CSV Export Button #}
+    <button id="import-users-btn" class="button">{{ _('Import Users (JSON)') }}</button> {# Clarified existing button #}
     <input type="file" id="import-users-file" accept="application/json" style="display:none;">
+    <button id="import-users-csv-btn" class="button">{{ _('Import Users from CSV') }}</button> {# New CSV Import Button #}
+    <input type="file" id="import-users-csv-file" accept=".csv,text/csv" style="display:none;">
+    <button id="bulk-add-pattern-btn" class="button">{{ _('Bulk Add with Pattern') }}</button> {# New Button #}
     <button id="delete-selected-users-btn" class="button danger">{{ _('Delete Selected') }}</button>
     <button id="bulk-edit-selected-users-btn" class="button action">{{ _('Bulk Edit Selected') }}</button> {# New Button #}
     <div class="filters-section" style="margin-top:15px;">
@@ -151,6 +155,62 @@
 
                 <button type="submit" class="button" style="margin-top: 15px;">{{ _('Submit Bulk Edit') }}</button>
                 <div id="bulk-edit-status" class="status-message" style="margin-top: 10px;"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal for Bulk Add Users with Pattern -->
+    <div id="bulk-add-pattern-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close-modal-btn" data-modal-id="bulk-add-pattern-modal">&times;</span>
+            <h3>{{ _('Bulk Add Users with Pattern') }}</h3>
+            <form id="bulk-add-pattern-form">
+                <div>
+                    <label for="pattern-username-prefix">{{ _('Username Prefix:') }}</label>
+                    <input type="text" id="pattern-username-prefix" name="pattern_username_prefix" required>
+                </div>
+                <div>
+                    <label for="pattern-username-suffix">{{ _('Username Suffix (Optional):') }}</label>
+                    <input type="text" id="pattern-username-suffix" name="pattern_username_suffix">
+                </div>
+                <div>
+                    <label for="pattern-start-number">{{ _('Start Number:') }}</label>
+                    <input type="number" id="pattern-start-number" name="pattern_start_number" value="1" min="0" required>
+                </div>
+                <div>
+                    <label for="pattern-count">{{ _('Number of Users to Create:') }}</label>
+                    <input type="number" id="pattern-count" name="pattern_count" value="10" min="1" max="100" required>
+                </div>
+                <div>
+                    <label for="pattern-email-domain">{{ _('Email Domain (e.g., example.com):') }}</label>
+                    <input type="text" id="pattern-email-domain" name="pattern_email_domain" placeholder="example.com">
+                    <small>{{ _('OR use Email Pattern below.') }}</small>
+                </div>
+                 <div>
+                    <label for="pattern-email-pattern">{{ _('Email Pattern (e.g., {username}@custom.com):') }}</label>
+                    <input type="text" id="pattern-email-pattern" name="pattern_email_pattern" placeholder="{username}@custom.com">
+                    <small>{{ _('Use {username} as placeholder for the generated username.') }}</small>
+                </div>
+                <div>
+                    <label for="pattern-default-password">{{ _('Default Password:') }}</label>
+                    <input type="password" id="pattern-default-password" name="pattern_default_password" required>
+                </div>
+                <div>
+                    <label for="pattern-confirm-password">{{ _('Confirm Default Password:') }}</label>
+                    <input type="password" id="pattern-confirm-password" name="pattern_confirm_password" required>
+                </div>
+                <div>
+                    <input type="checkbox" id="pattern-is-admin" name="pattern_is_admin" value="true">
+                    <label for="pattern-is-admin">{{ _('Set as Admin') }}</label>
+                </div>
+                <div style="margin-top: 15px;">
+                    <h4>{{ _('Assign Roles (Optional):') }}</h4>
+                    <div id="pattern-roles-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding:5px;">
+                        <small>{{ _('Loading roles...') }}</small>
+                    </div>
+                </div>
+                <button type="submit" class="button" style="margin-top: 15px;">{{ _('Submit Bulk Add Pattern') }}</button>
+                <div id="bulk-add-pattern-status" class="status-message" style="margin-top: 10px;"></div>
             </form>
         </div>
     </div>

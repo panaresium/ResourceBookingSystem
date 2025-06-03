@@ -13,9 +13,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const userFormModalStatusDiv = document.getElementById('user-form-modal-status');
     const closeModalBtn = userFormModal ? userFormModal.querySelector('.close-modal-btn') : null;
 
-    const exportUsersBtn = document.getElementById('export-users-btn');
-    const importUsersBtn = document.getElementById('import-users-btn');
+    const exportUsersBtn = document.getElementById('export-users-btn'); // For JSON export
+    const exportUsersCsvBtn = document.getElementById('export-users-csv-btn'); // For CSV export
+    const importUsersBtn = document.getElementById('import-users-btn'); // For JSON import
     const importUsersFile = document.getElementById('import-users-file');
+    const importUsersCsvBtn = document.getElementById('import-users-csv-btn'); // For CSV import
+    const importUsersCsvFile = document.getElementById('import-users-csv-file');
     const deleteSelectedUsersBtn = document.getElementById('delete-selected-users-btn');
     const selectAllUsersCheckbox = document.getElementById('select-all-users');
 
@@ -52,6 +55,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const bulkEditRolesCheckboxContainer = document.getElementById('bulk-edit-roles-checkbox-container');
     const bulkEditStatusDiv = document.getElementById('bulk-edit-status');
     const closeBulkEditModalBtn = bulkEditUsersModal ? bulkEditUsersModal.querySelector('.close-modal-btn') : null;
+
+    const bulkAddPatternBtn = document.getElementById('bulk-add-pattern-btn');
+    const bulkAddPatternModal = document.getElementById('bulk-add-pattern-modal');
+    const bulkAddPatternForm = document.getElementById('bulk-add-pattern-form');
+    const bulkAddPatternStatusDiv = document.getElementById('bulk-add-pattern-status');
+    const patternRolesCheckboxContainer = document.getElementById('pattern-roles-checkbox-container');
+    const closeBulkAddPatternModalBtn = bulkAddPatternModal ? bulkAddPatternModal.querySelector('.close-modal-btn') : null;
 
 
     let currentFilters = {};
@@ -152,6 +162,106 @@ document.addEventListener('DOMContentLoaded', function() {
                 showSuccess(userManagementStatusDiv, 'Export complete.');
             } catch (err) {
                 console.error(err);
+                showError(userManagementStatusDiv, 'JSON export failed: ' + err.message);
+            }
+        });
+    }
+
+    if (importUsersCsvBtn && importUsersCsvFile) {
+        importUsersCsvBtn.addEventListener('click', () => importUsersCsvFile.click());
+        importUsersCsvFile.addEventListener('change', async () => {
+            const file = importUsersCsvFile.files[0];
+            if (!file) return;
+
+            showLoading(userManagementStatusDiv, 'Importing users from CSV...');
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                // apiCall might need adjustment if it strictly sets Content-Type to application/json
+                // For FormData, the browser sets it to multipart/form-data automatically with the correct boundary.
+                // Let's assume apiCall can handle this or use fetch directly if not.
+                // If using apiCall and it has a default 'Content-Type' header, it needs to be omitted for FormData.
+
+                // Using fetch directly for clarity with FormData
+                const response = await fetch('/api/admin/users/import/csv', {
+                    method: 'POST',
+                    body: formData
+                    // No 'Content-Type' header here, browser will set it for FormData
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || `HTTP error! status: ${response.status}`);
+                }
+
+                let message = `CSV Import finished. Created: ${result.users_created || 0}, Updated: ${result.users_updated || 0}.`;
+                if (result.errors && result.errors.length > 0) {
+                    const errorDetails = result.errors.map(err =>
+                        `Row ${err.row} (User: ${err.username || 'N/A'}): ${err.error}`
+                    ).join('<br>- ');
+                    showError(userManagementStatusDiv, `${message}<br>Errors:<br>- ${errorDetails}`);
+                } else {
+                    showSuccess(userManagementStatusDiv, message);
+                }
+
+                if ((result.users_created || 0) > 0 || (result.users_updated || 0) > 0) {
+                    fetchAndDisplayUsers(currentFilters); // Refresh table
+                }
+
+            } catch (e) {
+                console.error('CSV Import error:', e);
+                showError(userManagementStatusDiv, 'CSV Import failed: ' + e.message);
+            } finally {
+                importUsersCsvFile.value = ''; // Reset file input
+            }
+        });
+    }
+
+    if (exportUsersCsvBtn) {
+        exportUsersCsvBtn.addEventListener('click', async () => {
+            showLoading(userManagementStatusDiv, 'Exporting users to CSV...');
+            try {
+                const response = await fetch('/api/admin/users/export/csv');
+                if (!response.ok) {
+                    // Try to parse error from JSON response if API returns one for errors
+                    let errorMsg = 'Network response was not ok: ' + response.statusText;
+                    try {
+                        const errData = await response.json();
+                        if (errData && errData.error) {
+                            errorMsg = errData.error;
+                        }
+                    } catch (e) {
+                        // Ignore if error response is not JSON
+                    }
+                    throw new Error(errorMsg);
+                }
+
+                const disposition = response.headers.get('content-disposition');
+                let filename = 'users_export.csv'; // Default filename
+                if (disposition && disposition.indexOf('attachment') !== -1) {
+                    const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+                    const matches = filenameRegex.exec(disposition);
+                    if (matches != null && matches[1]) {
+                        filename = matches[1].replace(/['"]/g, '');
+                    }
+                }
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                a.remove();
+                showSuccess(userManagementStatusDiv, 'Users exported to CSV successfully.');
+            } catch (error) {
+                console.error('Error exporting users to CSV:', error);
+                showError(userManagementStatusDiv, 'CSV Export failed: ' + error.message);
             }
         });
     }
@@ -455,6 +565,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (userFormModal) userFormModal.style.display = 'none'; // Ensure modal is hidden initially
     if (bulkAddUsersModal) bulkAddUsersModal.style.display = 'none'; // Hide bulk add modal initially
     if (bulkEditUsersModal) bulkEditUsersModal.style.display = 'none'; // Hide bulk edit modal initially
+    if (bulkAddPatternModal) bulkAddPatternModal.style.display = 'none'; // Hide pattern modal initially
 
     fetchAndDisplayUsers(currentFilters); // Fetch and display users on page load
 
@@ -748,8 +859,160 @@ document.addEventListener('DOMContentLoaded', function() {
         if (event.target === bulkEditUsersModal) {
             if (bulkEditUsersModal) bulkEditUsersModal.style.display = 'none';
         }
+        if (event.target === bulkAddPatternModal) {
+            if (bulkAddPatternModal) bulkAddPatternModal.style.display = 'none';
+        }
     });
 
+    // --- Bulk Add Users with Pattern ---
+    async function populateRolesForPatternForm() { // Similar to populateRolesForUserForm but for pattern modal
+        if (!patternRolesCheckboxContainer) return;
+        showLoading(patternRolesCheckboxContainer, 'Loading roles...');
+        try {
+            if (!allAvailableRolesCache) {
+                allAvailableRolesCache = await apiCall('/api/admin/roles');
+            }
+            patternRolesCheckboxContainer.innerHTML = ''; // Clear previous
+
+            if (!allAvailableRolesCache || allAvailableRolesCache.length === 0) {
+                patternRolesCheckboxContainer.innerHTML = '<small>No roles available.</small>';
+                return;
+            }
+            allAvailableRolesCache.forEach(role => {
+                const checkboxDiv = document.createElement('div');
+                checkboxDiv.classList.add('checkbox-item');
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `pattern-role-${role.id}`;
+                checkbox.value = role.id;
+                checkbox.name = 'pattern_role_ids';
+
+                const label = document.createElement('label');
+                label.htmlFor = `pattern-role-${role.id}`;
+                label.textContent = role.name;
+
+                checkboxDiv.appendChild(checkbox);
+                checkboxDiv.appendChild(label);
+                patternRolesCheckboxContainer.appendChild(checkboxDiv);
+            });
+        } catch (error) {
+            showError(patternRolesCheckboxContainer, 'Failed to load roles.');
+            console.error("Error populating roles for pattern form:", error);
+        }
+    }
+
+    if (bulkAddPatternBtn && bulkAddPatternModal) {
+        bulkAddPatternBtn.addEventListener('click', async () => {
+            if (bulkAddPatternForm) bulkAddPatternForm.reset();
+            hideMessage(bulkAddPatternStatusDiv);
+            await populateRolesForPatternForm(); // Populate roles when modal is opened
+            bulkAddPatternModal.style.display = 'block';
+        });
+    }
+
+    if (closeBulkAddPatternModalBtn) {
+        closeBulkAddPatternModalBtn.addEventListener('click', () => {
+            if (bulkAddPatternModal) bulkAddPatternModal.style.display = 'none';
+        });
+    }
+
+    if (bulkAddPatternForm) {
+        bulkAddPatternForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            showLoading(bulkAddPatternStatusDiv, 'Processing pattern bulk add...');
+
+            const usernamePrefix = document.getElementById('pattern-username-prefix').value.trim();
+            const usernameSuffix = document.getElementById('pattern-username-suffix').value.trim();
+            const startNumber = parseInt(document.getElementById('pattern-start-number').value, 10);
+            const count = parseInt(document.getElementById('pattern-count').value, 10);
+            const emailDomain = document.getElementById('pattern-email-domain').value.trim();
+            const emailPattern = document.getElementById('pattern-email-pattern').value.trim();
+            const defaultPassword = document.getElementById('pattern-default-password').value;
+            const confirmPassword = document.getElementById('pattern-confirm-password').value;
+            const isAdmin = document.getElementById('pattern-is-admin').checked;
+            const selectedRoleIds = Array.from(patternRolesCheckboxContainer.querySelectorAll('input[name="pattern_role_ids"]:checked'))
+                                       .map(cb => parseInt(cb.value, 10));
+
+            // Frontend Validations
+            if (!usernamePrefix) {
+                showError(bulkAddPatternStatusDiv, 'Username prefix is required.'); return;
+            }
+            if (isNaN(startNumber) || startNumber < 0) {
+                showError(bulkAddPatternStatusDiv, 'Start number must be a non-negative integer.'); return;
+            }
+            if (isNaN(count) || count < 1 || count > 100) {
+                showError(bulkAddPatternStatusDiv, 'Count must be between 1 and 100.'); return;
+            }
+            if (!emailDomain && !emailPattern) {
+                showError(bulkAddPatternStatusDiv, 'Either Email Domain or Email Pattern is required.'); return;
+            }
+            if (emailDomain && emailPattern) {
+                showError(bulkAddPatternStatusDiv, 'Provide either Email Domain or Email Pattern, not both.'); return;
+            }
+            if (emailPattern && !emailPattern.includes('{username}')) {
+                 showError(bulkAddPatternStatusDiv, 'Email Pattern must contain "{username}" placeholder.'); return;
+            }
+            if (!defaultPassword) {
+                showError(bulkAddPatternStatusDiv, 'Default password is required.'); return;
+            }
+            if (defaultPassword !== confirmPassword) {
+                showError(bulkAddPatternStatusDiv, 'Passwords do not match.'); return;
+            }
+
+            const payload = {
+                username_prefix: usernamePrefix,
+                username_suffix: usernameSuffix,
+                start_number: startNumber,
+                count: count,
+                email_domain: emailDomain || null, // Send null if empty
+                email_pattern: emailPattern || null, // Send null if empty
+                default_password: defaultPassword,
+                is_admin: isAdmin,
+                role_ids: selectedRoleIds
+            };
+
+            try {
+                const response = await apiCall('/api/admin/users/bulk_add_pattern', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }, bulkAddPatternStatusDiv); // apiCall will show message in modal status div
+
+                let summaryMessage = `Pattern bulk add completed. Added: ${response.users_added || 0}.`;
+                if (response.errors_warnings && response.errors_warnings.length > 0) {
+                    summaryMessage += ` Skipped/Errors: ${response.errors_warnings.length}.`;
+                    const errorDetails = response.errors_warnings.map(err =>
+                        `Attempted User (Username: ${err.username || err.username_attempt || 'N/A'}, Email: ${err.email || err.email_attempt || 'N/A'}): ${err.error}`
+                    ).join('<br>- ');
+                    showError(userManagementStatusDiv, `${summaryMessage}<br>Details:<br>- ${errorDetails}`);
+                } else {
+                    showSuccess(userManagementStatusDiv, summaryMessage);
+                }
+
+                if ((response.users_added || 0) > 0) {
+                    fetchAndDisplayUsers(currentFilters); // Refresh table
+                }
+                // Close modal only if fully successful or if only warnings (e.g. skips)
+                if (bulkAddPatternModal && (!response.errors_warnings || response.errors_warnings.every(e => e.error.includes("already exists")))) {
+                    // Consider closing if errors are just skips. For now, keeps modal open if any error/warning.
+                    // if (bulkAddPatternModal && (!response.errors_warnings || response.errors_warnings.length === 0)) {
+                    //    bulkAddPatternModal.style.display = 'none';
+                    // }
+                }
+                 if (bulkAddPatternModal && (!response.errors_warnings || response.errors_warnings.length === 0)) {
+                    bulkAddPatternModal.style.display = 'none';
+                }
+
+
+            } catch (error) {
+                // Error should have been shown by apiCall. If not, this is a fallback.
+                if (!bulkAddPatternStatusDiv.textContent || bulkAddPatternStatusDiv.style.display === 'none') {
+                     showError(bulkAddPatternStatusDiv, `Pattern bulk add failed: ${error.message}`);
+                }
+                showError(userManagementStatusDiv, `Pattern bulk add operation failed. Check modal for details.`);
+            }
+        });
+    }
 
     // --- Role Management ---
     const roleManagementStatusDiv = document.getElementById('role-management-status');
