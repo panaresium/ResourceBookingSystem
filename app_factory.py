@@ -244,7 +244,7 @@ def create_app(config_object=config):
             scheduler.add_job(apply_scheduled_resource_status_changes, 'interval', minutes=1, args=[app])
         if run_scheduled_backup_job:
             scheduler.add_job(run_scheduled_backup_job, 'interval', minutes=app.config.get('SCHEDULER_BACKUP_JOB_INTERVAL_MINUTES', 60), args=[app]) # New config option
-        
+
         if run_scheduled_booking_csv_backup: # Check if the function exists
             booking_csv_interval = app.config.get('BOOKINGS_CSV_BACKUP_INTERVAL_MINUTES', 60) # Default to 60 minutes
             scheduler.add_job(
