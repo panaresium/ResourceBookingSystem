@@ -275,43 +275,33 @@ document.addEventListener('DOMContentLoaded', function () {
                             finalAvailabilityClass = 'resource-area-restricted';
                             isMapAreaClickable = false;
                             areaDiv.title = `${resource.name} (Access Restricted)`;
-                        } else if (loggedInUsername && allGenerallyAvailableSlotsBlockedForUser && anyGenerallyAvailableSlotExists) {
+                        } else if (!anyGenerallyAvailableSlotExists) { // All primary slots are booked on this resource
+                            finalAvailabilityClass = 'resource-area-fully-booked';
+                            areaDiv.title = resource.name + " (Fully Booked)";
+                            isMapAreaClickable = false;
+                        } else if (loggedInUsername && allGenerallyAvailableSlotsBlockedForUser) { // anyGenerallyAvailableSlotExists must be true here
                             finalAvailabilityClass = 'resource-area-user-conflict';
                             areaDiv.title = resource.name + " (Unavailable - Your bookings conflict)";
                             isMapAreaClickable = false;
                         } else {
-                            // Fallback to original general availability logic if no user-specific full block
-                            const generalBookings = resource.bookings_on_date;
-                            if (generalBookings) {
-                                if (generalBookings.length === 0) {
-                                    finalAvailabilityClass = 'resource-area-available';
-                                } else {
-                                    let totalBookedMinutes = 0;
-                                    const workDayStartHour = 8; const workDayEndHour = 17;
-                                    generalBookings.forEach(booking => {
-                                        const bookingStartInMinutes = timeToMinutes(booking.start_time);
-                                        const bookingEndInMinutes = timeToMinutes(booking.end_time);
-                                        const workDayStartMinutes = workDayStartHour * 60;
-                                        const workDayEndMinutes = workDayEndHour * 60;
-                                        const effectiveStart = Math.max(bookingStartInMinutes, workDayStartMinutes);
-                                        const effectiveEnd = Math.min(bookingEndInMinutes, workDayEndMinutes);
-                                        if (effectiveEnd > effectiveStart) totalBookedMinutes += (effectiveEnd - effectiveStart);
-                                    });
-                                    const workDayDurationMinutes = (workDayEndHour - workDayStartHour) * 60;
-                                    if (totalBookedMinutes >= workDayDurationMinutes * 0.9) { // 90% threshold
-                                        finalAvailabilityClass = 'resource-area-fully-booked';
-                                    } else if (totalBookedMinutes > 0) {
-                                        finalAvailabilityClass = 'resource-area-partially-booked';
-                                    } else {
-                                        finalAvailabilityClass = 'resource-area-available';
-                                    }
-                                }
+                            // Slots are generally available, and not all are blocked by user's other bookings.
+                            // Determine if available, partial based on remaining generally available slots that are also available to user.
+                            const stillBookableSlots = primarySlots.filter(slot => slot.isGenerallyAvailable && slot.isAvailableToUser);
+                            if (stillBookableSlots.length === primarySlots.filter(slot => slot.isGenerallyAvailable).length && stillBookableSlots.length > 0) {
+                                finalAvailabilityClass = 'resource-area-available';
+                            } else if (stillBookableSlots.length > 0) {
+                                finalAvailabilityClass = 'resource-area-partially-booked';
+                            } else {
+                                // This case should ideally be covered by !anyGenerallyAvailableSlotExists or allGenerallyAvailableSlotsBlockedForUser
+                                // but as a fallback, if no slots are bookable by the user for other reasons (e.g. partial general booking not covering a full primary slot)
+                                finalAvailabilityClass = 'resource-area-fully-booked'; // Or 'unavailable' if a more generic term is preferred
                             }
-                            // Set title based on general availability if not user-conflict or restricted
+
                             let statusText = finalAvailabilityClass.replace('resource-area-','').replace('-',' ');
                             statusText = statusText.charAt(0).toUpperCase() + statusText.slice(1);
                             areaDiv.title = resource.name + (finalAvailabilityClass !== 'resource-area-available' ? ` (${statusText})` : ' (Available)');
 
+                            // Redundant check for fully-booked, but safe
                             if (finalAvailabilityClass === 'resource-area-fully-booked' || finalAvailabilityClass === 'resource-area-unknown') {
                                 isMapAreaClickable = false;
                             }
