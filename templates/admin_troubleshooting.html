@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('System Troubleshooting Tools') }}{% endblock %}
+
+{% block content %} {# Adjusted from page_content to content #}
+<div class="container-fluid"> {# Or container mt-4 if that's preferred for admin pages #}
+    <div class="row">
+        <div class="col-lg-12">
+            {# Assuming page-header is a valid class, or use a simple h1 #}
+            <h1 class="page-header">{{ _('System Troubleshooting Tools') }}</h1>
+            <hr>
+            <section id="troubleshooting-tools-section" class="mb-5">
+                <h2>{{ _('System Troubleshooting Tools') }}</h2>
+
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title">{{ _('View Database Records') }}</h5>
+                        <p class="card-text">{{ _('Fetch and display the top 100 records from key database tables.') }}</p>
+                        <button id="view-db-records-btn" class="btn btn-info">{{ _('View DB Records') }}</button>
+                        <div id="view-db-records-status" class="mt-2"></div>
+                        <pre id="view-db-records-output" class="log-area" style="display: none; max-height: 400px;"></pre>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title">{{ _('Reload Configurations') }}</h5>
+                        <p class="card-text">{{ _('Attempt to reload system configurations like the backup schedule and map data. Note: Full effect may require deeper application integration for some configurations.') }}</p>
+                        <button id="reload-configurations-btn" class="btn btn-warning">{{ _('Reload Configurations') }}</button>
+                        <div id="reload-configurations-status" class="mt-2"></div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title">{{ _('Cleanup System Data') }}</h5>
+                        <p class="card-text text-danger"><strong>{{ _('Warning:') }}</strong> {{ _('This will delete all bookings, resources, and floor maps from the database, and remove all uploaded floor map and resource images. This action is irreversible.') }}</p>
+                        <button id="cleanup-system-data-btn" class="btn btn-danger">{{ _('Cleanup System Data') }}</button>
+                        <div id="cleanup-system-data-status" class="mt-2"></div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+</div>
+{% endblock %}

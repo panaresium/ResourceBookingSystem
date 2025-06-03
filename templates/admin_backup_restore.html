@@ -179,7 +179,7 @@
                 <i class="fas fa-cloud-upload-alt"></i> {{ _('Backup All Bookings to CSV Now') }}
             </button>
         </form>
-        
+
         {% if booking_csv_backups and booking_csv_backups|length > 0 %}
             <table class="table table-striped">
                 <thead>
@@ -222,10 +222,10 @@
             <p>{{ _('No booking CSV backups found.') }}</p>
         {% endif %}
 
-        {% if booking_csv_pagination_total_pages > 1 %}
+        {% if booking_csv_total_pages > 1 %}
         <nav aria-label="Booking CSV Backup Pagination" class="mt-3">
             <ul class="pagination justify-content-center">
-                {% if booking_csv_pagination_has_prev %}
+                {% if booking_csv_has_prev %}
                     <li class="page-item">
                         <a class="page-link" href="{{ url_for('admin_ui.serve_backup_restore_page', page=booking_csv_page - 1) }}">{{ _('Previous') }}</a>
                     </li>
@@ -236,10 +236,10 @@
                 {% endif %}
 
                 <li class="page-item disabled">
-                    <span class="page-link">{{ _('Page %(page)s of %(total_pages)s', page=booking_csv_page, total_pages=booking_csv_pagination_total_pages) }}</span>
+                    <span class="page-link">{{ _('Page %(page)s of %(total_pages)s', page=booking_csv_page, total_pages=booking_csv_total_pages) }}</span>
                 </li>
 
-                {% if booking_csv_pagination_has_next %}
+                {% if booking_csv_has_next %}
                     <li class="page-item">
                         <a class="page-link" href="{{ url_for('admin_ui.serve_backup_restore_page', page=booking_csv_page + 1) }}">{{ _('Next') }}</a>
                     </li>
@@ -253,38 +253,12 @@
         {% endif %}
     </section>
 
-    <hr>
-    <section id="troubleshooting-tools-section" class="mb-5">
-        <h2>{{ _('System Troubleshooting Tools') }}</h2>
+    {# The System Troubleshooting Tools section that was here has been moved to admin_troubleshooting.html #}
+    {# Ensure the <hr> that was above it is also removed if it's now redundant, or kept if it separates from the above section. #}
+    {# Based on the previous structure, the <hr> before troubleshooting tools should remain to separate it from Booking CSV section. #}
+    {# However, since the entire troubleshooting section is gone, the <hr> immediately preceding it is also gone. #}
+    {# The final <hr> of the booking CSV section now acts as the separator before the script block or end of content. #}
 
-        <div class="card mb-3">
-            <div class="card-body">
-                <h5 class="card-title">{{ _('View Database Records') }}</h5>
-                <p class="card-text">{{ _('Fetch and display the top 100 records from key database tables.') }}</p>
-                <button id="view-db-records-btn" class="btn btn-info">{{ _('View DB Records') }}</button>
-                <div id="view-db-records-status" class="mt-2"></div>
-                <pre id="view-db-records-output" class="log-area" style="display: none; max-height: 400px;"></pre>
-            </div>
-        </div>
-
-        <div class="card mb-3">
-            <div class="card-body">
-                <h5 class="card-title">{{ _('Reload Configurations') }}</h5>
-                <p class="card-text">{{ _('Attempt to reload system configurations like the backup schedule and map data. Note: Full effect may require deeper application integration for some configurations.') }}</p>
-                <button id="reload-configurations-btn" class="btn btn-warning">{{ _('Reload Configurations') }}</button>
-                <div id="reload-configurations-status" class="mt-2"></div>
-            </div>
-        </div>
-
-        <div class="card mb-3">
-            <div class="card-body">
-                <h5 class="card-title">{{ _('Cleanup System Data') }}</h5>
-                <p class="card-text text-danger"><strong>{{ _('Warning:') }}</strong> {{ _('This will delete all bookings, resources, and floor maps from the database, and remove all uploaded floor map and resource images. This action is irreversible.') }}</p>
-                <button id="cleanup-system-data-btn" class="btn btn-danger">{{ _('Cleanup System Data') }}</button>
-                <div id="cleanup-system-data-status" class="mt-2"></div>
-            </div>
-        </div>
-    </section>
 </div>
 
 <script>
@@ -342,6 +316,8 @@
         const componentAllCheckbox = document.getElementById('component-all');
 
         // Troubleshooting Tools Elements
+        // These elements are no longer in this file, but their JS might still be here.
+        // This will be handled in a subsequent step if necessary by removing unused JS.
         const viewDbRecordsBtn = document.getElementById('view-db-records-btn');
         const viewDbRecordsStatusEl = document.getElementById('view-db-records-status');
         const viewDbRecordsOutputEl = document.getElementById('view-db-records-output');
@@ -1308,3 +1284,5 @@
     });
 </script>
 {% endblock %}
+
+[end of templates/admin_backup_restore.html]

@@ -94,7 +94,7 @@ def serve_backup_restore_page():
 
     # New logic for booking CSV backups
     all_booking_csv_files = list_available_booking_csv_backups()
-    
+
     # Pagination for Booking CSV Backups
     page = request.args.get('page', 1, type=int)
     per_page = 10 # Items per page
@@ -108,7 +108,7 @@ def serve_backup_restore_page():
 
     return render_template(
         'admin_backup_restore.html',
-        full_backups=full_backups, 
+        full_backups=full_backups,
         booking_csv_backups=paginated_booking_csv_backups,
         booking_csv_pagination_current_page=page,
         booking_csv_pagination_total_pages=total_pages,
@@ -122,7 +122,7 @@ def serve_backup_restore_page():
 def restore_booking_csv_route(timestamp_str):
     current_app.logger.info(f"User {current_user.username} initiated restore for booking CSV backup: {timestamp_str}")
     task_id = uuid.uuid4().hex
-    
+
     # Use current_app._get_current_object() to pass the actual app instance
     # Pass socketio instance if available and configured, else None
     socketio_instance = None
@@ -132,9 +132,9 @@ def restore_booking_csv_route(timestamp_str):
         socketio_instance = socketio
 
     summary = restore_bookings_from_csv_backup(
-        current_app._get_current_object(), 
-        timestamp_str, 
-        socketio_instance=socketio_instance, 
+        current_app._get_current_object(),
+        timestamp_str,
+        socketio_instance=socketio_instance,
         task_id=task_id
     )
 
@@ -165,7 +165,7 @@ def manual_backup_bookings_csv_route():
 
     app_instance = current_app._get_current_object()
     app_instance.logger.info(f"Manual booking CSV backup triggered by user {current_user.username if current_user else 'Unknown User'} with task ID {task_id}.")
-            
+
     try:
         # backup_bookings_csv is expected to handle its own app_context for DB queries
         # and emit socketio messages if socketio_instance is provided.
@@ -177,14 +177,14 @@ def manual_backup_bookings_csv_route():
     except Exception as e:
         app_instance.logger.error(f"Exception during manual booking CSV backup initiation by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
         flash(_('An unexpected error occurred while starting the manual booking CSV backup. Check server logs.'), 'danger')
-            
+
     return redirect(url_for('admin_ui.serve_backup_restore_page'))
 
 @admin_ui_bp.route('/admin/delete_booking_csv/<timestamp_str>', methods=['POST'])
 @login_required
 @permission_required('manage_system')
 def delete_booking_csv_backup_route(timestamp_str):
-    task_id = uuid.uuid4().hex 
+    task_id = uuid.uuid4().hex
     socketio_instance = None
     if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
         socketio_instance = current_app.extensions['socketio']
@@ -203,8 +203,16 @@ def delete_booking_csv_backup_route(timestamp_str):
     except Exception as e:
         app_instance.logger.error(f"Exception during booking CSV backup deletion for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
         flash(_('An unexpected error occurred while deleting the booking CSV backup for %(timestamp)s. Check server logs.', timestamp=timestamp_str), 'danger')
-            
+
     return redirect(url_for('admin_ui.serve_backup_restore_page'))
+
+
+@admin_ui_bp.route('/troubleshooting', methods=['GET'])
+@login_required
+@permission_required('manage_system') # Assuming same permission as backup/restore
+def serve_troubleshooting_page():
+    current_app.logger.info(f"User {current_user.username} accessed System Troubleshooting page.")
+    return render_template('admin_troubleshooting.html')
 
 
 @admin_ui_bp.route('/analytics/') # Merged from analytics_bp

@@ -354,7 +354,7 @@ def backup_bookings_csv(app, socketio_instance=None, task_id=None):
     try:
         timestamp_str = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
         remote_filename = f"{BOOKING_CSV_FILENAME_PREFIX}{timestamp_str}.csv"
-        
+
         csv_data_string = ""
         with app.app_context():
             all_bookings = Booking.query.all()
@@ -362,7 +362,7 @@ def backup_bookings_csv(app, socketio_instance=None, task_id=None):
                 logger.info("No bookings found in the database. Skipping CSV backup.")
                 _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', 'No bookings to backup.', 'INFO')
                 return True # Considered success as there's nothing to backup
-            
+
             logger.info(f"Exporting {len(all_bookings)} bookings to CSV format.")
             _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', f'Exporting {len(all_bookings)} bookings...')
             csv_data_string = export_bookings_to_csv_string(all_bookings)
@@ -377,7 +377,7 @@ def backup_bookings_csv(app, socketio_instance=None, task_id=None):
         with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv', encoding='utf-8') as tmp_file:
             tmp_file.write(csv_data_string)
             temp_file_path = tmp_file.name
-        
+
         logger.info(f"CSV data written to temporary file: {temp_file_path}")
 
         service_client = _get_service_client()
@@ -391,14 +391,14 @@ def backup_bookings_csv(app, socketio_instance=None, task_id=None):
             share_client.create_share()
 
         _ensure_directory_exists(share_client, BOOKING_CSV_BACKUPS_DIR)
-        
+
         remote_path_on_azure = f"{BOOKING_CSV_BACKUPS_DIR}/{remote_filename}"
-        
+
         logger.info(f"Attempting to upload booking CSV backup: {temp_file_path} to {share_name}/{remote_path_on_azure}")
         _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', f'Uploading {remote_filename} to {share_name}...')
-        
+
         upload_file(share_client, temp_file_path, remote_path_on_azure)
-        
+
         logger.info(f"Successfully backed up bookings CSV to '{share_name}/{remote_path_on_azure}'.")
         _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', 'Booking CSV backup complete.', 'SUCCESS')
         return True
@@ -458,11 +458,11 @@ def list_available_booking_csv_backups():
                         logger.warning(f"Skipping booking CSV file with unexpected name format: {filename}")
                 except ValueError:
                     logger.warning(f"Skipping booking CSV file with invalid timestamp format: {filename}")
-        
+
         sorted_timestamps = sorted(list(timestamps), reverse=True)
         logger.info(f"Found {len(sorted_timestamps)} available booking CSV backup timestamps.")
         return sorted_timestamps
-        
+
     except Exception as e:
         logger.error(f"Error listing available booking CSV backups: {e}", exc_info=True)
         return []
@@ -510,7 +510,7 @@ def restore_bookings_from_csv_backup(app, timestamp_str, socketio_instance=None,
 
         remote_csv_filename = f"{BOOKING_CSV_FILENAME_PREFIX}{timestamp_str}.csv"
         remote_azure_path = f"{BOOKING_CSV_BACKUPS_DIR}/{remote_csv_filename}"
-        
+
         file_client = share_client.get_file_client(remote_azure_path)
         if not _client_exists(file_client):
             actions_summary['status'] = 'failed'
@@ -521,14 +521,14 @@ def restore_bookings_from_csv_backup(app, timestamp_str, socketio_instance=None,
             return actions_summary
 
         _emit_progress(socketio_instance, task_id, event_name, f"Downloading booking CSV: {remote_azure_path}")
-        
+
         # Create a temporary file to download the CSV into
         # delete=False is important because we need to pass the path to another function
         # and ensure the file is still there. We'll manually delete it.
         with tempfile.NamedTemporaryFile(delete=False, suffix='.csv', mode='w+b') as tmp_file_obj:
             temp_csv_path = tmp_file_obj.name
         # The file is created empty and closed. download_file will open it in 'wb' mode.
-        
+
         logger.info(f"Downloading '{remote_azure_path}' to temporary file '{temp_csv_path}'.")
         download_success = download_file(share_client, remote_azure_path, temp_csv_path)
 
@@ -540,15 +540,15 @@ def restore_bookings_from_csv_backup(app, timestamp_str, socketio_instance=None,
             _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], 'ERROR')
             # temp_csv_path might still exist if download_file created it but failed writing, handled in finally
             return actions_summary
-        
+
         logger.info(f"Successfully downloaded booking CSV to '{temp_csv_path}'. Starting import.")
         _emit_progress(socketio_instance, task_id, event_name, "Download complete. Starting import from CSV.")
 
         import_summary = import_bookings_from_csv_file(temp_csv_path, app)
-        
+
         actions_summary.update(import_summary) # This will overwrite 'errors' if any, and add others
         actions_summary['message'] = "Booking CSV restore process completed."
-        
+
         if import_summary.get('errors'):
             actions_summary['status'] = 'completed_with_errors'
             logger.warning(f"Booking CSV import for {timestamp_str} completed with errors. Summary: {import_summary}")
@@ -607,7 +607,7 @@ def delete_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=Non
 
         remote_csv_filename = f"{BOOKING_CSV_FILENAME_PREFIX}{timestamp_str}.csv"
         remote_azure_path = f"{BOOKING_CSV_BACKUPS_DIR}/{remote_csv_filename}"
-        
+
         file_client = share_client.get_file_client(remote_azure_path)
 
         if _client_exists(file_client):

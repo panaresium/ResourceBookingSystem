@@ -490,7 +490,7 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
             try:
                 resource = Resource.query.get(res_map_data['id']) if res_map_data.get('id') is not None else None
                 if not resource and res_map_data.get('name'): resource = Resource.query.filter_by(name=res_map_data['name']).first()
-                
+
                 if not resource:
                     resource_errors.append({'error': f"Resource not found: '{res_map_data.get('name') or res_map_data.get('id', 'N/A')}'", 'data': res_map_data})
                     continue
@@ -641,7 +641,7 @@ def import_bookings_from_csv_file(csv_file_path, app):
                         if not user_name: # user_name is mandatory for a booking
                             errors.append(f"Row {line_num}: Missing user_name.")
                             continue
-                            
+
                         title = row.get('title', '').strip()
                         if not title: # title is mandatory for a booking
                             errors.append(f"Row {line_num}: Missing title.")
@@ -656,7 +656,7 @@ def import_bookings_from_csv_file(csv_file_path, app):
                         if not start_time or not end_time:
                             errors.append(f"Row {line_num}: Invalid or missing start_time or end_time format.")
                             continue
-                        
+
                         if start_time >= end_time:
                             errors.append(f"Row {line_num}: Start time must be before end time.")
                             continue
@@ -670,7 +670,7 @@ def import_bookings_from_csv_file(csv_file_path, app):
                         recurrence_rule = row.get('recurrence_rule')
                         if recurrence_rule == '': # Treat empty string as None
                             recurrence_rule = None
-                        
+
                         # Optional datetime fields
                         checked_in_at = _parse_iso_datetime(row.get('checked_in_at'))
                         checked_out_at = _parse_iso_datetime(row.get('checked_out_at'))
@@ -694,7 +694,7 @@ def import_bookings_from_csv_file(csv_file_path, app):
                             bookings_skipped_duplicate += 1
                             logger.info(f"Row {line_num}: Skipping duplicate booking for resource {resource_id}, user '{user_name}' at {start_time}.")
                             continue
-                        
+
                         # Create new booking
                         new_booking = Booking(
                             resource_id=resource_id,
