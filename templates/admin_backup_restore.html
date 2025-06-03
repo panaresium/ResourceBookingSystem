@@ -222,7 +222,7 @@
                                 </form>
                                 <form method="POST" action="{{ url_for('admin_ui.delete_booking_csv_backup_route', timestamp_str=backup_item.timestamp) }}" style="display: inline; margin-left: 5px;">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                    <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('{{ _('Are you sure you want to permanently delete the booking CSV backup for file %(filename)s?', filename=backup_item.display_name) }}');">
+                                    <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('{{ _('Are you sure you want to permanently delete the booking CSV backup for file:') }} ' + '{{ backup_item.display_name | e }}');">
                                         <i class="fas fa-trash-alt"></i> {{ _('Delete') }}
                                     </button>
                                 </form>
