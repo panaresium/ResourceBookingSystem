@@ -405,16 +405,41 @@
 
                 window.currentMapContext = { mapId, mapName, imageUrl, offsetX, offsetY };
 
+                // Populate resources dropdown (can happen before image load)
                 if (typeof window.populateResourcesForMapping === 'function') {
                     window.populateResourcesForMapping(mapId);
                 } else {
                     console.warn('populateResourcesForMapping function not found.');
                 }
-                if (typeof window.fetchAndDrawExistingMapAreas === 'function') {
-                    window.fetchAndDrawExistingMapAreas(mapId);
+
+                // Ensure canvas logic runs after image is loaded
+                const selectedMapImageElForLoad = document.getElementById('selected-map-image'); // Re-fetch to be sure
+                if (selectedMapImageElForLoad) { // Check if element exists
+                    selectedMapImageElForLoad.onload = function() {
+                        console.log("Map image loaded. Initializing canvas and drawing areas.");
+                        if (typeof window.initializeDefineAreasCanvasLogic === 'function') {
+                            window.initializeDefineAreasCanvasLogic();
+                        } else {
+                            console.warn('initializeDefineAreasCanvasLogic function not found.');
+                        }
+                        if (typeof window.fetchAndDrawExistingMapAreas === 'function') {
+                            window.fetchAndDrawExistingMapAreas(mapId);
+                        } else {
+                            console.warn('fetchAndDrawExistingMapAreas function not found.');
+                        }
+                    };
+                    // If the image is already loaded from cache, 'onload' might not fire.
+                    // Trigger it manually if complete and naturalWidth > 0.
+                    if (selectedMapImageElForLoad.complete && selectedMapImageElForLoad.naturalWidth && selectedMapImageElForLoad.naturalWidth > 0) {
+                        console.log("Map image already complete, manually triggering onload logic.");
+                        selectedMapImageElForLoad.onload(); // Call the handler directly
+                    } else if (!selectedMapImageElForLoad.src || selectedMapImageElForLoad.src === window.location.href + "#") { // If src is empty or just '#'
+                        console.log("Map image src is empty or '#', not attempting to trigger onload.");
+                    }
                 } else {
-                    console.warn('fetchAndDrawExistingMapAreas function not found.');
+                    console.error("selected-map-image element not found for onload binding.");
                 }
+
                 if(defineAreasSection) defineAreasSection.scrollIntoView({ behavior: 'smooth' });
             } // End of select-map-btn logic
 
