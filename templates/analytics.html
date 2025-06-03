@@ -1,31 +1,502 @@
 {% extends "base.html" %}
 
-{% block title %}{{ _('Analytics') }}{% endblock %}
+{% block title %}{{ _('Analytics Dashboard') }}{% endblock %}
+
+{% block styles %}
+{{ super() }}
+<style>
+    .chart-container {
+        margin-bottom: 40px;
+        padding: 20px;
+        border: 1px solid #eee;
+        border-radius: 8px;
+        background-color: #f9f9f9;
+    }
+    .filter-section {
+        margin-bottom: 30px;
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background-color: #f5f5f5;
+    }
+    .filter-section .form-group {
+        margin-right: 15px;
+        margin-bottom: 10px; /* Add some bottom margin for wrapped elements */
+    }
+    h1, h2 {
+        color: #333;
+    }
+    /* Ensure select elements are visible and have some spacing */
+    select.form-control {
+        min-width: 150px; /* Adjust as needed */
+        display: inline-block; /* Or block if they are on their own line */
+        margin-right: 5px; /* Spacing between label and select */
+    }
+    label {
+        margin-right: 5px;
+    }
+    .form-inline .form-group {
+      display: flex; /* Use flex for better alignment */
+      align-items: center; /* Vertically align items in the middle */
+    }
+</style>
+{% endblock %}
 
 {% block content %}
-<h1>{{ _('Resource Usage Analytics') }}</h1>
-<canvas id="usageChart" width="400" height="200"></canvas>
+<div class="container-fluid">
+    <h1>{{ _('Analytics Dashboard') }}</h1>
+
+    <!-- Filters Section -->
+    <div class="filter-section card">
+        <div class="card-body">
+            <h2 class="card-title">{{ _('Filters') }}</h2>
+            <form id="analyticsFiltersForm" class="form-inline flex-wrap"> {/* Allow wrapping */}
+                <div class="form-group">
+                    <label for="filterResourceTag">{{ _('Resource Tag:') }}</label>
+                    <select id="filterResourceTag" class="form-control custom-select"><option value="">{{ _('All Tags') }}</option></select>
+                </div>
+                <div class="form-group">
+                    <label for="filterResourceStatus">{{ _('Resource Status:') }}</label>
+                    <select id="filterResourceStatus" class="form-control custom-select"><option value="">{{ _('All Statuses') }}</option></select>
+                </div>
+                <div class="form-group">
+                    <label for="filterUser">{{ _('User:') }}</label>
+                    <select id="filterUser" class="form-control custom-select"><option value="">{{ _('All Users') }}</option></select>
+                </div>
+                <div class="form-group">
+                    <label for="filterLocation">{{ _('Location:') }}</label>
+                    <select id="filterLocation" class="form-control custom-select"><option value="">{{ _('All Locations') }}</option></select>
+                </div>
+                <div class="form-group">
+                    <label for="filterFloor">{{ _('Floor:') }}</label>
+                    <select id="filterFloor" class="form-control custom-select"><option value="">{{ _('All Floors') }}</option></select>
+                </div>
+                <div class="form-group">
+                    <label for="filterMonth">{{ _('Month:') }}</label>
+                    <select id="filterMonth" class="form-control custom-select"><option value="">{{ _('All Months') }}</option></select>
+                </div>
+                <div class="form-group">
+                    <label for="filterDayOfWeek">{{ _('Day of Week:') }}</label>
+                    <select id="filterDayOfWeek" class="form-control custom-select"><option value="">{{ _('All Days') }}</option></select>
+                </div>
+                <div class="form-group">
+                    <label for="filterHourOfDay">{{ _('Hour of Day:') }}</label>
+                    <select id="filterHourOfDay" class="form-control custom-select"><option value="">{{ _('All Hours') }}</option></select>
+                </div>
+                <div class="form-group align-self-end"> {/* Align button to bottom if filters wrap */}
+                    <button type="button" id="applyFiltersBtn" class="btn btn-primary">{{ _('Apply Filters') }}</button>
+                    <button type="button" id="resetFiltersBtn" class="btn btn-secondary ml-2">{{ _('Reset Filters') }}</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Charts Section -->
+    <div class="row">
+        <div class="col-lg-12 chart-container"> {/* Use col-lg for wider screens */}
+            <h2>{{ _('Resource Usage Over Last 30 Days (Daily)') }}</h2>
+            <canvas id="dailyUsageChart" width="400" height="150"></canvas>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 chart-container">
+            <h2>{{ _('Bookings Per User') }}</h2>
+            <canvas id="bookingsPerUserChart" width="400" height="250"></canvas> {/* Increased height */}
+        </div>
+        <div class="col-md-6 chart-container">
+            <h2>{{ _('Bookings Per Resource') }}</h2>
+            <canvas id="bookingsPerResourceChart" width="400" height="250"></canvas> {/* Increased height */}
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-4 chart-container">
+            <h2>{{ _('Bookings by Hour of Day') }}</h2>
+            <canvas id="bookingsByHourChart" width="400" height="200"></canvas>
+        </div>
+        <div class="col-md-4 chart-container">
+            <h2>{{ _('Bookings by Day of Week') }}</h2>
+            <canvas id="bookingsByDayOfWeekChart" width="400" height="200"></canvas>
+        </div>
+        <div class="col-md-4 chart-container">
+            <h2>{{ _('Bookings by Month') }}</h2>
+            <canvas id="bookingsByMonthChart" width="400" height="200"></canvas>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 chart-container">
+            <h2>{{ _('Bookings per Floor/Location (Pie Chart)') }}</h2>
+            <canvas id="resourceDistributionChart" width="400" height="250"></canvas> {/* Increased height */}
+        </div>
+    </div>
+
+</div>
 {% endblock %}
 
 {% block scripts %}
-    {{ super() }}
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script>
-    fetch("{{ url_for('admin_ui.analytics_bookings_data') }}")
-        .then(resp => resp.json())
-        .then(function(data){
-            const ctx = document.getElementById('usageChart');
-            const labelsSet = new Set();
-            Object.values(data).forEach(arr => arr.forEach(pt => labelsSet.add(pt.date)));
-            const labels = Array.from(labelsSet).sort();
-            const datasets = Object.keys(data).map(function(resource){
-                const counts = labels.map(function(l){
-                    const item = data[resource].find(d => d.date === l);
-                    return item ? item.count : 0;
-                });
-                return {label: resource, data: counts, fill:false};
+{{ super() }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/randomcolor@0.6.2/randomColor.min.js"></script> <!-- For varied chart colors -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const charts = {}; // To store chart instances for updates
+    let originalData = {}; // To store the initially fetched data
+
+    const filterElements = {
+        resourceTag: document.getElementById('filterResourceTag'),
+        resourceStatus: document.getElementById('filterResourceStatus'),
+        user: document.getElementById('filterUser'),
+        location: document.getElementById('filterLocation'),
+        floor: document.getElementById('filterFloor'),
+        month: document.getElementById('filterMonth'),
+        dayOfWeek: document.getElementById('filterDayOfWeek'),
+        hourOfDay: document.getElementById('filterHourOfDay'),
+    };
+
+    function populateFilters(data) {
+        if (!data || !data.aggregations) {
+            console.warn("No aggregations data to populate filters.");
+            return;
+        }
+        const aggs = data.aggregations;
+
+        const populateSelect = (selectElement, optionsSet, defaultOptionText) => {
+            const currentValue = selectElement.value; // Preserve current filter
+            while (selectElement.options.length > 1) selectElement.remove(1);
+            optionsSet.forEach(optionValue => {
+                const option = new Option(optionValue, optionValue);
+                selectElement.add(option);
             });
-            new Chart(ctx, {type:'line', data:{labels:labels, datasets:datasets}, options:{responsive:true, scales:{y:{beginAtZero:true}}}});
+            selectElement.value = currentValue; // Restore if possible
+        };
+
+        if (aggs.by_user) {
+            populateSelect(filterElements.user, new Set(Object.keys(aggs.by_user).sort()), "{{ _('All Users') }}");
+        }
+
+        if (aggs.by_time_attributes) {
+            if (aggs.by_time_attributes.month) {
+                // Simple alphabetical sort for months for now. Could be improved to chronological.
+                populateSelect(filterElements.month, new Set(Object.keys(aggs.by_time_attributes.month).sort()), "{{ _('All Months') }}");
+            }
+            if (aggs.by_time_attributes.day_of_week) {
+                const dayOrder = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Unknown"];
+                const sortedDays = Object.keys(aggs.by_time_attributes.day_of_week).sort((a, b) => dayOrder.indexOf(a) - dayOrder.indexOf(b));
+                populateSelect(filterElements.dayOfWeek, new Set(sortedDays), "{{ _('All Days') }}");
+            }
+            if (aggs.by_time_attributes.hour_of_day) {
+                const sortedHours = Object.keys(aggs.by_time_attributes.hour_of_day).map(h => parseInt(h)).sort((a,b) => a - b).map(h => h.toString());
+                populateSelect(filterElements.hourOfDay, new Set(sortedHours), "{{ _('All Hours') }}");
+            }
+        }
+
+        // Placeholder for Resource Tags and Statuses - requires data structure change from endpoint
+        // For now, they will remain with only "All Tags" / "All Statuses"
+        // If the data structure for `aggs.by_resource_attributes` was like:
+        // { "Resource A": { count: X, total_duration_hours: Y, details: { tags: ["tag1"], status: "Active" } } }
+        // Then you could populate them like this:
+        const resourceTags = new Set();
+        const resourceStatuses = new Set();
+        if (aggs.by_resource_attributes_details) { // Assuming a new field like this
+             Object.values(aggs.by_resource_attributes_details).forEach(res => {
+                 if(res.tags) res.tags.forEach(tag => resourceTags.add(tag));
+                 if(res.status) resourceStatuses.add(res.status);
+             });
+             populateSelect(filterElements.resourceTag, resourceTags, "{{ _('All Tags') }}");
+             populateSelect(filterElements.resourceStatus, resourceStatuses, "{{ _('All Statuses') }}");
+        } else {
+            console.warn("Resource Tag and Status filters cannot be fully populated. Endpoint data structure for 'by_resource_attributes' might need adjustment to include tag/status details per resource.");
+        }
+
+
+        const locations = new Set();
+        const floors = new Set();
+        if (aggs.by_floor_attributes) {
+            Object.keys(aggs.by_floor_attributes).forEach(key => {
+                const floorMatch = key.match(/Floor: ([\w\s.-]+),/); // Adjusted regex for more chars
+                const locationMatch = key.match(/Location: ([\w\s.-]+)$/); // Adjusted regex
+                if (floorMatch && floorMatch[1]) floors.add(floorMatch[1].trim());
+                if (locationMatch && locationMatch[1]) locations.add(locationMatch[1].trim());
+            });
+            populateSelect(filterElements.location, locations, "{{ _('All Locations') }}");
+            populateSelect(filterElements.floor, floors, "{{ _('All Floors') }}");
+        }
+        console.log("Filters populated.");
+    }
+
+    function getAppliedFilters() {
+        const activeFilters = {};
+        for (const key in filterElements) {
+            if (filterElements[key].value) {
+                activeFilters[key] = filterElements[key].value;
+            }
+        }
+        return activeFilters;
+    }
+
+    function createChart(canvasId, type, data, options = {responsive: true, maintainAspectRatio: false, scales: {y: {beginAtZero: true}}}) {
+        const ctx = document.getElementById(canvasId).getContext('2d');
+        if (charts[canvasId]) {
+            charts[canvasId].destroy();
+        }
+        charts[canvasId] = new Chart(ctx, { type, data, options });
+    }
+
+    function renderDailyUsageChart(data, filters = {}) {
+        const canvasId = 'dailyUsageChart';
+        if (!data || !data.daily_counts_last_30_days) {
+            console.warn("No data for daily usage chart");
+            if(charts[canvasId]) charts[canvasId].destroy();
+            return;
+        }
+        let dailyData = data.daily_counts_last_30_days;
+
+        // Allow filtering by resource name (selected from 'filterUser' for demo, ideally a separate resource filter)
+        if (filters.resourceName && dailyData[filters.resourceName]) {
+             dailyData = {[filters.resourceName]: dailyData[filters.resourceName]};
+        }
+        // This is a simplistic filter; a multi-select resource filter would be better.
+
+        const labelsSet = new Set();
+        Object.values(dailyData).forEach(arr => arr.forEach(pt => labelsSet.add(pt.date)));
+        const labels = Array.from(labelsSet).sort();
+
+        const datasets = Object.keys(dailyData).map(resource => {
+            const counts = labels.map(l => {
+                const item = dailyData[resource].find(d => d.date === l);
+                return item ? item.count : 0;
+            });
+            const color = randomColor({luminosity: 'bright'});
+            return { label: resource, data: counts, borderColor: color, backgroundColor: Chart.helpers.color(color).alpha(0.2).rgbString(), fill: false, tension: 0.1 };
         });
-    </script>
+        createChart(canvasId, 'line', { labels, datasets }, {responsive: true, maintainAspectRatio: false, scales: {y: {beginAtZero: true, title: {display: true, text: "{{_('Booking Count')}}"} }, x: {title: {display: true, text: "{{_('Date')}}"} } }});
+    }
+
+    function renderBookingsPerUserChart(aggregations, filters = {}) {
+        const canvasId = 'bookingsPerUserChart';
+        if (!aggregations || !aggregations.by_user) {
+             console.warn("No data for bookings per user chart");
+             if(charts[canvasId]) charts[canvasId].destroy();
+             return;
+        }
+        let userData = aggregations.by_user;
+        if (filters.user && userData[filters.user]) {
+            userData = {[filters.user]: userData[filters.user]};
+        }
+
+        const labels = Object.keys(userData);
+        if (labels.length === 0) { if(charts[canvasId]) charts[canvasId].destroy(); return; } // Clear chart if no data after filter
+
+        const bookingCounts = labels.map(user => userData[user].count);
+        const totalDurations = labels.map(user => userData[user].total_duration_hours);
+        const bgColors = labels.map(() => randomColor({luminosity: 'light', format: 'rgba', alpha: 0.6}));
+
+        createChart(canvasId, 'bar', {
+            labels: labels,
+            datasets: [
+                { label: "{{ _('Number of Bookings') }}", data: bookingCounts, backgroundColor: bgColors, yAxisID: 'yBookings' },
+                { label: "{{ _('Total Duration (Hours)') }}", data: totalDurations, borderColor: randomColor({luminosity: 'bright'}), type: 'line', yAxisID: 'yDuration', fill: false, tension: 0.1}
+            ]
+        }, {responsive: true, maintainAspectRatio: false, scales: { yBookings: {beginAtZero: true, position: 'left', title: {display:true, text: "{{ _('Number of Bookings') }}"}}, yDuration: {beginAtZero: true, position: 'right', title: {display:true, text: "{{ _('Total Duration (Hours)') }}"}, grid: {drawOnChartArea: false}} }});
+    }
+
+    function renderBookingsPerResourceChart(aggregations, filters = {}) {
+        const canvasId = 'bookingsPerResourceChart';
+        if (!aggregations || !aggregations.by_resource_attributes) {
+            console.warn("No data for bookings per resource chart");
+             if(charts[canvasId]) charts[canvasId].destroy();
+            return;
+        }
+
+        let resourceData = aggregations.by_resource_attributes;
+        // Note: Filtering by tag/status on client-side is difficult with current data structure.
+        // This would ideally be done by fetching data that includes these attributes per resource,
+        // or the backend would handle filtering based on query parameters.
+        // If filters.resourceTag or filters.resourceStatus is set, we would need to iterate originalData.aggregations.by_resource_attributes_details (hypothetical)
+        // and build a new resourceData object. For now, this chart shows all resources or a specific one if its name is passed via a general filter.
+
+        // Example: if a filter like 'resourceName' existed and was applied:
+        // if (filters.resourceName && resourceData[filters.resourceName]) {
+        //     resourceData = {[filters.resourceName]: resourceData[filters.resourceName]};
+        // }
+
+
+        const labels = Object.keys(resourceData);
+        if (labels.length === 0) { if(charts[canvasId]) charts[canvasId].destroy(); return; }
+
+        const bookingCounts = labels.map(res => resourceData[res].count);
+        const totalDurations = labels.map(res => resourceData[res].total_duration_hours);
+        const bgColors = labels.map(() => randomColor({luminosity: 'light', format: 'rgba', alpha: 0.6}));
+
+        createChart(canvasId, 'bar', {
+            labels: labels,
+            datasets: [
+                { label: "{{ _('Number of Bookings') }}", data: bookingCounts, backgroundColor: bgColors, yAxisID: 'yBookings' },
+                { label: "{{ _('Total Duration (Hours)') }}", data: totalDurations, borderColor: randomColor({luminosity: 'bright'}), type: 'line', yAxisID: 'yDuration', fill: false, tension: 0.1 }
+            ]
+        }, {responsive: true, maintainAspectRatio: false, scales: { yBookings: {beginAtZero: true, position: 'left', title: {display:true, text: "{{ _('Number of Bookings') }}"}}, yDuration: {beginAtZero: true, position: 'right', title: {display:true, text: "{{ _('Total Duration (Hours)') }}"}, grid: {drawOnChartArea: false}} }});
+    }
+
+    function createTimeAttributeChart(canvasId, dataSet, yAxisLabel, filters = {}, filterKey = null) {
+        if (!dataSet || Object.keys(dataSet).length === 0) {
+            console.warn(`No data for ${canvasId}`);
+            if(charts[canvasId]) charts[canvasId].destroy();
+            return;
+        }
+
+        let currentData = dataSet;
+        if (filterKey && filters[filterKey] && dataSet[filters[filterKey]]) {
+             currentData = { [filters[filterKey]]: dataSet[filters[filterKey]] };
+        } else if (filterKey && filters[filterKey] && !dataSet[filters[filterKey]]) {
+            currentData = {}; // Filter applied, but no data for it
+        }
+
+        const labels = Object.keys(currentData).sort((a,b) => {
+            if (canvasId === 'bookingsByHourChart') return parseInt(a) - parseInt(b);
+            if (canvasId === 'bookingsByDayOfWeekChart') {
+                 const dayOrder = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Unknown"];
+                 return dayOrder.indexOf(a) - dayOrder.indexOf(b);
+            }
+            // Add month name to number mapping for chronological sort if needed.
+            return a.localeCompare(b);
+        });
+
+        if (labels.length === 0) { if(charts[canvasId]) charts[canvasId].destroy(); return; }
+
+        const bookingCounts = labels.map(key => currentData[key].count);
+        const totalDurations = labels.map(key => currentData[key].total_duration_hours);
+        const bgColors = labels.map(() => randomColor({luminosity: 'light', format: 'rgba', alpha: 0.6}));
+
+        createChart(canvasId, 'bar', {
+            labels: labels,
+            datasets: [
+                { label: "{{ _('Number of Bookings') }}", data: bookingCounts, backgroundColor: bgColors, yAxisID: 'yBookings' },
+                { label: "{{ _('Total Duration (Hours)') }}", data: totalDurations, borderColor: randomColor({luminosity: 'bright'}), type: 'line', yAxisID: 'yDuration', fill: false, tension: 0.1}
+            ]
+        }, {responsive: true, maintainAspectRatio: false, scales: { yBookings: {beginAtZero: true, position: 'left', title: {display:true, text: yAxisLabel}}, yDuration: {beginAtZero: true, position: 'right', title: {display:true, text: "{{ _('Total Duration (Hours)') }}"}, grid: {drawOnChartArea: false}} }});
+    }
+
+    function renderBookingsByHourChart(aggregations, filters = {}) {
+        createTimeAttributeChart('bookingsByHourChart', aggregations?.by_time_attributes?.hour_of_day, "{{ _('Bookings by Hour') }}", filters, 'hourOfDay');
+    }
+
+    function renderBookingsByDayOfWeekChart(aggregations, filters = {}) {
+        createTimeAttributeChart('bookingsByDayOfWeekChart', aggregations?.by_time_attributes?.day_of_week, "{{ _('Bookings by Day of Week') }}", filters, 'dayOfWeek');
+    }
+
+    function renderBookingsByMonthChart(aggregations, filters = {}) {
+        createTimeAttributeChart('bookingsByMonthChart', aggregations?.by_time_attributes?.month, "{{ _('Bookings by Month') }}", filters, 'month');
+    }
+
+    function renderResourceDistributionChart(aggregations, filters = {}) {
+        const canvasId = 'resourceDistributionChart';
+        if (!aggregations || !aggregations.by_floor_attributes) {
+            console.warn("No data for resource distribution chart");
+            if(charts[canvasId]) charts[canvasId].destroy();
+            return;
+        }
+
+        let floorData = aggregations.by_floor_attributes;
+        let filteredFloorData = {};
+
+        if (filters.floor || filters.location) {
+            Object.keys(floorData).forEach(key => {
+                const floorMatch = key.match(/Floor: ([\w\s.-]+),/);
+                const locationMatch = key.match(/Location: ([\w\s.-]+)$/);
+                const currentFloor = floorMatch ? floorMatch[1].trim() : null;
+                const currentLocation = locationMatch ? locationMatch[1].trim() : null;
+
+                const floorFilterMatch = !filters.floor || filters.floor === currentFloor;
+                const locationFilterMatch = !filters.location || filters.location === currentLocation;
+
+                if (floorFilterMatch && locationFilterMatch) {
+                    filteredFloorData[key] = floorData[key];
+                }
+            });
+        } else {
+            filteredFloorData = floorData;
+        }
+
+        const labels = Object.keys(filteredFloorData);
+        if (labels.length === 0) { if(charts[canvasId]) charts[canvasId].destroy(); return; }
+
+        // This chart should ideally show resource counts per floor/location, not booking counts.
+        // The current endpoint provides booking counts ('count') and total_duration_hours.
+        // For now, using 'count' (booking counts) for this pie chart.
+        const bookingCounts = labels.map(key => filteredFloorData[key].count);
+        const bgColors = labels.map(() => randomColor({luminosity: 'bright'}));
+
+        createChart(canvasId, 'pie', {
+            labels: labels,
+            datasets: [{
+                label: "{{ _('Bookings per Floor/Location') }}",
+                data: bookingCounts,
+                backgroundColor: bgColors,
+                hoverOffset: 4
+            }]
+        }, {responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } } });
+    }
+
+    function applyFiltersAndRedrawCharts() {
+        const filters = getAppliedFilters();
+        console.log("Applying filters:", filters);
+
+        if (!originalData || Object.keys(originalData).length === 0 ) {
+            console.warn("Original data not loaded or empty. Cannot apply filters.");
+            return;
+        }
+
+        // Pass filters to all charts. Each chart will use relevant filters.
+        renderDailyUsageChart(originalData, filters); // Pass filters, it might use 'resourceName' or similar
+        renderBookingsPerUserChart(originalData.aggregations, filters);
+        renderBookingsPerResourceChart(originalData.aggregations, filters);
+        renderBookingsByHourChart(originalData.aggregations, filters);
+        renderBookingsByDayOfWeekChart(originalData.aggregations, filters);
+        renderBookingsByMonthChart(originalData.aggregations, filters);
+        renderResourceDistributionChart(originalData.aggregations, filters);
+    }
+
+    fetch("{{ url_for('admin_ui.analytics_bookings_data') }}")
+        .then(response => {
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            return response.json();
+        })
+        .then(function(data) {
+            console.log("Fetched data:", data);
+            if (data.error) {
+                throw new Error(`API Error: ${data.error}`);
+            }
+            originalData = data;
+
+            populateFilters(data);
+            applyFiltersAndRedrawCharts(); // Initial draw with all data and any persisted filter values
+
+            document.getElementById('applyFiltersBtn').addEventListener('click', applyFiltersAndRedrawCharts);
+            document.getElementById('resetFiltersBtn').addEventListener('click', () => {
+                document.getElementById('analyticsFiltersForm').reset();
+                // Clear select values explicitly for custom-select or if .reset() is not enough
+                Object.values(filterElements).forEach(el => el.value = "");
+                applyFiltersAndRedrawCharts();
+            });
+        })
+        .catch(function(error) {
+            console.error("Error fetching or processing analytics data:", error);
+            const container = document.querySelector('.container-fluid');
+            let errorDiv = document.getElementById('analyticsErrorDiv');
+            if (!errorDiv) {
+                errorDiv = document.createElement('div');
+                errorDiv.id = 'analyticsErrorDiv';
+                errorDiv.className = 'alert alert-danger';
+                if (container.firstChild) {
+                    container.insertBefore(errorDiv, container.firstChild);
+                } else {
+                    container.appendChild(errorDiv);
+                }
+            }
+            errorDiv.textContent = `Failed to load analytics data: ${error.message}. Please check the console for more details.`;
+        });
+});
+</script>
 {% endblock %}
