@@ -3351,6 +3351,88 @@ class TestBookingSettingsEnforcement(AppTests):
         db.session.commit()
         self.logout()
 
+    def test_past_booking_current_day_and_yesterday(self):
+        """Test booking in the past on current day vs. previous day based on settings."""
+        self.login(self.book_user.username, 'password')
+        res_id = self.resource1.id
+
+        # Ensure clean state for bookings and settings
+        Booking.query.filter_by(user_name=self.book_user.username).delete()
+        BookingSettings.query.delete()
+        db.session.commit()
+
+        # Scenario 1: Past booking on CURRENT DAY (e.g., 10 AM when it's 2 PM)
+        # Setting: allow_past_bookings = False
+        db.session.add(BookingSettings(allow_past_bookings=False))
+        db.session.commit()
+
+        now = datetime.utcnow()
+        past_start_time_today = now - timedelta(hours=4) # e.g., 4 hours ago
+        past_end_time_today = now - timedelta(hours=3)   # e.g., 3 hours ago
+
+        # Ensure the calculated times are not crossing midnight into "yesterday" for this part of the test
+        # If it's early morning, this test might try to book for "yesterday" if not careful.
+        # We want to test a time that is definitively earlier *on the same UTC date*.
+        if past_start_time_today.date() != now.date():
+            # If subtracting hours crossed midnight, adjust to be later but still past
+            # e.g. if now is 1 AM, 4 hours ago is yesterday.
+            # For simplicity, if it's before 5 AM, try to book 1 hour ago.
+            if now.hour < 5:
+                past_start_time_today = now - timedelta(hours=2)
+                past_end_time_today = now - timedelta(hours=1)
+            else: # Default to a time like 10:00 and 11:00 if now is much later
+                 past_start_time_today = now.replace(hour=10, minute=0, second=0, microsecond=0)
+                 past_end_time_today = now.replace(hour=11, minute=0, second=0, microsecond=0)
+                 # If 'now' is before 11 AM, this test for same-day past booking is tricky.
+                 # The check `new_booking_start_time < datetime.utcnow()` is precise.
+                 # For testing, we need to ensure the time strings we pass are genuinely in the past.
+
+        # Fallback if now is too early for the above logic to make sense for "past on current day"
+        if now.hour < 2: # e.g. if it's 00:30 or 01:30 UTC
+            self.skipTest("Skipping current day past booking test: current UTC hour is too early.")
+        else:
+            payload_past_current_day = self._make_booking_payload(
+                res_id,
+                days_offset=0, # Current day
+                start_time_str=past_start_time_today.strftime('%H:%M'),
+                end_time_str=past_end_time_today.strftime('%H:%M'),
+                title="Past Booking Current Day Fail"
+            )
+            response_past_current_day = self.client.post('/api/bookings', json=payload_past_current_day)
+            self.assertEqual(response_past_current_day.status_code, 400,
+                             f"Past booking on current day should fail when not allowed. Payload: {payload_past_current_day}, Response: {response_past_current_day.get_json()}")
+            self.assertIn('Booking in the past is not allowed', response_past_current_day.get_json().get('error', ''))
+
+        # Scenario 2: Past booking on PREVIOUS DAY
+        # Setting: allow_past_bookings = True
+        settings = BookingSettings.query.first()
+        if not settings: # Should exist from previous step, but good practice
+            settings = BookingSettings()
+            db.session.add(settings)
+        settings.allow_past_bookings = True
+        db.session.commit()
+
+        payload_yesterday_allowed = self._make_booking_payload(
+            res_id,
+            days_offset=-1, # Yesterday
+            start_time_str='10:00', # Specific time yesterday
+            end_time_str='11:00',
+            title="Past Booking Yesterday Allowed"
+        )
+        response_yesterday_allowed = self.client.post('/api/bookings', json=payload_yesterday_allowed)
+        self.assertEqual(response_yesterday_allowed.status_code, 201,
+                         f"Past booking on previous day should succeed when allowed. Payload: {payload_yesterday_allowed}, Response: {response_yesterday_allowed.get_json()}")
+
+        if response_yesterday_allowed.status_code == 201:
+            booking_id = response_yesterday_allowed.get_json()['bookings'][0]['id']
+            Booking.query.filter_by(id=booking_id).delete()
+            db.session.commit()
+
+        # Clean up settings for other tests
+        BookingSettings.query.delete()
+        db.session.commit()
+        self.logout()
+
     def test_allow_multiple_resources_same_time_setting(self):
         """Test enforcement of the 'allow_multiple_resources_same_time' setting."""
         self.login(self.book_user.username, 'password')

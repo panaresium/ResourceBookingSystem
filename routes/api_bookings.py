@@ -121,8 +121,9 @@ def create_booking():
         # new_booking_start_time is naive, convert to aware UTC if necessary, or compare dates directly if appropriate
         # Assuming new_booking_start_time is effectively local to server, convert to UTC date or compare with local server date.
         # For simplicity with current naive new_booking_start_time, comparing with datetime.utcnow().date()
-        if new_booking_start_time.date() < datetime.utcnow().date():
-            current_app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} in the past ({new_booking_start_time.date()}), not allowed by settings.")
+        # Updated to compare datetime objects directly, not just dates.
+        if new_booking_start_time < datetime.utcnow():
+            current_app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} in the past ({new_booking_start_time}), not allowed by settings.")
             return jsonify({'error': 'Booking in the past is not allowed.'}), 400
 
     # Enforce max_booking_days_in_future
