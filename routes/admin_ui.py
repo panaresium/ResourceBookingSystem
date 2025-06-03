@@ -20,9 +20,9 @@ from azure_backup import list_available_backups, restore_full_backup, \
 # Removed duplicate model, db, auth, datetime imports that were already covered above or are standard
 import os
 import json
-from flask_babel import _ # For flash messages and other translatable strings
 from apscheduler.jobstores.base import JobLookupError
 from scheduler_tasks import run_scheduled_booking_csv_backup # For re-adding job
+from translations import _ # For flash messages and other translatable strings
 
 admin_ui_bp = Blueprint('admin_ui', __name__, url_prefix='/admin', template_folder='../templates')
 
