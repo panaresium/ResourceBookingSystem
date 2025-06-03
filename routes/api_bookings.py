@@ -235,6 +235,7 @@ def create_booking():
                 recurrence_rule=recurrence_rule_str
             )
             db.session.add(new_booking)
+            created_bookings.append(new_booking)
             # Defer commit until all bookings in a recurring series are validated and added, or handle rollback for series
         db.session.commit() # Commit all bookings in the series at once
 
