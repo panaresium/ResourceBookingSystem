@@ -8,6 +8,7 @@
     <section id="upload-map-section">
         <h2>{{ _('Upload New Floor Map') }}</h2>
         <form id="upload-map-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div>
                 <label for="map-name">{{ _('Map Name:') }}</label>
                 <input type="text" id="map-name" name="map_name" required>
@@ -346,11 +347,18 @@
 
                 showStatus(adminMapsListStatus, `{{ _("Updating offsets for map ID ${mapId}...") }}`);
                 try {
+                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+                    if (!csrfToken) {
+                        showStatus(adminMapsListStatus, '{{ _("CSRF token not found. Cannot update.") }}', true);
+                        console.error('CSRF token not found in meta tag.');
+                        return;
+                    }
+
                     const response = await fetch(`/api/admin/maps/${mapId}/offsets`, {
                         method: 'PUT',
                         headers: {
                             'Content-Type': 'application/json',
-                            // Add CSRF token header if necessary, e.g., from a global variable or meta tag
+                            'X-CSRFToken': csrfToken // Added CSRF token
                         },
                         body: JSON.stringify({ offset_x: offsetX, offset_y: offsetY })
                     });
@@ -388,11 +396,33 @@
                 showStatus(uploadStatusDiv, '{{ _("Uploading map...") }}');
                 const formData = new FormData(uploadMapForm);
                 try {
-                    const response = await fetch('/api/admin/maps', {
+                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+                    // Note: For FormData with fetch, CSRF is often handled by cookies or server-side framework integration,
+                    // but if a header is needed, it would be added here similarly. However, Flask-WTF usually protects
+                    // forms submitted via POST more automatically if the form includes the CSRF field,
+                    // or AJAX POSTs if the token is in headers. For FormData, it's less common to manually set Content-Type
+                    // and X-CSRFToken as the browser handles multipart/form-data.
+                    // For now, assuming existing mechanism for form POST is sufficient or will be reviewed separately if it fails.
+                    // The primary concern for this task was the PUT request.
+
+                    const fetchOptions = {
                         method: 'POST',
                         body: formData,
-                        // Add CSRF token header if necessary
-                    });
+                        headers: {} // Initialize headers object
+                    };
+
+                    if (csrfToken) {
+                        // It's not standard to send X-CSRFToken with FormData POSTs like this,
+                        // as Flask-WTF usually checks a hidden form field `csrf_token`.
+                        // However, if the server is set up to check this header for POST AJAX too:
+                        // fetchOptions.headers['X-CSRFToken'] = csrfToken;
+                        // For now, let's assume the form POST CSRF is handled by Flask-WTF via a hidden field if needed,
+                        // or that the existing setup for POSTs doesn't require this explicit header for FormData.
+                        // The original code didn't have explicit CSRF for POST, so we maintain that unless specified.
+                    }
+
+
+                    const response = await fetch('/api/admin/maps', fetchOptions);
                     const result = await response.json();
                     if (!response.ok) {
                         throw new Error(result.error || `HTTP error! status: ${response.status}`);
