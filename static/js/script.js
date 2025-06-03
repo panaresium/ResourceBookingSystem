@@ -1975,11 +1975,21 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Populate Roles for Checkbox List in Define Area Form
         async function populateDefineAreaRolesCheckboxes() {
-            if (!authorizedRolesCheckboxContainer) return;
-            authorizedRolesCheckboxContainer.innerHTML = '<em>Loading roles...</em>';
+            const authorizedRolesCheckboxContainer = document.getElementById('define-area-authorized-roles-checkbox-container');
+
+            if (!authorizedRolesCheckboxContainer) {
+                console.error("#define-area-authorized-roles-checkbox-container not found in DOM.");
+                return;
+            }
+
+            // apiCall will now handle initial "Loading..." message and subsequent error/success messages.
             try {
-                const roles = await apiCall('/api/admin/roles'); // Assuming this endpoint exists
-                authorizedRolesCheckboxContainer.innerHTML = ''; // Clear loading message
+                const roles = await apiCall('/api/admin/roles', {}, authorizedRolesCheckboxContainer);
+
+                // If apiCall was successful, it might have shown a generic success message or hidden the loading one.
+                // We must clear the container before adding checkboxes.
+                authorizedRolesCheckboxContainer.innerHTML = '';
+
                 if (roles && roles.length > 0) {
                     roles.forEach(role => {
                         const div = document.createElement('div');
@@ -1990,20 +2000,29 @@ document.addEventListener('DOMContentLoaded', function() {
                         checkbox.name = 'define_area_authorized_role_ids';
                         const label = document.createElement('label');
                         label.htmlFor = `define-area-role-${role.id}`;
-                        label.textContent = role.name;
+                        label.textContent = role.name + (role.description ? ` (${role.description})` : '');
                         div.appendChild(checkbox);
                         div.appendChild(label);
                         authorizedRolesCheckboxContainer.appendChild(div);
                     });
                 } else {
-                    authorizedRolesCheckboxContainer.innerHTML = '<em>No roles found. Create roles in User Management.</em>';
+                    // If roles array is empty or undefined after a successful API call (no error thrown by apiCall)
+                    showSuccess(authorizedRolesCheckboxContainer, 'No roles found. You can create roles in User Management.');
                 }
             } catch (error) {
-                console.error("Failed to load roles for define area checkboxes:", error);
-                authorizedRolesCheckboxContainer.innerHTML = '<em class="error">Could not load roles.</em>';
+                // This catch block is for errors not handled by apiCall (e.g., if apiCall itself fails or network issues not caught by it)
+                // or if an error occurs in the processing logic above (after apiCall returns successfully but before this catch).
+                // apiCall should have already displayed an error in authorizedRolesCheckboxContainer if the API call failed.
+                console.error("Error in populateDefineAreaRolesCheckboxes after apiCall:", error);
+                // Check if an error message is already displayed by apiCall
+                const hasExistingErrorMessage = authorizedRolesCheckboxContainer.classList.contains('error') && authorizedRolesCheckboxContainer.textContent.trim() !== '';
+                if (!hasExistingErrorMessage) {
+                     // Show a generic error only if apiCall hasn't already set one.
+                     showError(authorizedRolesCheckboxContainer, 'Could not display roles due to an unexpected error.');
+                }
             }
         }
-        // populateDefineAreaRolesCheckboxes(); // Called by inline script in admin_maps.html now if needed for that form
+        // populateDefineAreaRolesCheckboxes(); // This is likely called on DOMContentLoaded or when Define Areas is shown.
 
         // Expose fetchAndDrawExistingMapAreas
         window.fetchAndDrawExistingMapAreas = async function(mapId) {
@@ -2369,7 +2388,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // has its core logic now encapsulated or to be called by initializeDefineAreasCanvasLogic.
 
         /*
-        // Delete map functionality (original, might be redundant if new table handles it)
+        // This entire block for mapsListUl is commented out as its functionality is replaced
+        // by the inline script in templates/admin_maps.html which uses a table and global functions.
         if (mapsListUl) { // This targets the old UL. The new table has its own delete logic.
             mapsListUl.addEventListener('click', async function(event) {
                 if (event.target.classList.contains('delete-map-btn')) { // This is for the old list
@@ -3180,3 +3200,5 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+[end of static/js/script.js]
