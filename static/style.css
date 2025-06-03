@@ -1199,6 +1199,5 @@ a.fc-daygrid-event.fc-event { /* Targeting the <a> tag specifically */
 
 #welcome-message-container {
     color: black;
-    margin-left: auto;
     margin-right: 10px;
 }
