@@ -3228,6 +3228,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     updateAllButtonColors();
                  // }
             }
+
+            // For the new booking map (if active)
+            const newBookingMapContainer = document.getElementById('new-booking-map-container');
+            if (newBookingMapContainer) {
+                console.log('Socket.IO: Requesting refresh for new_booking_map.js map view via custom event.');
+                document.dispatchEvent(new CustomEvent('refreshNewBookingMap', { detail: data }));
+            }
         });
         socket.on('connect', () => console.log('Socket.IO connected'));
         socket.on('disconnect', () => console.log('Socket.IO disconnected'));
