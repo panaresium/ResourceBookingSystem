@@ -33,16 +33,27 @@
             </thead>
             <tbody>
                 {% for booking in bookings %}
-                <tr>
+                <tr class="{{ 'table-warning' if booking.status == 'cancelled_by_admin' else '' }}">
                     <td>{{ booking.id }}</td>
                     <td>{{ booking.user_username }}</td>
                     <td>{{ booking.resource_name }}</td>
-                    <td>{{ booking.title if booking.title else '-' }}</td>
+                    <td>
+                        {{ booking.title if booking.title else '-' }}
+                        {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
+                          <div class="alert alert-warning p-1 my-1">
+                            <small><strong>{{ _('Admin Cancellation:') }}</strong> {{ booking.admin_deleted_message }}</small>
+                          </div>
+                        {% endif %}
+                    </td>
                     <td>{{ booking.start_time.strftime('%Y-%m-%d %H:%M') if booking.start_time else '-' }}</td>
                     <td>{{ booking.end_time.strftime('%Y-%m-%d %H:%M') if booking.end_time else '-' }}</td>
                     <td><span class="status-badge status-{{ booking.status | lower }}">{{ _(booking.status) }}</span></td>
                     <td>
-                        {% if booking.status and booking.status.lower() not in ['cancelled', 'rejected', 'completed', 'checked_out'] %}
+                        {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
+                          <button class="btn btn-sm btn-outline-secondary dismiss-admin-message-btn" data-booking-id="{{ booking.id }}">
+                            {{ _('Dismiss Message') }}
+                          </button>
+                        {% elif booking.status and booking.status.lower() not in ['cancelled', 'rejected', 'completed', 'checked_out', 'cancelled_by_admin'] %}
                         <button class="button button-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Delete') }}</button>
                         {% else %}
                         -
@@ -61,76 +72,110 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const statusDiv = document.getElementById('admin-booking-status');
-    const deleteButtons = document.querySelectorAll('.delete-booking-btn'); // Changed selector
     const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
-    deleteButtons.forEach(button => { // Changed variable name
+    document.querySelectorAll('.delete-booking-btn').forEach(button => {
         button.addEventListener('click', function() {
             const bookingId = this.dataset.bookingId;
-            const row = this.closest('tr'); // Get the table row
+            const row = this.closest('tr');
 
-            if (!bookingId) {
-                console.error('Booking ID not found on button');
-                statusDiv.textContent = 'Error: Booking ID missing.';
-                statusDiv.style.color = 'red';
+            if (!confirm("{{ _('Are you sure you want to cancel this booking? This action cannot be undone.') }}")) { // Message changed to 'cancel'
                 return;
             }
-
-            if (!csrfToken) {
-                console.error('CSRF token not found');
-                statusDiv.textContent = 'Error: CSRF token not found. Please refresh the page.';
-                statusDiv.style.color = 'red';
-                return;
-            }
-
-            // Confirmation dialog
-            if (!confirm("{{ _('Are you sure you want to delete this booking? This action cannot be undone.') }}")) {
-                return; // Stop if user cancels
-            }
-
-            // Optimistically disable the button
             this.disabled = true;
-            this.textContent = "{{ _('Deleting...') }}";
+            this.textContent = "{{ _('Processing...') }}"; // Changed text
 
-            fetch(`/api/admin/bookings/${bookingId}/cancel`, { // Endpoint remains the same as it now handles deletion
+            fetch(`/api/admin/bookings/${bookingId}/cancel`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfToken
-                },
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
             })
-            .then(response => {
-                if (response.ok) {
-                    return response.json();
-                } else {
-                    // Try to parse error, but provide a fallback
-                    return response.json().catch(() => ({ error: 'Failed to parse error response.' })).then(err => Promise.reject(err));
-                }
-            })
-            .then(data => {
-                statusDiv.textContent = data.message || "{{ _('Booking deleted successfully.') }}";
-                statusDiv.style.color = 'green';
+            .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, data })))
+            .then(({ ok, status, data }) => {
+                if (ok) {
+                    statusDiv.textContent = data.message || "{{ _('Booking action processed successfully.') }}";
+                    statusDiv.className = 'alert alert-success';
+                    // Update row content instead of removing, to show new status and message
+                    row.classList.add('table-warning'); // Add warning class
+                    row.cells[6].innerHTML = `<span class="status-badge status-${data.new_status.toLowerCase()}">${data.new_status}</span>`; // Update status cell
 
-                // Remove the row from the table
-                row.remove();
+                    // Add admin deleted message to title cell or a new dedicated cell if layout changes
+                    let titleCell = row.cells[3]; // Assuming title is the 4th cell
+                    let messageDiv = titleCell.querySelector('.alert.alert-warning');
+                    if (!messageDiv) {
+                        messageDiv = document.createElement('div');
+                        messageDiv.className = 'alert alert-warning p-1 my-1';
+                        titleCell.appendChild(messageDiv);
+                    }
+                    messageDiv.innerHTML = `<small><strong>{{ _('Admin Cancellation:') }}</strong> ${data.admin_message}</small>`;
+
+                    // Change button to "Dismiss Message"
+                    this.classList.remove('delete-booking-btn', 'button-danger');
+                    this.classList.add('dismiss-admin-message-btn', 'btn-outline-secondary');
+                    this.textContent = "{{ _('Dismiss Message') }}";
+                    this.disabled = false; // Re-enable as dismiss button
+                    // No longer a 'delete' button, so don't remove its event listener directly,
+                    // but its original functionality won't run again if it's not a .delete-booking-btn.
+                    // The new 'dismiss' functionality will be handled by a separate listener.
+
+                } else {
+                    throw new Error(data.error || `{{ _('Error processing booking action (Status: ${status}).') }}`);
+                }
             })
             .catch(error => {
-                const errorMessage = error.message || error.error || "{{ _('An unknown error occurred during deletion.') }}";
-                statusDiv.textContent = `{{ _('Error') }}: ${errorMessage}`;
-                statusDiv.style.color = 'red';
+                statusDiv.textContent = `{{ _('Error') }}: ${error.message}`;
+                statusDiv.className = 'alert alert-danger';
+                this.disabled = false;
+                this.textContent = "{{ _('Delete') }}"; // Revert text on error
+            });
+        });
+    });
 
-                // Re-enable the button if the operation failed, unless it was a 404 (booking not found)
-                // or other specific statuses where re-enabling isn't logical.
-                if (error.status !== 404 && error.status !== 400) { // 400 might be for already terminal state
-                     this.disabled = false;
-                     this.textContent = "{{ _('Delete') }}";
+    document.querySelectorAll('.dismiss-admin-message-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const bookingId = this.dataset.bookingId;
+            const row = this.closest('tr');
+            const messageDiv = row.querySelector('.alert.alert-warning');
+
+            this.disabled = true;
+            this.textContent = "{{ _('Processing...') }}";
+
+            fetch(`/api/admin/bookings/${bookingId}/clear_admin_message`, { // Corrected API endpoint
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            })
+            .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, data })))
+            .then(({ ok, status, data }) => {
+                if (ok) {
+                    statusDiv.textContent = data.message || "{{ _('Admin message cleared and booking acknowledged.') }}";
+                    statusDiv.className = 'alert alert-success';
+
+                    if (messageDiv) messageDiv.remove();
+                    this.remove(); // Remove the dismiss button
+
+                    // Update status display
+                    const statusCell = row.cells[6]; // Assuming status is the 7th cell
+                    if (statusCell && data.new_status) {
+                        // For translation, ideally the backend would send translated status or use a mapping here
+                        // For now, using the raw status string, which might not be ideal for display if it's an enum key.
+                        // The _() function is not directly available in JS unless passed specifically.
+                        // Simple approach: use the new_status string.
+                        statusCell.innerHTML = `<span class="status-badge status-${data.new_status.toLowerCase()}">${data.new_status}</span>`;
+                    }
+
+                    // Update row styling
+                    row.classList.remove('table-warning');
+                    // Optionally add another class like 'table-light' or 'table-secondary' if desired
+                    // row.classList.add('table-light');
+
                 } else {
-                    // For 404 or 400 (e.g. already terminal), the button might stay disabled or removed
-                    // If row wasn't removed due to error, button text indicates error
-                    this.textContent = "{{ _('Error') }}";
-                    // Optionally, if the row is still there and it's a 404, remove it.
-                    if (error.status === 404) row.remove();
+                    throw new Error(data.error || `{{ _('Failed to clear admin message (Status: ${status}).') }}`);
                 }
+            })
+            .catch(error => {
+                statusDiv.textContent = `{{ _('Error') }}: ${error.message}`;
+                statusDiv.className = 'alert alert-danger';
+                this.disabled = false;
+                this.textContent = "{{ _('Dismiss Message') }}"; // Revert button text
             });
         });
     });

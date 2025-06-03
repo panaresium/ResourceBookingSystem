@@ -2162,6 +2162,91 @@ class TestAdminBookings(AppTests):
         self.assertIsNone(Booking.query.get(booking_id).admin_deleted_message) # Should not have admin message if it was user-cancelled
         self.logout()
 
+    def test_admin_clear_booking_message_success(self):
+        """Test admin clearing a 'cancelled_by_admin' booking's message."""
+        admin_user = self._create_admin_user(username="admin_clear_msg_user", email_ext="adminclearmsg")
+        self.login(admin_user.username, 'adminpass')
+
+        regular_user = User.query.filter_by(username='testuser').first()
+        booking = self._create_booking(
+            user_name=regular_user.username,
+            resource_id=self.resource1.id,
+            start_offset_hours=24,
+            title="Booking for Message Clear"
+        )
+        booking_id = booking.id
+        booking.status = 'cancelled_by_admin'
+        booking.admin_deleted_message = "Initial cancellation message."
+        db.session.commit()
+
+        response = self.client.post(f'/api/admin/bookings/{booking_id}/clear_admin_message')
+        self.assertEqual(response.status_code, 200)
+        json_data = response.get_json()
+        self.assertEqual(json_data.get('message'), 'Admin message cleared and booking acknowledged.')
+        self.assertEqual(json_data.get('new_status'), 'cancelled_admin_acknowledged')
+
+        updated_booking = Booking.query.get(booking_id)
+        self.assertIsNone(updated_booking.admin_deleted_message)
+        self.assertEqual(updated_booking.status, 'cancelled_admin_acknowledged')
+
+        audit_log = AuditLog.query.filter_by(action="ADMIN_CLEAR_BOOKING_MESSAGE", user_id=admin_user.id).order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log)
+        self.assertIn(f"Admin '{admin_user.username}' cleared cancellation message for booking ID {booking_id}", audit_log.details)
+        self.assertIn("Status changed to 'cancelled_admin_acknowledged'", audit_log.details)
+        self.logout()
+
+    def test_admin_clear_booking_message_booking_not_found(self):
+        """Test admin clearing message for a non-existent booking."""
+        admin_user = self._create_admin_user(username="admin_clear_notfound", email_ext="adminclearnf")
+        self.login(admin_user.username, 'adminpass')
+        non_existent_booking_id = 99999
+        response = self.client.post(f'/api/admin/bookings/{non_existent_booking_id}/clear_admin_message')
+        self.assertEqual(response.status_code, 404)
+        self.assertIn('Booking not found', response.get_json().get('error', ''))
+        self.logout()
+
+    def test_admin_clear_booking_message_unauthorized(self):
+        """Test non-admin attempting to clear admin message."""
+        regular_user = User.query.filter_by(username='testuser').first()
+        booking = self._create_booking(
+            user_name=regular_user.username,
+            resource_id=self.resource1.id,
+            start_offset_hours=24
+        )
+        booking.status = 'cancelled_by_admin'
+        booking.admin_deleted_message = "A message."
+        db.session.commit()
+
+        self.login(regular_user.username, 'password') # Log in as non-admin
+        response = self.client.post(f'/api/admin/bookings/{booking.id}/clear_admin_message')
+        self.assertEqual(response.status_code, 403)
+        self.logout()
+
+    def test_admin_clear_booking_message_not_cancelled_by_admin(self):
+        """Test admin clearing message for a booking not in 'cancelled_by_admin' state."""
+        admin_user = self._create_admin_user(username="admin_clear_wrong_status", email_ext="adminclearws")
+        self.login(admin_user.username, 'adminpass')
+
+        booking = self._create_booking(
+            user_name='testuser',
+            resource_id=self.resource1.id,
+            start_offset_hours=24
+        )
+        booking.status = 'approved' # Not 'cancelled_by_admin'
+        booking.admin_deleted_message = None # Should be None anyway for approved
+        db.session.commit()
+        booking_id = booking.id
+
+        response = self.client.post(f'/api/admin/bookings/{booking_id}/clear_admin_message')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Message can only be cleared for bookings cancelled by an admin.", response.get_json().get('error', ''))
+
+        # Verify booking is unchanged
+        unchanged_booking = Booking.query.get(booking_id)
+        self.assertEqual(unchanged_booking.status, 'approved')
+        self.assertIsNone(unchanged_booking.admin_deleted_message)
+        self.logout()
+
     def test_admin_bookings_nav_link_visibility(self):
         """Test that the admin bookings nav link is rendered in base.html."""
         # Unauthenticated
