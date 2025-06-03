@@ -299,3 +299,74 @@ def get_map_details(map_id):
     except Exception as e:
         current_app.logger.exception(f"Error fetching map details for map_id {map_id}:")
         return jsonify({'error': 'Failed to fetch map details due to a server error.'}), 500
+
+@api_maps_bp.route('/admin/maps/<int:map_id>/offsets', methods=['PUT'])
+@login_required
+@permission_required('manage_floor_maps')
+def update_floor_map_offsets(map_id):
+    floor_map = FloorMap.query.get(map_id)
+    if not floor_map:
+        current_app.logger.warning(f"Attempt to update offsets for non-existent floor map ID: {map_id} by user {current_user.username}")
+        return jsonify({'error': 'Floor map not found.'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid request. JSON data expected.'}), 400
+
+    offset_x_updated = False
+    offset_y_updated = False
+
+    if 'offset_x' in data:
+        try:
+            new_offset_x = int(data['offset_x'])
+            if floor_map.offset_x != new_offset_x:
+                floor_map.offset_x = new_offset_x
+                offset_x_updated = True
+        except ValueError:
+            return jsonify({'error': 'Invalid offset_x value. Must be an integer.'}), 400
+
+    if 'offset_y' in data:
+        try:
+            new_offset_y = int(data['offset_y'])
+            if floor_map.offset_y != new_offset_y:
+                floor_map.offset_y = new_offset_y
+                offset_y_updated = True
+        except ValueError:
+            return jsonify({'error': 'Invalid offset_y value. Must be an integer.'}), 400
+
+    if not offset_x_updated and not offset_y_updated:
+        return jsonify({'message': 'No offset changes provided or values are the same.', 'map': {
+            'id': floor_map.id,
+            'name': floor_map.name,
+            'offset_x': floor_map.offset_x,
+            'offset_y': floor_map.offset_y
+        }}), 200
+
+    try:
+        db.session.commit()
+        current_app.logger.info(f"Offsets for floor map ID {map_id} ('{floor_map.name}') updated by {current_user.username}. New offsets: X={floor_map.offset_x}, Y={floor_map.offset_y}")
+        add_audit_log(
+            action="UPDATE_MAP_OFFSETS_SUCCESS",
+            details=f"Offsets for floor map ID {map_id} ('{floor_map.name}') updated to X:{floor_map.offset_x}, Y:{floor_map.offset_y} by {current_user.username}.",
+            user_id=current_user.id,
+            username=current_user.username
+        )
+        return jsonify({
+            'message': 'Floor map offsets updated successfully.',
+            'map': {
+                'id': floor_map.id,
+                'name': floor_map.name,
+                'offset_x': floor_map.offset_x,
+                'offset_y': floor_map.offset_y
+            }
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception(f"Error updating offsets for floor map ID {map_id}:")
+        add_audit_log(
+            action="UPDATE_MAP_OFFSETS_FAILED",
+            details=f"Failed to update offsets for map ID {map_id} by {current_user.username}. Error: {str(e)}",
+            user_id=current_user.id,
+            username=current_user.username
+        )
+        return jsonify({'error': f'Failed to update map offsets due to a server error: {str(e)}'}), 500

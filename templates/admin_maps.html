@@ -45,9 +45,38 @@
         <input type="file" id="import-map-config-file" accept=".json" style="display: none; margin-left: 10px;">
         <button id="import-map-config-btn" class="button" style="margin-bottom: 10px; margin-left: 5px;">{{ _('Import Map Configuration') }}</button>
         <div id="admin-maps-list-status"></div>
-        <ul id="maps-list">
-            <li>{{ _('Loading maps...') }}</li>
-        </ul>
+        <table class="table" id="maps-table" style="width:100%;">
+            <thead>
+                <tr>
+                    <th>{{ _('Name') }}</th>
+                    <th>{{ _('Location') }}</th>
+                    <th>{{ _('Floor') }}</th>
+                    <th>{{ _('Image') }}</th>
+                    <th>{{ _('Offset X (px)') }}</th>
+                    <th>{{ _('Offset Y (px)') }}</th>
+                    <th>{{ _('Actions') }}</th>
+                </tr>
+            </thead>
+            <tbody id="maps-table-body">
+                <tr><td colspan="7">{{ _('Loading maps...') }}</td></tr>
+            </tbody>
+        </table>
+        <!--
+        Example row structure for JavaScript to populate into #maps-table-body:
+        <tr data-map-id="MAP_ID_HERE">
+            <td>MAP_NAME</td>
+            <td>MAP_LOCATION</td>
+            <td>MAP_FLOOR</td>
+            <td><img src="MAP_IMAGE_URL" alt="MAP_NAME" style="width: 100px; height: auto;"></td>
+            <td><input type="number" class="form-control map-offset-x-input" value="MAP_OFFSET_X" style="width: 70px;" aria-label="Offset X"></td>
+            <td><input type="number" class="form-control map-offset-y-input" value="MAP_OFFSET_Y" style="width: 70px;" aria-label="Offset Y"></td>
+            <td>
+                <button class="button button-small update-map-offsets-btn" data-map-id="MAP_ID_HERE">Update Offsets</button>
+                <button class="button button-small select-map-btn" data-map-id="MAP_ID_HERE" data-map-name="MAP_NAME" data-image-url="MAP_IMAGE_URL" data-offset-x="MAP_OFFSET_X" data-offset-y="MAP_OFFSET_Y">Define Areas</button>
+                <button class="button button-danger button-small delete-map-btn" data-map-id="MAP_ID_HERE">Delete</button>
+            </td>
+        </tr>
+        -->
     </section>
 
     <hr>
@@ -190,4 +219,193 @@
     {{ super() }}
     <script src="{{ url_for('static', filename='js/admin_resource_edit.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/admin_resource_roles.js') }}" defer></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const mapsTableBody = document.getElementById('maps-table-body');
+        const adminMapsListStatus = document.getElementById('admin-maps-list-status'); // For status messages
+
+        // Function to display status messages
+        function showStatus(element, message, isError = false) {
+            if (element) {
+                element.textContent = message;
+                element.className = isError ? 'status-message error' : 'status-message success'; // Assuming these classes exist
+                // Make sure status-message is styled to be visible
+            }
+        }
+
+        // Function to render maps in the table
+        function renderMaps(maps) {
+            mapsTableBody.innerHTML = ''; // Clear existing rows (e.g., "Loading maps...")
+            if (!maps || maps.length === 0) {
+                mapsTableBody.innerHTML = '<tr><td colspan="7">{{ _("No maps found.") }}</td></tr>';
+                return;
+            }
+
+            maps.forEach(map => {
+                const row = mapsTableBody.insertRow();
+                row.dataset.mapId = map.id;
+
+                row.insertCell().textContent = map.name || 'N/A';
+                row.insertCell().textContent = map.location || 'N/A';
+                row.insertCell().textContent = map.floor || 'N/A';
+
+                const imgCell = row.insertCell();
+                if (map.image_url) {
+                    const img = document.createElement('img');
+                    img.src = map.image_url;
+                    img.alt = map.name || 'Map Image';
+                    img.style.width = '100px';
+                    img.style.height = 'auto';
+                    imgCell.appendChild(img);
+                } else {
+                    imgCell.textContent = 'No image';
+                }
+
+                const offsetXCell = row.insertCell();
+                const offsetXInput = document.createElement('input');
+                offsetXInput.type = 'number';
+                offsetXInput.className = 'form-control map-offset-x-input'; // Ensure 'form-control' styles apply if desired
+                offsetXInput.value = map.offset_x !== undefined ? map.offset_x : 0;
+                offsetXInput.style.width = '70px';
+                offsetXInput.setAttribute('aria-label', 'Offset X');
+                offsetXCell.appendChild(offsetXInput);
+
+                const offsetYCell = row.insertCell();
+                const offsetYInput = document.createElement('input');
+                offsetYInput.type = 'number';
+                offsetYInput.className = 'form-control map-offset-y-input';
+                offsetYInput.value = map.offset_y !== undefined ? map.offset_y : 0;
+                offsetYInput.style.width = '70px';
+                offsetYInput.setAttribute('aria-label', 'Offset Y');
+                offsetYCell.appendChild(offsetYInput);
+
+                const actionsCell = row.insertCell();
+                const updateButton = document.createElement('button');
+                updateButton.className = 'button button-small update-map-offsets-btn';
+                updateButton.dataset.mapId = map.id;
+                updateButton.textContent = '{{ _("Update Offsets") }}';
+                actionsCell.appendChild(updateButton);
+
+                // Add Define Areas button (from example structure)
+                const defineAreasButton = document.createElement('button');
+                defineAreasButton.className = 'button button-small select-map-btn';
+                defineAreasButton.dataset.mapId = map.id;
+                defineAreasButton.dataset.mapName = map.name;
+                defineAreasButton.dataset.imageUrl = map.image_url;
+                defineAreasButton.dataset.offsetX = map.offset_x; // Pass offsets to define areas
+                defineAreasButton.dataset.offsetY = map.offset_y;
+                defineAreasButton.textContent = '{{ _("Define Areas") }}';
+                defineAreasButton.style.marginLeft = '5px';
+                actionsCell.appendChild(defineAreasButton);
+
+
+                // Add Delete button (from example structure)
+                const deleteButton = document.createElement('button');
+                deleteButton.className = 'button button-danger button-small delete-map-btn';
+                deleteButton.dataset.mapId = map.id;
+                deleteButton.textContent = '{{ _("Delete") }}';
+                deleteButton.style.marginLeft = '5px';
+                actionsCell.appendChild(deleteButton);
+            });
+        }
+
+        // Function to fetch maps
+        async function loadMaps() {
+            showStatus(adminMapsListStatus, '{{ _("Loading maps...") }}');
+            try {
+                const response = await fetch('/api/admin/maps'); // This API now returns offsets
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const maps = await response.json();
+                renderMaps(maps);
+                showStatus(adminMapsListStatus, '{{ _("Maps loaded.") }}', false);
+                setTimeout(() => { if(adminMapsListStatus && adminMapsListStatus.textContent === '{{ _("Maps loaded.") }}') adminMapsListStatus.textContent = ''; }, 3000);
+            } catch (error) {
+                console.error('Error loading maps:', error);
+                showStatus(adminMapsListStatus, '{{ _("Error loading maps.") }}', true);
+                mapsTableBody.innerHTML = '<tr><td colspan="7">{{ _("Error loading maps.") }}</td></tr>';
+            }
+        }
+
+        // Event listener for updating offsets (using event delegation)
+        mapsTableBody.addEventListener('click', async function(event) {
+            if (event.target.classList.contains('update-map-offsets-btn')) {
+                const mapId = event.target.dataset.mapId;
+                const row = event.target.closest('tr');
+                const offsetXInput = row.querySelector('.map-offset-x-input');
+                const offsetYInput = row.querySelector('.map-offset-y-input');
+
+                const offsetX = parseInt(offsetXInput.value);
+                const offsetY = parseInt(offsetYInput.value);
+
+                if (isNaN(offsetX) || isNaN(offsetY)) {
+                    showStatus(adminMapsListStatus, '{{ _("Invalid offset value. Please enter numbers.") }}', true);
+                    return;
+                }
+
+                showStatus(adminMapsListStatus, `{{ _("Updating offsets for map ID ${mapId}...") }}`);
+                try {
+                    const response = await fetch(`/api/admin/maps/${mapId}/offsets`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            // Add CSRF token header if necessary, e.g., from a global variable or meta tag
+                        },
+                        body: JSON.stringify({ offset_x: offsetX, offset_y: offsetY })
+                    });
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.error || `HTTP error! status: ${response.status}`);
+                    }
+                    showStatus(adminMapsListStatus, result.message || '{{ _("Offsets updated successfully.") }}', false);
+                    // Optionally update the input fields to the returned values if API sanitizes/changes them
+                    if(result.map) {
+                        offsetXInput.value = result.map.offset_x;
+                        offsetYInput.value = result.map.offset_y;
+                    }
+                } catch (error) {
+                    console.error('Error updating map offsets:', error);
+                    showStatus(adminMapsListStatus, `{{ _("Error updating offsets: ${error.message}") }}`, true);
+                }
+            }
+            // Note: Logic for Define Areas and Delete buttons might be in other JS files (admin_resource_edit.js?) or needs to be handled here too.
+            // This subtask focuses on the "Update Offsets" button.
+            // Define Areas and Delete button functionality might be handled by existing scripts like admin_resource_edit.js or similar,
+            // as they interact with elements beyond just map offsets.
+            // The select-map-btn and delete-map-btn classes are standard across the admin interface.
+        });
+
+        // Initial load of maps
+        loadMaps();
+
+        // Handle map upload form
+        const uploadMapForm = document.getElementById('upload-map-form');
+        const uploadStatusDiv = document.getElementById('upload-status');
+        if (uploadMapForm) {
+            uploadMapForm.addEventListener('submit', async function(event) {
+                event.preventDefault();
+                showStatus(uploadStatusDiv, '{{ _("Uploading map...") }}');
+                const formData = new FormData(uploadMapForm);
+                try {
+                    const response = await fetch('/api/admin/maps', {
+                        method: 'POST',
+                        body: formData,
+                        // Add CSRF token header if necessary
+                    });
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.error || `HTTP error! status: ${response.status}`);
+                    }
+                    showStatus(uploadStatusDiv, result.message || '{{ _("Map uploaded successfully!") }}', false);
+                    uploadMapForm.reset();
+                    loadMaps(); // Refresh the list of maps
+                } catch (error) {
+                    console.error('Error uploading map:', error);
+                    showStatus(uploadStatusDiv, `{{ _("Error uploading map: ${error.message}") }}`, true);
+                }
+            });
+        }
+    });
+    </script>
 {% endblock %}
