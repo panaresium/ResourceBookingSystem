@@ -48,7 +48,7 @@
 
         <li id="admin-menu-item" style="display:none;"> <!-- Container for Configuration -->
             <details id="admin-section" open>
-                <summary><span class="menu-text">{{ _('Configuration') }}</span></summary> <!-- Icon removed, text changed -->
+                <summary><span class="menu-text"><b>{{ _('Configuration') }}</b></span></summary> <!-- Icon removed, text changed, text now bold -->
                 <ul class="admin-menu">
                     <li id="user-management-nav-link" style="display: none;">
                         <a href="{{ url_for('admin_ui.serve_user_management_page') }}">{{ _('Users') }}</a> <!-- Icon removed, text changed -->
