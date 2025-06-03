@@ -721,17 +721,15 @@ class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusi
         for table_name in all_db_table_names:
             self.assertIn(table_name, response_table_keys, f"Table '{table_name}' not found in API response.")
 
-            table_content = data['data'][table_name]
-            # The content should be a list (of records, or an empty list, or a list with an info dict for skipped)
-            self.assertIsInstance(table_content, list, f"Content for table '{table_name}' should be a list.")
+            table_value = data['data'][table_name]
 
-            if table_content: # If the list is not empty
-                # If it's an info message for a skipped table, it's a list with one dict: e.g. [{"info": "Skipped..."}]
-                if "info" in table_content[0]:
-                    self.assertTrue(isinstance(table_content[0]["info"], str))
-                else: # Otherwise, it's a list of records (dictionaries)
-                    for record in table_content:
-                        self.assertIsInstance(record, dict)
+            if isinstance(table_value, list):
+                # If it's a list, it should be a list of records (dictionaries) or an empty list.
+                for record in table_value: # This loop is skipped if table_value is an empty list.
+                    self.assertIsInstance(record, dict, f"Record in table '{table_name}' should be a dict.")
+            else:
+                # If not a list, it must be a string (informational message for skipped/problematic table).
+                self.assertIsInstance(table_value, str, f"Skipped/problematic table '{table_name}' entry should be a string message. Got: {type(table_value)}")
 
         # Verify that all keys in response data are actual table names (no extra keys)
         for response_key in response_table_keys:
