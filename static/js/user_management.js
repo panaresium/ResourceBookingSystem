@@ -1212,7 +1212,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         body: JSON.stringify(roleData)
                     }, roleFormModalStatusDiv);
                 } else { // Add Role
-                    console.log('Role Data being sent:', JSON.stringify(roleData)); // Added for debugging
                     response = await apiCall('/api/admin/roles', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
