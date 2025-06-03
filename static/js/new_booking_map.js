@@ -151,6 +151,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
         currentMapId = mapId; // Store the current map ID
 
+        let userBookingsForDate = [];
+        const loggedInUsername = sessionStorage.getItem('loggedInUserUsername');
+        if (loggedInUsername) {
+            try {
+                userBookingsForDate = await apiCall(`/api/bookings/my_bookings_for_date?date=${dateString}`, {}, null);
+            } catch (err) {
+                console.warn(`Could not fetch user's bookings for date ${dateString}:`, err.message);
+                // Proceed with empty userBookingsForDate, map will show general availability
+            }
+        }
+
         try {
             const apiUrl = `/api/map_details/${mapId}?date=${dateString}`;
             // Assuming apiCall and other helper functions are globally available from script.js
@@ -188,60 +199,136 @@ document.addEventListener('DOMContentLoaded', function () {
                         areaDiv.style.height = `${heightValue}px`;
                         areaDiv.textContent = resource.name;
                         areaDiv.dataset.resourceId = resource.id;
-                        areaDiv.title = resource.name;
+                        // areaDiv.title = resource.name; // Title will be set based on availability
 
-                        // Determine availability and set class
-                        let availabilityClass = 'resource-area-unknown';
-                        const bookings = resource.bookings_on_date;
+                        // --- Start of new availability logic ---
+                        const primarySlots = [
+                            { name: "first_half", start: 8 * 60, end: 12 * 60, isGenerallyAvailable: true, isAvailableToUser: true },
+                            { name: "second_half", start: 13 * 60, end: 17 * 60, isGenerallyAvailable: true, isAvailableToUser: true }
+                        ];
+                        function timeToMinutes(timeStr) { // HH:MM or HH:MM:SS
+                            const parts = timeStr.split(':');
+                            return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+                        }
 
-                        if (bookings) {
-                            if (bookings.length === 0) {
-                                availabilityClass = 'resource-area-available';
-                            } else {
-                                // Simplified logic: if any bookings, it's partially.
-                                // More complex logic (e.g., checking full day) can be added if needed.
-                                // For now, any booking means "partially" unless a more robust "fully booked" check is implemented.
-                                let totalBookedMinutes = 0;
-                                const workDayStartHour = 8; 
-                                const workDayEndHour = 17; 
-
-                                bookings.forEach(booking => {
-                                    const [sH, sM] = booking.start_time.split(':').map(Number);
-                                    const [eH, eM] = booking.end_time.split(':').map(Number);
-                                    
-                                    const bookingStart = new Date(2000, 0, 1, sH, sM);
-                                    const bookingEnd = new Date(2000, 0, 1, eH, eM);
-                                    
-                                    const slotStartInWorkHours = new Date(2000, 0, 1, Math.max(workDayStartHour, sH), sM);
-                                    const slotEndInWorkHours = new Date(2000, 0, 1, Math.min(workDayEndHour, eH), eM);
-
-                                    if (slotEndInWorkHours > slotStartInWorkHours) {
-                                        totalBookedMinutes += (slotEndInWorkHours - slotStartInWorkHours) / (1000 * 60);
+                        // Determine General Availability for Primary Slots for THIS resource
+                        if (resource.bookings_on_date && resource.bookings_on_date.length > 0) {
+                            resource.bookings_on_date.forEach(booking => {
+                                const bookingStartMinutes = timeToMinutes(booking.start_time);
+                                const bookingEndMinutes = timeToMinutes(booking.end_time);
+                                primarySlots.forEach(slot => {
+                                    if (Math.max(slot.start, bookingStartMinutes) < Math.min(slot.end, bookingEndMinutes)) {
+                                        slot.isGenerallyAvailable = false;
                                     }
                                 });
-                                const workDayDurationMinutes = (workDayEndHour - workDayStartHour) * 60;
-                                if (totalBookedMinutes >= workDayDurationMinutes * 0.9) { // 90% considered fully booked
-                                    availabilityClass = 'resource-area-fully-booked';
-                                } else if (totalBookedMinutes > 0) {
-                                    availabilityClass = 'resource-area-partially-booked';
-                                } else {
-                                    availabilityClass = 'resource-area-available';
+                            });
+                        }
+
+                        // Check User's Conflicts for Generally Available Primary Slots
+                        if (loggedInUsername && userBookingsForDate && userBookingsForDate.length > 0) {
+                            primarySlots.forEach(slot => {
+                                if (slot.isGenerallyAvailable) {
+                                    for (const userBooking of userBookingsForDate) {
+                                        if (String(userBooking.resource_id) !== String(resource.id)) { // User's booking on a DIFFERENT resource
+                                            const userBookingStartMinutes = timeToMinutes(userBooking.start_time);
+                                            const userBookingEndMinutes = timeToMinutes(userBooking.end_time);
+                                            if (Math.max(slot.start, userBookingStartMinutes) < Math.min(slot.end, userBookingEndMinutes)) {
+                                                slot.isAvailableToUser = false;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        }
+
+                        let allGenerallyAvailableSlotsBlockedForUser = true;
+                        let anyGenerallyAvailableSlotExists = false;
+                        primarySlots.forEach(slot => {
+                            if (slot.isGenerallyAvailable) {
+                                anyGenerallyAvailableSlotExists = true;
+                                if (slot.isAvailableToUser) {
+                                    allGenerallyAvailableSlotsBlockedForUser = false;
                                 }
                             }
+                        });
+                        if (!anyGenerallyAvailableSlotExists) { // If no slots were generally available to begin with
+                            allGenerallyAvailableSlotsBlockedForUser = false;
                         }
-                        areaDiv.classList.add(availabilityClass);
+                        // --- End of new availability logic ---
 
-                        // Make clickable if available or partially booked
-                        if (availabilityClass === 'resource-area-available' || availabilityClass === 'resource-area-partially-booked') {
+                        // Clear existing classes before applying new ones
+                        areaDiv.classList.remove('resource-area-available', 'resource-area-partially-booked', 'resource-area-fully-booked', 'resource-area-user-conflict', 'resource-area-restricted', 'resource-area-unknown');
+
+                        let finalAvailabilityClass = 'resource-area-unknown'; // Default
+                        let isMapAreaClickable = true;
+                        const currentUserId = parseInt(sessionStorage.getItem('loggedInUserId'), 10);
+                        const currentUserIsAdmin = sessionStorage.getItem('loggedInUserIsAdmin') === 'true';
+                        const resourceForPermission = { // Ensure this object is correctly populated for checkUserPermissionForResource
+                            id: resource.id, name: resource.name,
+                            booking_restriction: resource.booking_restriction,
+                            allowed_user_ids: resource.allowed_user_ids,
+                            roles: resource.roles // Ensure roles are passed correctly
+                        };
+
+                        if (!checkUserPermissionForResource(resourceForPermission, currentUserId, currentUserIsAdmin)) {
+                            finalAvailabilityClass = 'resource-area-restricted';
+                            isMapAreaClickable = false;
+                            areaDiv.title = `${resource.name} (Access Restricted)`;
+                        } else if (loggedInUsername && allGenerallyAvailableSlotsBlockedForUser && anyGenerallyAvailableSlotExists) {
+                            finalAvailabilityClass = 'resource-area-user-conflict';
+                            areaDiv.title = resource.name + " (Unavailable - Your bookings conflict)";
+                            isMapAreaClickable = false;
+                        } else {
+                            // Fallback to original general availability logic if no user-specific full block
+                            const generalBookings = resource.bookings_on_date;
+                            if (generalBookings) {
+                                if (generalBookings.length === 0) {
+                                    finalAvailabilityClass = 'resource-area-available';
+                                } else {
+                                    let totalBookedMinutes = 0;
+                                    const workDayStartHour = 8; const workDayEndHour = 17;
+                                    generalBookings.forEach(booking => {
+                                        const bookingStartInMinutes = timeToMinutes(booking.start_time);
+                                        const bookingEndInMinutes = timeToMinutes(booking.end_time);
+                                        const workDayStartMinutes = workDayStartHour * 60;
+                                        const workDayEndMinutes = workDayEndHour * 60;
+                                        const effectiveStart = Math.max(bookingStartInMinutes, workDayStartMinutes);
+                                        const effectiveEnd = Math.min(bookingEndInMinutes, workDayEndMinutes);
+                                        if (effectiveEnd > effectiveStart) totalBookedMinutes += (effectiveEnd - effectiveStart);
+                                    });
+                                    const workDayDurationMinutes = (workDayEndHour - workDayStartHour) * 60;
+                                    if (totalBookedMinutes >= workDayDurationMinutes * 0.9) { // 90% threshold
+                                        finalAvailabilityClass = 'resource-area-fully-booked';
+                                    } else if (totalBookedMinutes > 0) {
+                                        finalAvailabilityClass = 'resource-area-partially-booked';
+                                    } else {
+                                        finalAvailabilityClass = 'resource-area-available';
+                                    }
+                                }
+                            }
+                            // Set title based on general availability if not user-conflict or restricted
+                            let statusText = finalAvailabilityClass.replace('resource-area-','').replace('-',' ');
+                            statusText = statusText.charAt(0).toUpperCase() + statusText.slice(1);
+                            areaDiv.title = resource.name + (finalAvailabilityClass !== 'resource-area-available' ? ` (${statusText})` : ' (Available)');
+
+                            if (finalAvailabilityClass === 'resource-area-fully-booked' || finalAvailabilityClass === 'resource-area-unknown') {
+                                isMapAreaClickable = false;
+                            }
+                        }
+
+                        areaDiv.classList.add(finalAvailabilityClass);
+
+                        // Make clickable if not fully booked, not unknown, not user conflict, and not restricted
+                        if (isMapAreaClickable) {
                             areaDiv.classList.add('map-area-clickable');
                             areaDiv.addEventListener('click', function() {
-                                // Sync resource to main form when clicked on map
                                 if (resourceSelectBooking) {
                                     resourceSelectBooking.value = resource.id;
-                                    // Dispatch change event to trigger any listeners on the main form's resource select
                                     resourceSelectBooking.dispatchEvent(new Event('change'));
                                 }
-                                openResourceDetailModal(resource, dateString);
+                                // Pass userBookingsForDate to openResourceDetailModal
+                                openResourceDetailModal(resource, dateString, userBookingsForDate);
                             });
                         }
                         // Highlight resource if it's the one selected in the main form
@@ -472,10 +559,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     let selectedTimeSlotForNewBooking = null; // Variable to store selected slot details
 
-    async function openResourceDetailModal(resource, dateString) {
+    // Accept userBookingsForDate as a new parameter
+    async function openResourceDetailModal(resource, dateString, userBookingsForDate = []) {
         if (!resourceDetailModal || !modalResourceNameSpan || !modalDateSpan || !modalResourceImageImg || !modalTimeSlotsListDiv || !modalBookingTitleInput || !modalConfirmBookingBtn || !modalStatusMessageP) {
             console.error('One or more modal elements are missing for new booking.');
-            return;
             return;
         }
 
@@ -534,41 +621,96 @@ document.addEventListener('DOMContentLoaded', function () {
             predefinedSlots.forEach(slot => {
                 const button = document.createElement('button');
                 button.textContent = slot.label;
-                button.classList.add('time-slot-item', 'button'); // Use 'button' class for styling consistency
+                button.classList.add('time-slot-item', 'button');
                 button.dataset.slotId = slot.id;
+                // Clear previous dynamic states
+                button.classList.remove('time-slot-available', 'time-slot-booked', 'time-slot-user-busy', 'selected', 'time-slot-selected');
+                button.disabled = false;
+                button.textContent = slot.label; // Reset text to original label
+                button.title = ''; // Reset title
 
-                const isConflicting = checkConflict(slot.startTime, slot.endTime, bookedSlots);
 
-                if (isConflicting) {
-                    button.classList.add('time-slot-booked'); // Or a new class like 'time-slot-conflicting'
+                const isGenerallyConflicting = checkConflict(slot.startTime, slot.endTime, bookedSlots);
+
+                if (isGenerallyConflicting) {
+                    button.classList.add('time-slot-booked');
                     button.disabled = true;
-                    button.title = `${slot.name} is unavailable due to existing bookings.`;
+                    button.title = `${slot.name} is unavailable due to existing bookings on this resource.`;
                 } else {
-                    button.classList.add('time-slot-available');
-                    button.addEventListener('click', function() {
-                        // Remove 'selected' from previously selected button
-                        const allButtons = modalTimeSlotsListDiv.querySelectorAll('button.time-slot-item');
-                        allButtons.forEach(btn => btn.classList.remove('time-slot-selected', 'selected')); // Ensure 'selected' is also removed
+                    let isUserBusyElsewhere = false;
+                    const loggedInUsernameChecked = sessionStorage.getItem('loggedInUserUsername'); // Use a different var name to avoid conflict
+                    if (loggedInUsernameChecked && userBookingsForDate && userBookingsForDate.length > 0) {
+                        const slotStart = new Date(`${dateString}T${slot.startTime}:00`);
+                        const slotEnd = new Date(`${dateString}T${slot.endTime}:00`);
+                        for (const userBooking of userBookingsForDate) {
+                            if (String(userBooking.resource_id) !== String(resource.id)) {
+                                const userBookingStart = new Date(`${dateString}T${userBooking.start_time}`);
+                                const userBookingEnd = new Date(`${dateString}T${userBooking.end_time}`);
+                                if (userBookingStart < slotEnd && userBookingEnd > slotStart) {
+                                    isUserBusyElsewhere = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
 
-                        // Add 'selected' to current button
-                        this.classList.add('time-slot-selected', 'selected');
-                        selectedTimeSlotForNewBooking = {
-                            startTimeStr: slot.startTime,
-                            endTimeStr: slot.endTime
-                        };
-                        if (modalStatusMessageP) modalStatusMessageP.textContent = '';
-
-                        // Sync to main form's start and end time inputs
-                        if (mainFormStartTimeInput) mainFormStartTimeInput.value = slot.startTime;
-                        if (mainFormEndTimeInput) mainFormEndTimeInput.value = slot.endTime;
-                        
-                        // No need to interact with mainFormManualTimeRadio as it's removed.
-                        // The main form's quick options will naturally be out of sync if user used them,
-                        // but the actual time inputs (start-time, end-time) will be correct.
-                    });
+                    if (isUserBusyElsewhere) {
+                        button.classList.add('time-slot-user-busy');
+                        button.disabled = true;
+                        button.title = `${slot.name} is unavailable as you have another booking at this time.`;
+                        button.textContent = slot.label + " (Your Conflict)";
+                    } else {
+                        button.classList.add('time-slot-available');
+                        button.title = `${slot.name} is available.`;
+                        button.addEventListener('click', function() {
+                            const allButtons = modalTimeSlotsListDiv.querySelectorAll('button.time-slot-item');
+                            allButtons.forEach(btn => btn.classList.remove('time-slot-selected', 'selected'));
+                            this.classList.add('time-slot-selected', 'selected');
+                            selectedTimeSlotForNewBooking = {
+                                startTimeStr: slot.startTime,
+                                endTimeStr: slot.endTime
+                            };
+                            if (modalStatusMessageP) modalStatusMessageP.textContent = '';
+                            if (mainFormStartTimeInput) mainFormStartTimeInput.value = slot.startTime;
+                            if (mainFormEndTimeInput) mainFormEndTimeInput.value = slot.endTime;
+                        });
+                    }
                 }
                 modalTimeSlotsListDiv.appendChild(button);
             });
+
+            // Refine Full Day Slot Logic
+            const firstHalfBtn = modalTimeSlotsListDiv.querySelector('[data-slot-id="first_half"]');
+            const secondHalfBtn = modalTimeSlotsListDiv.querySelector('[data-slot-id="second_half"]');
+            const fullDayBtn = modalTimeSlotsListDiv.querySelector('[data-slot-id="full_day"]');
+
+            if (fullDayBtn && firstHalfBtn && secondHalfBtn) {
+                 // Check if fullDayBtn itself is already booked on the resource (takes highest precedence)
+                const isFullDayGenerallyBooked = fullDayBtn.classList.contains('time-slot-booked');
+
+                if (!isFullDayGenerallyBooked) { // Only proceed if full day isn't already resource-booked
+                    const firstHalfBooked = firstHalfBtn.classList.contains('time-slot-booked');
+                    const secondHalfBooked = secondHalfBtn.classList.contains('time-slot-booked');
+                    const firstHalfUserConflict = firstHalfBtn.classList.contains('time-slot-user-busy');
+                    const secondHalfUserConflict = secondHalfBtn.classList.contains('time-slot-user-busy');
+                    const fullDaySlotDetails = predefinedSlots.find(s => s.id === 'full_day');
+
+
+                    if (firstHalfBooked || secondHalfBooked) {
+                        fullDayBtn.disabled = true;
+                        fullDayBtn.classList.remove('time-slot-available', 'time-slot-user-busy', 'selected', 'time-slot-selected');
+                        fullDayBtn.classList.add('time-slot-booked');
+                        fullDayBtn.title = "Full Day is unavailable because part of the day is booked on this resource.";
+                        if (fullDaySlotDetails) fullDayBtn.textContent = fullDaySlotDetails.label + " (Booked)";
+                    } else if (firstHalfUserConflict || secondHalfUserConflict) {
+                        fullDayBtn.disabled = true;
+                        fullDayBtn.classList.remove('time-slot-available', 'time-slot-booked', 'selected', 'time-slot-selected');
+                        fullDayBtn.classList.add('time-slot-user-busy');
+                        fullDayBtn.title = "Full Day is unavailable because you have other bookings conflicting with part of this day.";
+                        if (fullDaySlotDetails) fullDayBtn.textContent = fullDaySlotDetails.label + " (Your Conflict)";
+                    }
+                }
+            }
 
         } catch (error) {
             // apiCall should have shown error in modalStatusMessageP
