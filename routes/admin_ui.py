@@ -210,12 +210,12 @@ def manual_backup_bookings_csv_route():
             range_label=range_label
         )
         if success:
-            flash(_('Manual booking CSV backup for range "%(range)s" initiated successfully. Check logs or SocketIO messages for progress/completion.', range=range_label), 'success')
+            flash(_('Manual booking CSV backup for range "%(range)s" initiated successfully. Check logs or SocketIO messages for progress/completion.') % {'range': range_label}, 'success')
         else:
-            flash(_('Manual booking CSV backup for range "%(range)s" failed to complete successfully. Please check server logs.', range=range_label), 'warning')
+            flash(_('Manual booking CSV backup for range "%(range)s" failed to complete successfully. Please check server logs.') % {'range': range_label}, 'warning')
     except Exception as e:
         app_instance.logger.error(f"Exception during manual booking CSV backup (range: {range_label}) initiation by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
-        flash(_('An unexpected error occurred while starting the manual booking CSV backup for range "%(range)s". Check server logs.', range=range_label), 'danger')
+        flash(_('An unexpected error occurred while starting the manual booking CSV backup for range "%(range)s". Check server logs.') % {'range': range_label}, 'danger')
 
     return redirect(url_for('admin_ui.serve_backup_restore_page'))
 
@@ -236,12 +236,12 @@ def delete_booking_csv_backup_route(timestamp_str):
     try:
         success = delete_booking_csv_backup(timestamp_str, socketio_instance=socketio_instance, task_id=task_id)
         if success:
-            flash(_('Booking CSV backup for %(timestamp)s successfully deleted (or was not found).', timestamp=timestamp_str), 'success')
+            flash(_('Booking CSV backup for %(timestamp)s successfully deleted (or was not found).') % {'timestamp': timestamp_str}, 'success')
         else:
-            flash(_('Failed to delete booking CSV backup for %(timestamp)s. Check server logs.', timestamp=timestamp_str), 'danger')
+            flash(_('Failed to delete booking CSV backup for %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
     except Exception as e:
         app_instance.logger.error(f"Exception during booking CSV backup deletion for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
-        flash(_('An unexpected error occurred while deleting the booking CSV backup for %(timestamp)s. Check server logs.', timestamp=timestamp_str), 'danger')
+        flash(_('An unexpected error occurred while deleting the booking CSV backup for %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
 
     return redirect(url_for('admin_ui.serve_backup_restore_page'))
 
@@ -378,15 +378,15 @@ def verify_booking_csv_backup_route(timestamp_str):
         file_path = verification_result.get('file_path', 'N/A')
 
         if status == 'success':
-            flash(_('Booking CSV Backup Verification for "%(timestamp)s": File found at "%(path)s".', timestamp=timestamp_str, path=file_path), 'success')
+            flash(_('Booking CSV Backup Verification for "%(timestamp)s": File found at "%(path)s".') % {'timestamp': timestamp_str, 'path': file_path}, 'success')
         elif status == 'not_found':
-            flash(_('Booking CSV Backup Verification for "%(timestamp)s": File NOT found at "%(path)s".', timestamp=timestamp_str, path=file_path), 'warning')
+            flash(_('Booking CSV Backup Verification for "%(timestamp)s": File NOT found at "%(path)s".') % {'timestamp': timestamp_str, 'path': file_path}, 'warning')
         else: # 'error' or 'unknown'
-            flash(_('Booking CSV Backup Verification for "%(timestamp)s" FAILED: %(message)s', timestamp=timestamp_str, message=message), 'danger')
+            flash(_('Booking CSV Backup Verification for "%(timestamp)s" FAILED: %(message)s') % {'timestamp': timestamp_str, 'message': message}, 'danger')
 
     except Exception as e:
         app_instance.logger.error(f"Exception during Booking CSV backup verification for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
-        flash(_('An unexpected error occurred while verifying Booking CSV backup %(timestamp)s. Check server logs.', timestamp=timestamp_str), 'danger')
+        flash(_('An unexpected error occurred while verifying Booking CSV backup %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
 
     return redirect(url_for('admin_ui.serve_backup_restore_page'))
 
@@ -413,19 +413,19 @@ def verify_full_backup_route(timestamp_str):
         # checks = verification_summary.get('checks', []) # For more detailed logging if needed
 
         if verification_summary.get('status') == 'verified_present':
-            flash(_('Backup set %(timestamp)s verified successfully. Status: %(status)s', timestamp=timestamp_str, status=status_message), 'success')
+            flash(_('Backup set %(timestamp)s verified successfully. Status: %(status)s') % {'timestamp': timestamp_str, 'status': status_message}, 'success')
         elif verification_summary.get('status') in ['manifest_missing', 'manifest_corrupt', 'failed_verification', 'critical_error']:
             error_details = "; ".join(errors)
-            flash(_('Backup set %(timestamp)s verification FAILED. Status: %(status)s. Errors: %(details)s', timestamp=timestamp_str, status=status_message, details=error_details), 'danger')
+            flash(_('Backup set %(timestamp)s verification FAILED. Status: %(status)s. Errors: %(details)s') % {'timestamp': timestamp_str, 'status': status_message, 'details': error_details}, 'danger')
             # Log detailed checks for failed verifications
             # for check_item in checks:
             #     app_instance.logger.debug(f"Verification check for {timestamp_str} ({task_id}): {check_item}")
         else: # e.g. 'pending' or other statuses if verify_backup_set is asynchronous (currently it's synchronous)
-            flash(_('Backup set %(timestamp)s verification status: %(status)s. Issues: %(errors)s', timestamp=timestamp_str, status=status_message, errors='; '.join(errors)), 'warning')
+            flash(_('Backup set %(timestamp)s verification status: %(status)s. Issues: %(errors)s') % {'timestamp': timestamp_str, 'status': status_message, 'errors': '; '.join(errors)}, 'warning')
 
     except Exception as e:
         app_instance.logger.error(f"Exception during full backup verification for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
-        flash(_('An unexpected error occurred while verifying backup set %(timestamp)s. Check server logs.', timestamp=timestamp_str), 'danger')
+        flash(_('An unexpected error occurred while verifying backup set %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
 
     return redirect(url_for('admin_ui.serve_backup_restore_page'))
 
