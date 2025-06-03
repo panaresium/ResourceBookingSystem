@@ -775,12 +775,12 @@ def bulk_add_users_pattern():
     if not data:
         return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
 
-    username_prefix = data.get('username_prefix', '').strip()
-    username_suffix = data.get('username_suffix', '').strip() # Optional custom suffix for username
+    username_prefix = (data.get('username_prefix') or '').strip()
+    username_suffix = (data.get('username_suffix') or '').strip() # Optional custom suffix for username
     start_number = data.get('start_number')
     count = data.get('count')
-    email_domain = data.get('email_domain', '').strip() # e.g., example.com
-    email_pattern = data.get('email_pattern', '').strip() # e.g., {username}@example.com
+    email_domain = (data.get('email_domain') or '').strip() # e.g., example.com
+    email_pattern = (data.get('email_pattern') or '').strip() # e.g., {username}@example.com
     default_password = data.get('default_password')
     is_admin = data.get('is_admin', False)
     role_ids = data.get('role_ids', [])
