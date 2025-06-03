@@ -61,6 +61,7 @@ def create_booking():
 
     # Define effective settings, using defaults if booking_settings is None or specific values are not set
     allow_past_bookings_effective = booking_settings.allow_past_bookings if booking_settings else False
+    effective_past_booking_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings and booking_settings.past_booking_time_adjustment_hours is not None else 0
     max_booking_days_in_future_effective = booking_settings.max_booking_days_in_future if booking_settings and booking_settings.max_booking_days_in_future is not None else None
     allow_multiple_resources_same_time_effective = booking_settings.allow_multiple_resources_same_time if booking_settings else False
     max_bookings_per_user_effective = booking_settings.max_bookings_per_user if booking_settings and booking_settings.max_bookings_per_user is not None else None
@@ -116,15 +117,27 @@ def create_booking():
         return jsonify({'error': 'Invalid date or time format.'}), 400
 
     # Enforce allow_past_bookings
-    if not allow_past_bookings_effective:
-        # Use datetime.now(timezone.utc).date() for comparison to ensure timezone consistency
-        # new_booking_start_time is naive, convert to aware UTC if necessary, or compare dates directly if appropriate
-        # Assuming new_booking_start_time is effectively local to server, convert to UTC date or compare with local server date.
-        # For simplicity with current naive new_booking_start_time, comparing with datetime.utcnow().date()
-        # Updated to compare datetime objects directly, not just dates.
-        if new_booking_start_time < datetime.utcnow():
-            current_app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} in the past ({new_booking_start_time}), not allowed by settings.")
-            return jsonify({'error': 'Booking in the past is not allowed.'}), 400
+    # The effective_past_booking_hours will be negative to restrict further, positive to allow more into the past.
+    # A value of 0 means standard behavior (booking up to current time if allow_past_bookings_effective is true).
+    # If allow_past_bookings_effective is false, this entire block is skipped, and past bookings are disallowed.
+    if allow_past_bookings_effective:
+        # Calculate the cutoff time: current time MINUS the adjustment.
+        # If adjustment is positive (e.g., 2 hours), cutoff is 2 hours ago (allowing bookings up to 2 hours in past).
+        # If adjustment is negative (e.g., -1 hour), cutoff is 1 hour in the future (restricting bookings to start at least 1 hour from now).
+        past_booking_cutoff_time = datetime.utcnow() - timedelta(hours=effective_past_booking_hours)
+        if new_booking_start_time < past_booking_cutoff_time:
+            current_app.logger.warning(
+                f"Booking attempt by {current_user.username} for resource {resource_id} at {new_booking_start_time} "
+                f"is before the allowed cutoff time of {past_booking_cutoff_time} "
+                f"(current time: {datetime.utcnow()}, adjustment: {effective_past_booking_hours} hours)."
+            )
+            return jsonify({'error': 'Booking time is outside the allowed window for past or future bookings as per current settings.'}), 400
+    elif new_booking_start_time < datetime.utcnow(): # If past bookings are generally disallowed
+        current_app.logger.warning(
+            f"Booking attempt by {current_user.username} for resource {resource_id} in the past ({new_booking_start_time}), "
+            f"and past bookings are disabled."
+        )
+        return jsonify({'error': 'Booking in the past is not allowed.'}), 400
 
     # Enforce max_booking_days_in_future
     if max_booking_days_in_future_effective is not None:

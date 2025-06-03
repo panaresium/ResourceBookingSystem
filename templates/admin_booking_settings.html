@@ -13,6 +13,13 @@
             <label for="allow_past_bookings" style="display: inline-block; margin-left: 5px;">{{ _('Allow booking creation in the past') }}</label>
         </div>
 
+        <div class="form-group" id="past_booking_time_adjustment_hours_group" style="margin-left: 20px;">
+            <label for="past_booking_time_adjustment_hours">{{ _('Past booking time adjustment (hours, can be negative):') }}</label>
+            <input type="number" id="past_booking_time_adjustment_hours" name="past_booking_time_adjustment_hours"
+                   value="{{ settings.past_booking_time_adjustment_hours | default(0) }}"
+                   class="form-control">
+        </div>
+
         <div class="form-group">
             <label for="max_booking_days_in_future">{{ _('Maximum days in the future a booking can be made (leave empty for no limit):') }}</label>
             <input type="number" id="max_booking_days_in_future" name="max_booking_days_in_future"
@@ -46,5 +53,24 @@
 
 {% block scripts %}
     {{ super() }}
-    {# Add any specific JS for this page if needed in the future #}
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var allowPastBookingsCheckbox = document.getElementById('allow_past_bookings');
+            var adjustmentGroup = document.getElementById('past_booking_time_adjustment_hours_group');
+
+            function toggleAdjustmentField() {
+                if (allowPastBookingsCheckbox.checked) {
+                    adjustmentGroup.style.display = ''; // Or 'block', depending on desired layout
+                } else {
+                    adjustmentGroup.style.display = 'none';
+                }
+            }
+
+            // Initial state
+            toggleAdjustmentField();
+
+            // Event listener
+            allowPastBookingsCheckbox.addEventListener('change', toggleAdjustmentField);
+        });
+    </script>
 {% endblock %}

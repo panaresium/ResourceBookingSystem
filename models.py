@@ -75,6 +75,7 @@ class BookingSettings(db.Model):
     allow_multiple_resources_same_time = db.Column(db.Boolean, default=False)
     max_bookings_per_user = db.Column(db.Integer, nullable=True, default=None)
     enable_check_in_out = db.Column(db.Boolean, default=False)
+    past_booking_time_adjustment_hours = db.Column(db.Integer, default=0)
 
     def __repr__(self):
         return f"<BookingSettings {self.id}>"

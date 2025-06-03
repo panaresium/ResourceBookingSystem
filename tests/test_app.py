@@ -2239,6 +2239,13 @@ class TestAdminBookings(AppTests):
         self.assertIn('name="allow_multiple_resources_same_time" checked', html_content)
         self.assertIn('name="max_bookings_per_user" value="10"', html_content)
         self.assertIn('name="enable_check_in_out" checked', html_content)
+        # Assuming past_booking_time_adjustment_hours was not set or default 0 for this existing setting
+        # If it was set to a specific value, that value should be checked here.
+        # For this test, let's assume it would be 0 if not set.
+        if settings.past_booking_time_adjustment_hours is not None:
+             self.assertIn(f'name="past_booking_time_adjustment_hours" value="{settings.past_booking_time_adjustment_hours}"', html_content)
+        else:
+             self.assertIn('name="past_booking_time_adjustment_hours" value="0"', html_content)
         self.logout()
 
     def test_admin_post_update_booking_settings_create_new(self):
@@ -2255,7 +2262,8 @@ class TestAdminBookings(AppTests):
             'max_booking_days_in_future': '90',
             # allow_multiple_resources_same_time not sent (effectively False)
             'max_bookings_per_user': '5',
-            'enable_check_in_out': 'on'
+            'enable_check_in_out': 'on',
+            'past_booking_time_adjustment_hours': '3'
         }
         response = self.client.post('/admin/booking_settings/update', data=form_data, follow_redirects=True)
         self.assertEqual(response.status_code, 200) # Should redirect to GET page
@@ -2268,6 +2276,7 @@ class TestAdminBookings(AppTests):
         self.assertFalse(settings.allow_multiple_resources_same_time) # Was not sent, so default False
         self.assertEqual(settings.max_bookings_per_user, 5)
         self.assertTrue(settings.enable_check_in_out)
+        self.assertEqual(settings.past_booking_time_adjustment_hours, 3)
         self.logout()
 
     def test_admin_post_update_booking_settings_update_existing(self):
@@ -2285,7 +2294,8 @@ class TestAdminBookings(AppTests):
             'max_booking_days_in_future': '15',
             'allow_multiple_resources_same_time': 'on',
             'max_bookings_per_user': '', # Empty string should be None
-            'enable_check_in_out': 'on'
+            'enable_check_in_out': 'on',
+            'past_booking_time_adjustment_hours': '-2'
         }
         response = self.client.post('/admin/booking_settings/update', data=form_data, follow_redirects=True)
         self.assertEqual(response.status_code, 200)
@@ -2298,7 +2308,65 @@ class TestAdminBookings(AppTests):
         self.assertTrue(settings.allow_multiple_resources_same_time)
         self.assertIsNone(settings.max_bookings_per_user) # Empty string becomes None
         self.assertTrue(settings.enable_check_in_out)
+        self.assertEqual(settings.past_booking_time_adjustment_hours, -2)
         self.logout()
+
+    def test_admin_post_update_booking_settings_specific_fields(self):
+        """Test updating specific fields including past_booking_time_adjustment_hours and its persistence."""
+        admin = self._create_admin_user(username="settingsadmin_specific", email_ext="settings_specific")
+        self.login(admin.username, 'adminpass')
+
+        BookingSettings.query.delete()
+        db.session.add(BookingSettings(allow_past_bookings=False, past_booking_time_adjustment_hours=0))
+        db.session.commit()
+
+        # Scenario 1: Update past_booking_time_adjustment_hours, allow_past_bookings is ON
+        form_data1 = {
+            'allow_past_bookings': 'on',
+            'past_booking_time_adjustment_hours': '5',
+            # Other fields not sent, should retain defaults or existing if any
+        }
+        self.client.post('/admin/booking_settings/update', data=form_data1)
+        settings1 = BookingSettings.query.first()
+        self.assertTrue(settings1.allow_past_bookings)
+        self.assertEqual(settings1.past_booking_time_adjustment_hours, 5)
+
+        # Scenario 2: Update past_booking_time_adjustment_hours, allow_past_bookings is OFF
+        # The adjustment value should still be saved.
+        form_data2 = {
+            # allow_past_bookings not sent (effectively 'off')
+            'past_booking_time_adjustment_hours': '-3',
+        }
+        self.client.post('/admin/booking_settings/update', data=form_data2)
+        settings2 = BookingSettings.query.first()
+        self.assertFalse(settings2.allow_past_bookings) # Explicitly check it's off
+        self.assertEqual(settings2.past_booking_time_adjustment_hours, -3) # Value should be saved
+
+        # Scenario 3: Send empty string for past_booking_time_adjustment_hours
+        form_data3 = {
+            'allow_past_bookings': 'on',
+            'past_booking_time_adjustment_hours': '', # Empty string
+        }
+        self.client.post('/admin/booking_settings/update', data=form_data3)
+        settings3 = BookingSettings.query.first()
+        self.assertTrue(settings3.allow_past_bookings)
+        self.assertEqual(settings3.past_booking_time_adjustment_hours, 0) # Should default to 0
+
+        # Scenario 4: Send invalid (non-integer) for past_booking_time_adjustment_hours
+        initial_adjustment_val = settings3.past_booking_time_adjustment_hours # Should be 0 from previous step
+        form_data4 = {
+            'allow_past_bookings': 'on',
+            'past_booking_time_adjustment_hours': 'not-an-integer',
+        }
+        response4 = self.client.post('/admin/booking_settings/update', data=form_data4, follow_redirects=True)
+        self.assertIn(b'Invalid input for "Past booking time adjustment"', response4.data)
+        settings4 = BookingSettings.query.first()
+        # Value should not have changed from previous valid state due to rollback
+        self.assertEqual(settings4.past_booking_time_adjustment_hours, initial_adjustment_val)
+        self.assertTrue(settings4.allow_past_bookings) # This checkbox was 'on', should remain if not part of error
+
+        self.logout()
+
 
     def test_admin_post_update_booking_settings_invalid_data(self):
         """Test POST /admin/booking_settings/update with invalid data."""
@@ -3138,12 +3206,55 @@ class TestBookingSettingsModel(AppTests):
         self.assertEqual(retrieved_settings.allow_multiple_resources_same_time, True)
         self.assertEqual(retrieved_settings.max_bookings_per_user, 5)
         self.assertEqual(retrieved_settings.enable_check_in_out, True)
+        self.assertEqual(retrieved_settings.past_booking_time_adjustment_hours, 0) # Default check
 
         # Test modifying a single field
         retrieved_settings.max_booking_days_in_future = None
         db.session.commit()
         modified_settings = BookingSettings.query.get(settings.id)
         self.assertIsNone(modified_settings.max_booking_days_in_future)
+
+    def test_booking_settings_past_booking_adjustment_field(self):
+        """Test the past_booking_time_adjustment_hours field specifically."""
+        settings = BookingSettings.query.first()
+        if settings:
+            db.session.delete(settings)
+            db.session.commit()
+
+        # Test default value
+        new_settings = BookingSettings()
+        db.session.add(new_settings)
+        db.session.commit()
+        self.assertEqual(new_settings.past_booking_time_adjustment_hours, 0)
+        db.session.delete(new_settings)
+        db.session.commit()
+
+        # Test setting positive value
+        settings_positive = BookingSettings(past_booking_time_adjustment_hours=5)
+        db.session.add(settings_positive)
+        db.session.commit()
+        retrieved_positive = BookingSettings.query.get(settings_positive.id)
+        self.assertEqual(retrieved_positive.past_booking_time_adjustment_hours, 5)
+        db.session.delete(settings_positive)
+        db.session.commit()
+
+        # Test setting negative value
+        settings_negative = BookingSettings(past_booking_time_adjustment_hours=-3)
+        db.session.add(settings_negative)
+        db.session.commit()
+        retrieved_negative = BookingSettings.query.get(settings_negative.id)
+        self.assertEqual(retrieved_negative.past_booking_time_adjustment_hours, -3)
+        db.session.delete(settings_negative)
+        db.session.commit()
+
+        # Test setting zero
+        settings_zero = BookingSettings(past_booking_time_adjustment_hours=0)
+        db.session.add(settings_zero)
+        db.session.commit()
+        retrieved_zero = BookingSettings.query.get(settings_zero.id)
+        self.assertEqual(retrieved_zero.past_booking_time_adjustment_hours, 0)
+        db.session.delete(settings_zero)
+        db.session.commit()
 
 
 class TestBookingSettingsEnforcement(AppTests):
@@ -3172,6 +3283,140 @@ class TestBookingSettingsEnforcement(AppTests):
             'title': title,
             'user_name': user_name
         }
+
+    def _make_booking_payload_fixed_time(self, resource_id, start_datetime, end_datetime, title="Test Booking", user_name="booktestuser"):
+        return {
+            'resource_id': resource_id,
+            'date_str': start_datetime.strftime('%Y-%m-%d'),
+            'start_time_str': start_datetime.strftime('%H:%M'),
+            'end_time_str': end_datetime.strftime('%H:%M'),
+            'title': title,
+            'user_name': user_name
+        }
+
+    @unittest.mock.patch('routes.api_bookings.datetime')
+    def test_past_booking_time_adjustment_logic(self, mock_api_datetime):
+        """Test the past_booking_time_adjustment_hours logic in create_booking."""
+        self.login(self.book_user.username, 'password')
+        res_id = self.resource1.id
+
+        # --- Scenario 1: allow_past_bookings is False ---
+        BookingSettings.query.delete()
+        db.session.add(BookingSettings(allow_past_bookings=False, past_booking_time_adjustment_hours=0)) # Adjustment irrelevant here
+        db.session.commit()
+
+        mock_now = datetime(2024, 1, 15, 12, 0, 0) # Fixed "current" time
+        mock_api_datetime.utcnow.return_value = mock_now
+        mock_api_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw) # Allow other datetime uses
+
+        # Attempt to book 1 hour ago (should fail)
+        past_booking_time_s1 = mock_now - timedelta(hours=1)
+        payload_s1_past = self._make_booking_payload_fixed_time(res_id, past_booking_time_s1, past_booking_time_s1 + timedelta(hours=1), title="S1 Past Fail")
+        response_s1_past = self.client.post('/api/bookings', json=payload_s1_past)
+        self.assertEqual(response_s1_past.status_code, 400, f"S1 Past Fail: {response_s1_past.get_json()}")
+        self.assertIn("Booking in the past is not allowed", response_s1_past.get_json().get('error', ''))
+
+        # Attempt to book 1 hour in the future (should succeed)
+        future_booking_time_s1 = mock_now + timedelta(hours=1)
+        payload_s1_future = self._make_booking_payload_fixed_time(res_id, future_booking_time_s1, future_booking_time_s1 + timedelta(hours=1), title="S1 Future Success")
+        response_s1_future = self.client.post('/api/bookings', json=payload_s1_future)
+        self.assertEqual(response_s1_future.status_code, 201, f"S1 Future Success: {response_s1_future.get_json()}")
+        if response_s1_future.status_code == 201: Booking.query.get(response_s1_future.get_json()['bookings'][0]['id']).delete()
+        db.session.commit()
+
+        # --- Scenario 2: allow_past_bookings is True, past_booking_time_adjustment_hours is 0 ---
+        settings_s2 = BookingSettings.query.first()
+        settings_s2.allow_past_bookings = True
+        settings_s2.past_booking_time_adjustment_hours = 0
+        db.session.commit()
+        mock_api_datetime.utcnow.return_value = mock_now # Reset mock_now just in case
+
+        # Attempt to book 1 minute before mock_now (should fail, as cutoff is exactly mock_now)
+        past_booking_time_s2_fail = mock_now - timedelta(minutes=1)
+        payload_s2_past_fail = self._make_booking_payload_fixed_time(res_id, past_booking_time_s2_fail, past_booking_time_s2_fail + timedelta(hours=1), title="S2 Past Fail")
+        response_s2_past_fail = self.client.post('/api/bookings', json=payload_s2_past_fail)
+        self.assertEqual(response_s2_past_fail.status_code, 400, f"S2 Past Fail: {response_s2_past_fail.get_json()}")
+        self.assertIn("Booking time is outside the allowed window", response_s2_past_fail.get_json().get('error', ''))
+
+        # Attempt to book exactly at mock_now (should succeed, as check is strictly < cutoff)
+        exact_booking_time_s2_succ = mock_now
+        payload_s2_exact_succ = self._make_booking_payload_fixed_time(res_id, exact_booking_time_s2_succ, exact_booking_time_s2_succ + timedelta(hours=1), title="S2 Exact Success")
+        response_s2_exact_succ = self.client.post('/api/bookings', json=payload_s2_exact_succ)
+        self.assertEqual(response_s2_exact_succ.status_code, 201, f"S2 Exact Success: {response_s2_exact_succ.get_json()}")
+        if response_s2_exact_succ.status_code == 201: Booking.query.get(response_s2_exact_succ.get_json()['bookings'][0]['id']).delete()
+        db.session.commit()
+
+        # --- Scenario 3: allow_past_bookings is True, past_booking_time_adjustment_hours is positive (e.g., 2) ---
+        settings_s3 = BookingSettings.query.first()
+        settings_s3.allow_past_bookings = True
+        settings_s3.past_booking_time_adjustment_hours = 2 # Allows booking up to 2 hours in the past
+        db.session.commit()
+        mock_api_datetime.utcnow.return_value = mock_now
+
+        # Attempt to book 1 hour ago (should succeed, cutoff is mock_now - 2 hours)
+        past_booking_time_s3_succ = mock_now - timedelta(hours=1)
+        payload_s3_past_succ = self._make_booking_payload_fixed_time(res_id, past_booking_time_s3_succ, past_booking_time_s3_succ + timedelta(hours=1), title="S3 Past Success (1hr ago)")
+        response_s3_past_succ = self.client.post('/api/bookings', json=payload_s3_past_succ)
+        self.assertEqual(response_s3_past_succ.status_code, 201, f"S3 Past Success (1hr ago): {response_s3_past_succ.get_json()}")
+        if response_s3_past_succ.status_code == 201: Booking.query.get(response_s3_past_succ.get_json()['bookings'][0]['id']).delete()
+        db.session.commit()
+
+        # Attempt to book 2 hours ago (should succeed, exactly at cutoff)
+        exact_cutoff_booking_s3_succ = mock_now - timedelta(hours=2)
+        payload_s3_exact_cutoff_succ = self._make_booking_payload_fixed_time(res_id, exact_cutoff_booking_s3_succ, exact_cutoff_booking_s3_succ + timedelta(hours=1), title="S3 Exact Cutoff Success (2hr ago)")
+        response_s3_exact_cutoff_succ = self.client.post('/api/bookings', json=payload_s3_exact_cutoff_succ)
+        self.assertEqual(response_s3_exact_cutoff_succ.status_code, 201, f"S3 Exact Cutoff Success (2hr ago): {response_s3_exact_cutoff_succ.get_json()}")
+        if response_s3_exact_cutoff_succ.status_code == 201: Booking.query.get(response_s3_exact_cutoff_succ.get_json()['bookings'][0]['id']).delete()
+        db.session.commit()
+
+        # Attempt to book 2 hours and 1 minute ago (should fail, before cutoff)
+        too_far_past_booking_time_s3_fail = mock_now - timedelta(hours=2, minutes=1)
+        payload_s3_past_fail = self._make_booking_payload_fixed_time(res_id, too_far_past_booking_time_s3_fail, too_far_past_booking_time_s3_fail + timedelta(hours=1), title="S3 Past Fail (2hr1min ago)")
+        response_s3_past_fail = self.client.post('/api/bookings', json=payload_s3_past_fail)
+        self.assertEqual(response_s3_past_fail.status_code, 400, f"S3 Past Fail (2hr1min ago): {response_s3_past_fail.get_json()}")
+        self.assertIn("Booking time is outside the allowed window", response_s3_past_fail.get_json().get('error', ''))
+
+        # --- Scenario 4: allow_past_bookings is True, past_booking_time_adjustment_hours is negative (e.g., -2) ---
+        # This means bookings must be at least 2 hours in the future from mock_now.
+        settings_s4 = BookingSettings.query.first()
+        settings_s4.allow_past_bookings = True
+        settings_s4.past_booking_time_adjustment_hours = -2
+        db.session.commit()
+        mock_api_datetime.utcnow.return_value = mock_now
+
+        # Cutoff time is mock_now - (-2 hours) = mock_now + 2 hours.
+        # Attempt to book 1 hour in the past (relative to mock_now) (should fail)
+        past_booking_time_s4_fail = mock_now - timedelta(hours=1)
+        payload_s4_past_fail = self._make_booking_payload_fixed_time(res_id, past_booking_time_s4_fail, past_booking_time_s4_fail + timedelta(hours=1), title="S4 Past Fail (1hr ago)")
+        response_s4_past_fail = self.client.post('/api/bookings', json=payload_s4_past_fail)
+        self.assertEqual(response_s4_past_fail.status_code, 400, f"S4 Past Fail (1hr ago): {response_s4_past_fail.get_json()}")
+
+        # Attempt to book 1 hour in the future (relative to mock_now) (should fail, because cutoff is mock_now + 2 hours)
+        future_booking_time_s4_fail = mock_now + timedelta(hours=1)
+        payload_s4_future_fail = self._make_booking_payload_fixed_time(res_id, future_booking_time_s4_fail, future_booking_time_s4_fail + timedelta(hours=1), title="S4 Future Fail (1hr ahead)")
+        response_s4_future_fail = self.client.post('/api/bookings', json=payload_s4_future_fail)
+        self.assertEqual(response_s4_future_fail.status_code, 400, f"S4 Future Fail (1hr ahead): {response_s4_future_fail.get_json()}")
+
+        # Attempt to book exactly 2 hours in the future (relative to mock_now) (should succeed, at cutoff)
+        exact_future_cutoff_s4_succ = mock_now + timedelta(hours=2)
+        payload_s4_future_exact_succ = self._make_booking_payload_fixed_time(res_id, exact_future_cutoff_s4_succ, exact_future_cutoff_s4_succ + timedelta(hours=1), title="S4 Future Success (2hr ahead - exact)")
+        response_s4_future_exact_succ = self.client.post('/api/bookings', json=payload_s4_future_exact_succ)
+        self.assertEqual(response_s4_future_exact_succ.status_code, 201, f"S4 Future Success (2hr ahead - exact): {response_s4_future_exact_succ.get_json()}")
+        if response_s4_future_exact_succ.status_code == 201: Booking.query.get(response_s4_future_exact_succ.get_json()['bookings'][0]['id']).delete()
+        db.session.commit()
+
+        # Attempt to book 2 hours and 1 minute in the future (relative to mock_now) (should succeed)
+        far_future_booking_time_s4_succ = mock_now + timedelta(hours=2, minutes=1)
+        payload_s4_future_succ = self._make_booking_payload_fixed_time(res_id, far_future_booking_time_s4_succ, far_future_booking_time_s4_succ + timedelta(hours=1), title="S4 Future Success (2hr1min ahead)")
+        response_s4_future_succ = self.client.post('/api/bookings', json=payload_s4_future_succ)
+        self.assertEqual(response_s4_future_succ.status_code, 201, f"S4 Future Success (2hr1min ahead): {response_s4_future_succ.get_json()}")
+        if response_s4_future_succ.status_code == 201: Booking.query.get(response_s4_future_succ.get_json()['bookings'][0]['id']).delete()
+        db.session.commit()
+
+        self.logout()
+        # Reset mock for other tests if necessary, though patch is method-scoped
+        mock_api_datetime.side_effect = None
+
 
     def test_allow_past_bookings_setting(self):
         """Test enforcement of the 'allow_past_bookings' setting."""
