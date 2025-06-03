@@ -375,6 +375,9 @@ def _import_resource_configurations_data(resources_data_list: list) -> tuple[int
             if not resource and 'name' in res_data and res_data['name']:
                 resource = db.session.query(Resource).filter_by(name=res_data['name']).first()
 
+            if resource: # Existing resource found
+                _ = resource.bookings # Load bookings to prevent delete-orphan cascade
+
             action_taken = "UPDATE_RESOURCE_VIA_RESTORE"
             if not resource:
                 action_taken = "CREATE_RESOURCE_VIA_RESTORE"
@@ -485,9 +488,12 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
             try:
                 resource = Resource.query.get(res_map_data['id']) if res_map_data.get('id') is not None else None
                 if not resource and res_map_data.get('name'): resource = Resource.query.filter_by(name=res_map_data['name']).first()
+                
                 if not resource:
                     resource_errors.append({'error': f"Resource not found: '{res_map_data.get('name') or res_map_data.get('id', 'N/A')}'", 'data': res_map_data})
                     continue
+                else: # Resource found
+                    _ = resource.bookings # Load bookings to prevent delete-orphan cascade
 
                 imported_floor_map_id = res_map_data.get('floor_map_id')
                 target_floor_map = None
