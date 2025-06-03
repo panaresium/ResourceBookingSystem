@@ -998,12 +998,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     // if (bulkAddPatternModal && (!response.errors_warnings || response.errors_warnings.length === 0)) {
                     //    bulkAddPatternModal.style.display = 'none';
                     // }
+                // The above commented out block was part of the previous erroneous fix attempt.
+                // The correct logic is to ensure the try block is properly closed before the catch.
+                // The following line for closing the modal if no errors is correct.
                  if (bulkAddPatternModal && (!response.errors_warnings || response.errors_warnings.length === 0)) {
                     bulkAddPatternModal.style.display = 'none';
                 }
-
-
-            } catch (error) {
+            // This is where the try block should end.
+            } catch (error) { // This is the catch block
                 // Error should have been shown by apiCall. If not, this is a fallback.
                 if (!bulkAddPatternStatusDiv.textContent || bulkAddPatternStatusDiv.style.display === 'none') {
                      showError(bulkAddPatternStatusDiv, `Pattern bulk add failed: ${error.message}`);
