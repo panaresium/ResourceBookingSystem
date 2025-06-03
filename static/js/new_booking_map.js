@@ -320,13 +320,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
                         if (isMapAreaClickable) {
                             areaDiv.classList.add('map-area-clickable');
-                            // Ensure to clone the node to remove previous listeners if any, before adding a new one.
-                            // However, since areaDiv is created new each time, cloning isn't strictly for listener removal here,
-                            // but good practice if the element were being reused.
-                            const newAreaDiv = areaDiv.cloneNode(true); // Clone to ensure fresh listeners
-                            areaDiv.parentNode.replaceChild(newAreaDiv, areaDiv);
-                            areaDiv = newAreaDiv;
-
+                            // Add event listener directly to the original areaDiv
                             areaDiv.addEventListener('click', function() {
                                 if (resourceSelectBooking) {
                                     resourceSelectBooking.value = resource.id;
