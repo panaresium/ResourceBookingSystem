@@ -916,35 +916,44 @@ def admin_cancel_booking(booking_id):
 
         terminal_statuses = ['cancelled', 'rejected', 'completed', 'checked_out']
         if booking.status and booking.status.lower() in terminal_statuses:
-            current_app.logger.warning(f"Admin cancel attempt: Booking ID {booking_id} is already in a terminal state: '{booking.status}'.")
-            return jsonify({'error': f'Booking is already in a terminal state ({booking.status}) and cannot be cancelled.'}), 400
+            # Still relevant to prevent deleting already finalized bookings if that's desired,
+            # but if hard delete is always allowed, this check might be removed or modified.
+            # For now, keeping it to prevent accidental deletion of e.g. a 'completed' record unless intended.
+            current_app.logger.warning(f"Admin delete attempt: Booking ID {booking_id} is in a terminal state: '{booking.status}'. Action aborted.")
+            return jsonify({'error': f'Booking is already in a terminal state ({booking.status}) and cannot be deleted this way.'}), 400
 
+        booking.admin_deleted_message = "This booking was deleted by an administrator."
+        # Retain original booking details for logging before deletion
         original_status = booking.status
-        booking.status = 'cancelled'
-
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
         booking_title = booking.title or "N/A"
+        user_name_of_booking = booking.user_name
+        resource_id_of_booking = booking.resource_id
 
         audit_details = (
-            f"Admin '{current_user.username}' cancelled booking ID {booking.id}. "
+            f"Admin '{current_user.username}' deleted booking ID {booking_id}. "
             f"Original status: '{original_status}'. "
-            f"Booked by: '{booking.user_name}'. "
-            f"Resource: '{resource_name}' (ID: {booking.resource_id}). "
-            f"Title: '{booking_title}'."
+            f"Booked by: '{user_name_of_booking}'. "
+            f"Resource: '{resource_name}' (ID: {resource_id_of_booking}). "
+            f"Title: '{booking_title}'. "
+            f"Deletion message: '{booking.admin_deleted_message}'."
         )
 
+        db.session.delete(booking)
         db.session.commit()
-        add_audit_log(action="ADMIN_CANCEL_BOOKING", details=audit_details)
-        socketio.emit('booking_updated', {'action': 'cancelled_admin', 'booking_id': booking_id, 'resource_id': booking.resource_id, 'new_status': 'cancelled'})
 
-        current_app.logger.info(f"Admin user {current_user.username} successfully cancelled booking ID: {booking_id}.")
-        return jsonify({'message': 'Booking cancelled successfully.', 'booking_id': booking_id, 'new_status': 'cancelled'}), 200
+        add_audit_log(action="ADMIN_DELETE_BOOKING", details=audit_details)
+        # Emit a general 'deleted' action, or a specific 'deleted_admin' if clients need to differentiate
+        socketio.emit('booking_updated', {'action': 'deleted_admin', 'booking_id': booking_id, 'resource_id': resource_id_of_booking})
+
+        current_app.logger.info(f"Admin user {current_user.username} successfully deleted booking ID: {booking_id}.")
+        return jsonify({'message': 'Booking deleted successfully by admin.', 'booking_id': booking_id}), 200
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.exception(f"Error during admin cancellation of booking ID {booking_id}:")
+        current_app.logger.exception(f"Error during admin deletion of booking ID {booking_id}:")
         add_audit_log(
-            action="ADMIN_CANCEL_BOOKING_FAILED",
-            details=f"Admin '{current_user.username}' failed to cancel booking ID {booking_id}. Error: {str(e)}"
+            action="ADMIN_DELETE_BOOKING_FAILED",
+            details=f"Admin '{current_user.username}' failed to delete booking ID {booking_id}. Error: {str(e)}"
         )
-        return jsonify({'error': 'Failed to cancel booking due to a server error.'}), 500
+        return jsonify({'error': 'Failed to delete booking due to a server error.'}), 500

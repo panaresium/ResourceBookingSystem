@@ -93,47 +93,74 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             bookings.forEach(booking => {
-                const bookingItemClone = bookingItemTemplate.content.cloneNode(true);
-                const bookingItemDiv = bookingItemClone.querySelector('.booking-item');
+                if (booking.admin_deleted_message) {
+                    // Create a specific display for admin-deleted bookings
+                    const deletedBookingDiv = document.createElement('div');
+                    deletedBookingDiv.classList.add('booking-item', 'admin-deleted-item', 'alert', 'alert-warning'); // Added 'admin-deleted-item' for potential specific styling
+                    deletedBookingDiv.setAttribute('role', 'alert');
 
-                bookingItemDiv.dataset.bookingId = booking.id; // Store booking ID on the item div
-                bookingItemDiv.dataset.resourceId = booking.resource_id; // Store resource ID
-                bookingItemDiv.dataset.startTime = booking.start_time; // Store full start time
-                bookingItemDiv.dataset.endTime = booking.end_time; // Store full end time
+                    const messageHeader = document.createElement('h5');
+                    messageHeader.classList.add('alert-heading');
+                    messageHeader.textContent = 'Booking Notice'; // Or "Booking Deleted by Admin"
 
-                bookingItemClone.querySelector('.resource-name').textContent = booking.resource_name;
-                const titleSpan = bookingItemClone.querySelector('.booking-title');
-                titleSpan.textContent = booking.title || 'N/A';
-                titleSpan.dataset.originalTitle = booking.title || ''; // Store original title
+                    const messageParagraph = document.createElement('p');
+                    messageParagraph.textContent = booking.admin_deleted_message;
 
-                const startTimeSpan = bookingItemClone.querySelector('.start-time');
-                startTimeSpan.textContent = new Date(booking.start_time).toUTCString();
-                startTimeSpan.dataset.originalStartTime = booking.start_time;
+                    deletedBookingDiv.appendChild(messageHeader);
+                    deletedBookingDiv.appendChild(messageParagraph);
 
-                const endTimeSpan = bookingItemClone.querySelector('.end-time');
-                endTimeSpan.textContent = new Date(booking.end_time).toUTCString();
-                endTimeSpan.dataset.originalEndTime = booking.end_time;
-                
-                bookingItemClone.querySelector('.recurrence-rule').textContent = booking.recurrence_rule || '';
-                
-                const updateBtn = bookingItemClone.querySelector('.update-booking-btn');
-                updateBtn.dataset.bookingId = booking.id;
+                    // Optionally, add original booking ID if useful for user reference
+                    const bookingIdInfo = document.createElement('p');
+                    bookingIdInfo.classList.add('text-muted', 'small');
+                    bookingIdInfo.textContent = `(Regarding Booking ID: ${booking.id})`; // Assuming booking.id is still available
+                    deletedBookingDiv.appendChild(bookingIdInfo);
 
-                const cancelBtn = bookingItemClone.querySelector('.cancel-booking-btn');
-                cancelBtn.dataset.bookingId = booking.id;
+                    bookingsListDiv.appendChild(deletedBookingDiv);
 
-                const checkInBtn = bookingItemClone.querySelector('.check-in-btn');
-                const checkOutBtn = bookingItemClone.querySelector('.check-out-btn');
-                checkInBtn.dataset.bookingId = booking.id;
-                checkOutBtn.dataset.bookingId = booking.id;
-                if (booking.can_check_in) {
-                    checkInBtn.style.display = 'inline-block';
+                } else {
+                    // Existing logic for rendering active bookings
+                    const bookingItemClone = bookingItemTemplate.content.cloneNode(true);
+                    const bookingItemDiv = bookingItemClone.querySelector('.booking-item');
+
+                    bookingItemDiv.dataset.bookingId = booking.id; // Store booking ID on the item div
+                    bookingItemDiv.dataset.resourceId = booking.resource_id; // Store resource ID
+                    bookingItemDiv.dataset.startTime = booking.start_time; // Store full start time
+                    bookingItemDiv.dataset.endTime = booking.end_time; // Store full end time
+
+                    bookingItemClone.querySelector('.resource-name').textContent = booking.resource_name;
+                    const titleSpan = bookingItemClone.querySelector('.booking-title');
+                    titleSpan.textContent = booking.title || 'N/A';
+                    titleSpan.dataset.originalTitle = booking.title || ''; // Store original title
+
+                    const startTimeSpan = bookingItemClone.querySelector('.start-time');
+                    startTimeSpan.textContent = new Date(booking.start_time).toUTCString();
+                    startTimeSpan.dataset.originalStartTime = booking.start_time;
+
+                    const endTimeSpan = bookingItemClone.querySelector('.end-time');
+                    endTimeSpan.textContent = new Date(booking.end_time).toUTCString();
+                    endTimeSpan.dataset.originalEndTime = booking.end_time;
+
+                    bookingItemClone.querySelector('.recurrence-rule').textContent = booking.recurrence_rule || '';
+
+                    const updateBtn = bookingItemClone.querySelector('.update-booking-btn');
+                    updateBtn.dataset.bookingId = booking.id;
+
+                    const cancelBtn = bookingItemClone.querySelector('.cancel-booking-btn');
+                    cancelBtn.dataset.bookingId = booking.id;
+
+                    const checkInBtn = bookingItemClone.querySelector('.check-in-btn');
+                    const checkOutBtn = bookingItemClone.querySelector('.check-out-btn');
+                    checkInBtn.dataset.bookingId = booking.id;
+                    checkOutBtn.dataset.bookingId = booking.id;
+                    if (booking.can_check_in) {
+                        checkInBtn.style.display = 'inline-block';
+                    }
+                    if (booking.checked_in_at && !booking.checked_out_at) {
+                        checkOutBtn.style.display = 'inline-block';
+                    }
+
+                    bookingsListDiv.appendChild(bookingItemClone);
                 }
-                if (booking.checked_in_at && !booking.checked_out_at) {
-                    checkOutBtn.style.display = 'inline-block';
-                }
-
-                bookingsListDiv.appendChild(bookingItemClone);
             });
             hideStatusMessage(statusDiv);
         } catch (error) {
