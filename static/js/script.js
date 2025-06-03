@@ -1866,14 +1866,55 @@ document.addEventListener('DOMContentLoaded', function() {
     // Admin Maps Page Specific Logic
     const adminMapsPageIdentifier = document.getElementById('upload-map-form');
     if (adminMapsPageIdentifier) { 
-        // ... (Keep existing admin maps page logic as is) ...
         const uploadMapForm = document.getElementById('upload-map-form');
-        const mapsListUl = document.getElementById('maps-list');
+        const mapsListUl = document.getElementById('maps-list'); // This might be legacy if table is used in admin_maps.html
         const uploadStatusDiv = document.getElementById('upload-status'); 
         const adminMapsListStatusDiv = document.getElementById('admin-maps-list-status'); 
 
+        const defineAreasSection = document.getElementById('define-areas-section');
+        const selectedMapNameH3 = document.getElementById('selected-map-name');
+        const selectedMapImageImg = document.getElementById('selected-map-image');
+        const resourceToMapSelect = document.getElementById('resource-to-map');
+        const defineAreaForm = document.getElementById('define-area-form');
+        const hiddenFloorMapIdInput = document.getElementById('selected-floor-map-id');
+        const areaDefinitionStatusDiv = document.getElementById('area-definition-status');
+        const bookingPermissionDropdown = document.getElementById('booking-permission');
+        const resourceActionsContainer = document.getElementById('resource-actions-container');
+        const authorizedUsersCheckboxContainer = document.getElementById('define-area-authorized-users-checkbox-container');
+        const authorizedRolesCheckboxContainer = document.getElementById('define-area-authorized-roles-checkbox-container');
+
+        const drawingCanvas = document.getElementById('drawing-canvas');
+        let canvasCtx = null;
+        let isDrawing = false;
+        let startX, startY;
+        let currentDrawnRect = null;
+        let existingMapAreas = [];
+        let selectedAreaForEditing = null;
+
+        let isMovingArea = false;
+        let isResizingArea = false;
+        let resizeHandle = null;
+        let dragStartX, dragStartY;
+        let initialAreaX, initialAreaY;
+        let initialAreaWidth, initialAreaHeight;
+
+        const HANDLE_SIZE = 8;
+        const HANDLE_COLOR = 'rgba(0, 0, 255, 0.7)';
+        const SELECTED_BORDER_COLOR = 'rgba(0, 0, 255, 0.9)';
+        const SELECTED_LINE_WIDTH = 2;
+
+
+        // Function to fetch and display maps (original simple list, might need adaptation for new table)
         async function fetchAndDisplayMaps() {
-            if (!mapsListUl || !adminMapsListStatusDiv) return;
+            // This function is now largely superseded by the inline script in admin_maps.html
+            // which populates a table. Keeping it here for now, but it might be removed
+            // or adapted if parts of its logic are still needed by other functions in this file.
+            // For now, the new table rendering in admin_maps.html handles the display.
+            console.log("Legacy fetchAndDisplayMaps in script.js called. Consider removing if new table in admin_maps.html is sufficient.");
+            if (!mapsListUl || !adminMapsListStatusDiv) { // mapsListUl is the old <ul>
+                // If mapsListUl doesn't exist (because it's a table now), this function might not be needed.
+                return;
+            }
             try {
                 const maps = await apiCall('/api/admin/maps', {}, adminMapsListStatusDiv);
                 mapsListUl.innerHTML = ''; 
@@ -1932,39 +1973,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         fetchAndDisplayMaps();
         
-        const defineAreasSection = document.getElementById('define-areas-section');
-        const selectedMapNameH3 = document.getElementById('selected-map-name');
-        const selectedMapImageImg = document.getElementById('selected-map-image');
-        const resourceToMapSelect = document.getElementById('resource-to-map');
-        const defineAreaForm = document.getElementById('define-area-form');
-        const hiddenFloorMapIdInput = document.getElementById('selected-floor-map-id');
-        const areaDefinitionStatusDiv = document.getElementById('area-definition-status');
-        const bookingPermissionDropdown = document.getElementById('booking-permission');
-        const resourceActionsContainer = document.getElementById('resource-actions-container');
-        const authorizedUsersCheckboxContainer = document.getElementById('define-area-authorized-users-checkbox-container'); // Corrected ID
-        const authorizedRolesCheckboxContainer = document.getElementById('define-area-authorized-roles-checkbox-container'); // Corrected ID
-
-
-        const drawingCanvas = document.getElementById('drawing-canvas');
-        let canvasCtx = null;
-        let isDrawing = false;
-        let startX, startY;
-        let currentDrawnRect = null;
-        let existingMapAreas = [];
-        let selectedAreaForEditing = null;
-
-        let isMovingArea = false;
-        let isResizingArea = false;
-        let resizeHandle = null;
-        let dragStartX, dragStartY;
-        let initialAreaX, initialAreaY;
-        let initialAreaWidth, initialAreaHeight;
-
-        const HANDLE_SIZE = 8;
-        const HANDLE_COLOR = 'rgba(0, 0, 255, 0.7)';
-        const SELECTED_BORDER_COLOR = 'rgba(0, 0, 255, 0.9)';
-        const SELECTED_LINE_WIDTH = 2;
-
         // Populate Roles for Checkbox List in Define Area Form
         async function populateDefineAreaRolesCheckboxes() {
             if (!authorizedRolesCheckboxContainer) return;
@@ -1995,10 +2003,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 authorizedRolesCheckboxContainer.innerHTML = '<em class="error">Could not load roles.</em>';
             }
         }
-        populateDefineAreaRolesCheckboxes();
+        // populateDefineAreaRolesCheckboxes(); // Called by inline script in admin_maps.html now if needed for that form
 
-
-        async function fetchAndDrawExistingMapAreas(mapId) {
+        // Expose fetchAndDrawExistingMapAreas
+        window.fetchAndDrawExistingMapAreas = async function(mapId) {
             existingMapAreas = [];
             const defineAreasStatusDiv = document.getElementById('define-areas-status');
             if (!defineAreasStatusDiv) {
@@ -2030,59 +2038,73 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (error) {
                 console.error('Error fetching existing map areas:', error.message);
             }
-            redrawCanvas();
+            if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window");
         }
+        window.fetchAndDrawExistingMapAreas = fetchAndDrawExistingMapAreas; // Expose it
 
-        function redrawCanvas() {
-            if (!canvasCtx) return;
+        // Expose redrawCanvas
+        window.redrawCanvas = function() {
+            if (!canvasCtx) {
+                console.warn("Canvas context not initialized for redrawCanvas.");
+                return;
+            }
             canvasCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+
+            // Apply global map offsets before drawing each area
+            const globalOffsetX = window.currentMapContext ? (window.currentMapContext.offsetX || 0) : 0;
+            const globalOffsetY = window.currentMapContext ? (window.currentMapContext.offsetY || 0) : 0;
 
             canvasCtx.font = "10px Arial";
             existingMapAreas.forEach(area => {
                 if (selectedAreaForEditing && selectedAreaForEditing.id === area.id) {
-                    return;
+                    return; // Skip drawing here, will be drawn as selected
                 }
                 if (area.map_coordinates && area.map_coordinates.type === 'rect') {
                     const coords = area.map_coordinates;
+                    const drawX = coords.x + globalOffsetX;
+                    const drawY = coords.y + globalOffsetY;
+
                     canvasCtx.fillStyle = 'rgba(255, 0, 0, 0.1)';
                     canvasCtx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
                     canvasCtx.lineWidth = 1;
 
-                    canvasCtx.fillRect(coords.x, coords.y, coords.width, coords.height);
-                    canvasCtx.strokeRect(coords.x, coords.y, coords.width, coords.height);
+                    canvasCtx.fillRect(drawX, drawY, coords.width, coords.height);
+                    canvasCtx.strokeRect(drawX, drawY, coords.width, coords.height);
 
                     canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
                     canvasCtx.textAlign = "center";
                     canvasCtx.textBaseline = "middle";
                     if (coords.width > 30 && coords.height > 10) {
-                         canvasCtx.fillText(area.name || `ID:${area.id}`, coords.x + coords.width / 2, coords.y + coords.height / 2, coords.width - 4);
+                         canvasCtx.fillText(area.name || `ID:${area.id}`, drawX + coords.width / 2, drawY + coords.height / 2, coords.width - 4);
                     }
                 }
             });
 
             if (selectedAreaForEditing && selectedAreaForEditing.map_coordinates && selectedAreaForEditing.map_coordinates.type === 'rect') {
                 const coords = selectedAreaForEditing.map_coordinates;
+                const drawX = coords.x + globalOffsetX;
+                const drawY = coords.y + globalOffsetY;
 
                 canvasCtx.fillStyle = 'rgba(0, 0, 255, 0.2)';
                 canvasCtx.strokeStyle = SELECTED_BORDER_COLOR;
                 canvasCtx.lineWidth = SELECTED_LINE_WIDTH;
 
-                canvasCtx.fillRect(coords.x, coords.y, coords.width, coords.height);
-                canvasCtx.strokeRect(coords.x, coords.y, coords.width, coords.height);
+                canvasCtx.fillRect(drawX, drawY, coords.width, coords.height);
+                canvasCtx.strokeRect(drawX, drawY, coords.width, coords.height);
 
                 canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.9)';
                 canvasCtx.textAlign = "center";
                 canvasCtx.textBaseline = "middle";
                 if (coords.width > 30 && coords.height > 10) {
-                     canvasCtx.fillText(selectedAreaForEditing.name || `ID:${selectedAreaForEditing.id}`, coords.x + coords.width / 2, coords.y + coords.height / 2, coords.width - 4);
+                     canvasCtx.fillText(selectedAreaForEditing.name || `ID:${selectedAreaForEditing.id}`, drawX + coords.width / 2, drawY + coords.height / 2, coords.width - 4);
                 }
 
                 canvasCtx.fillStyle = HANDLE_COLOR;
                 const halfHandle = HANDLE_SIZE / 2;
-                canvasCtx.fillRect(coords.x - halfHandle, coords.y - halfHandle, HANDLE_SIZE, HANDLE_SIZE);
-                canvasCtx.fillRect(coords.x + coords.width - halfHandle, coords.y - halfHandle, HANDLE_SIZE, HANDLE_SIZE);
-                canvasCtx.fillRect(coords.x - halfHandle, coords.y + coords.height - halfHandle, HANDLE_SIZE, HANDLE_SIZE);
-                canvasCtx.fillRect(coords.x + coords.width - halfHandle, coords.y + coords.height - halfHandle, HANDLE_SIZE, HANDLE_SIZE);
+                canvasCtx.fillRect(drawX - halfHandle, drawY - halfHandle, HANDLE_SIZE, HANDLE_SIZE);
+                canvasCtx.fillRect(drawX + coords.width - halfHandle, drawY - halfHandle, HANDLE_SIZE, HANDLE_SIZE);
+                canvasCtx.fillRect(drawX - halfHandle, drawY + coords.height - halfHandle, HANDLE_SIZE, HANDLE_SIZE);
+                canvasCtx.fillRect(drawX + coords.width - halfHandle, drawY + coords.height - halfHandle, HANDLE_SIZE, HANDLE_SIZE);
             }
 
             if (currentDrawnRect && currentDrawnRect.width !== undefined) {
@@ -2090,6 +2112,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 canvasCtx.fillStyle = 'rgba(0, 0, 255, 0.1)';
                 canvasCtx.lineWidth = 2;
 
+                // Do NOT apply global offsets to currentDrawnRect as it's drawn relative to mouse which is already on canvas
                 let x = currentDrawnRect.x;
                 let y = currentDrawnRect.y;
                 let w = currentDrawnRect.width;
@@ -2103,7 +2126,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        function updateCoordinateInputs(coords) {
+        function updateCoordinateInputs(coords) { // This function remains local as it directly manipulates DOM elements in this scope
             document.getElementById('coord-x').value = Math.round(coords.x);
             document.getElementById('coord-y').value = Math.round(coords.y);
             document.getElementById('coord-width').value = Math.round(coords.width);
@@ -2171,173 +2194,185 @@ document.addEventListener('DOMContentLoaded', function() {
                 resourceToMapSelect.innerHTML = '<option value="">Error loading resources</option>';
             }
         }
+        window.populateResourcesForMapping = populateResourcesForMapping; // Expose it
 
-        if (mapsListUl) {
-            mapsListUl.addEventListener('click', async function(event) {
-                if (event.target.classList.contains('select-map-for-areas-btn')) {
-                    const button = event.target;
-                    const mapId = button.dataset.mapId;
-                    const mapName = button.dataset.mapName;
-                    const mapImageUrl = button.dataset.mapImageUrl;
+        // New function to encapsulate canvas setup and event listener attachment
+        function initializeDefineAreasCanvasLogic() {
+            if (!drawingCanvas || !selectedMapImageImg) {
+                console.error("Canvas or map image element not found for initialization.");
+                return;
+            }
 
-                    if (defineAreasSection) defineAreasSection.style.display = 'block';
-                    if (selectedMapNameH3) selectedMapNameH3.textContent = `Defining Areas for: ${mapName}`;
-                    if (selectedMapImageImg) {
-                        selectedMapImageImg.src = mapImageUrl;
-                        selectedMapImageImg.alt = mapName;
+            // This function should be called after selectedMapImageImg.src is set and it's loaded.
+            // The new 'Define Areas' button in admin_maps.html inline script should handle this.
+            // Ensure selectedMapImageImg has loaded before setting canvas dimensions.
+            if (!selectedMapImageImg.complete || selectedMapImageImg.naturalWidth === 0) {
+                console.warn("Selected map image not loaded yet. Canvas initialization might be inaccurate or deferred.");
+                // It's better if the caller ensures image is loaded.
+                // For now, we proceed, but this could lead to 0x0 canvas if image isn't ready.
+            }
+
+            drawingCanvas.width = selectedMapImageImg.clientWidth;
+            drawingCanvas.height = selectedMapImageImg.clientHeight;
+            canvasCtx = drawingCanvas.getContext('2d'); // Ensure canvasCtx is accessible by handlers
+
+            // Attach mouse event handlers (these are the existing functions, they will be updated for offsets later)
+            drawingCanvas.onmousedown = function(event) { // Start of onmousedown
+                const globalOffsetX = window.currentMapContext ? (window.currentMapContext.offsetX || 0) : 0;
+                const globalOffsetY = window.currentMapContext ? (window.currentMapContext.offsetY || 0) : 0;
+
+                const clickX = event.offsetX - globalOffsetX; // Adjust click by global offset
+                const clickY = event.offsetY - globalOffsetY; // Adjust click by global offset
+                const rawClickX = event.offsetX; // Keep raw for handle checks if handles are drawn without offset
+                const rawClickY = event.offsetY;
+
+                const editDeleteButtonsDiv = document.getElementById('edit-delete-buttons');
+
+                const getHandleUnderCursor = (x, y, rect) => { // x,y are raw canvas click coordinates
+                    const rectDrawX = rect.x + globalOffsetX;
+                    const rectDrawY = rect.y + globalOffsetY;
+                    const half = HANDLE_SIZE / 2;
+                    if (x >= rectDrawX - half && x <= rectDrawX + half && y >= rectDrawY - half && y <= rectDrawY + half) return 'nw';
+                    if (x >= rectDrawX + rect.width - half && x <= rectDrawX + rect.width + half && y >= rectDrawY - half && y <= rectDrawY + half) return 'ne';
+                    if (x >= rectDrawX - half && x <= rectDrawX + half && y >= rectDrawY + rect.height - half && y <= rectDrawY + rect.height + half) return 'sw';
+                    if (x >= rectDrawX + rect.width - half && x <= rectDrawX + rect.width + half && y >= rectDrawY + rect.height - half && y <= rectDrawY + rect.height + half) return 'se';
+                    return null;
+                };
+
+                if (selectedAreaForEditing && selectedAreaForEditing.map_coordinates && selectedAreaForEditing.map_coordinates.type === 'rect') {
+                    const coords = selectedAreaForEditing.map_coordinates;
+                    const handle = getHandleUnderCursor(rawClickX, rawClickY, coords);
+                    if (handle) {
+                        isResizingArea = true; resizeHandle = handle; isDrawing = false; isMovingArea = false; currentDrawnRect = null;
+                        dragStartX = rawClickX; dragStartY = rawClickY; // Use raw canvas coords for drag calculation start
+                        initialAreaX = coords.x; initialAreaY = coords.y; initialAreaWidth = coords.width; initialAreaHeight = coords.height;
+                        if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window"); return;
                     }
-                    if (hiddenFloorMapIdInput) hiddenFloorMapIdInput.value = mapId;
+                    // Check click within the drawn area (using adjusted clickX/Y for logical coords)
+                    if (clickX >= coords.x && clickX <= coords.x + coords.width && clickY >= coords.y && clickY <= coords.y + coords.height) {
+                        isMovingArea = true; isDrawing = false; currentDrawnRect = null;
+                        dragStartX = rawClickX; dragStartY = rawClickY; // Use raw canvas coords
+                        initialAreaX = coords.x; initialAreaY = coords.y;
+                        if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window"); return;
+                    }
+                }
 
-                    if (resourceToMapSelect) await populateResourcesForMapping(mapId);
-                    if (defineAreasSection) defineAreasSection.scrollIntoView({ behavior: 'smooth' });
-
-                    selectedMapImageImg.onload = () => {
-                        if (drawingCanvas) {
-                            drawingCanvas.width = selectedMapImageImg.clientWidth;
-                            drawingCanvas.height = selectedMapImageImg.clientHeight;
-                            canvasCtx = drawingCanvas.getContext('2d');
-                            canvasCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
-                            isDrawing = false;
-                            currentDrawnRect = null;
-
-                            const currentMapIdForAreas = hiddenFloorMapIdInput.value;
-                            if (currentMapIdForAreas) {
-                                fetchAndDrawExistingMapAreas(currentMapIdForAreas);
-                            } else {
-                                existingMapAreas = [];
-                                redrawCanvas();
+                let clickedOnExistingArea = false;
+                for (const area of existingMapAreas) {
+                    if (area.map_coordinates && area.map_coordinates.type === 'rect') {
+                        const coords = area.map_coordinates;
+                        // Check click within the logical area (using adjusted clickX/Y)
+                        if (clickX >= coords.x && clickX <= coords.x + coords.width && clickY >= coords.y && clickY <= coords.y + coords.height) {
+                            selectedAreaForEditing = area;
+                            console.log('Area selected:', JSON.parse(JSON.stringify(selectedAreaForEditing)));
+                            isDrawing = false; currentDrawnRect = null; clickedOnExistingArea = true;
+                            if (editDeleteButtonsDiv) editDeleteButtonsDiv.style.display = 'block';
+                            updateCoordinateInputs(coords);
+                            if (resourceToMapSelect) resourceToMapSelect.value = area.resource_id;
+                            if (bookingPermissionDropdown) bookingPermissionDropdown.value = area.booking_restriction || "";
+                            if (authorizedRolesCheckboxContainer) {
+                                const selectedRoleIds = (area.roles || []).map(r => String(r.id));
+                                authorizedRolesCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                                    cb.checked = selectedRoleIds.includes(cb.value);
+                                });
                             }
-
-                            drawingCanvas.onmousedown = function(event) {
-                                const clickX = event.offsetX;
-                                const clickY = event.offsetY;
-                                const editDeleteButtonsDiv = document.getElementById('edit-delete-buttons');
-
-                                const getHandleUnderCursor = (x, y, rect) => {
-                                    const half = HANDLE_SIZE / 2;
-                                    if (x >= rect.x - half && x <= rect.x + half && y >= rect.y - half && y <= rect.y + half) return 'nw';
-                                    if (x >= rect.x + rect.width - half && x <= rect.x + rect.width + half && y >= rect.y - half && y <= rect.y + half) return 'ne';
-                                    if (x >= rect.x - half && x <= rect.x + half && y >= rect.y + rect.height - half && y <= rect.y + rect.height + half) return 'sw';
-                                    if (x >= rect.x + rect.width - half && x <= rect.x + rect.width + half && y >= rect.y + rect.height - half && y <= rect.y + rect.height + half) return 'se';
-                                    return null;
-                                };
-
-                                if (selectedAreaForEditing && selectedAreaForEditing.map_coordinates && selectedAreaForEditing.map_coordinates.type === 'rect') {
-                                    const coords = selectedAreaForEditing.map_coordinates;
-                                    const handle = getHandleUnderCursor(clickX, clickY, coords);
-                                    if (handle) {
-                                        isResizingArea = true; resizeHandle = handle; isDrawing = false; isMovingArea = false; currentDrawnRect = null;
-                                        dragStartX = clickX; dragStartY = clickY;
-                                        initialAreaX = coords.x; initialAreaY = coords.y; initialAreaWidth = coords.width; initialAreaHeight = coords.height;
-                                        redrawCanvas(); return;
-                                    }
-                                    if (clickX >= coords.x && clickX <= coords.x + coords.width && clickY >= coords.y && clickY <= coords.y + coords.height) {
-                                        isMovingArea = true; isDrawing = false; currentDrawnRect = null;
-                                        dragStartX = clickX; dragStartY = clickY; initialAreaX = coords.x; initialAreaY = coords.y;
-                                        redrawCanvas(); return;
-                                    }
-                                }
-
-                                let clickedOnExistingArea = false;
-                                for (const area of existingMapAreas) {
-                                    if (area.map_coordinates && area.map_coordinates.type === 'rect') {
-                                        const coords = area.map_coordinates;
-                                        if (clickX >= coords.x && clickX <= coords.x + coords.width && clickY >= coords.y && clickY <= coords.y + coords.height) {
-                                            selectedAreaForEditing = area;
-                                            console.log('Area selected:', JSON.parse(JSON.stringify(selectedAreaForEditing))); // DEBUG
-                                            isDrawing = false; currentDrawnRect = null; clickedOnExistingArea = true;
-                                            if (editDeleteButtonsDiv) editDeleteButtonsDiv.style.display = 'block';
-
-                                            updateCoordinateInputs(coords); // Update X,Y,W,H inputs
-                                            if (resourceToMapSelect) resourceToMapSelect.value = area.resource_id; // Select resource in dropdown
-                                            if (bookingPermissionDropdown) bookingPermissionDropdown.value = area.booking_restriction || "";
-
-                                            // const allowedUserIdsArr = (area.allowed_user_ids || "").split(',').filter(id => id.trim() !== '');
-                                            // if(authorizedUsersCheckboxContainer) { // This container is for defining new areas, not editing existing ones directly from map click
-                                            // }
-                                            if (authorizedRolesCheckboxContainer) { // Populate for define area form
-                                                const selectedRoleIds = (area.roles || []).map(r => String(r.id));
-                                                authorizedRolesCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-                                                    cb.checked = selectedRoleIds.includes(cb.value);
-                                                });
-                                            }
-                                            resourceToMapSelect.dispatchEvent(new Event('change'));
-                                            break;
-                                        }
-                                    }
-                                }
-
-                                if (!clickedOnExistingArea) {
-                                    selectedAreaForEditing = null;
-                                    if (editDeleteButtonsDiv) editDeleteButtonsDiv.style.display = 'none';
-                                    isDrawing = true; startX = clickX; startY = clickY;
-                                    currentDrawnRect = { x: startX, y: startY, width: 0, height: 0 };
-
-                                    const defineAreaFormElement = document.getElementById('define-area-form');
-                                    if(defineAreaFormElement) {
-                                        defineAreaFormElement.reset();
-                                        const submitButton = defineAreaFormElement.querySelector('button[type="submit"]');
-                                        if (submitButton) submitButton.textContent = 'Save New Area Mapping';
-                                        if(authorizedRolesCheckboxContainer) authorizedRolesCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
-                                    }
-                                    if (resourceToMapSelect) resourceToMapSelect.value = '';
-                                    if (bookingPermissionDropdown) bookingPermissionDropdown.value = "";
-                                    resourceToMapSelect.dispatchEvent(new Event('change')); // Update resource actions UI
-                                }
-                                redrawCanvas();
-                            };
-
-                            drawingCanvas.onmousemove = function(event) {
-                                const currentX = event.offsetX; const currentY = event.offsetY;
-                                if (isDrawing) {
-                                    currentDrawnRect.width = currentX - startX; currentDrawnRect.height = currentY - startY;
-                                    redrawCanvas();
-                                } else if (isMovingArea && selectedAreaForEditing) {
-                                    const deltaX = currentX - dragStartX; const deltaY = currentY - dragStartY;
-                                    const coords = selectedAreaForEditing.map_coordinates;
-                                    coords.x = initialAreaX + deltaX; coords.y = initialAreaY + deltaY;
-                                    updateCoordinateInputs(coords); currentDrawnRect = { ...coords };
-                                    redrawCanvas();
-                                } else if (isResizingArea && selectedAreaForEditing) {
-                                    const deltaX = currentX - dragStartX; const deltaY = currentY - dragStartY;
-                                    const coords = selectedAreaForEditing.map_coordinates;
-                                    let newX = initialAreaX, newY = initialAreaY, newW = initialAreaWidth, newH = initialAreaHeight;
-                                    switch(resizeHandle) {
-                                        case 'nw': newX += deltaX; newY += deltaY; newW -= deltaX; newH -= deltaY; break;
-                                        case 'ne': newY += deltaY; newW += deltaX; newH -= deltaY; break;
-                                        case 'sw': newX += deltaX; newW -= deltaX; newH += deltaY; break;
-                                        case 'se': newW += deltaX; newH += deltaY; break;
-                                    }
-                                    if (newW < 1) newW = 1; if (newH < 1) newH = 1;
-                                    coords.x = newX; coords.y = newY; coords.width = newW; coords.height = newH;
-                                    updateCoordinateInputs(coords); currentDrawnRect = { ...coords };
-                                    redrawCanvas();
-                                }
-                            };
-
-                            drawingCanvas.onmouseup = async function(event) {
-                                if (isDrawing) {
-                                    isDrawing = false;
-                                    let {x,y,width,height} = currentDrawnRect;
-                                    if (width < 0) { x += width; width = -width; }
-                                    if (height < 0) { y += height; height = -height; }
-                                    currentDrawnRect = { x, y, width, height };
-                                    updateCoordinateInputs(currentDrawnRect);
-                                    redrawCanvas();
-                                } else if ((isMovingArea || isResizingArea) && selectedAreaForEditing) {
-                                    isMovingArea = false; isResizingArea = false;
-                                    const coords = selectedAreaForEditing.map_coordinates; // Already updated by onmousemove
-                                    updateCoordinateInputs(coords); // Ensure form reflects final state
-                                    await saveSelectedAreaDimensions(coords); // API call to save new dimensions
-                                    redrawCanvas();
-                                }
-                            };
+                            resourceToMapSelect.dispatchEvent(new Event('change'));
+                            break;
                         }
-                    };
-                    if (selectedMapImageImg.complete && selectedMapImageImg.src && selectedMapImageImg.src !== 'data:,') {
-                        selectedMapImageImg.onload();
                     }
-                } else if (event.target.classList.contains('delete-map-btn')) {
+                }
+
+                if (!clickedOnExistingArea) {
+                    selectedAreaForEditing = null;
+                    if (editDeleteButtonsDiv) editDeleteButtonsDiv.style.display = 'none';
+                    isDrawing = true;
+                    startX = clickX; // Use adjusted click coordinates for drawing start
+                    startY = clickY;
+                    currentDrawnRect = { x: startX, y: startY, width: 0, height: 0 };
+                    const defineAreaFormElement = document.getElementById('define-area-form');
+                    if(defineAreaFormElement) {
+                        defineAreaFormElement.reset();
+                        const submitButton = defineAreaFormElement.querySelector('button[type="submit"]');
+                        if (submitButton) submitButton.textContent = 'Save New Area Mapping';
+                        if(authorizedRolesCheckboxContainer) authorizedRolesCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+                    }
+                    if (resourceToMapSelect) resourceToMapSelect.value = '';
+                    if (bookingPermissionDropdown) bookingPermissionDropdown.value = "";
+                    resourceToMapSelect.dispatchEvent(new Event('change'));
+                }
+                if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window");
+            }; // End of onmousedown
+
+            drawingCanvas.onmousemove = function(event) { // Start of onmousemove
+                const globalOffsetX = window.currentMapContext ? (window.currentMapContext.offsetX || 0) : 0;
+                const globalOffsetY = window.currentMapContext ? (window.currentMapContext.offsetY || 0) : 0;
+                const currentX = event.offsetX - globalOffsetX; // Adjust by global offset
+                const currentY = event.offsetY - globalOffsetY; // Adjust by global offset
+                const rawCurrentX = event.offsetX;
+                const rawCurrentY = event.offsetY;
+
+                if (isDrawing) {
+                    currentDrawnRect.width = currentX - startX; currentDrawnRect.height = currentY - startY;
+                    if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window");
+                } else if (isMovingArea && selectedAreaForEditing) {
+                    const deltaX = rawCurrentX - dragStartX; const deltaY = rawCurrentY - dragStartY;
+                    const coords = selectedAreaForEditing.map_coordinates;
+                    coords.x = initialAreaX + deltaX; coords.y = initialAreaY + deltaY;
+                    updateCoordinateInputs(coords); currentDrawnRect = { ...coords }; // Store logical, un-offsetted coords
+                    if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window");
+                } else if (isResizingArea && selectedAreaForEditing) {
+                    const deltaX = rawCurrentX - dragStartX; const deltaY = rawCurrentY - dragStartY;
+                    const coords = selectedAreaForEditing.map_coordinates;
+                    let newX = initialAreaX, newY = initialAreaY, newW = initialAreaWidth, newH = initialAreaHeight;
+                    switch(resizeHandle) {
+                        case 'nw': newX += deltaX; newY += deltaY; newW -= deltaX; newH -= deltaY; break;
+                        case 'ne': newY += deltaY; newW += deltaX; newH -= deltaY; break;
+                        case 'sw': newX += deltaX; newW -= deltaX; newH += deltaY; break;
+                        case 'se': newW += deltaX; newH += deltaY; break;
+                    }
+                    if (newW < 1) newW = 1; if (newH < 1) newH = 1;
+                    coords.x = newX; coords.y = newY; coords.width = newW; coords.height = newH;
+                    updateCoordinateInputs(coords); currentDrawnRect = { ...coords }; // Store logical, un-offsetted coords
+                    if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window");
+                }
+            }; // End of onmousemove
+
+            drawingCanvas.onmouseup = async function(event) { // Start of onmouseup
+                if (isDrawing) {
+                    isDrawing = false;
+                    let {x,y,width,height} = currentDrawnRect;
+                    if (width < 0) { x += width; width = -width; }
+                    if (height < 0) { y += height; height = -height; }
+                    currentDrawnRect = { x, y, width, height }; // These are logical, un-offsetted coords
+                    updateCoordinateInputs(currentDrawnRect);
+                    if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window");
+                } else if ((isMovingArea || isResizingArea) && selectedAreaForEditing) {
+                    isMovingArea = false; isResizingArea = false;
+                    const coords = selectedAreaForEditing.map_coordinates;
+                    updateCoordinateInputs(coords);
+                    await saveSelectedAreaDimensions(coords);
+                    if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window");
+                }
+            }; // End of onmouseup
+
+            console.log("Define Areas canvas logic initialized/re-initialized.");
+        }
+        window.initializeDefineAreasCanvasLogic = initializeDefineAreasCanvasLogic; // Expose it
+
+
+        // The old mapsListUl event listener for 'select-map-for-areas-btn' needs to be removed or adapted.
+        // Since the new 'Define Areas' button is in admin_maps.html (handled by its inline script),
+        // the old listener on mapsListUl (if it still exists and has such buttons) might conflict or be redundant.
+        // For now, we are focusing on exposing functions. The actual call to initializeDefineAreasCanvasLogic
+        // will be from the inline script in admin_maps.html after the image is loaded.
+        // The original selectedMapImageImg.onload within the old mapsListUl click listener
+        // has its core logic now encapsulated or to be called by initializeDefineAreasCanvasLogic.
+
+        /*
+        // Delete map functionality (original, might be redundant if new table handles it)
+        if (mapsListUl) { // This targets the old UL. The new table has its own delete logic.
+            mapsListUl.addEventListener('click', async function(event) {
+                if (event.target.classList.contains('delete-map-btn')) { // This is for the old list
                     const button = event.target;
                     const mapId = button.dataset.mapId;
                     const mapName = button.dataset.mapName;
@@ -2374,6 +2409,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
         }
+        */
 
         if (defineAreaForm) {
             defineAreaForm.addEventListener('submit', async function(event) {
