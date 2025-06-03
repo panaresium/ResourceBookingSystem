@@ -1897,6 +1897,359 @@ class TestAdminBookings(AppTests):
         self.logout()
 
 
+class TestBulkUserOperationsAPI(AppTests):
+    def setUp(self):
+        super().setUp()
+        # Create roles needed for tests
+        self.role_user = Role.query.filter_by(name='User').first()
+        if not self.role_user:
+            self.role_user = Role(name='User', permissions='view_resources,make_bookings')
+            db.session.add(self.role_user)
+
+        self.role_editor = Role.query.filter_by(name='Editor').first()
+        if not self.role_editor:
+            self.role_editor = Role(name='Editor', permissions='manage_resources')
+            db.session.add(self.role_editor)
+
+        self.role_admin_actual = Role.query.filter_by(name='Administrator').first()
+        if not self.role_admin_actual:
+            self.role_admin_actual = Role(name='Administrator', permissions='all_permissions') # Or specific like 'manage_users'
+            db.session.add(self.role_admin_actual)
+
+        db.session.commit()
+
+        # Create an admin user with 'manage_users' permission
+        self.admin_bulk_user = User.query.filter_by(username='adminbulk').first()
+        if not self.admin_bulk_user:
+            self.admin_bulk_user = User(username='adminbulk', email='adminbulk@example.com', is_admin=True)
+            self.admin_bulk_user.set_password('adminpass')
+            self.admin_bulk_user.roles.append(self.role_admin_actual) # Assign Administrator role
+            db.session.add(self.admin_bulk_user)
+            db.session.commit()
+
+        # Create a non-admin user for permission tests
+        self.non_admin_user = User.query.filter_by(username='nonadminbulk').first()
+        if not self.non_admin_user:
+            self.non_admin_user = User(username='nonadminbulk', email='nonadminbulk@example.com', is_admin=False)
+            self.non_admin_user.set_password('userpass')
+            self.non_admin_user.roles.append(self.role_user)
+            db.session.add(self.non_admin_user)
+            db.session.commit()
+
+    # --- Tests for POST /api/admin/users/bulk_add ---
+
+    def test_bulk_add_users_success(self):
+        """Test successful bulk addition of multiple users."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+        users_data = [
+            {"username": "bulkuser1", "email": "bulk1@example.com", "password": "pass1", "is_admin": False, "role_ids": [self.role_user.id]},
+            {"username": "bulkuser2", "email": "bulk2@example.com", "password": "pass2", "is_admin": True, "role_ids": [self.role_admin_actual.id, self.role_editor.id]},
+            {"username": "bulkuser3", "email": "bulk3@example.com", "password": "pass3"} # No roles, no admin flag
+        ]
+        response = self.client.post('/api/admin/users/bulk_add', json=users_data)
+        self.assertEqual(response.status_code, 201) # Should be 201 if all successful
+        data = response.get_json()
+        self.assertEqual(data['users_added'], 3)
+        self.assertEqual(len(data['errors']), 0)
+
+        # Verify in DB
+        u1 = User.query.filter_by(username="bulkuser1").first()
+        self.assertIsNotNone(u1)
+        self.assertEqual(u1.email, "bulk1@example.com")
+        self.assertFalse(u1.is_admin)
+        self.assertIn(self.role_user, u1.roles)
+
+        u2 = User.query.filter_by(username="bulkuser2").first()
+        self.assertIsNotNone(u2)
+        self.assertTrue(u2.is_admin)
+        self.assertIn(self.role_admin_actual, u2.roles)
+        self.assertIn(self.role_editor, u2.roles)
+
+        u3 = User.query.filter_by(username="bulkuser3").first()
+        self.assertIsNotNone(u3)
+        self.assertFalse(u3.is_admin) # Default
+        self.assertEqual(len(u3.roles), 0) # No roles assigned
+
+        self.logout()
+
+    def test_bulk_add_users_partial_success_and_errors(self):
+        """Test bulk addition with a mix of valid and invalid user data."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+
+        # Pre-create a user to cause duplication error
+        existing_user_for_conflict = User(username='existinguser', email='existing@example.com')
+        existing_user_for_conflict.set_password('password')
+        db.session.add(existing_user_for_conflict)
+        db.session.commit()
+
+        users_data = [
+            {"username": "validbulkuser", "email": "validbulk@example.com", "password": "passvalid", "role_ids": [self.role_user.id]}, # Valid
+            {"username": "existinguser", "email": "another@example.com", "password": "pass"}, # Duplicate username
+            {"username": "anotheruser", "email": "existing@example.com", "password": "pass"}, # Duplicate email
+            {"username": "nousername", "password": "pass"}, # Missing email
+            {"username": "bademail", "email": "invalidemail", "password": "pass"}, # Invalid email format
+            {"username": "badrole", "email": "badrole@example.com", "password": "pass", "role_ids": [9999]} # Non-existent role ID
+        ]
+        response = self.client.post('/api/admin/users/bulk_add', json=users_data)
+        self.assertEqual(response.status_code, 207) # Partial success
+        data = response.get_json()
+
+        self.assertEqual(data['users_added'], 1) # Only 'validbulkuser' should be added
+        self.assertEqual(len(data['errors']), 5)
+
+        # Verify DB state
+        self.assertIsNotNone(User.query.filter_by(username="validbulkuser").first())
+        self.assertIsNone(User.query.filter_by(username="nousername").first())
+        self.assertIsNone(User.query.filter_by(username="bademail").first())
+        self.assertIsNone(User.query.filter_by(username="badrole").first())
+
+        # Check specific errors (optional, but good for verifying messages)
+        errors = data['errors']
+        self.assertTrue(any("Username 'existinguser' already exists" in e['error'] for e in errors if e['user_data'].get('username') == 'existinguser'))
+        self.assertTrue(any("Email 'existing@example.com' already registered" in e['error'] for e in errors if e['user_data'].get('email') == 'existing@example.com'))
+        self.assertTrue(any("Email is required" in e['error'] for e in errors if e['user_data'].get('username') == 'nousername'))
+        self.assertTrue(any("Invalid email format" in e['error'] for e in errors if e['user_data'].get('username') == 'bademail'))
+        self.assertTrue(any("Role with ID 9999 not found" in e['error'] for e in errors if e['user_data'].get('username') == 'badrole'))
+
+        self.logout()
+
+    def test_bulk_add_users_all_invalid(self):
+        """Test bulk addition where all user entries are invalid."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+        users_data = [
+            {"username": "user1", "password": "p1"}, # Missing email
+            {"username": "user2", "email": "invalid", "password": "p2"} # Invalid email
+        ]
+        initial_user_count = User.query.count()
+        response = self.client.post('/api/admin/users/bulk_add', json=users_data)
+        # The status code might be 207 if it processes each and finds errors, or 400 if there's an upfront validation schema for the list itself.
+        # Given the current backend likely loops, 207 is more probable if any processing starts.
+        # If the list itself is malformed (e.g., not a list), it would be 400.
+        # For this case (list of bad items), 207 is expected if users_to_add remains empty.
+        self.assertEqual(response.status_code, 207) # Or 200 if no users added and no commit happens, resulting in "completed"
+        data = response.get_json()
+        self.assertEqual(data['users_added'], 0)
+        self.assertEqual(len(data['errors']), 2)
+        self.assertEqual(User.query.count(), initial_user_count) # No users added
+        self.logout()
+
+    def test_bulk_add_users_empty_list(self):
+        """Test bulk addition with an empty list."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+        response = self.client.post('/api/admin/users/bulk_add', json=[])
+        self.assertEqual(response.status_code, 200) # API accepts empty list, adds 0 users.
+        data = response.get_json()
+        self.assertEqual(data['users_added'], 0)
+        self.assertEqual(len(data['errors']), 0)
+        self.logout()
+
+    def test_bulk_add_users_not_a_list(self):
+        """Test bulk addition with non-list payload."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+        response = self.client.post('/api/admin/users/bulk_add', json={"not": "a list"})
+        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertIn("Invalid input. JSON list of users expected.", data.get('error',''))
+        self.logout()
+
+
+    def test_bulk_add_users_no_permission(self):
+        """Test bulk add endpoint without 'manage_users' permission."""
+        self.login(self.non_admin_user.username, 'userpass') # Login as non-admin
+        users_data = [{"username": "permtest", "email": "perm@test.com", "password": "password"}]
+        response = self.client.post('/api/admin/users/bulk_add', json=users_data)
+        self.assertEqual(response.status_code, 403)
+        self.logout()
+
+    # --- Tests for PUT /api/admin/users/bulk_edit ---
+    def _setup_users_for_bulk_edit(self):
+        u_edit1 = User(username='edituser1', email='edit1@example.com', is_admin=False)
+        u_edit1.set_password('pass1')
+        u_edit1.roles.append(self.role_user)
+
+        u_edit2 = User(username='edituser2', email='edit2@example.com', is_admin=False)
+        u_edit2.set_password('pass2')
+
+        u_edit3_admin = User(username='edituser3admin', email='edit3@example.com', is_admin=True)
+        u_edit3_admin.set_password('pass3')
+        u_edit3_admin.roles.append(self.role_admin_actual)
+
+        db.session.add_all([u_edit1, u_edit2, u_edit3_admin])
+        db.session.commit()
+        return u_edit1, u_edit2, u_edit3_admin
+
+    def test_bulk_edit_users_success(self):
+        """Test successful bulk editing of multiple users."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+        u1, u2, u3 = self._setup_users_for_bulk_edit()
+
+        updates_data = [
+            {"id": u1.id, "email": "updated_edit1@example.com", "role_ids": [self.role_editor.id]},
+            {"id": u2.id, "is_admin": True, "password": "newpass2"},
+            {"id": u3.id, "username": "updated_edituser3admin"}
+        ]
+        response = self.client.put('/api/admin/users/bulk_edit', json=updates_data)
+        self.assertEqual(response.status_code, 200) # All successful
+        data = response.get_json()
+        self.assertEqual(data['users_updated'], 3)
+        self.assertEqual(len(data['errors']), 0)
+
+        # Verify DB
+        db.session.refresh(u1)
+        db.session.refresh(u2)
+        db.session.refresh(u3)
+
+        self.assertEqual(u1.email, "updated_edit1@example.com")
+        self.assertIn(self.role_editor, u1.roles)
+        self.assertNotIn(self.role_user, u1.roles) # Roles are replaced
+
+        self.assertTrue(u2.is_admin)
+        self.assertTrue(u2.check_password('newpass2'))
+
+        self.assertEqual(u3.username, "updated_edituser3admin")
+        self.logout()
+
+    def test_bulk_edit_users_partial_success_and_errors(self):
+        """Test bulk editing with a mix of valid updates and errors."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+        u1, u2, u3 = self._setup_users_for_bulk_edit()
+
+        # Pre-create another user to cause potential conflicts
+        conflict_user = User(username='conflictuser', email='conflict@example.com')
+        conflict_user.set_password('password')
+        db.session.add(conflict_user)
+        db.session.commit()
+
+        updates_data = [
+            {"id": u1.id, "email": "valid_update_edit1@example.com"}, # Valid
+            {"id": u2.id, "username": "conflictuser"}, # Duplicate username
+            {"id": 9999, "email": "doesnotexist@example.com"}, # Non-existent user ID
+            {"id": u3.id, "email": "invalidformat"}, # Invalid email format
+            {"id": u3.id, "role_ids": [8888]} # Try to update same user u3 again, but with invalid role
+                                             # Note: The current backend endpoint processes user by user.
+                                             # If a user has an error, subsequent changes for that same user in the list might be skipped
+                                             # or might overwrite. The test should reflect the actual behavior.
+                                             # For this test, we assume the first error for a user stops further processing for that user item in the list.
+                                             # Let's make the second u3 update distinct or test separately.
+                                             # For now, let's assume that if u3's email update fails, role_ids won't be processed for it.
+                                             # Or, if email is valid, then role_ids check happens.
+                                             # The backend should ideally collect all errors for a single user item if possible,
+                                             # but current structure is likely one error per item.
+        ]
+        # To make error for u3 more predictable:
+        # Let's assume first u3 update has valid email, then a separate item for u3 with bad role
+        # This is not ideal for "bulk_edit" which implies one set of changes per user ID.
+        # The API takes a list of objects, each with an ID. So, one user can appear multiple times.
+        # Let's adjust the payload to be more realistic:
+
+        updates_data_revised = [
+            {"id": u1.id, "email": "valid_update_edit1@example.com"}, # Valid
+            {"id": u2.id, "username": "conflictuser"}, # Duplicate username for u2
+            {"id": 9999, "email": "doesnotexist@example.com"}, # Non-existent user ID
+            {"id": u3.id, "email": "invalidformat", "role_ids": [self.role_user.id]} # u3: invalid email, but roles are valid
+        ]
+
+
+        response = self.client.put('/api/admin/users/bulk_edit', json=updates_data_revised)
+        self.assertEqual(response.status_code, 207) # Partial success
+        data = response.get_json()
+
+        self.assertEqual(data['users_updated'], 1) # Only u1 should be updated
+        self.assertEqual(len(data['errors']), 3)
+
+        db.session.refresh(u1)
+        db.session.refresh(u2) # u2 should not change
+        db.session.refresh(u3) # u3 should not change due to email error
+
+        self.assertEqual(u1.email, "valid_update_edit1@example.com")
+        self.assertNotEqual(u2.username, "conflictuser") # u2's username should not have changed
+        self.assertEqual(u3.email, "edit3@example.com") # u3's email should not have changed
+
+        errors = data['errors']
+        self.assertTrue(any(err['id'] == u2.id and "Username 'conflictuser' already exists" in err['error'] for err in errors))
+        self.assertTrue(any(err['id'] == 9999 and "User not found" in err['error'] for err in errors))
+        self.assertTrue(any(err['id'] == u3.id and "Invalid email format" in err['error'] for err in errors))
+
+        self.logout()
+
+    def test_bulk_edit_users_prevent_last_admin_demotion(self):
+        """Test bulk edit safeguards against removing the last admin's status/role."""
+        self.login(self.admin_bulk_user.username, 'adminpass') # self.admin_bulk_user is an admin
+
+        # Ensure self.admin_bulk_user is the ONLY user with 'Administrator' role and is_admin=True
+        all_users = User.query.all()
+        for user in all_users:
+            if user.id != self.admin_bulk_user.id:
+                user.is_admin = False
+                if self.role_admin_actual in user.roles:
+                    user.roles.remove(self.role_admin_actual)
+        self.admin_bulk_user.is_admin = True
+        if self.role_admin_actual not in self.admin_bulk_user.roles:
+            self.admin_bulk_user.roles.append(self.role_admin_actual)
+        db.session.commit()
+
+        # Verify only one admin
+        admin_users_count = User.query.filter_by(is_admin=True).count()
+        self.assertEqual(admin_users_count, 1, "Setup failed: more than one is_admin=True user")
+
+        users_with_admin_role_count = User.query.filter(User.roles.any(id=self.role_admin_actual.id)).count()
+        self.assertEqual(users_with_admin_role_count, 1, "Setup failed: more than one user with Administrator role")
+
+
+        # Attempt to demote self.admin_bulk_user via is_admin flag
+        updates_demote_flag = [{"id": self.admin_bulk_user.id, "is_admin": False}]
+        response_flag = self.client.put('/api/admin/users/bulk_edit', json=updates_demote_flag)
+        self.assertEqual(response_flag.status_code, 207) # Or 200 if updated_count is 0 and only errors
+        data_flag = response_flag.get_json()
+        self.assertEqual(data_flag['users_updated'], 0)
+        self.assertEqual(len(data_flag['errors']), 1)
+        self.assertIn("Cannot remove your own admin status (is_admin flag) as the sole admin", data_flag['errors'][0]['error'])
+        db.session.refresh(self.admin_bulk_user)
+        self.assertTrue(self.admin_bulk_user.is_admin) # Should not change
+
+        # Attempt to demote self.admin_bulk_user via roles (remove Administrator role)
+        updates_demote_role = [{"id": self.admin_bulk_user.id, "role_ids": [self.role_user.id]}] # Assign a non-admin role
+        response_role = self.client.put('/api/admin/users/bulk_edit', json=updates_demote_role)
+        self.assertEqual(response_role.status_code, 207)
+        data_role = response_role.get_json()
+        self.assertEqual(data_role['users_updated'], 0)
+        self.assertEqual(len(data_role['errors']), 1)
+        self.assertIn("Cannot remove your own \"Administrator\" role as the sole holder", data_role['errors'][0]['error'])
+        db.session.refresh(self.admin_bulk_user)
+        self.assertIn(self.role_admin_actual, self.admin_bulk_user.roles) # Role should not change
+
+        self.logout()
+
+
+    def test_bulk_edit_users_empty_list(self):
+        """Test bulk editing with an empty list."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+        response = self.client.put('/api/admin/users/bulk_edit', json=[])
+        self.assertEqual(response.status_code, 200) # API accepts empty list, updates 0 users.
+        data = response.get_json()
+        self.assertEqual(data['users_updated'], 0)
+        self.assertEqual(len(data['errors']), 0)
+        self.logout()
+
+    def test_bulk_edit_users_not_a_list(self):
+        """Test bulk editing with non-list payload."""
+        self.login(self.admin_bulk_user.username, 'adminpass')
+        response = self.client.put('/api/admin/users/bulk_edit', json={"not": "a list"})
+        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertIn("Invalid input. JSON list of user updates expected.", data.get('error',''))
+        self.logout()
+
+    def test_bulk_edit_users_no_permission(self):
+        """Test bulk edit endpoint without 'manage_users' permission."""
+        self.login(self.non_admin_user.username, 'userpass')
+        u1, _, _ = self._setup_users_for_bulk_edit()
+        updates_data = [{"id": u1.id, "email": "perm_test_edit@example.com"}]
+        response = self.client.put('/api/admin/users/bulk_edit', json=updates_data)
+        self.assertEqual(response.status_code, 403)
+        self.logout()
+
+
 class TestHomePage(AppTests):
     def test_home_page_not_authenticated(self):
         """Test home page when user is not authenticated."""
