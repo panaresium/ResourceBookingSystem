@@ -1944,7 +1944,6 @@ class TestHomePage(AppTests):
         self.assertNotIn('Quick Actions', content)
         self.assertNotIn('Book a Room', content)
 
-
 class TestBookingSettingsModel(AppTests):
     def test_create_booking_settings_default_values(self):
         """Test creation of BookingSettings with default values."""
@@ -2295,7 +2294,6 @@ class TestBookingSettingsEnforcement(AppTests):
         User.query.filter_by(username='otherbooker').delete()
         db.session.commit()
         self.logout()
-
 
 if __name__ == '__main__':
     unittest.main()

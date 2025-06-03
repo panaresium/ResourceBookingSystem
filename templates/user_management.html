@@ -9,6 +9,8 @@
     <button id="import-users-btn" class="button">{{ _('Import Users') }}</button>
     <input type="file" id="import-users-file" accept="application/json" style="display:none;">
     <button id="delete-selected-users-btn" class="button danger">{{ _('Delete Selected') }}</button>
+    <button id="bulk-edit-users-btn" class="button">{{ _('Bulk Edit Selected') }}</button>
+    <button id="bulk-add-users-btn" class="button success">{{ _('Bulk Add Users (Pattern)') }}</button>
     <div class="filters-section" style="margin-top:15px;">
         <h3>{{ _('Filters') }}</h3>
         <label for="user-filter-username">{{ _('Username:') }}</label>
@@ -145,3 +147,88 @@
     <script src="{{ url_for('static', filename='js/user_management.js') }}" defer></script>
 {% endblock %}
 
+<!-- Modal for Bulk Edit Users -->
+<div id="bulk-edit-user-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <span class="close-modal-btn" data-modal-id="bulk-edit-user-modal">&times;</span>
+        <h3 id="bulk-edit-user-modal-title">{{ _('Bulk Edit Users') }}</h3>
+        <div id="bulk-edit-user-modal-status" class="status-message"></div>
+        <form id="bulk-edit-user-form">
+            <p><strong id="bulk-edit-selected-count"></strong> users selected.</p>
+            <hr>
+            <div>
+                <label for="bulk-set-admin">{{ _('Set Admin Status:') }}</label>
+                <select id="bulk-set-admin" name="bulk_set_admin">
+                    <option value="">{{ _('No Change') }}</option>
+                    <option value="true">{{ _('Yes (Set as Admin)') }}</option>
+                    <option value="false">{{ _('No (Remove Admin)') }}</option>
+                </select>
+            </div>
+            <hr>
+            <div>
+                <label>{{ _('Add Roles:') }}</label>
+                <div id="bulk-add-roles-container" class="checkbox-container" style="max-height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;">
+                    <!-- Role checkboxes will be populated here by JavaScript -->
+                </div>
+            </div>
+            <hr>
+            <div>
+                <label>{{ _('Remove Roles:') }}</label>
+                <div id="bulk-remove-roles-container" class="checkbox-container" style="max-height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;">
+                    <!-- Role checkboxes will be populated here by JavaScript -->
+                </div>
+            </div>
+            <hr>
+            <button type="submit" class="button primary" style="margin-top: 15px;">{{ _('Apply Changes to Selected Users') }}</button>
+        </form>
+    </div>
+</div>
+
+<!-- Modal for Bulk Add Users (Pattern) -->
+<div id="bulk-add-user-modal" class="modal" style="display: none;">
+    <div class="modal-content large"> <!-- Added 'large' class for more space if needed -->
+        <span class="close-modal-btn" data-modal-id="bulk-add-user-modal">&times;</span>
+        <h3 id="bulk-add-user-modal-title">{{ _('Bulk Add Users (Pattern)') }}</h3>
+        <div id="bulk-add-user-modal-status" class="status-message"></div>
+        <form id="bulk-add-user-form">
+            <div>
+                <label for="bulk-add-username-pattern">{{ _('Username Pattern:') }}</label>
+                <input type="text" id="bulk-add-username-pattern" name="username_pattern" required value="user###" style="width: 95%;">
+                <small>{{ _("Use '###' as a placeholder for numbers (e.g., user###, student##). The number of '#' determines padding.") }}</small>
+            </div>
+            <div class="form-row">
+                <div class="form-group half-width">
+                    <label for="bulk-add-start-index">{{ _('Start Index:') }}</label>
+                    <input type="number" id="bulk-add-start-index" name="start_index" required value="1" min="0">
+                </div>
+                <div class="form-group half-width">
+                    <label for="bulk-add-count">{{ _('Number of Users to Create:') }}</label>
+                    <input type="number" id="bulk-add-count" name="count" required value="10" min="1">
+                </div>
+            </div>
+            <div>
+                <label for="bulk-add-default-password">{{ _('Default Password (min 6 chars):') }}</label>
+                <input type="password" id="bulk-add-default-password" name="default_password" required style="width: 95%;">
+            </div>
+            <div>
+                <label for="bulk-add-email-pattern">{{ _('Email Pattern (optional):') }}</label>
+                <input type="text" id="bulk-add-email-pattern" name="email_pattern" placeholder="user###@example.com" style="width: 95%;">
+                <small>{{ _("If blank, generated as 'username@example.com'. Use '###' for number placeholder.") }}</small>
+            </div>
+            <div>
+                <input type="checkbox" id="bulk-add-is-admin" name="is_admin" value="true">
+                <label for="bulk-add-is-admin" style="display: inline;">{{ _('Set as Admin') }}</label>
+            </div>
+            <hr>
+            <div>
+                <label>{{ _('Assign Roles (optional):') }}</label>
+                <div id="bulk-add-roles-container" class="checkbox-container" style="max-height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;">
+                    <!-- Role checkboxes will be populated here by JavaScript -->
+                    <small>{{_('Loading roles...')}}</small>
+                </div>
+            </div>
+            <hr>
+            <button type="submit" class="button success" style="margin-top: 15px;">{{ _('Create Users') }}</button>
+        </form>
+    </div>
+</div>
