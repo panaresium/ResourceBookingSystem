@@ -142,7 +142,19 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
         updateDbViewStatus(`{{ _('Loading schema for table:') }} ${tableName}...`);
-        dbFilterControlsContainer.innerHTML = `<p>{{ _('Loading filters for ') }}${tableName}...</p>`;
+
+        const dbFilterCol1 = document.getElementById('db-filter-col-1');
+        const dbFilterCol2 = document.getElementById('db-filter-col-2');
+
+        if (!dbFilterCol1 || !dbFilterCol2) {
+            console.error('Filter columns not found in DOM.');
+            updateDbViewStatus('{{ _("Internal UI error: Filter columns not found.") }}', true);
+            return;
+        }
+
+        dbFilterCol1.innerHTML = `<p>{{ _('Loading filters for ') }}${tableName}...</p>`;
+        dbFilterCol2.innerHTML = ''; // Clear second column initially
+
         try {
             const response = await fetch(`/api/admin/db/table_info/${tableName}`);
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -150,17 +162,22 @@ document.addEventListener('DOMContentLoaded', function () {
 
             if (data.success && data.columns) {
                 dbViewState.columns = data.columns;
-                dbFilterControlsContainer.innerHTML = ''; // Clear loading message
+                dbFilterCol1.innerHTML = ''; // Clear loading message
+                dbFilterCol2.innerHTML = '';
 
-                data.columns.forEach(column => {
+                if (data.columns.length === 0) {
+                    dbFilterCol1.innerHTML = `<p>{{ _('No filterable columns found for this table.') }}</p>`;
+                }
+
+                data.columns.forEach((column, index) => {
                     const filterGroup = document.createElement('div');
-                    filterGroup.className = 'row mb-2 align-items-center';
+                    // Each filter group can be a simple div, styling will be handled by parent col-md-6 and its own items
+                    filterGroup.className = 'mb-3 filter-group-item';
+                    // Using template literals for cleaner HTML structure within JS
                     filterGroup.innerHTML = `
-                        <div class="col-md-3">
-                            <label class="form-label mb-0">${column.name} <small class="text-muted">(${column.type})</small></label>
-                        </div>
-                        <div class="col-md-3">
-                            <select class="form-select form-select-sm filter-op" data-column="${column.name}">
+                        <div><label class="form-label mb-1">${column.name} <small class="text-muted">(${column.type})</small></label></div>
+                        <div class="input-group input-group-sm mb-1">
+                            <select class="form-select filter-op" data-column="${column.name}">
                                 <option value="">{{ _('-- Operator --') }}</option>
                                 <option value="eq">{{ _('Equals') }} (=)</option>
                                 <option value="neq">{{ _('Not Equals') }} (!=)</option>
@@ -174,11 +191,10 @@ document.addEventListener('DOMContentLoaded', function () {
                                 <option value="is_null">{{ _('Is Null') }}</option>
                                 <option value="is_not_null">{{ _('Is Not Null') }}</option>
                             </select>
-                        </div>
-                        <div class="col-md-6">
-                            <input type="text" class="form-control form-control-sm filter-val" data-column="${column.name}" placeholder="{{ _('Value') }}">
+                            <input type="text" class="form-control filter-val" data-column="${column.name}" placeholder="{{ _('Value') }}">
                         </div>
                     `;
+
                     const opSelect = filterGroup.querySelector('.filter-op');
                     const valInput = filterGroup.querySelector('.filter-val');
                     opSelect.addEventListener('change', function() {
@@ -189,7 +205,12 @@ document.addEventListener('DOMContentLoaded', function () {
                             valInput.style.display = 'block';
                         }
                     });
-                    dbFilterControlsContainer.appendChild(filterGroup);
+
+                    if (index % 2 === 0) {
+                        dbFilterCol1.appendChild(filterGroup);
+                    } else {
+                        dbFilterCol2.appendChild(filterGroup);
+                    }
                 });
                 dbFilterArea.style.display = 'block';
                 updateDbViewStatus(`{{ _('Schema loaded for table:') }} ${tableName}. {{ _('Ready for filtering and data fetching.') }}`, false);
@@ -386,11 +407,14 @@ document.addEventListener('DOMContentLoaded', function () {
             dbPaginationControls.style.display = 'none';
 
             if (dbViewState.selectedTable) {
-                await loadTableInfoAndGenerateFilters(dbViewState.selectedTable); // This also sets dbViewState.columns
-                await fetchAndDisplayTableData(); // Initial data load for the table
+                await loadTableInfoAndGenerateFilters(dbViewState.selectedTable);
+                await fetchAndDisplayTableData();
             } else {
                 dbFilterArea.style.display = 'none';
-                dbFilterControlsContainer.innerHTML = `<p>{{ _('Select a table to see available filters.') }}</p>`;
+                const col1 = document.getElementById('db-filter-col-1');
+                const col2 = document.getElementById('db-filter-col-2');
+                if(col1) col1.innerHTML = `<p>{{ _('Select a table to see available filters.') }}</p>`;
+                if(col2) col2.innerHTML = '';
             }
         });
     }
@@ -398,15 +422,18 @@ document.addEventListener('DOMContentLoaded', function () {
     if (dbApplyFiltersBtn) {
         dbApplyFiltersBtn.addEventListener('click', async function() {
             dbViewState.currentFilters = [];
-            const filterGroups = dbFilterControlsContainer.querySelectorAll('.row.mb-2');
-            filterGroups.forEach(group => {
-                const column = group.querySelector('.filter-op').dataset.column;
-                const op = group.querySelector('.filter-op').value;
-                let value = group.querySelector('.filter-val').value;
+            // Iterate over controls in both columns
+            const filterItems = dbFilterControlsContainer.querySelectorAll('.filter-group-item');
+            filterItems.forEach(item => {
+                const opSelect = item.querySelector('.filter-op');
+                const valInput = item.querySelector('.filter-val');
+                const column = opSelect.dataset.column;
+                const op = opSelect.value;
+                let value = valInput.value;
 
-                if (op) { // Only add filter if an operator is selected
+                if (op) {
                     if (op === 'is_null' || op === 'is_not_null') {
-                        dbViewState.currentFilters.push({ column, op, value: null }); // Value is not used by backend for these
+                        dbViewState.currentFilters.push({ column, op, value: null });
                     } else if (value.trim() !== '') {
                          dbViewState.currentFilters.push({ column, op, value: value.trim() });
                     }
@@ -419,12 +446,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (dbClearFiltersBtn) {
         dbClearFiltersBtn.addEventListener('click', async function() {
-            const filterOps = dbFilterControlsContainer.querySelectorAll('.filter-op');
-            const filterVals = dbFilterControlsContainer.querySelectorAll('.filter-val');
-            filterOps.forEach(select => select.value = '');
-            filterVals.forEach(input => {
-                input.value = '';
-                input.style.display = 'block'; // Ensure value input is visible again
+            const filterItems = dbFilterControlsContainer.querySelectorAll('.filter-group-item');
+            filterItems.forEach(item => {
+                item.querySelector('.filter-op').value = '';
+                const valInput = item.querySelector('.filter-val');
+                valInput.value = '';
+                valInput.style.display = 'block';
             });
             dbViewState.currentFilters = [];
             dbViewState.currentPage = 1;
