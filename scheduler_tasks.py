@@ -168,16 +168,58 @@ def run_scheduled_booking_csv_backup(app):
     """
     with app.app_context():
         logger = app.logger
-        logger.info("Starting scheduled booking CSV backup...")
+        logger.info("Starting scheduled booking CSV backup based on configured settings...")
         try:
             if not backup_bookings_csv:
-                logger.error("Scheduled booking CSV backup: backup_bookings_csv function not available/imported.")
+                logger.error("Scheduled booking CSV backup: backup_bookings_csv function not available/imported. Cannot proceed.")
                 return
 
-            success = backup_bookings_csv(app, socketio_instance=None, task_id=None)
+            settings = app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS', {})
+            # 'enabled' flag is checked by the scheduler job adder in app_factory,
+            # so if this job runs, it's assumed to be enabled.
+            # However, settings might be missing if config file was deleted after app start.
+            if not settings:
+                logger.warning("Scheduled booking CSV backup: Settings not found in app.config. Using fallback (all bookings).")
+
+            range_type = settings.get('range_type', 'all')
+            range_label = range_type # Used for filename and logging
+
+            start_date_dt = None
+            end_date_dt = None
+
+            # Consistent with manual backup date logic: end_date is start of next day (exclusive)
+            # and start_date is X days before that.
+            # All datetime objects should be timezone-aware (UTC) for consistency.
+            if range_type != 'all':
+                utcnow = datetime.now(timezone.utc)
+                # Set end_date_dt to be the beginning of "tomorrow" UTC to include all of "today"
+                end_date_dt = datetime(utcnow.year, utcnow.month, utcnow.day, tzinfo=timezone.utc) + timedelta(days=1)
+
+                if range_type == "1day":
+                    start_date_dt = end_date_dt - timedelta(days=1)
+                elif range_type == "3days":
+                    start_date_dt = end_date_dt - timedelta(days=3)
+                elif range_type == "7days":
+                    start_date_dt = end_date_dt - timedelta(days=7)
+                else:
+                    logger.warning(f"Scheduled booking CSV backup: Unknown range_type '{range_type}'. Defaulting to 'all'.")
+                    range_label = 'all' # Fallback range_label
+
+            task_id_str = f"scheduled_booking_csv_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+            logger.info(f"Running scheduled booking CSV backup for range: {range_label}, Start: {start_date_dt}, End: {end_date_dt}. Task ID: {task_id_str}")
+
+            success = backup_bookings_csv(
+                app=app,
+                socketio_instance=None, # Scheduler runs non-interactively
+                task_id=task_id_str,
+                start_date_dt=start_date_dt,
+                end_date_dt=end_date_dt,
+                range_label=range_label
+            )
+
             if success:
-                logger.info("Scheduled booking CSV backup completed successfully.")
-                add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_SUCCESS", details="Scheduled booking CSV backup successful.", username="System")
+                logger.info(f"Scheduled booking CSV backup (range: {range_label}) completed successfully.")
+                add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_SUCCESS", details=f"Scheduled booking CSV backup (range: {range_label}) successful.", username="System")
             else:
                 logger.error("Scheduled booking CSV backup failed.")
                 add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_FAILED", details="Scheduled booking CSV backup failed.", username="System")

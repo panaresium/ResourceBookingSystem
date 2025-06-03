@@ -175,47 +175,54 @@
 
         <form method="POST" action="{{ url_for('admin_ui.manual_backup_bookings_csv_route') }}" style="margin-bottom: 15px;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-            <button type="submit" class="btn btn-primary" onclick="return confirm('{{ _('Are you sure you want to manually back up all bookings to a new CSV file?') }}');">
-                <i class="fas fa-cloud-upload-alt"></i> {{ _('Backup All Bookings to CSV Now') }}
-            </button>
+            <div class="form-row align-items-center">
+                <div class="col-auto">
+                    <label class="sr-only" for="booking_backup_range">{{ _('Select Backup Range') }}</label>
+                    <select class="custom-select mr-sm-2" id="booking_backup_range" name="backup_range_type">
+                        <option value="all" selected>{{ _('All Bookings') }}</option>
+                        <option value="1day">{{ _('Last 1 Day') }}</option>
+                        <option value="3days">{{ _('Last 3 Days') }}</option>
+                        <option value="7days">{{ _('Last 7 Days') }}</option>
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-primary" onclick="return confirm('{{ _('Are you sure you want to manually back up bookings for the selected range to a new CSV file?') }}');">
+                        <i class="fas fa-cloud-upload-alt"></i> {{ _('Backup Bookings to CSV') }}
+                    </button>
+                </div>
+            </div>
         </form>
 
         {% if booking_csv_backups and booking_csv_backups|length > 0 %}
             <table class="table table-striped">
                 <thead>
                     <tr>
-                        <th>{{ _('Backup Timestamp (UTC)') }}</th>
+                        <th>{{ _('Backup Details') }}</th> {# Changed header #}
                         <th>{{ _('Actions') }}</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for backup_ts in booking_csv_backups %}
+                    {% for backup_item in booking_csv_backups %} {# Changed loop variable #}
                         <tr>
                             <td>
-                                {% set year = backup_ts[:4] %}
-                                {% set month = backup_ts[4:6] %}
-                                {% set day = backup_ts[6:8] %}
-                                {% set hour = backup_ts[9:11] %}
-                                {% set minute = backup_ts[11:13] %}
-                                {% set second = backup_ts[13:15] %}
-                                {{ year }}-{{ month }}-{{ day }} {{ hour }}:{{ minute }}:{{ second }}
+                                {{ backup_item.display_name }} {# Use new display_name field #}
                             </td>
                             <td>
-                                <form method="POST" action="{{ url_for('admin_ui.restore_booking_csv_route', timestamp_str=backup_ts) }}" style="display: inline;">
+                                <form method="POST" action="{{ url_for('admin_ui.restore_booking_csv_route', timestamp_str=backup_item.timestamp) }}" style="display: inline;">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                    <button type="submit" class="btn btn-warning btn-sm" onclick="return confirm('{{ _('Are you sure you want to restore bookings from CSV backup') }} {{ backup_ts }}? {{ _('This may add new bookings or skip duplicates based on existing data.') }}');">
+                                    <button type="submit" class="btn btn-warning btn-sm" onclick="return confirm('{{ _('Are you sure you want to restore bookings from CSV backup') }} \'{{ backup_item.display_name }}\'? {{ _('This may add new bookings or skip duplicates based on existing data.') }}');">
                                         {{ _('Restore Bookings from this CSV') }}
                                     </button>
                                 </form>
-                                <form method="POST" action="{{ url_for('admin_ui.verify_booking_csv_backup_route', timestamp_str=backup_ts) }}" style="display: inline; margin-left: 5px;">
+                                <form method="POST" action="{{ url_for('admin_ui.verify_booking_csv_backup_route', timestamp_str=backup_item.timestamp) }}" style="display: inline; margin-left: 5px;">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <button type="submit" class="btn btn-info btn-sm">
                                         <i class="fas fa-check-circle"></i> {{ _('Verify') }}
                                     </button>
                                 </form>
-                                <form method="POST" action="{{ url_for('admin_ui.delete_booking_csv_backup_route', timestamp_str=backup_ts) }}" style="display: inline; margin-left: 5px;">
+                                <form method="POST" action="{{ url_for('admin_ui.delete_booking_csv_backup_route', timestamp_str=backup_item.timestamp) }}" style="display: inline; margin-left: 5px;">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                    <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('{{ _('Are you sure you want to permanently delete the booking CSV backup for timestamp %(timestamp)s?', timestamp=backup_ts) }}');">
+                                    <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('{{ _('Are you sure you want to permanently delete the booking CSV backup for file %(filename)s?', filename=backup_item.filename) }}');">
                                         <i class="fas fa-trash-alt"></i> {{ _('Delete') }}
                                     </button>
                                 </form>
@@ -257,6 +264,53 @@
             </ul>
         </nav>
         {% endif %}
+    </section>
+
+    <hr>
+    <section id="booking-csv-schedule-section" class="mb-5">
+        {# Ensure the route name 'admin_ui.save_booking_csv_schedule_route' is what will be created later #}
+        <form method="POST" action="{{ url_for('admin_ui.save_booking_csv_schedule_route') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            <h3>{{ _('Schedule Periodic Booking CSV Backups') }}</h3>
+
+            <div class="form-group">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="booking_csv_schedule_enabled" name="booking_csv_schedule_enabled" value="true">
+                    <label class="form-check-label" for="booking_csv_schedule_enabled">
+                        {{ _('Enable Scheduled Booking CSV Backups') }}
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group col-md-3">
+                    <label for="booking_csv_schedule_interval_value">{{ _('Backup Interval Value') }}</label>
+                    <input type="number" class="form-control" id="booking_csv_schedule_interval_value" name="booking_csv_schedule_interval_value" value="24" min="1">
+                </div>
+                <div class="form-group col-md-3">
+                    <label for="booking_csv_schedule_interval_unit">{{ _('Interval Unit') }}</label>
+                    <select class="custom-select" id="booking_csv_schedule_interval_unit" name="booking_csv_schedule_interval_unit">
+                        <option value="hours" selected>{{ _('Hours') }}</option>
+                        <option value="days">{{ _('Days') }}</option>
+                        <option value="minutes">{{ _('Minutes') }}</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="booking_csv_schedule_range_type">{{ _('Backup Data Range for Schedule') }}</label>
+                <select class="custom-select" id="booking_csv_schedule_range_type" name="booking_csv_schedule_range_type">
+                    <option value="all" selected>{{ _('All Bookings') }}</option>
+                    <option value="1day">{{ _('Last 1 Day') }}</option>
+                    <option value="3days">{{ _('Last 3 Days') }}</option>
+                    <option value="7days">{{ _('Last 7 Days') }}</option>
+                </select>
+            </div>
+
+            <button type="submit" class="btn btn-success">
+                <i class="fas fa-save"></i> {{ _('Save Schedule Settings') }}
+            </button>
+        </form>
     </section>
 
     {# The System Troubleshooting Tools section that was here has been moved to admin_troubleshooting.html #}

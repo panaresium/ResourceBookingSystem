@@ -18,6 +18,11 @@ from azure_backup import list_available_backups, restore_full_backup, \
                          backup_bookings_csv, verify_backup_set, delete_backup_set, \
                          delete_booking_csv_backup, verify_booking_csv_backup
 # Removed duplicate model, db, auth, datetime imports that were already covered above or are standard
+import os
+import json
+from flask_babel import _ # For flash messages and other translatable strings
+from apscheduler.jobstores.base import JobLookupError
+from scheduler_tasks import run_scheduled_booking_csv_backup # For re-adding job
 
 admin_ui_bp = Blueprint('admin_ui', __name__, url_prefix='/admin', template_folder='../templates')
 
@@ -164,19 +169,51 @@ def manual_backup_bookings_csv_route():
         socketio_instance = socketio
 
     app_instance = current_app._get_current_object()
-    app_instance.logger.info(f"Manual booking CSV backup triggered by user {current_user.username if current_user else 'Unknown User'} with task ID {task_id}.")
+
+    range_type = request.form.get('backup_range_type', 'all')
+    start_date_dt = None
+    end_date_dt = None
+    range_label = range_type
+
+    utcnow = datetime.utcnow()
+    # Calculate end_date_dt as the beginning of tomorrow to include all of today
+    # For 'all', start_date_dt and end_date_dt remain None
+    if range_type != "all":
+        end_date_dt = datetime(utcnow.year, utcnow.month, utcnow.day) + timedelta(days=1)
+
+    if range_type == "1day":
+        start_date_dt = end_date_dt - timedelta(days=1)
+    elif range_type == "3days":
+        start_date_dt = end_date_dt - timedelta(days=3)
+    elif range_type == "7days":
+        start_date_dt = end_date_dt - timedelta(days=7)
+    elif range_type == "all": # Explicitly handle 'all' for clarity, though defaults cover it
+        start_date_dt = None
+        end_date_dt = None
+        range_label = "all"
+
+    log_detail = f"range: {range_label}"
+    if start_date_dt: log_detail += f", from: {start_date_dt.strftime('%Y-%m-%d')}"
+    if end_date_dt: log_detail += f", to: {end_date_dt.strftime('%Y-%m-%d')}"
+
+    app_instance.logger.info(f"Manual booking CSV backup ({log_detail}) triggered by user {current_user.username if current_user else 'Unknown User'} with task ID {task_id}.")
 
     try:
-        # backup_bookings_csv is expected to handle its own app_context for DB queries
-        # and emit socketio messages if socketio_instance is provided.
-        success = backup_bookings_csv(app=app_instance, socketio_instance=socketio_instance, task_id=task_id)
+        success = backup_bookings_csv(
+            app=app_instance,
+            socketio_instance=socketio_instance,
+            task_id=task_id,
+            start_date_dt=start_date_dt,
+            end_date_dt=end_date_dt,
+            range_label=range_label
+        )
         if success:
-            flash(_('Manual booking CSV backup initiated successfully. Check logs or SocketIO messages for progress/completion.'), 'success')
+            flash(_('Manual booking CSV backup for range "%(range)s" initiated successfully. Check logs or SocketIO messages for progress/completion.', range=range_label), 'success')
         else:
-            flash(_('Manual booking CSV backup failed to complete successfully. Please check server logs.'), 'warning') # Changed to warning as some part might have run
+            flash(_('Manual booking CSV backup for range "%(range)s" failed to complete successfully. Please check server logs.', range=range_label), 'warning')
     except Exception as e:
-        app_instance.logger.error(f"Exception during manual booking CSV backup initiation by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
-        flash(_('An unexpected error occurred while starting the manual booking CSV backup. Check server logs.'), 'danger')
+        app_instance.logger.error(f"Exception during manual booking CSV backup (range: {range_label}) initiation by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
+        flash(_('An unexpected error occurred while starting the manual booking CSV backup for range "%(range)s". Check server logs.', range=range_label), 'danger')
 
     return redirect(url_for('admin_ui.serve_backup_restore_page'))
 
@@ -203,6 +240,116 @@ def delete_booking_csv_backup_route(timestamp_str):
     except Exception as e:
         app_instance.logger.error(f"Exception during booking CSV backup deletion for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
         flash(_('An unexpected error occurred while deleting the booking CSV backup for %(timestamp)s. Check server logs.', timestamp=timestamp_str), 'danger')
+
+    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+
+
+@admin_ui_bp.route('/save_booking_csv_schedule', methods=['POST']) # Corrected path to be relative to blueprint
+@login_required
+@permission_required('manage_system')
+def save_booking_csv_schedule_route():
+    current_app.logger.info(f"User {current_user.username} attempting to save Booking CSV Backup schedule settings.")
+
+    # Construct config file path within the route to use current_app context
+    booking_csv_schedule_config_file = os.path.join(current_app.config['DATA_DIR'], 'booking_csv_schedule.json')
+
+    try:
+        is_enabled = request.form.get('booking_csv_schedule_enabled') == 'true'
+        interval_value_str = request.form.get('booking_csv_schedule_interval_value', '24')
+        interval_unit = request.form.get('booking_csv_schedule_interval_unit', 'hours')
+        range_type = request.form.get('booking_csv_schedule_range_type', 'all')
+
+        # Validate Interval Value
+        try:
+            interval_value = int(interval_value_str)
+            if interval_value <= 0:
+                raise ValueError(_("Interval must be positive."))
+        except ValueError as ve:
+            flash(str(ve) or _('Invalid interval value. Please enter a positive integer.'), 'danger')
+            return redirect(url_for('admin_ui.serve_backup_restore_page'))
+
+        # Validate Interval Unit
+        allowed_units = ['minutes', 'hours', 'days']
+        if interval_unit not in allowed_units:
+            flash(_('Invalid interval unit specified.'), 'danger')
+            return redirect(url_for('admin_ui.serve_backup_restore_page'))
+
+        # Validate Range Type
+        allowed_range_types = ['all', '1day', '3days', '7days']
+        if range_type not in allowed_range_types:
+            flash(_('Invalid backup data range type specified.'), 'danger')
+            return redirect(url_for('admin_ui.serve_backup_restore_page'))
+
+        schedule_settings = {
+            'enabled': is_enabled,
+            'interval_value': interval_value,
+            'interval_unit': interval_unit,
+            'range_type': range_type
+        }
+
+        os.makedirs(os.path.dirname(booking_csv_schedule_config_file), exist_ok=True)
+        with open(booking_csv_schedule_config_file, 'w') as f:
+            json.dump(schedule_settings, f, indent=4)
+
+        current_app.logger.info(f"Booking CSV Backup schedule settings saved to file by {current_user.username}: {schedule_settings}")
+        flash(_('Booking CSV backup schedule settings saved successfully.'), 'success')
+
+        # Update current app config with new settings
+        current_app.config['BOOKING_CSV_SCHEDULE_SETTINGS'] = schedule_settings
+        current_app.logger.info(f"Updated app.config['BOOKING_CSV_SCHEDULE_SETTINGS'] to: {schedule_settings}")
+
+        # Dynamically update the scheduler
+        scheduler = getattr(current_app, 'scheduler', None)
+        if scheduler and scheduler.running:
+            job_id = 'scheduled_booking_csv_backup_job'
+            try:
+                existing_job = scheduler.get_job(job_id)
+                if existing_job:
+                    scheduler.remove_job(job_id)
+                    current_app.logger.info(f"Removed existing scheduler job '{job_id}' to apply new schedule.")
+            except JobLookupError:
+                current_app.logger.info(f"Scheduler job '{job_id}' not found, no need to remove before potentially adding.")
+            except Exception as e_remove: # Catch other potential errors during job removal
+                current_app.logger.error(f"Error removing existing scheduler job '{job_id}': {e_remove}", exc_info=True)
+                flash(_('Error removing old schedule job. Please check logs. New schedule might not apply until restart.'), 'warning')
+
+            if schedule_settings.get('enabled'):
+                interval_value = schedule_settings.get('interval_value')
+                interval_unit = schedule_settings.get('interval_unit')
+
+                job_kwargs = {}
+                if interval_unit == 'minutes': job_kwargs['minutes'] = interval_value
+                elif interval_unit == 'hours': job_kwargs['hours'] = interval_value
+                elif interval_unit == 'days': job_kwargs['days'] = interval_value
+                else:
+                    # This case should ideally be prevented by earlier validation
+                    current_app.logger.error(f"Invalid interval unit '{interval_unit}' for scheduler. Defaulting to 24 hours.")
+                    job_kwargs = {'hours': 24} # Fallback
+
+                try:
+                    scheduler.add_job(
+                        func=run_scheduled_booking_csv_backup, # Direct function reference
+                        trigger='interval',
+                        id=job_id,
+                        **job_kwargs,
+                        args=[current_app._get_current_object()] # Pass app instance for the job context
+                    )
+                    flash(_('Schedule updated. New settings will apply. The job has been re-added/updated.'), 'info')
+                    current_app.logger.info(f"Added/Updated scheduler job '{job_id}' with interval {interval_value} {interval_unit}.")
+                except Exception as e_add_job:
+                    current_app.logger.error(f"Failed to add/update scheduler job '{job_id}': {e_add_job}", exc_info=True)
+                    flash(_('Failed to apply new schedule settings to the scheduler. Please check logs.'), 'danger')
+            else:
+                # If schedule is disabled and job was removed (or not found), this is the desired state.
+                flash(_('Schedule updated and is now disabled. The job has been removed if it existed.'), 'info')
+                current_app.logger.info(f"Scheduled booking CSV backup is now disabled. Job '{job_id}' removed (if it existed).")
+        elif not scheduler or not scheduler.running:
+            current_app.logger.warning("Scheduler not found or not running. Schedule changes will apply on next app start.")
+            flash(_('Schedule settings saved, but scheduler is not running. Changes will apply on restart.'), 'warning')
+
+    except Exception as e:
+        current_app.logger.error(f"Error saving Booking CSV backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
+        flash(_('An error occurred while saving the schedule settings. Please check the logs.'), 'danger')
 
     return redirect(url_for('admin_ui.serve_backup_restore_page'))
 

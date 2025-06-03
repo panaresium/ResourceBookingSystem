@@ -71,6 +71,58 @@ def _ensure_sqlite_configured_factory_hook(current_app, current_db):
     # This function will be registered with @app.before_request
     configure_sqlite_pragmas_factory(current_app, current_db)
 
+# Helper function to load Booking CSV schedule settings
+def load_booking_csv_schedule_settings(app):
+    default_settings = {
+        'enabled': False,
+        'interval_value': 24,
+        'interval_unit': 'hours', # 'minutes', 'hours', 'days'
+        'range_type': 'all'    # 'all', '1day', '3days', '7days'
+    }
+    # Ensure DATA_DIR is available in app.config before this function is called.
+    if not app.config.get('DATA_DIR'):
+        app.logger.error("DATA_DIR not configured in app. Cannot load booking_csv_schedule.json. Using defaults.")
+        return default_settings
+
+    config_file_path = os.path.join(app.config['DATA_DIR'], 'booking_csv_schedule.json')
+
+    if os.path.exists(config_file_path):
+        try:
+            with open(config_file_path, 'r') as f:
+                settings = json.load(f)
+
+            # Basic validation/merge with defaults
+            validated_settings = default_settings.copy()
+            # Only update keys that are expected and have correct types if possible
+            for key, default_value in default_settings.items():
+                if key in settings and isinstance(settings[key], type(default_value)):
+                    validated_settings[key] = settings[key]
+                elif key in settings: # Log type mismatch or unexpected key
+                    app.logger.warning(f"Booking CSV schedule config: Key '{key}' has unexpected type or value '{settings[key]}'. Using default for this key.")
+
+            # Specific validation for interval_unit and range_type against allowed values
+            if validated_settings['interval_unit'] not in ['minutes', 'hours', 'days']:
+                app.logger.warning(f"Booking CSV schedule config: Invalid interval_unit '{validated_settings['interval_unit']}'. Reverting to default.")
+                validated_settings['interval_unit'] = default_settings['interval_unit']
+            if not isinstance(validated_settings.get('interval_value'), int) or validated_settings.get('interval_value') <= 0:
+                app.logger.warning(f"Booking CSV schedule config: Invalid interval_value '{validated_settings.get('interval_value', 'Not Set')}'. Reverting to default.")
+                validated_settings['interval_value'] = default_settings['interval_value']
+
+            if validated_settings['range_type'] not in ['all', '1day', '3days', '7days']:
+                app.logger.warning(f"Booking CSV schedule config: Invalid range_type '{validated_settings['range_type']}'. Reverting to default.")
+                validated_settings['range_type'] = default_settings['range_type']
+
+            # Ensure 'enabled' is a boolean
+            if not isinstance(validated_settings.get('enabled'), bool):
+                app.logger.warning(f"Booking CSV schedule config: Invalid type for 'enabled' ('{validated_settings.get('enabled')}'). Reverting to default (False).")
+                validated_settings['enabled'] = default_settings['enabled']
+
+            return validated_settings
+        except (json.JSONDecodeError, IOError) as e:
+            app.logger.error(f"Error loading or parsing booking_csv_schedule.json: {e}. Using default settings.", exc_info=True)
+            return default_settings
+    return default_settings
+
 def create_app(config_object=config):
     app = Flask(__name__, template_folder='templates', static_folder='static')
     # Corrected template_folder and static_folder paths assuming app_factory.py is in root.
@@ -78,7 +130,6 @@ def create_app(config_object=config):
 
     # 1. Load Configuration
     app.config.from_object(config_object)
-
     # Initialize DB early for startup restore if needed
     db.init_app(app)
 
@@ -89,6 +140,9 @@ def create_app(config_object=config):
     if not os.path.exists(app.config['DATA_DIR']): # From config.py
         os.makedirs(app.config['DATA_DIR'])
 
+    # Load Booking CSV Schedule Settings after DATA_DIR is ensured
+    app.config['BOOKING_CSV_SCHEDULE_SETTINGS'] = load_booking_csv_schedule_settings(app)
+    app.logger.info(f"Loaded Booking CSV Schedule Settings: {app.config['BOOKING_CSV_SCHEDULE_SETTINGS']}")
 
     # 2. Initialize Logging (Basic, can be expanded)
     # Using Flask's built-in logger. Configuration can be enhanced.
@@ -246,14 +300,35 @@ def create_app(config_object=config):
             scheduler.add_job(run_scheduled_backup_job, 'interval', minutes=app.config.get('SCHEDULER_BACKUP_JOB_INTERVAL_MINUTES', 60), args=[app]) # New config option
 
         if run_scheduled_booking_csv_backup: # Check if the function exists
-            booking_csv_interval = app.config.get('BOOKINGS_CSV_BACKUP_INTERVAL_MINUTES', 60) # Default to 60 minutes
-            scheduler.add_job(
-                run_scheduled_booking_csv_backup,
-                'interval',
-                minutes=booking_csv_interval,
-                args=[app]
-            )
-            app.logger.info(f"Scheduled booking CSV backup job added with interval: {booking_csv_interval} minutes.")
+            booking_schedule_settings = app.config['BOOKING_CSV_SCHEDULE_SETTINGS']
+            if booking_schedule_settings.get('enabled'):
+                interval_value = booking_schedule_settings.get('interval_value', 24) # Default from helper if somehow missing
+                interval_unit = booking_schedule_settings.get('interval_unit', 'hours') # Default from helper
+
+                # APScheduler uses plural for interval units (minutes, hours, days)
+                # However, the add_job function takes kwargs like hours=X, minutes=Y, days=Z
+                job_kwargs = {}
+                if interval_unit == 'minutes':
+                    job_kwargs['minutes'] = interval_value
+                elif interval_unit == 'hours':
+                    job_kwargs['hours'] = interval_value
+                elif interval_unit == 'days':
+                    job_kwargs['days'] = interval_value
+                else:
+                    # Should not happen due to validation in load_booking_csv_schedule_settings
+                    app.logger.warning(f"Invalid interval unit '{interval_unit}' from settings. Defaulting to 24 hours.")
+                    job_kwargs['hours'] = 24
+
+                scheduler.add_job(
+                    run_scheduled_booking_csv_backup,
+                    'interval',
+                    id='scheduled_booking_csv_backup_job', # Add an ID for later modification/removal
+                    **job_kwargs,
+                    args=[app] # Pass the app instance itself
+                )
+                app.logger.info(f"Scheduled booking CSV backup job added: Interval {interval_value} {interval_unit}, Range: {booking_schedule_settings.get('range_type')}.")
+            else:
+                app.logger.info("Scheduled booking CSV backup is disabled in settings. Job not added.")
 
         if azure_backup_if_changed: # Legacy Azure backup
              scheduler.add_job(azure_backup_if_changed, 'interval', minutes=app.config.get('AZURE_BACKUP_INTERVAL_MINUTES', 60))
