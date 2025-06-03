@@ -63,10 +63,14 @@ class FloorMap(db.Model):
     image_filename = db.Column(db.String(255), nullable=False, unique=True)
     location = db.Column(db.String(100), nullable=True)
     floor = db.Column(db.String(50), nullable=True)
+    # New offset columns
+    offset_x = db.Column(db.Integer, nullable=False, default=0)
+    offset_y = db.Column(db.Integer, nullable=False, default=0)
 
     def __repr__(self):
+        # Consider adding offsets to repr if useful for debugging
         loc_floor = f"{self.location or 'N/A'} - Floor {self.floor}" if self.location or self.floor else ""
-        return f"<FloorMap {self.name} ({loc_floor})>"
+        return f"<FloorMap {self.name} ({loc_floor}) Offsets(x:{self.offset_x}, y:{self.offset_y})>"
 
 class BookingSettings(db.Model):
     id = db.Column(db.Integer, primary_key=True)
