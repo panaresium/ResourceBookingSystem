@@ -5,12 +5,12 @@
 {% block content %}
     <h1>{{ _('User Management') }}</h1>
     <button id="add-new-user-btn" class="button">{{ _('Add New User') }}</button>
+    <button id="bulk-add-users-btn" class="button">{{ _('Bulk Add Users') }}</button> {# New Button #}
     <button id="export-users-btn" class="button">{{ _('Export Users') }}</button>
     <button id="import-users-btn" class="button">{{ _('Import Users') }}</button>
     <input type="file" id="import-users-file" accept="application/json" style="display:none;">
     <button id="delete-selected-users-btn" class="button danger">{{ _('Delete Selected') }}</button>
-    <button id="bulk-edit-users-btn" class="button">{{ _('Bulk Edit Selected') }}</button>
-    <button id="bulk-add-users-btn" class="button success">{{ _('Bulk Add Users (Pattern)') }}</button>
+    <button id="bulk-edit-selected-users-btn" class="button action">{{ _('Bulk Edit Selected') }}</button> {# New Button #}
     <div class="filters-section" style="margin-top:15px;">
         <h3>{{ _('Filters') }}</h3>
         <label for="user-filter-username">{{ _('Username:') }}</label>
@@ -87,6 +87,70 @@
 
                 <button type="submit" class="button" style="margin-top: 15px;">{{ _('Save User') }}</button>
                 <div id="user-form-modal-status" class="status-message" style="margin-top: 10px;"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal for Bulk Add Users -->
+    <div id="bulk-add-users-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close-modal-btn" data-modal-id="bulk-add-users-modal">&times;</span>
+            <h3>{{ _('Bulk Add Users') }}</h3>
+            <form id="bulk-add-users-form">
+                <div>
+                    <label for="bulk-add-data">{{ _('User Data (CSV Format):') }}</label>
+                    <textarea id="bulk-add-data" name="bulk-add-data" rows="10" style="width: 95%;" placeholder="username,email,password,isAdmin (true/false),role_ids (comma-separated)"></textarea>
+                    <small>
+                        {{ _('Instructions: Each line should be in the format: username,email,password,isAdmin (true/false),role_ids (e.g., 1,2,3)') }}<br>
+                        {{ _('isAdmin and role_ids are optional. Default for isAdmin is false. Example:') }}<br>
+                        <code>newuser1,user1@example.com,Pass123,false,1,2</code><br>
+                        <code>newuser2,user2@example.com,Pass456,true</code><br>
+                        <code>newuser3,user3@example.com,Pass789</code>
+                    </small>
+                </div>
+                <button type="submit" class="button" style="margin-top: 15px;">{{ _('Submit Bulk Add') }}</button>
+                <div id="bulk-add-status" class="status-message" style="margin-top: 10px;"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal for Bulk Edit Users -->
+    <div id="bulk-edit-users-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close-modal-btn" data-modal-id="bulk-edit-users-modal">&times;</span>
+            <h3>{{ _('Bulk Edit Selected Users') }}</h3>
+            <p> {{ _('Editing') }} <span id="bulk-edit-selected-count">0</span> {{ _('user(s).') }} {{ _('Only fill fields you want to change for all selected users.') }}</p>
+            <form id="bulk-edit-users-form">
+                <div>
+                    <label for="bulk-edit-password">{{ _('New Password:') }}</label>
+                    <input type="password" id="bulk-edit-password" name="bulk_edit_password">
+                    <small>{{ _('(Leave blank to keep current passwords)') }}</small>
+                </div>
+                <div>
+                    <label for="bulk-edit-confirm-password">{{ _('Confirm New Password:') }}</label>
+                    <input type="password" id="bulk-edit-confirm-password" name="bulk_edit_confirm_password">
+                </div>
+                <div style="margin-top: 10px;">
+                    <input type="checkbox" id="bulk-edit-is-admin-enable" name="bulk_edit_is_admin_enable">
+                    <label for="bulk-edit-is-admin-enable" style="font-weight: normal;">{{ _('Change Admin Status?') }}</label>
+                    <select id="bulk-edit-is-admin" name="bulk_edit_is_admin" disabled style="display: inline-block; width: auto; margin-left: 5px;">
+                        <option value="true">{{ _('Set as Admin') }}</option>
+                        <option value="false">{{ _('Set as Non-Admin') }}</option>
+                    </select>
+                </div>
+
+                <div style="margin-top: 15px;">
+                    <h4>{{ _('Set Roles (Replaces existing roles for selected users):') }}</h4>
+                     <input type="checkbox" id="bulk-edit-roles-enable" name="bulk_edit_roles_enable">
+                    <label for="bulk-edit-roles-enable" style="font-weight: normal;">{{ _('Change Roles?') }}</label>
+                    <div id="bulk-edit-roles-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding:5px; margin-top: 5px;">
+                        <!-- Role checkboxes will be populated here by JavaScript -->
+                        <small>{{ _('Loading roles...') }}</small>
+                    </div>
+                </div>
+
+                <button type="submit" class="button" style="margin-top: 15px;">{{ _('Submit Bulk Edit') }}</button>
+                <div id="bulk-edit-status" class="status-message" style="margin-top: 10px;"></div>
             </form>
         </div>
     </div>
@@ -232,3 +296,4 @@
         </form>
     </div>
 </div>
+

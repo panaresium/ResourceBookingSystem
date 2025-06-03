@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Booking Settings - Smart Resource Booking') }}{% endblock %}
+
+{% block content %}
+    <h1>{{ _('Booking Settings') }}</h1>
+
+    <form method="POST" action="{{ url_for('admin_ui.update_booking_settings') }}" class="form-stacked">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+        <div class="form-group">
+            <input type="checkbox" id="allow_past_bookings" name="allow_past_bookings" {% if settings.allow_past_bookings %}checked{% endif %}>
+            <label for="allow_past_bookings" style="display: inline-block; margin-left: 5px;">{{ _('Allow booking creation in the past') }}</label>
+        </div>
+
+        <div class="form-group">
+            <label for="max_booking_days_in_future">{{ _('Maximum days in the future a booking can be made (leave empty for no limit):') }}</label>
+            <input type="number" id="max_booking_days_in_future" name="max_booking_days_in_future"
+                   value="{{ settings.max_booking_days_in_future if settings.max_booking_days_in_future is not none else '' }}"
+                   class="form-control" min="0">
+        </div>
+
+        <div class="form-group">
+            <input type="checkbox" id="allow_multiple_resources_same_time" name="allow_multiple_resources_same_time" {% if settings.allow_multiple_resources_same_time %}checked{% endif %}>
+            <label for="allow_multiple_resources_same_time" style="display: inline-block; margin-left: 5px;">{{ _('Allow users to book multiple resources for the same time slot') }}</label>
+        </div>
+
+        <div class="form-group">
+            <label for="max_bookings_per_user">{{ _('Maximum active bookings per user (leave empty for no limit):') }}</label>
+            <input type="number" id="max_bookings_per_user" name="max_bookings_per_user"
+                   value="{{ settings.max_bookings_per_user if settings.max_bookings_per_user is not none else '' }}"
+                   class="form-control" min="0">
+        </div>
+
+        <div class="form-group">
+            <input type="checkbox" id="enable_check_in_out" name="enable_check_in_out" {% if settings.enable_check_in_out %}checked{% endif %}>
+            <label for="enable_check_in_out" style="display: inline-block; margin-left: 5px;">{{ _('Enable Check-in / Check-out feature for bookings') }}</label>
+        </div>
+
+        <div style="margin-top: 20px;">
+            <button type="submit" class="button primary-button">{{ _('Save Settings') }}</button>
+        </div>
+    </form>
+
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
+    {# Add any specific JS for this page if needed in the future #}
+{% endblock %}

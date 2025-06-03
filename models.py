@@ -68,6 +68,17 @@ class FloorMap(db.Model):
         loc_floor = f"{self.location or 'N/A'} - Floor {self.floor}" if self.location or self.floor else ""
         return f"<FloorMap {self.name} ({loc_floor})>"
 
+class BookingSettings(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    allow_past_bookings = db.Column(db.Boolean, default=False)
+    max_booking_days_in_future = db.Column(db.Integer, nullable=True, default=None)
+    allow_multiple_resources_same_time = db.Column(db.Boolean, default=False)
+    max_bookings_per_user = db.Column(db.Integer, nullable=True, default=None)
+    enable_check_in_out = db.Column(db.Boolean, default=False)
+
+    def __repr__(self):
+        return f"<BookingSettings {self.id}>"
+
 # Association table for Resource and Role (Many-to-Many for resource-specific role permissions)
 resource_roles_table = db.Table('resource_roles',
     db.Column('resource_id', db.Integer, db.ForeignKey('resource.id'), primary_key=True),

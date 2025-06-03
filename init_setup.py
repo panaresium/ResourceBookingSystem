@@ -17,6 +17,7 @@ from models import (
     Role,
     AuditLog,
     FloorMap,
+    WaitlistEntry,
     resource_roles_table, # Assuming these are still relevant and defined in models.py
     user_roles_table    # or directly in extensions.py if preferred for table instances
 )
@@ -206,17 +207,14 @@ def init_db(force=False):
         # If it doesn't exist, create_all makes them, then we might not need these.
         # For robustness, call ensure_all_migrations. If tables don't exist, they'll error gracefully.
         # This is better handled by proper migration tools like Alembic usually.
-        if DB_PATH.exists():
-             current_app.logger.info("Database file exists. Ensuring all schema elements (columns) are present before ORM operations.")
-             ensure_all_migrations()
-
-
         current_app.logger.info("Creating database tables (db.create_all())...")
         db.create_all() # This creates tables based on models if they don't exist.
         current_app.logger.info("Database tables creation/verification step completed.")
 
-        # If tables were newly created by create_all, ensure_all_migrations might be more relevant AFTER it.
-        # This part is tricky without a full migration system. For now, this order.
+        # Now that tables are guaranteed to exist, run migrations/column checks.
+        # This is relevant whether the DB file existed before or was just created.
+        current_app.logger.info("Ensuring all schema elements (columns) are present after table creation.")
+        ensure_all_migrations()
 
         if not force:
             # Check if any of the core tables have data
@@ -259,26 +257,60 @@ def init_db(force=False):
             # Default Admin User from config or hardcoded fallback
             default_admin_username = current_app.config.get('DEFAULT_ADMIN_USERNAME', 'admin')
             default_admin_email = current_app.config.get('DEFAULT_ADMIN_EMAIL', 'admin@example.com')
-            default_admin_password = current_app.config.get('DEFAULT_ADMIN_PASSWORD', 'ChangeMe123!')
+            # Changed default admin password
+            default_admin_password = 'admin'
 
-            admin_role = Role(name="Administrator", description="Full system access", permissions="all_permissions,view_analytics,manage_bookings,manage_system,manage_users,manage_resources,manage_floor_maps")
-            standard_role = Role(name="StandardUser", description="Can make bookings and view resources", permissions="make_bookings,view_resources")
+            # Role Handling
+            admin_role = Role.query.filter_by(name="Administrator").first()
+            if not admin_role:
+                admin_role = Role(name="Administrator", description="Full system access", permissions="all_permissions,view_analytics,manage_bookings,manage_system,manage_users,manage_resources,manage_floor_maps")
+                db.session.add(admin_role)
+                current_app.logger.info("Administrator role created.")
+            else:
+                current_app.logger.info("Administrator role already exists.")
 
-            admin_user = User(username=default_admin_username, email=default_admin_email, is_admin=True)
-            admin_user.set_password(default_admin_password) # Use the method to hash password
+            standard_role = Role.query.filter_by(name="StandardUser").first()
+            if not standard_role:
+                standard_role = Role(name="StandardUser", description="Can make bookings and view resources", permissions="make_bookings,view_resources")
+                db.session.add(standard_role)
+                current_app.logger.info("StandardUser role created.")
+            else:
+                current_app.logger.info("StandardUser role already exists.")
 
-            standard_user = User(username="user", email="user@example.com", is_admin=False)
-            standard_user.set_password("userpass")
+            # Commit roles if new ones were added to ensure they have IDs before user association
+            # This commit is fine here, or could be part of the larger commit at the end.
+            # For clarity, let's commit them if they were added.
+            if not Role.query.filter_by(name="Administrator").first() or not Role.query.filter_by(name="StandardUser").first():
+                 db.session.commit() # Commit if any role was newly added.
 
-            admin_user.roles.append(admin_role)
-            standard_user.roles.append(standard_role)
-            db.session.add_all([admin_role, standard_role, admin_user, standard_user])
-            db.session.commit()
-            current_app.logger.warning(
-                f"IMPORTANT SECURITY WARNING: A default admin user ('{default_admin_username}') with a password "
-                f"has been created. This password MUST be changed immediately in a production environment."
-            )
-            current_app.logger.info("Default roles and users created.")
+            # Admin User Handling
+            admin_user = User.query.filter_by(username=default_admin_username).first()
+            if not admin_user:
+                admin_user = User(username=default_admin_username, email=default_admin_email, is_admin=True)
+                admin_user.set_password(default_admin_password) # Use new password
+                admin_user.roles.append(admin_role)
+                db.session.add(admin_user)
+                current_app.logger.info(f"Default admin user '{default_admin_username}' created.")
+                current_app.logger.warning(
+                    f"IMPORTANT SECURITY WARNING: A default admin user ('{default_admin_username}') with password '{default_admin_password}' "
+                    f"has been created. This password MUST be changed immediately in a production environment."
+                )
+            else:
+                current_app.logger.info(f"Default admin user '{default_admin_username}' already exists. Skipping creation.")
+
+            # Standard User Handling
+            standard_user = User.query.filter_by(username="user").first()
+            if not standard_user:
+                standard_user = User(username="user", email="user@example.com", is_admin=False)
+                standard_user.set_password("user") # Use new password
+                standard_user.roles.append(standard_role)
+                db.session.add(standard_user)
+                current_app.logger.info("Default standard user 'user' created.")
+            else:
+                current_app.logger.info("Default standard user 'user' already exists. Skipping creation.")
+
+            db.session.commit() # Commit all new users and role associations
+            current_app.logger.info("Default roles and users creation/verification process completed.")
         except Exception as e:
             db.session.rollback()
             current_app.logger.exception("Error creating default roles or users:")

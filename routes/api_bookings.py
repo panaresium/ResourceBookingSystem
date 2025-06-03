@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone, time
 # Assuming extensions.py contains db, socketio, mail
 from extensions import db, socketio, mail
 # Assuming models.py contains these model definitions
-from models import Booking, Resource, User, WaitlistEntry
+from models import Booking, Resource, User, WaitlistEntry, BookingSettings
 # Assuming utils.py contains these helper functions
 from utils import add_audit_log, parse_simple_rrule, send_email, send_slack_notification, send_teams_notification
 # Assuming auth.py contains permission_required decorator
@@ -55,6 +55,16 @@ def create_booking():
     if not resource:
         current_app.logger.warning(f"Booking attempt by {current_user.username} for non-existent resource ID: {resource_id}")
         return jsonify({'error': 'Resource not found.'}), 404
+
+    # Fetch Booking Settings
+    booking_settings = BookingSettings.query.first()
+
+    # Define effective settings, using defaults if booking_settings is None or specific values are not set
+    allow_past_bookings_effective = booking_settings.allow_past_bookings if booking_settings else False
+    max_booking_days_in_future_effective = booking_settings.max_booking_days_in_future if booking_settings and booking_settings.max_booking_days_in_future is not None else None
+    allow_multiple_resources_same_time_effective = booking_settings.allow_multiple_resources_same_time if booking_settings else False
+    max_bookings_per_user_effective = booking_settings.max_bookings_per_user if booking_settings and booking_settings.max_bookings_per_user is not None else None
+    # enable_check_in_out_effective = booking_settings.enable_check_in_out if booking_settings else False # Not used in this function directly
 
     # Permission Enforcement Logic
     can_book = False
@@ -105,6 +115,23 @@ def create_booking():
         current_app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} with invalid date/time format: {date_str} {start_time_str}-{end_time_str}")
         return jsonify({'error': 'Invalid date or time format.'}), 400
 
+    # Enforce allow_past_bookings
+    if not allow_past_bookings_effective:
+        # Use datetime.now(timezone.utc).date() for comparison to ensure timezone consistency
+        # new_booking_start_time is naive, convert to aware UTC if necessary, or compare dates directly if appropriate
+        # Assuming new_booking_start_time is effectively local to server, convert to UTC date or compare with local server date.
+        # For simplicity with current naive new_booking_start_time, comparing with datetime.utcnow().date()
+        if new_booking_start_time.date() < datetime.utcnow().date():
+            current_app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} in the past ({new_booking_start_time.date()}), not allowed by settings.")
+            return jsonify({'error': 'Booking in the past is not allowed.'}), 400
+
+    # Enforce max_booking_days_in_future
+    if max_booking_days_in_future_effective is not None:
+        max_allowed_date = datetime.utcnow().date() + timedelta(days=max_booking_days_in_future_effective)
+        if new_booking_start_time.date() > max_allowed_date:
+            current_app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} too far in future ({new_booking_start_time.date()}), limit is {max_booking_days_in_future_effective} days.")
+            return jsonify({'error': f'Bookings cannot be made more than {max_booking_days_in_future_effective} days in advance.'}), 400
+
     if resource.is_under_maintenance and (resource.maintenance_until is None or new_booking_start_time < resource.maintenance_until):
         until_str = resource.maintenance_until.isoformat() if resource.maintenance_until else 'until further notice'
         return jsonify({'error': f'Resource under maintenance until {until_str}.'}), 403
@@ -120,42 +147,67 @@ def create_booking():
         delta = timedelta(days=i) if freq == 'DAILY' else timedelta(weeks=i) if freq == 'WEEKLY' else timedelta(0)
         occurrences.append((new_booking_start_time + delta, new_booking_end_time + delta))
 
+    # Enforce max_bookings_per_user
+    if max_bookings_per_user_effective is not None and occurrences:
+        # Count active (non-past, non-cancelled/rejected) bookings for the user
+        # Ensure datetime.utcnow() is used for comparison with end_time
+        user_booking_count = Booking.query.filter(
+            Booking.user_name == current_user.username, # Assuming current_user.username is the correct field
+            Booking.end_time > datetime.utcnow(),      # Booking has not ended yet
+            Booking.status.notin_(['cancelled', 'rejected']) # Booking is active
+        ).count()
+
+        if user_booking_count + len(occurrences) > max_bookings_per_user_effective:
+            current_app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} would exceed max bookings per user ({max_bookings_per_user_effective}). Current: {user_booking_count}, Requested: {len(occurrences)}.")
+            return jsonify({'error': f'Cannot create new booking(s). You would exceed the maximum of {max_bookings_per_user_effective} bookings allowed per user.'}), 400
+
     if occurrences:
         first_occ_start, first_occ_end = occurrences[0]
-        first_slot_user_conflict = Booking.query.filter(
-            Booking.user_name == user_name_for_record,
-            Booking.start_time < first_occ_end,
-            Booking.end_time > first_occ_start
-        ).first()
+        if not allow_multiple_resources_same_time_effective:
+            first_slot_user_conflict = Booking.query.filter(
+                Booking.user_name == user_name_for_record,
+                Booking.start_time < first_occ_end,
+                Booking.end_time > first_occ_start,
+                Booking.status.notin_(['cancelled', 'rejected'])
+            ).first()
 
-        if first_slot_user_conflict:
-            conflicting_resource_name = first_slot_user_conflict.resource_booked.name if first_slot_user_conflict.resource_booked else "an unknown resource"
-            return jsonify({'error': f"You already have a booking for resource '{conflicting_resource_name}' from {first_slot_user_conflict.start_time.strftime('%H:%M')} to {first_slot_user_conflict.end_time.strftime('%H:%M')} that overlaps with the requested time slot on {first_occ_start.strftime('%Y-%m-%d')}."}), 409
+            if first_slot_user_conflict:
+                conflicting_resource_name = first_slot_user_conflict.resource_booked.name if first_slot_user_conflict.resource_booked else "an unknown resource"
+                current_app.logger.info(f"User {user_name_for_record} booking conflict (first slot) with booking {first_slot_user_conflict.id} for resource '{conflicting_resource_name}' due to allow_multiple_resources_same_time=False.")
+                return jsonify({'error': f"You already have a booking for resource '{conflicting_resource_name}' from {first_slot_user_conflict.start_time.strftime('%H:%M')} to {first_slot_user_conflict.end_time.strftime('%H:%M')} that overlaps with the requested time slot on {first_occ_start.strftime('%Y-%m-%d')}."}), 409
 
     for occ_start, occ_end in occurrences:
         conflicting = Booking.query.filter(
             Booking.resource_id == resource_id,
             Booking.start_time < occ_end,
-            Booking.end_time > occ_start
+            Booking.end_time > occ_start,
+            Booking.status.notin_(['cancelled', 'rejected'])
         ).first()
         if conflicting:
-            existing_waitlist_count = WaitlistEntry.query.filter_by(resource_id=resource_id).count()
-            if existing_waitlist_count < 2:
-                waitlist_entry = WaitlistEntry(resource_id=resource_id, user_id=current_user.id)
-                db.session.add(waitlist_entry)
-                current_app.logger.info(f"Added user {current_user.id} to waitlist for resource {resource_id} due to conflict with booking {conflicting.id}")
+            current_app.logger.info(f"Booking conflict for resource {resource_id} on slot {occ_start}-{occ_end} with existing booking {conflicting.id}.")
+            # Waitlist logic (condensed for brevity, assuming it's still desired)
+            if WaitlistEntry.query.filter_by(resource_id=resource_id).count() < current_app.config.get('MAX_WAITLIST_PER_RESOURCE', 2): # Example: make max waitlist configurable
+                existing_entry = WaitlistEntry.query.filter_by(resource_id=resource_id, user_id=current_user.id).first()
+                if not existing_entry:
+                    waitlist_entry = WaitlistEntry(resource_id=resource_id, user_id=current_user.id, timestamp=datetime.utcnow())
+                    db.session.add(waitlist_entry)
+                    # db.session.commit() # Commit waitlist entry separately or with main booking transaction
+                    current_app.logger.info(f"Added user {current_user.id} to waitlist for resource {resource_id} due to conflict with booking {conflicting.id}")
             return jsonify({'error': f"This time slot ({occ_start.strftime('%Y-%m-%d %H:%M')} to {occ_end.strftime('%Y-%m-%d %H:%M')}) on resource '{resource.name}' is already booked or conflicts. You may have been added to the waitlist if available."}), 409
 
-        user_conflicting_recurring = Booking.query.filter(
-            Booking.user_name == user_name_for_record,
-            Booking.resource_id != resource_id,
-            Booking.start_time < occ_end,
-            Booking.end_time > occ_start
-        ).first()
+        if not allow_multiple_resources_same_time_effective:
+            user_conflicting_recurring = Booking.query.filter(
+                Booking.user_name == user_name_for_record,
+                Booking.resource_id != resource_id, # Check on other resources
+                Booking.start_time < occ_end,
+                Booking.end_time > occ_start,
+                Booking.status.notin_(['cancelled', 'rejected'])
+            ).first()
 
-        if user_conflicting_recurring:
-            conflicting_resource_name = user_conflicting_recurring.resource_booked.name if user_conflicting_recurring.resource_booked else "an unknown resource"
-            return jsonify({'error': f"You already have a booking for resource '{conflicting_resource_name}' from {user_conflicting_recurring.start_time.strftime('%H:%M')} to {user_conflicting_recurring.end_time.strftime('%H:%M')} that overlaps with the requested occurrence on {occ_start.strftime('%Y-%m-%d')}."}), 409
+            if user_conflicting_recurring:
+                conflicting_resource_name = user_conflicting_recurring.resource_booked.name if user_conflicting_recurring.resource_booked else "an unknown resource"
+                current_app.logger.info(f"User {user_name_for_record} booking conflict (recurring slot) with booking {user_conflicting_recurring.id} for resource '{conflicting_resource_name}' due to allow_multiple_resources_same_time=False.")
+                return jsonify({'error': f"You already have a booking for resource '{conflicting_resource_name}' from {user_conflicting_recurring.start_time.strftime('%H:%M')} to {user_conflicting_recurring.end_time.strftime('%H:%M')} that overlaps with the requested occurrence on {occ_start.strftime('%Y-%m-%d')}."}), 409
 
     try:
         created_bookings = []
@@ -169,8 +221,10 @@ def create_booking():
                 recurrence_rule=recurrence_rule_str
             )
             db.session.add(new_booking)
-            db.session.commit() # Commit each booking to get ID for audit log and socketio
-            created_bookings.append(new_booking)
+            # Defer commit until all bookings in a recurring series are validated and added, or handle rollback for series
+        db.session.commit() # Commit all bookings in the series at once
+
+        for new_booking in created_bookings: # Log after successful commit of the series
             add_audit_log(action="CREATE_BOOKING", details=f"Booking ID {new_booking.id} for resource ID {resource_id} ('{resource.name}') created by user '{user_name_for_record}'. Title: '{title}'.")
             socketio.emit('booking_updated', {'action': 'created', 'booking_id': new_booking.id, 'resource_id': resource_id})
 
@@ -188,9 +242,9 @@ def create_booking():
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.exception(f"Error creating booking for resource {resource_id} by {current_user.username}:")
-        add_audit_log(action="CREATE_BOOKING_FAILED", details=f"Failed to create booking for resource ID {resource_id} by user '{current_user.username}'. Error: {str(e)}")
-        return jsonify({'error': 'Failed to create booking due to a server error.'}), 500
+        current_app.logger.exception(f"Error creating booking series for resource {resource_id} by {current_user.username}: {e}")
+        add_audit_log(action="CREATE_BOOKING_FAILED", details=f"Failed to create booking series for resource ID {resource_id} by user '{current_user.username}'. Error: {str(e)}")
+        return jsonify({'error': 'Failed to create booking series due to a server error.'}), 500
 
 @api_bookings_bp.route('/bookings/my_bookings', methods=['GET'])
 @login_required
