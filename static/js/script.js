@@ -1275,14 +1275,18 @@ document.addEventListener('DOMContentLoaded', function() {
                                     }
                                 }
 
-                                let userBookings = [];
-                                const loggedInUserId = sessionStorage.getItem('loggedInUserId'); // Check if user is logged in
+                                let userBookingsForDate = []; // Renamed from userBookings
+                                const loggedInUserId = sessionStorage.getItem('loggedInUserId');
                                 if (loggedInUserId) {
                                     try {
-                                        userBookings = await apiCall(`/api/bookings/my_bookings_for_date?date=${selectedDate}`, {}, null); // No specific message div for this background fetch
+                                        // Use selectedDate which is already defined in this scope
+                                        userBookingsForDate = await apiCall(`/api/bookings/my_bookings_for_date?date=${selectedDate}`, {}, modalStatusMsg);
+                                        if (modalStatusMsg && !modalStatusMsg.classList.contains('error')) hideMessage(modalStatusMsg); // Hide if successful
                                     } catch (error) {
                                         console.warn(`Could not fetch user's other bookings for ${selectedDate}:`, error.message);
-                                        // Proceed even if this fails, userBookings will be empty.
+                                        // showError is likely called by apiCall in modalStatusMsg, if not, uncomment below
+                                        // if(modalStatusMsg) showError(modalStatusMsg, "Could not load your other bookings. Availability may not reflect all your conflicts.");
+                                        userBookingsForDate = []; // Default to empty array on error
                                     }
                                 }
                                 
@@ -1290,7 +1294,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     modalSlotOptionsContainer.querySelector('[data-slot-type="first_half"]'),
                                     modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]'),
                                     modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]')
-                                ].filter(btn => btn); // Filter out nulls if any button not found
+                                ].filter(btn => btn);
 
                                 const definedSlots = {
                                     first_half: { name: 'First Half-Day', start: 8 * 60, end: 12 * 60, startTimeStr: "08:00:00", endTimeStr: "12:00:00" },
@@ -1298,7 +1302,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     full_day: { name: 'Full Day', start: 8 * 60, end: 17 * 60, startTimeStr: "08:00:00", endTimeStr: "17:00:00" }
                                 };
 
-                                function parseTimeHHMMSS(timeStr) { // e.g., "08:00:00"
+                                function parseTimeHHMMSS(timeStr) {
                                     const parts = timeStr.split(':');
                                     return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
                                 }
@@ -1309,11 +1313,14 @@ document.addEventListener('DOMContentLoaded', function() {
                                     if (!definedSlot) return;
 
                                     btn.disabled = false;
-                                    btn.classList.remove('slot-available', 'slot-booked-resource', 'slot-user-busy', 'selected', 'unavailable', 'booked', 'partial'); // Clear all relevant classes
-                                    const baseText = btn.textContent.split(" (")[0]; // Get original button text like "First Half-Day"
+                                    // Ensure all potentially conflicting classes are removed
+                                    btn.classList.remove('slot-available', 'slot-booked-resource', 'slot-user-busy', 'selected');
+                                    const baseText = btn.dataset.baseText || btn.textContent.split(" (")[0]; // Store base text if not already
+                                    btn.dataset.baseText = baseText;
+
 
                                     let isResourceBookedForSlot = false;
-                                    if (resourceBookings && resourceBookings.length > 0) {
+                                    if (resourceBookings && resourceBookings.length > 0) { // resourceBookings is general availability for THIS resource
                                         for (const booking of resourceBookings) {
                                             const bookingStartMinutes = parseTimeHHMMSS(booking.start_time);
                                             const bookingEndMinutes = parseTimeHHMMSS(booking.end_time);
@@ -1328,12 +1335,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                         btn.disabled = true;
                                         btn.classList.add('slot-booked-resource');
                                         btn.textContent = baseText + " (Booked)";
+                                        btn.title = "This time slot is booked on this resource.";
                                     } else {
                                         let isUserBusyElsewhere = false;
-                                        if (userBookings && userBookings.length > 0) {
-                                            for (const userBooking of userBookings) {
-                                                // Ensure it's a booking on a DIFFERENT resource
-                                                if (String(userBooking.resource_id) !== String(resourceId)) {
+                                        if (userBookingsForDate && userBookingsForDate.length > 0) {
+                                            for (const userBooking of userBookingsForDate) {
+                                                if (String(userBooking.resource_id) !== String(resourceId)) { // User booking on a DIFFERENT resource
                                                     const userBookingStartMinutes = parseTimeHHMMSS(userBooking.start_time);
                                                     const userBookingEndMinutes = parseTimeHHMMSS(userBooking.end_time);
                                                     if (Math.max(definedSlot.start, userBookingStartMinutes) < Math.min(definedSlot.end, userBookingEndMinutes)) {
@@ -1345,12 +1352,14 @@ document.addEventListener('DOMContentLoaded', function() {
                                         }
 
                                         if (isUserBusyElsewhere) {
+                                            btn.disabled = true; // Disable if user has a conflict
                                             btn.classList.add('slot-user-busy');
-                                            btn.textContent = baseText + " (User Busy)";
-                                            // Button remains enabled
+                                            btn.textContent = baseText + " (Your Conflict)";
+                                            btn.title = "You have another booking at this time on a different resource.";
                                         } else {
                                             btn.classList.add('slot-available');
                                             btn.textContent = baseText; // Or baseText + " (Available)"
+                                            btn.title = "This time slot is available.";
                                         }
                                     }
                                 });
@@ -1360,19 +1369,26 @@ document.addEventListener('DOMContentLoaded', function() {
                                 const secondHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]');
                                 const fullDayBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]');
 
-                                if (fullDayBtn && !fullDayBtn.classList.contains('slot-booked-resource')) { // Only if not already booked on this resource
+                                if (fullDayBtn && !fullDayBtn.classList.contains('slot-booked-resource')) {
                                     const firstHalfBookedOnResource = firstHalfBtn && firstHalfBtn.classList.contains('slot-booked-resource');
                                     const secondHalfBookedOnResource = secondHalfBtn && secondHalfBtn.classList.contains('slot-booked-resource');
+                                    const firstHalfUserBusy = firstHalfBtn && firstHalfBtn.classList.contains('slot-user-busy');
+                                    const secondHalfUserBusy = secondHalfBtn && secondHalfBtn.classList.contains('slot-user-busy');
 
                                     if (firstHalfBookedOnResource || secondHalfBookedOnResource) {
                                         fullDayBtn.disabled = true;
-                                        fullDayBtn.classList.remove('slot-available', 'slot-user-busy');
-                                        fullDayBtn.classList.add('slot-booked-resource'); // Treat as resource booked for simplicity
-                                        fullDayBtn.textContent = fullDayBtn.textContent.split(" (")[0] + " (Unavailable)";
+                                        fullDayBtn.classList.remove('slot-available', 'slot-user-busy'); // Clear other states
+                                        fullDayBtn.classList.add('slot-booked-resource');
+                                        fullDayBtn.textContent = (fullDayBtn.dataset.baseText || "Full Day") + " (Unavailable)";
+                                        fullDayBtn.title = "Part of the day is booked on this resource.";
+                                    } else if (firstHalfUserBusy || secondHalfUserBusy) {
+                                        fullDayBtn.disabled = true;
+                                        fullDayBtn.classList.remove('slot-available', 'slot-booked-resource'); // Clear other states
+                                        fullDayBtn.classList.add('slot-user-busy');
+                                        fullDayBtn.textContent = (fullDayBtn.dataset.baseText || "Full Day") + " (Your Conflict)";
+                                        fullDayBtn.title = "You have other bookings conflicting with part of this day.";
                                     }
-                                    // If user is busy in one half, full day might still be "User Busy" or "Available" depending on exact overlap logic desired.
-                                    // Current logic marks slot by slot. Full day being "User Busy" if one half is "User Busy" is an enhancement.
-                                    // For now, if any part of full day makes it "User Busy", it will be marked as such if not resource-booked.
+                                    // If neither, fullDayBtn retains its original 'slot-available' state from the loop above.
                                 }
         
                                 if (bookingModal) bookingModal.style.display = 'block';
@@ -1552,125 +1568,153 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        // 3. updateButtonColor(button, dateStr) function
-        async function updateButtonColor(button, dateStr) {
+        // 3. updateButtonColorModified(button, dateStr, userBookingsForDate) function
+        async function updateButtonColorModified(button, dateStr, userBookingsForDate = []) {
             const resourceId = button.dataset.resourceId;
-            console.log(`Updating button color for resource ${resourceId} on date ${dateStr}`);
+            const resourceName = button.dataset.resourceName;
+            // console.log(`Updating MODIFIED button color for resource ${resourceId} ('${resourceName}') on date ${dateStr}`);
 
-            // Use a temporary, non-visible element for apiCall's messages for this specific update,
-            // or null if errors should only be logged for this background update.
-            // For now, let's use resourceLoadingStatusDiv but it might flash "Processing..." often.
-            // A dedicated silent message div or null might be better.
-            let bookings;
+            let generalBookings;
             const cacheKey = resourceId + '_' + dateStr;
 
-            // Check cache first
             if (currentResourceBookingsCache[cacheKey]) {
-                bookings = currentResourceBookingsCache[cacheKey];
-                console.log(`Using cached availability for ${resourceId} on ${dateStr} for button color.`);
+                generalBookings = currentResourceBookingsCache[cacheKey];
+                // console.log(`Using cached general availability for ${resourceId} on ${dateStr}`);
             } else {
                 try {
-                    bookings = await apiCall(`/api/resources/${resourceId}/availability?date=${dateStr}`, {}, null /* No message element for background updates */);
-                    currentResourceBookingsCache[cacheKey] = bookings; // Cache the result
-                    console.log(`Fetched availability for ${resourceId} on ${dateStr}:`, bookings);
+                    generalBookings = await apiCall(`/api/resources/${resourceId}/availability?date=${dateStr}`, {}, null);
+                    currentResourceBookingsCache[cacheKey] = generalBookings;
+                    // console.log(`Fetched general availability for ${resourceId} on ${dateStr}:`, generalBookings);
                 } catch (error) {
-                    console.error(`Failed to fetch availability for ${resourceId} on ${dateStr}:`, error);
-                    button.classList.remove('available', 'partial', 'unavailable');
-                    button.classList.add('error'); // Special class for API error state
-                    button.title = `${button.dataset.resourceName} - Error loading availability`;
-                    return; // Stop further processing for this button
+                    console.error(`Failed to fetch general availability for ${resourceId} on ${dateStr}:`, error);
+                    button.classList.remove('available', 'partial', 'unavailable', 'unavailable-user-conflict', 'error');
+                    button.classList.add('error');
+                    button.title = `${resourceName} - Error loading availability`;
+                    button.style.display = ''; // Ensure button is visible if error
+                    return;
                 }
             }
 
-            // Define slots (using 08:00-12:00 and 13:00-17:00 as per modal)
-            const slots = [
-                { name: "First Half", startHour: 8, endHour: 12, isAvailable: true },
-                { name: "Second Half", startHour: 13, endHour: 17, isAvailable: true }
+            const primarySlots = [
+                { name: "First Half", startHour: 8, endHour: 12, isGenerallyAvailable: true, isAvailableToUser: true, startTimeStr: "08:00:00", endTimeStr: "12:00:00" },
+                { name: "Second Half", startHour: 13, endHour: 17, isGenerallyAvailable: true, isAvailableToUser: true, startTimeStr: "13:00:00", endTimeStr: "17:00:00" }
             ];
 
-            if (bookings && bookings.length > 0) {
-                bookings.forEach(booking => {
+            if (generalBookings && generalBookings.length > 0) {
+                generalBookings.forEach(booking => {
                     const bookingStartHour = parseInt(booking.start_time.split(':')[0], 10);
                     const bookingEndHour = parseInt(booking.end_time.split(':')[0], 10);
-
-                    slots.forEach(slot => {
+                    primarySlots.forEach(slot => {
                         if (bookingStartHour < slot.endHour && bookingEndHour > slot.startHour) {
-                            slot.isAvailable = false; // This slot is booked
+                            slot.isGenerallyAvailable = false;
                         }
                     });
                 });
             }
-            
-            const isFirstHalfAvailable = slots[0].isAvailable;
-            const isSecondHalfAvailable = slots[1].isAvailable;
-            
-            console.log(`Availability for ${resourceId}: First Half: ${isFirstHalfAvailable}, Second Half: ${isSecondHalfAvailable}`);
 
-            button.classList.remove('available', 'partial', 'unavailable', 'error'); // Clear previous states
+            const loggedInUserId = sessionStorage.getItem('loggedInUserId');
+            if (loggedInUserId && userBookingsForDate && userBookingsForDate.length > 0) {
+                userBookingsForDate.forEach(userBooking => {
+                    if (String(userBooking.resource_id) !== String(resourceId)) { // Booking on a DIFFERENT resource
+                        const userBookingStartHour = parseInt(userBooking.start_time.split(':')[0], 10); // Assuming 'HH:MM:SS'
+                        const userBookingEndHour = parseInt(userBooking.end_time.split(':')[0], 10);
+
+                        primarySlots.forEach(slot => {
+                            if (slot.isGenerallyAvailable) { // Only check user conflict if the slot is generally available
+                                if (userBookingStartHour < slot.endHour && userBookingEndHour > slot.startHour) {
+                                    slot.isAvailableToUser = false;
+                                }
+                            }
+                        });
+                    }
+                });
+            }
+
+            button.classList.remove('available', 'partial', 'unavailable', 'unavailable-user-conflict', 'error');
 
             let currentUserId = null;
             const currentUserIdStr = sessionStorage.getItem('loggedInUserId');
             if (currentUserIdStr) currentUserId = parseInt(currentUserIdStr, 10);
             const currentUserIsAdmin = sessionStorage.getItem('loggedInUserIsAdmin') === 'true';
-            
-            const resourceDataForPermission = { // Construct a resource-like object for the permission check
-                id: resourceId,
-                name: button.dataset.resourceName,
+
+            const resourceDataForPermission = {
+                id: resourceId, name: resourceName,
                 booking_restriction: button.dataset.bookingRestriction,
                 allowed_user_ids: button.dataset.allowedUserIds,
-                roles: parseRolesFromDataset(button.dataset.roleIds) // Assuming role_ids are stored on button dataset
+                roles: parseRolesFromDataset(button.dataset.roles) // Ensure 'roles' dataset, not 'roleIds'
             };
 
             if (!checkUserPermissionForResource(resourceDataForPermission, currentUserId, currentUserIsAdmin)) {
-                 button.classList.add('unavailable'); // Or a new 'restricted' class
-                 button.title = `${button.dataset.resourceName} - Restricted Access`;
-                 console.log(`Resource ${resourceId} is restricted. Class: unavailable (or restricted)`);
-            } else if (isFirstHalfAvailable && isSecondHalfAvailable) {
-                button.classList.add('available');
-                button.title = `${button.dataset.resourceName} - Available`;
-                console.log(`Resource ${resourceId} is available. Class: available`);
-            } else if (isFirstHalfAvailable || isSecondHalfAvailable) {
-                button.classList.add('partial');
-                button.title = `${button.dataset.resourceName} - Partially Available`;
-                console.log(`Resource ${resourceId} is partially available. Class: partial`);
+                button.classList.add('unavailable'); // Or 'restricted'
+                button.title = `${resourceName} - Restricted Access`;
             } else {
-                button.classList.add('unavailable');
-                button.title = `${button.dataset.resourceName} - Unavailable`;
-                console.log(`Resource ${resourceId} is unavailable. Class: unavailable`);
+                const generallyAvailableSlots = primarySlots.filter(s => s.isGenerallyAvailable);
+                const userAvailableSlots = generallyAvailableSlots.filter(s => s.isAvailableToUser);
+
+                if (loggedInUserId && generallyAvailableSlots.length > 0 && userAvailableSlots.length === 0) {
+                    // User is logged in, there are generally available slots, but none are available to the user due to their own conflicts
+                    button.classList.add('unavailable-user-conflict');
+                    button.title = `${resourceName} - Unavailable (Your existing bookings conflict)`;
+                } else if (userAvailableSlots.length === generallyAvailableSlots.length && generallyAvailableSlots.length > 0) {
+                    // All generally available slots are also available to the user
+                    button.classList.add('available');
+                    button.title = `${resourceName} - Available`;
+                } else if (userAvailableSlots.length > 0) {
+                    // Some, but not all, generally available slots are available to the user
+                    button.classList.add('partial');
+                    button.title = `${resourceName} - Partially Available`;
+                } else {
+                    // No slots available to the user (either all generally unavailable, or remaining general ones are blocked by user)
+                    // This also covers the case where generallyAvailableSlots.length === 0
+                    button.classList.add('unavailable');
+                     button.title = `${resourceName} - Unavailable`;
+                }
             }
 
-            // Existing class adding logic should be right above this
-            if (button.classList.contains('unavailable') && !button.title.includes('Restricted Access')) {
-                // If the button is 'unavailable' AND it's not due to a permission restriction (title check)
+            // Visibility Logic
+            const isEffectivelyUnavailable = button.classList.contains('unavailable') || button.classList.contains('unavailable-user-conflict');
+            const isPermissionRestricted = button.title.includes('Restricted Access');
+            const isErrorState = button.classList.contains('error');
+
+            if (isEffectivelyUnavailable && !isPermissionRestricted && !isErrorState) {
                 button.style.display = 'none';
-                console.log(`Resource ${resourceId} is unavailable and not restricted, hiding button.`);
+                // console.log(`Resource ${resourceId} is effectively unavailable and not restricted/error, hiding button.`);
             } else {
-                // For 'available', 'partial', or 'unavailable' due to restriction, or 'error' state
-                button.style.display = ''; // Reset to default display (usually 'block' or 'inline-block' based on CSS)
-                console.log(`Resource ${resourceId} is available, partial, restricted, or in error state, showing button. Classes: ${button.className}`);
+                button.style.display = '';
+                // console.log(`Resource ${resourceId} is available, partial, restricted, or error, showing button. Classes: ${button.className}`);
             }
         }
+
 
         // 4. updateAllButtonColors() function
         async function updateAllButtonColors() {
             const dateStr = availabilityDateInput ? availabilityDateInput.value : getTodayDateString();
-            console.log(`Updating all button colors for date: ${dateStr}`);
-            currentResourceBookingsCache = {}; // Clear cache when date changes or full refresh
+            // console.log(`Updating all button colors for date: ${dateStr}`);
+            currentResourceBookingsCache = {}; // Clear cache for general availability
 
             const buttons = resourceButtonsContainer.querySelectorAll('.resource-availability-button');
             if (buttons.length === 0) {
-                console.log("No resource buttons found to update.");
+                // console.log("No resource buttons found to update.");
                 return;
             }
             
-            // Show a general loading message while updating all buttons
             if (resourceLoadingStatusDiv) showLoading(resourceLoadingStatusDiv, "Updating availability status...");
 
-            // Sequentially or with Promise.all. Promise.all is faster but might hit rate limits if many resources.
-            // For a moderate number of resources, Promise.all is fine.
+            let userBookingsForDate = [];
+            const loggedInUserId = sessionStorage.getItem('loggedInUserId');
+            if (loggedInUserId) {
+                try {
+                    userBookingsForDate = await apiCall(`/api/bookings/my_bookings_for_date?date=${dateStr}`, {}, null);
+                    // console.log(`Fetched user's bookings for ${dateStr}:`, userBookingsForDate);
+                } catch (error) {
+                    console.warn(`Could not fetch user's bookings for date ${dateStr}: ${error.message}. Proceeding without user-specific checks.`);
+                    userBookingsForDate = []; // Ensure it's an empty array on failure
+                }
+            }
+
             const updatePromises = [];
             buttons.forEach(button => {
-                updatePromises.push(updateButtonColor(button, dateStr));
+                updatePromises.push(updateButtonColorModified(button, dateStr, userBookingsForDate));
             });
 
             try {
@@ -3174,14 +3218,15 @@ document.addEventListener('DOMContentLoaded', function() {
             if (typeof updateAllButtonColors === 'function' && resourceButtonsContainer) {
                  console.log('Socket.IO: Refreshing resource button colors due to booking update for resource_id:', data.resource_id);
                  // More targeted update: only update the specific button if possible
-                 const buttonToUpdate = resourceButtonsContainer.querySelector(`.resource-availability-button[data-resource-id="${data.resource_id}"]`);
-                 if (buttonToUpdate && availabilityDateInput) { // availabilityDateInput is for resource buttons page
-                     updateButtonColor(buttonToUpdate, availabilityDateInput.value);
-                 } else if (buttonToUpdate) { // Fallback if date input not found (should not happen)
-                     updateButtonColor(buttonToUpdate, getTodayDateString());
-                 } else { // Fallback to full update if specific button not found (e.g. new resource added)
+                 // Decided to call updateAllButtonColors to ensure userBookingsForDate is refreshed.
+                 // const buttonToUpdate = resourceButtonsContainer.querySelector(`.resource-availability-button[data-resource-id="${data.resource_id}"]`);
+                 // if (buttonToUpdate && availabilityDateInput) {
+                 //     updateButtonColorModified(buttonToUpdate, availabilityDateInput.value); // This would need userBookingsForDate
+                 // } else if (buttonToUpdate) {
+                 //     updateButtonColorModified(buttonToUpdate, getTodayDateString()); // This would need userBookingsForDate
+                 // } else {
                     updateAllButtonColors();
-                 }
+                 // }
             }
         });
         socket.on('connect', () => console.log('Socket.IO connected'));
