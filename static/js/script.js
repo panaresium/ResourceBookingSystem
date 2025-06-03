@@ -667,10 +667,11 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    const loginForm = document.getElementById('login-form');
-    const loginMessageDiv = document.getElementById('login-message'); // Ensure this is defined in the scope
+    // loginForm and loginMessageDiv are already declared in this scope from lines ~366-367
+    // const loginForm = document.getElementById('login-form'); // REMOVE DUPLICATE
+    // const loginMessageDiv = document.getElementById('login-message'); // REMOVE DUPLICATE
 
-    if (loginForm) {
+    if (loginForm) { // This loginForm refers to the one declared earlier in the DOMContentLoaded scope
         loginForm.addEventListener('submit', async function(event) {
             console.log('Login form submit event triggered.'); // LOG 1
             event.preventDefault();
