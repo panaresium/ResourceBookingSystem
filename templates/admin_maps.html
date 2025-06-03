@@ -479,6 +479,8 @@
         if (uploadMapForm) {
             uploadMapForm.addEventListener('submit', async function(event) {
                 event.preventDefault();
+                event.stopImmediatePropagation(); // Prevent other listeners on this form
+
                 showStatus(uploadStatusDiv, '{{ _("Uploading map...") }}');
                 const formData = new FormData(uploadMapForm);
                 try {
