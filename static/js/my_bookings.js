@@ -84,15 +84,21 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchAndDisplayBookings() {
         showLoading(statusDiv, 'Loading your bookings...');
         try {
-            const bookings = await apiCall('/api/bookings/my_bookings');
+            const apiResponse = await apiCall('/api/bookings/my_bookings');
+            const bookings = apiResponse.bookings; // Access the bookings array
+            const checkInOutEnabled = apiResponse.check_in_out_enabled; // Store the flag
+
             bookingsListDiv.innerHTML = ''; // Clear loading message or previous bookings
 
-            if (bookings.length === 0) {
+            if (!bookings || bookings.length === 0) { // Check if bookings is undefined or empty
                 showStatusMessage(statusDiv, 'You have no bookings.', 'info');
                 return;
             }
 
             bookings.forEach(booking => {
+                // Bookings with status 'cancelled_by_admin' will have an admin_deleted_message.
+                // This existing block should correctly handle them by displaying the message
+                // and not proceeding to the 'else' block which renders action buttons.
                 if (booking.admin_deleted_message) {
                     // Create a specific display for admin-deleted bookings
                     const deletedBookingDiv = document.createElement('div');
@@ -159,12 +165,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     const checkOutBtn = bookingItemClone.querySelector('.check-out-btn');
                     checkInBtn.dataset.bookingId = booking.id;
                     checkOutBtn.dataset.bookingId = booking.id;
-                    if (booking.can_check_in) {
-                        checkInBtn.style.display = 'inline-block';
+
+                    // Ensure buttons are hidden by default (if not already by CSS/template)
+                    checkInBtn.style.display = 'none';
+                    checkOutBtn.style.display = 'none';
+
+                    if (checkInOutEnabled) {
+                        if (booking.can_check_in) {
+                            checkInBtn.style.display = 'inline-block';
+                        }
+                        if (booking.checked_in_at && !booking.checked_out_at) {
+                            checkOutBtn.style.display = 'inline-block';
+                        }
                     }
-                    if (booking.checked_in_at && !booking.checked_out_at) {
-                        checkOutBtn.style.display = 'inline-block';
-                    }
+                    // If checkInOutEnabled is false, buttons remain hidden.
 
                     bookingsListDiv.appendChild(bookingItemClone);
                 }
