@@ -4,55 +4,45 @@
 
 {% block content %}
     <h1>{{ _('Resource Availability') }}</h1>
+
     <div>
-        <label for="availability-date">{{ _('Select Date:') }}</label>
-        <input type="date" id="availability-date" name="availability-date">
+        <label for="new-booking-map-availability-date">{{ _('Select Date:') }}</label>
+        <input type="date" id="new-booking-map-availability-date" name="new-booking-map-availability-date">
+    </div>
+    <div style="margin-top: 10px; margin-bottom: 10px;">
+        <label for="new-booking-map-location-select">{{ _('Location:') }}</label>
+        <select id="new-booking-map-location-select" style="margin-right: 10px;"></select>
+        <label for="new-booking-map-floor-select">{{ _('Floor:') }}</label>
+        <select id="new-booking-map-floor-select"></select>
     </div>
 
-    <div class="filters-section" style="margin-top:15px;">
-        <label for="resource-filter-capacity">{{ _('Min Capacity:') }}</label>
-        <input type="number" id="resource-filter-capacity" min="1">
-
-        <label for="resource-filter-equipment">{{ _('Equipment:') }}</label>
-        <input type="text" id="resource-filter-equipment">
-
-        <label for="resource-filter-tags">{{ _('Tags:') }}</label>
-        <input type="text" id="resource-filter-tags">
-
-        <button id="resource-apply-filters-btn" class="button">{{ _('Apply Filters') }}</button>
-        <button id="resource-clear-filters-btn" class="button">{{ _('Clear Filters') }}</button>
+    <div id="new-booking-map-container" style="position: relative; width: 800px; height: 600px; background-size: contain; background-repeat: no-repeat; background-position: center center; border: 1px solid #ccc; margin-bottom: 20px;">
+        <!-- Resource areas will be populated by JavaScript -->
     </div>
+    <div id="new-booking-map-loading-status" class="status-message" style="margin-bottom: 15px;">{{ _('Loading map...') }}</div>
 
-    <div id="resource-loading-status" class="status-message" style="margin-bottom: 15px;"></div>
-    <div id="resource-buttons-container" class="resource-buttons-grid" style="margin-top: 20px;">
-        <!-- Resource buttons will be populated by JavaScript -->
-        <p>{{ _('Loading resources...') }}</p>
-    </div>
-
-    <div id="resource-page-booking-modal" class="modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="rpbm-title">
+    <div id="new-booking-time-slot-modal" class="modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="new-booking-modal-title">
         <div class="modal-content">
-            <span id="rpbm-close-modal-btn" class="close-modal-btn" role="button" aria-label="{{ _('Close modal') }}">&times;</span>
-            <h3 id="rpbm-title">{{ _('Book Resource') }}</h3>
-            
-            <p>{{ _('Resource:') }} <strong id="rpbm-resource-name">N/A</strong></p>
-            <p>{{ _('Date:') }} <strong id="rpbm-selected-date">N/A</strong></p>
-            <img id="rpbm-resource-image" src="#" alt="{{ _('Resource image') }}" style="max-width:100%; display:none; margin-bottom:10px;">
-
-            <div id="rpbm-slot-options" style="margin-top: 15px; margin-bottom: 15px;">
-                <button class="button time-slot-btn" data-slot-type="first_half" data-start-time="08:00" data-end-time="12:00">{{ _('First Half-Day (08:00-12:00)') }}</button>
-                <button class="button time-slot-btn" data-slot-type="second_half" data-start-time="13:00" data-end-time="17:00">{{ _('Second Half-Day (13:00-17:00)') }}</button>
-                <button class="button time-slot-btn" data-slot-type="full_day" data-start-time="08:00" data-end-time="17:00">{{ _('Full Day (08:00-17:00)') }}</button>
+            <span id="new-booking-close-modal-btn" class="close-modal-btn" role="button" aria-label="{{ _('Close modal') }}">&times;</span>
+            <h3 id="new-booking-modal-title">{{ _('Book Resource') }}</h3>
+            <p>{{ _('Resource:') }} <strong id="new-booking-modal-resource-name">N/A</strong></p>
+            <img id="new-booking-modal-resource-image" src="#" alt="{{ _('Resource image') }}" style="max-width:100%; display:none; margin-bottom:5px;">
+            <p>{{ _('Date:') }} <strong id="new-booking-modal-date">N/A</strong></p>
+            <div id="new-booking-modal-time-slots-list" class="time-slots-container" style="margin-top: 15px; margin-bottom: 15px; max-height: 200px; overflow-y: auto; border: 1px solid #eee; padding: 10px;">
+                <!-- Time slots will be populated by JavaScript -->
             </div>
-            
             <div>
-                <label for="rpbm-booking-title">{{ _('Booking Title (optional):') }}</label>
-                <input type="text" id="rpbm-booking-title" name="booking_title" class="form-control">
+                <label for="new-booking-modal-booking-title">{{ _('Booking Title (optional):') }}</label>
+                <input type="text" id="new-booking-modal-booking-title" name="booking_title" class="form-control">
             </div>
-            
-            <button id="rpbm-confirm-booking-btn" class="button" style="margin-top: 15px;">{{ _('Confirm Booking') }}</button>
-            <div id="rpbm-status-message" class="status-message" style="margin-top:10px;"></div>
-            <button id="rpbm-ack-close-btn" class="button" style="display: none; margin-top: 10px;">{{ _('Close') }}</button>
+            <button id="new-booking-modal-confirm-booking-btn" class="button" style="margin-top: 15px;">{{ _('Confirm Booking') }}</button>
+            <p id="new-booking-modal-status-message" class="status-message" style="margin-top:10px;"></p>
         </div>
     </div>
 
+{% endblock %}
+
+{% block footer_extra %}
+    {{ super() if super }} {# Call super if it exists, to include base scripts #}
+    <script src="{{ url_for('static', filename='js/new_booking_map.js') }}" defer></script>
 {% endblock %}
