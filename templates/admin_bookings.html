@@ -77,38 +77,49 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.delete-booking-btn').forEach(button => {
         button.addEventListener('click', function() {
             const bookingId = this.dataset.bookingId;
-            const row = this.closest('tr'); // Get the table row
+            const row = this.closest('tr');
 
-            // Updated confirmation message
-            if (!confirm("{{ _('Are you sure you want to DELETE this booking? This action cannot be undone and the booking will be permanently removed.') }}")) {
+            if (!confirm("{{ _('Are you sure you want to cancel this booking? This will mark it as cancelled by an administrator.') }}")) {
                 return;
             }
             this.disabled = true;
             this.textContent = "{{ _('Processing...') }}";
 
-            // Updated fetch URL
-            fetch(`/api/admin/bookings/${bookingId}/delete`, {
+            fetch(`/api/admin/bookings/${bookingId}/cancel`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
             })
             .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, data })))
             .then(({ ok, status, data }) => {
                 if (ok) {
-                    // Updated success logic
-                    statusDiv.textContent = data.message || "{{ _('Booking deleted successfully.') }}"; // Use message from response
+                    statusDiv.textContent = data.message || "{{ _('Booking cancelled successfully.') }}";
                     statusDiv.className = 'alert alert-success';
-                    row.remove(); // Remove the row from the table
-                    // No need to interact with the button further as it's removed with the row
+
+                    row.classList.add('table-warning');
+                    row.cells[6].innerHTML = `<span class="status-badge status-${data.new_status.toLowerCase()}">${data.new_status}</span>`;
+
+                    let titleCell = row.cells[3];
+                    let messageDiv = titleCell.querySelector('.alert.alert-warning');
+                    if (!messageDiv) {
+                        messageDiv = document.createElement('div');
+                        messageDiv.className = 'alert alert-warning p-1 my-1';
+                        titleCell.appendChild(messageDiv);
+                    }
+                    messageDiv.innerHTML = `<small><strong>{{ _('Admin Cancellation:') }}</strong> ${data.admin_message}</small>`;
+
+                    this.classList.remove('delete-booking-btn', 'button-danger');
+                    this.classList.add('dismiss-admin-message-btn', 'btn-outline-secondary');
+                    this.textContent = "{{ _('Dismiss Message') }}";
+                    this.disabled = false;
                 } else {
-                    // Error handling remains largely the same
-                    throw new Error(data.error || `{{ _('Error deleting booking (Status: ${status}).') }}`);
+                    throw new Error(data.error || `{{ _('Error cancelling booking (Status: ${status}).') }}`);
                 }
             })
             .catch(error => {
                 statusDiv.textContent = `{{ _('Error') }}: ${error.message}`;
                 statusDiv.className = 'alert alert-danger';
                 this.disabled = false;
-                this.textContent = "{{ _('Delete') }}"; // Ensure button text reverts correctly
+                this.textContent = "{{ _('Delete') }}";
             });
         });
     });
