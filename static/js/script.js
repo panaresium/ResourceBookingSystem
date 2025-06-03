@@ -667,56 +667,79 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    const loginForm = document.getElementById('login-form');
+    const loginMessageDiv = document.getElementById('login-message'); // Ensure this is defined in the scope
+
     if (loginForm) {
-        // ... (Keep existing loginForm related logic as is) ...
         loginForm.addEventListener('submit', async function(event) {
+            console.log('Login form submit event triggered.'); // LOG 1
             event.preventDefault();
-    
+            console.log('event.preventDefault() called.'); // LOG 2
+
             const usernameInput = document.getElementById('username'); 
             const passwordInput = document.getElementById('password'); 
+
+            if (!usernameInput || !passwordInput) {
+                console.error('Username or password input field not found!');
+                if (loginMessageDiv) showError(loginMessageDiv, 'Login form fields are missing. Please contact support.');
+                return;
+            }
+
             const username = usernameInput.value.trim();
             const password = passwordInput.value; 
     
             if (!username || !password) {
-                showError(loginMessageDiv, 'Username and password are required.');
+                if (loginMessageDiv) showError(loginMessageDiv, 'Username and password are required.');
+                console.log('Username or password empty.'); // LOG 3
                 return;
             }
     
+            console.log(`Attempting login for user: ${username} via apiCall.`); // LOG 4
             try {
                 const responseData = await apiCall('/api/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, password })
-                }, loginMessageDiv);
+                }, loginMessageDiv); // loginMessageDiv is passed for messages
 
-                showSuccess(loginMessageDiv, responseData.message || 'Login successful!');
+                // apiCall will handle showing success/error in loginMessageDiv based on response
+                // We just need to handle the successful login flow (session storage, redirect)
+                console.log('Login API call successful:', responseData); // LOG 5
     
                 if (responseData.user) {
                     sessionStorage.setItem('loggedInUserUsername', responseData.user.username);
                     sessionStorage.setItem('loggedInUserIsAdmin', responseData.user.is_admin ? 'true' : 'false');
                     sessionStorage.setItem('loggedInUserId', responseData.user.id);
                 } else {
+                    // Fallback if user object isn't in response, though API should provide it on success
                     sessionStorage.setItem('loggedInUserUsername', username);
-                    sessionStorage.removeItem('loggedInUserIsAdmin');
+                    sessionStorage.removeItem('loggedInUserIsAdmin'); // Clear admin status if not confirmed
                     sessionStorage.removeItem('loggedInUserId');
                 }
                 sessionStorage.setItem('userPerformedLoginAction', 'true');
                 sessionStorage.removeItem('explicitlyLoggedOut');
                 sessionStorage.removeItem('autoLoggedOutDueToStartupSession');
                 
-                await updateAuthLink(); 
+                await updateAuthLink(); // Update nav/UI elements
                 
+                // Redirect after a short delay to allow user to see success message if any
                 setTimeout(() => {
-                    window.location.href = '/'; 
+                    window.location.href = '/'; // Redirect to home page
                 }, 500); 
     
             } catch (error) {
+                // apiCall should have displayed the error in loginMessageDiv.
+                // Additional logging here is for debugging.
+                console.error('Login attempt failed in catch block:', error.message);
+                // Clear any potentially partially set session storage on error
                 sessionStorage.removeItem('loggedInUserUsername');
                 sessionStorage.removeItem('loggedInUserIsAdmin');
                 sessionStorage.removeItem('loggedInUserId');
-                console.error('Login attempt failed:', error.message);
             }
         });
+    } else {
+        // This log helps confirm if the loginForm element itself isn't found on page load
+        console.log('Login form with id "login-form" not found on this page.');
     }
 
     const googleLoginBtn = document.getElementById('google-login-btn');
