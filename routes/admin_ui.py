@@ -483,6 +483,21 @@ def update_booking_settings():
 
         settings.enable_check_in_out = request.form.get('enable_check_in_out') == 'on'
 
+        # Handle past_booking_time_adjustment_hours
+        past_booking_adjustment_str = request.form.get('past_booking_time_adjustment_hours')
+        if past_booking_adjustment_str is not None and past_booking_adjustment_str.strip() != "":
+            try:
+                settings.past_booking_time_adjustment_hours = int(past_booking_adjustment_str)
+            except ValueError:
+                db.session.rollback()
+                flash(_('Invalid input for "Past booking time adjustment". Please enter a valid integer.'), 'danger')
+                return redirect(url_for('admin_ui.serve_booking_settings_page'))
+        else:
+            # If empty, set to default (e.g., 0 or a specific default from model)
+            # Assuming model default is 0, or explicitly set here if form can send empty for "reset"
+            settings.past_booking_time_adjustment_hours = 0
+
+
         db.session.commit()
         flash(_('Booking settings updated successfully.'), 'success')
     except ValueError:
