@@ -85,7 +85,13 @@ document.addEventListener('DOMContentLoaded', () => {
         showLoading(statusDiv, 'Loading your bookings...');
         try {
             const apiResponse = await apiCall('/api/bookings/my_bookings');
+            console.log('Raw API response data:', apiResponse); // Added console.log for raw response
             const bookings = apiResponse.bookings; // Access the bookings array
+            console.log('Extracted bookings array:', bookings); // Added console.log for extracted array
+            console.log('Is bookings an array?', Array.isArray(bookings));
+            if (bookings) {
+                console.log('Length of bookings array:', bookings.length);
+            }
             const checkInOutEnabled = apiResponse.check_in_out_enabled; // Store the flag
 
             bookingsListDiv.innerHTML = ''; // Clear loading message or previous bookings
