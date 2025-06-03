@@ -1001,9 +1001,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 // The above commented out block was part of the previous erroneous fix attempt.
                 // The correct logic is to ensure the try block is properly closed before the catch.
                 // The following line for closing the modal if no errors is correct.
-                 if (bulkAddPatternModal && (!response.errors_warnings || response.errors_warnings.length === 0)) {
+                if (bulkAddPatternModal && (!response.errors_warnings || response.errors_warnings.length === 0)) {
                     bulkAddPatternModal.style.display = 'none';
                 }
+				}
             // This is where the try block should end.
             } catch (error) { // This is the catch block
                 // Error should have been shown by apiCall. If not, this is a fallback.
@@ -1604,5 +1605,3 @@ document.addEventListener('DOMContentLoaded', function() {
     fetchAndDisplayRoles(); // This also populates allAvailableRolesCache for user forms
 
 });
-
-[end of static/js/user_management.js]
