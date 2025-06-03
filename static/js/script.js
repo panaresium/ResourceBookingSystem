@@ -220,7 +220,7 @@ async function updateAuthLink() {
 
             if (welcomeMessageContainer) {
                 welcomeMessageContainer.textContent = `Welcome, ${data.user.username}!`;
-                welcomeMessageContainer.style.display = 'list-item';
+                welcomeMessageContainer.style.display = 'flex';
             }
 
             if (userDropdownContainer) userDropdownContainer.style.display = 'list-item';
