@@ -2312,61 +2312,72 @@ class TestAdminBookings(AppTests):
         self.logout()
 
     def test_admin_post_update_booking_settings_specific_fields(self):
-        """Test updating specific fields including past_booking_time_adjustment_hours and its persistence."""
+        """Test updating specific fields including past_booking_time_adjustment_hours, its persistence, and interaction with allow_past_bookings."""
         admin = self._create_admin_user(username="settingsadmin_specific", email_ext="settings_specific")
         self.login(admin.username, 'adminpass')
 
         BookingSettings.query.delete()
-        db.session.add(BookingSettings(allow_past_bookings=False, past_booking_time_adjustment_hours=0))
+        # Initial state: allow_past_bookings=False, adjustment_hours=0
+        settings = BookingSettings(allow_past_bookings=False, past_booking_time_adjustment_hours=0)
+        db.session.add(settings)
         db.session.commit()
 
-        # Scenario 1: Update past_booking_time_adjustment_hours, allow_past_bookings is ON
-        form_data1 = {
-            'allow_past_bookings': 'on',
+        # Case 1: allow_past_bookings is UNCHECKED (adjustment field is ENABLED and submitted)
+        form_data_enabled = {
+            # 'allow_past_bookings': 'off', # Not sending this key simulates checkbox being off
             'past_booking_time_adjustment_hours': '5',
-            # Other fields not sent, should retain defaults or existing if any
+            # Other fields not sent to keep test focused
         }
-        self.client.post('/admin/booking_settings/update', data=form_data1)
-        settings1 = BookingSettings.query.first()
-        self.assertTrue(settings1.allow_past_bookings)
-        self.assertEqual(settings1.past_booking_time_adjustment_hours, 5)
+        self.client.post('/admin/booking_settings/update', data=form_data_enabled)
+        settings_case1 = BookingSettings.query.first()
+        self.assertFalse(settings_case1.allow_past_bookings)
+        self.assertEqual(settings_case1.past_booking_time_adjustment_hours, 5)
 
-        # Scenario 2: Update past_booking_time_adjustment_hours, allow_past_bookings is OFF
-        # The adjustment value should still be saved.
-        form_data2 = {
+        # Case 2: allow_past_bookings is CHECKED (adjustment field is DISABLED and NOT submitted by browser)
+        # Value from Case 1 (5) should be preserved due to new backend logic.
+        form_data_disabled = {
+            'allow_past_bookings': 'on',
+            # past_booking_time_adjustment_hours is NOT sent in the form data, simulating a disabled field
+        }
+        self.client.post('/admin/booking_settings/update', data=form_data_disabled)
+        settings_case2 = BookingSettings.query.first()
+        self.assertTrue(settings_case2.allow_past_bookings)
+        self.assertEqual(settings_case2.past_booking_time_adjustment_hours, 5, "Value should be preserved from previous state as field was disabled")
+
+        # Case 3: allow_past_bookings is UNCHECKED again, new value for adjustment hours
+        # This ensures that if the field becomes enabled again, it can be updated.
+        form_data_reenabled = {
             # allow_past_bookings not sent (effectively 'off')
             'past_booking_time_adjustment_hours': '-3',
         }
-        self.client.post('/admin/booking_settings/update', data=form_data2)
-        settings2 = BookingSettings.query.first()
-        self.assertFalse(settings2.allow_past_bookings) # Explicitly check it's off
-        self.assertEqual(settings2.past_booking_time_adjustment_hours, -3) # Value should be saved
+        self.client.post('/admin/booking_settings/update', data=form_data_reenabled)
+        settings_case3 = BookingSettings.query.first()
+        self.assertFalse(settings_case3.allow_past_bookings)
+        self.assertEqual(settings_case3.past_booking_time_adjustment_hours, -3)
 
-        # Scenario 3: Send empty string for past_booking_time_adjustment_hours
-        form_data3 = {
-            'allow_past_bookings': 'on',
-            'past_booking_time_adjustment_hours': '', # Empty string
+        # Case 4: Test empty string submission when field is enabled (allow_past_bookings is 'off')
+        form_data_empty_enabled = {
+            # allow_past_bookings not sent (effectively 'off')
+            'past_booking_time_adjustment_hours': '',
         }
-        self.client.post('/admin/booking_settings/update', data=form_data3)
-        settings3 = BookingSettings.query.first()
-        self.assertTrue(settings3.allow_past_bookings)
-        self.assertEqual(settings3.past_booking_time_adjustment_hours, 0) # Should default to 0
+        self.client.post('/admin/booking_settings/update', data=form_data_empty_enabled)
+        settings_case4 = BookingSettings.query.first()
+        self.assertFalse(settings_case4.allow_past_bookings)
+        self.assertEqual(settings_case4.past_booking_time_adjustment_hours, 0) # Should default to 0
 
-        # Scenario 4: Send invalid (non-integer) for past_booking_time_adjustment_hours
-        initial_adjustment_val = settings3.past_booking_time_adjustment_hours # Should be 0 from previous step
-        form_data4 = {
-            'allow_past_bookings': 'on',
+        # Case 5: Test invalid (non-integer) when field is enabled (allow_past_bookings is 'off')
+        initial_adj_val_before_invalid = settings_case4.past_booking_time_adjustment_hours # Should be 0
+        form_data_invalid_enabled = {
+            # allow_past_bookings not sent (effectively 'off')
             'past_booking_time_adjustment_hours': 'not-an-integer',
         }
-        response4 = self.client.post('/admin/booking_settings/update', data=form_data4, follow_redirects=True)
-        self.assertIn(b'Invalid input for "Past booking time adjustment"', response4.data)
-        settings4 = BookingSettings.query.first()
-        # Value should not have changed from previous valid state due to rollback
-        self.assertEqual(settings4.past_booking_time_adjustment_hours, initial_adjustment_val)
-        self.assertTrue(settings4.allow_past_bookings) # This checkbox was 'on', should remain if not part of error
+        response_invalid = self.client.post('/admin/booking_settings/update', data=form_data_invalid_enabled, follow_redirects=True)
+        self.assertIn(b'Invalid input for "Past booking time adjustment"', response_invalid.data)
+        settings_case5 = BookingSettings.query.first()
+        self.assertFalse(settings_case5.allow_past_bookings) # allow_past_bookings was not sent, so it should be False
+        self.assertEqual(settings_case5.past_booking_time_adjustment_hours, initial_adj_val_before_invalid) # Should not change from last valid
 
         self.logout()
-
 
     def test_admin_post_update_booking_settings_invalid_data(self):
         """Test POST /admin/booking_settings/update with invalid data."""
@@ -2391,55 +2402,55 @@ class TestAdminBookings(AppTests):
         self.assertEqual(settings.max_booking_days_in_future, 30)
         self.logout()
 
-    def test_admin_booking_settings_visibility_toggle_setup(self):
-        """Test the HTML structure and JS setup for past booking adjustment visibility."""
-        admin = self._create_admin_user(username="settingsadmin_visibility", email_ext="settings_visibility")
+    def test_admin_booking_settings_field_state(self):
+        """Test the HTML structure and JS setup for past booking adjustment field enabled/disabled state."""
+        admin = self._create_admin_user(username="settingsadmin_fieldstate", email_ext="settings_fieldstate")
         self.login(admin.username, 'adminpass')
 
-        # Ensure BookingSettings exists
         settings = BookingSettings.query.first()
         if not settings:
             settings = BookingSettings()
             db.session.add(settings)
 
-        # Case 1: allow_past_bookings is False (adjustment field should be hidden by style attribute)
+        # Scenario A: allow_past_bookings is False (adjustment input should be ENABLED)
         settings.allow_past_bookings = False
-        settings.past_booking_time_adjustment_hours = 5 # Value should not affect visibility if parent is off
+        settings.past_booking_time_adjustment_hours = 5 # This value should be present
         db.session.commit()
 
-        response_hidden = self.client.get('/admin/booking_settings')
-        self.assertEqual(response_hidden.status_code, 200)
-        html_hidden = response_hidden.data.decode('utf-8')
+        response_a = self.client.get('/admin/booking_settings')
+        self.assertEqual(response_a.status_code, 200)
+        html_a = response_a.data.decode('utf-8')
 
-        self.assertIn('id="allow_past_bookings"', html_hidden)
-        self.assertNotIn('id="allow_past_bookings" checked', html_hidden)
-        self.assertIn('id="past_booking_time_adjustment_hours_group" style="display: none;"', html_hidden)
-        self.assertIn('name="past_booking_time_adjustment_hours" value="5"', html_hidden) # Value should still be rendered
+        self.assertIn('id="allow_past_bookings"', html_a)
+        self.assertNotIn('id="allow_past_bookings" checked', html_a)
+        # Check that the input field for past_booking_time_adjustment_hours does NOT have 'disabled'
+        self.assertIn('id="past_booking_time_adjustment_hours"', html_a)
+        self.assertNotIn('id="past_booking_time_adjustment_hours" disabled', html_a.replace(' disabled=""', ' disabled'))
+        self.assertIn('name="past_booking_time_adjustment_hours" value="5"', html_a)
 
-        # Case 2: allow_past_bookings is True (adjustment field should be visible)
+        # Scenario B: allow_past_bookings is True (adjustment input should be DISABLED)
         settings.allow_past_bookings = True
         settings.past_booking_time_adjustment_hours = -2
         db.session.commit()
 
-        response_visible = self.client.get('/admin/booking_settings')
-        self.assertEqual(response_visible.status_code, 200)
-        html_visible = response_visible.data.decode('utf-8')
+        response_b = self.client.get('/admin/booking_settings')
+        self.assertEqual(response_b.status_code, 200)
+        html_b = response_b.data.decode('utf-8')
 
-        self.assertIn('id="allow_past_bookings" checked', html_visible)
-        # When visible, the style attribute might be empty or 'display: block/inline-block'.
-        # The JS sets it to display: ''
-        self.assertIn('id="past_booking_time_adjustment_hours_group" style="display: \'\';"', html_visible.replace(" ", "")) # Remove spaces for robust check
-        self.assertIn('name="past_booking_time_adjustment_hours" value="-2"', html_visible)
+        self.assertIn('id="allow_past_bookings" checked', html_b)
+        # Check that the input field for past_booking_time_adjustment_hours HAS 'disabled'
+        self.assertIn('id="past_booking_time_adjustment_hours" name="past_booking_time_adjustment_hours" value="-2" class="form-control" disabled', html_b.replace(' disabled=""', ' disabled'))
 
-        # Verify JavaScript snippet is present and seems correct
-        self.assertIn("var allowPastBookingsCheckbox = document.getElementById('allow_past_bookings');", html_visible)
-        self.assertIn("var adjustmentGroup = document.getElementById('past_booking_time_adjustment_hours_group');", html_visible)
-        self.assertIn("function toggleAdjustmentField() {", html_visible)
-        self.assertIn("if (allowPastBookingsCheckbox.checked)", html_visible)
-        self.assertIn("adjustmentGroup.style.display = '';", html_visible)
-        self.assertIn("adjustmentGroup.style.display = 'none';", html_visible)
-        self.assertIn("toggleAdjustmentField();", html_visible) # Initial call
-        self.assertIn("allowPastBookingsCheckbox.addEventListener('change', toggleAdjustmentField);", html_visible)
+        # Verify JavaScript snippet for toggling 'disabled' property is present and seems correct
+        self.assertIn("var allowPastBookingsCheckbox = document.getElementById('allow_past_bookings');", html_b)
+        self.assertIn("var adjustmentInput = document.getElementById('past_booking_time_adjustment_hours');", html_b)
+        self.assertIn("function updatePastBookingAdjustmentFieldState() {", html_b) # Renamed function
+        self.assertIn("if (allowPastBookingsCheckbox.checked)", html_b)
+        self.assertIn("adjustmentInput.disabled = true;", html_b)
+        self.assertIn("} else {", html_b)
+        self.assertIn("adjustmentInput.disabled = false;", html_b)
+        self.assertIn("updatePastBookingAdjustmentFieldState();", html_b) # Initial call
+        self.assertIn("allowPastBookingsCheckbox.addEventListener('change', updatePastBookingAdjustmentFieldState);", html_b)
 
         self.logout()
 
