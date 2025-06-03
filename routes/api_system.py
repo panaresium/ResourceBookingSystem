@@ -657,6 +657,185 @@ def api_admin_view_db_raw_top100():
         current_app.logger.error(f"Error fetching raw DB data from all tables for {current_user.username}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': f'Failed to fetch raw database data: {str(e)}'}), 500
 
+# --- DB Schema Info Routes ---
+
+@api_system_bp.route('/api/admin/db/table_names', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def api_admin_get_table_names():
+    """Fetches all table names from the database."""
+    current_app.logger.info(f"User {current_user.username} requested list of database table names.")
+    try:
+        table_names_list = list(db.metadata.tables.keys())
+        current_app.logger.info(f"Successfully retrieved {len(table_names_list)} table names for {current_user.username}.")
+        return jsonify({'success': True, 'tables': table_names_list}), 200
+    except Exception as e:
+        current_app.logger.error(f"Error fetching database table names for {current_user.username}: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': f'Failed to retrieve table names: {str(e)}'}), 500
+
+@api_system_bp.route('/api/admin/db/table_info/<string:table_name>', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def api_admin_get_table_info(table_name: str):
+    """Fetches column information for a specific database table."""
+    current_app.logger.info(f"User {current_user.username} requested info for table: {table_name}.")
+    try:
+        if table_name not in db.metadata.tables:
+            current_app.logger.warning(f"Table '{table_name}' not found by {current_user.username}.")
+            return jsonify({'success': False, 'message': 'Table not found.'}), 404
+
+        table_obj = db.metadata.tables[table_name]
+        column_info_list = []
+        for column in table_obj.columns:
+            column_info_list.append({
+                'name': column.name,
+                'type': str(column.type),
+                'nullable': column.nullable,
+                'primary_key': column.primary_key
+            })
+
+        current_app.logger.info(f"Successfully retrieved info for table '{table_name}' for {current_user.username}.")
+        return jsonify({'success': True, 'table_name': table_name, 'columns': column_info_list}), 200
+    except Exception as e:
+        current_app.logger.error(f"Error fetching info for table '{table_name}' for {current_user.username}: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': f'Failed to retrieve table information for {table_name}: {str(e)}'}), 500
+
+@api_system_bp.route('/api/admin/db/table_data/<string:table_name>', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def api_admin_get_table_data(table_name: str):
+    """Fetches paginated and filterable data from a specific database table."""
+    import math # For math.ceil
+
+    current_app.logger.info(f"User {current_user.username} requested data for table: {table_name} with query params: {request.args}")
+
+    if table_name not in db.metadata.tables:
+        current_app.logger.warning(f"Table '{table_name}' not found by {current_user.username}.")
+        return jsonify({'success': False, 'message': 'Table not found.'}), 404
+
+    table_obj = db.metadata.tables[table_name]
+
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 30, type=int)
+        filters_str = request.args.get('filters') # JSON string
+        sort_by = request.args.get('sort_by')
+        sort_order = request.args.get('sort_order', 'asc')
+
+        if page < 1: page = 1
+        if per_page < 1: per_page = 1
+        if per_page > 200: per_page = 200 # Max limit for per_page
+
+        query = db.session.query(table_obj)
+
+        # Apply Filters
+        if filters_str:
+            try:
+                filters = json.loads(filters_str)
+                if not isinstance(filters, list):
+                    raise ValueError("Filters must be a list.")
+                for f_data in filters:
+                    if not isinstance(f_data, dict) or not all(k in f_data for k in ['column', 'op', 'value']):
+                        current_app.logger.warning(f"Invalid filter data format: {f_data} for table {table_name}")
+                        continue # Or return error
+
+                    col_name = f_data['column']
+                    op = f_data['op'].lower()
+                    value = f_data['value']
+
+                    if col_name not in table_obj.c:
+                        current_app.logger.warning(f"Invalid column '{col_name}' for filtering in table {table_name}")
+                        continue # Or return error
+
+                    column_obj = table_obj.c[col_name]
+
+                    if op == 'eq': query = query.filter(column_obj == value)
+                    elif op == 'neq': query = query.filter(column_obj != value)
+                    elif op == 'ilike': query = query.filter(column_obj.ilike(value))
+                    elif op == 'gt': query = query.filter(column_obj > value)
+                    elif op == 'gte': query = query.filter(column_obj >= value)
+                    elif op == 'lt': query = query.filter(column_obj < value)
+                    elif op == 'lte': query = query.filter(column_obj <= value)
+                    elif op == 'in': query = query.filter(column_obj.in_(value.split(',')))
+                    elif op == 'notin': query = query.filter(column_obj.notin_(value.split(',')))
+                    elif op == 'is_null': query = query.filter(column_obj.is_(None))
+                    elif op == 'is_not_null': query = query.filter(column_obj.isnot(None))
+                    else:
+                        current_app.logger.warning(f"Unsupported filter operation '{op}' for table {table_name}")
+                        # Potentially return a 400 error or ignore
+            except json.JSONDecodeError:
+                current_app.logger.warning(f"Invalid JSON in filters string for table {table_name}: {filters_str}")
+                return jsonify({'success': False, 'message': 'Invalid filters format: Not valid JSON.'}), 400
+            except ValueError as ve:
+                current_app.logger.warning(f"Invalid filters structure for table {table_name}: {ve}")
+                return jsonify({'success': False, 'message': f'Invalid filters structure: {ve}.'}), 400
+            except Exception as e_filter: # Catch other potential errors during filter application
+                current_app.logger.error(f"Error applying filter for table {table_name}: {e_filter}", exc_info=True)
+                return jsonify({'success': False, 'message': f'Error applying filter: {e_filter}.'}), 500
+
+
+        # Apply Sorting
+        if sort_by:
+            if sort_by not in table_obj.c:
+                current_app.logger.warning(f"Invalid column '{sort_by}' for sorting in table {table_name}")
+                # Optionally return a 400 error or ignore sorting
+            else:
+                sort_column_obj = table_obj.c[sort_by]
+                if sort_order.lower() == 'desc':
+                    query = query.order_by(sort_column_obj.desc())
+                else:
+                    query = query.order_by(sort_column_obj.asc())
+
+        total_records = query.count() # Count after filtering
+
+        # Apply Pagination
+        offset = (page - 1) * per_page
+        paginated_query = query.limit(per_page).offset(offset)
+
+        result_records_raw = paginated_query.all()
+
+        # Serialize Records
+        serialized_records = []
+        for row in result_records_raw:
+            record_dict_raw = row._asdict()
+            record_dict_final = {}
+            for col_name, val in record_dict_raw.items():
+                if isinstance(val, datetime):
+                    record_dict_final[col_name] = val.isoformat()
+                elif isinstance(val, uuid.UUID):
+                    record_dict_final[col_name] = str(val)
+                else:
+                    record_dict_final[col_name] = val
+            serialized_records.append(record_dict_final)
+
+        # Column Information
+        column_info_list = []
+        for column in table_obj.columns:
+            column_info_list.append({
+                'name': column.name,
+                'type': str(column.type),
+                'nullable': column.nullable,
+                'primary_key': column.primary_key
+            })
+
+        current_app.logger.info(f"Successfully retrieved data for table '{table_name}' by {current_user.username}.")
+        return jsonify({
+            'success': True,
+            'table_name': table_name,
+            'columns': column_info_list,
+            'records': serialized_records,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total_records': total_records,
+                'total_pages': math.ceil(total_records / per_page) if per_page > 0 else 0
+            }
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error fetching data for table '{table_name}' for {current_user.username}: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': f'Failed to retrieve data for table {table_name}: {str(e)}'}), 500
+
 # --- System Data Cleanup Route ---
 
 @api_system_bp.route('/api/admin/cleanup_system_data', methods=['POST'])

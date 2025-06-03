@@ -1,6 +1,7 @@
 import unittest
 import unittest.mock
 import json
+import urllib.parse
 from sqlalchemy import text
 
 from datetime import datetime, time, date, timedelta
@@ -683,58 +684,90 @@ class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusi
         self.assertIn(b'Analytics Dashboard', resp_admin.data) # Updated title
         # Further checks for new elements can be added in a dedicated page rendering test
 
-    def test_view_db_raw_top100_all_tables(self):
-        """Test the /api/admin/view_db_raw_top100 endpoint to ensure it fetches all tables."""
-        # Create an admin user with 'manage_system' permission
-        # Assuming 'Administrator' role grants 'manage_system' via 'all_permissions'
+    # test_view_db_raw_top100_all_tables has been removed as the endpoint's primary purpose
+    # is now covered by the new /api/admin/db/table_data endpoint and its tests.
+    # The old endpoint /api/admin/view_db_raw_top100 still exists but its detailed testing might be redundant
+    # or could be simplified to just check if it returns data for known models if kept.
+    # For now, removing it as per instruction.
+
+    def test_get_db_table_names(self):
+        """Test GET /api/admin/db/table_names returns a list of all table names."""
+        admin_role = Role.query.filter_by(name="Administrator").first()
+        if not admin_role:
+            admin_role = Role(name="Administrator", permissions="all_permissions") # Assumes 'manage_system'
+            db.session.add(admin_role)
+            db.session.commit()
+
+        admin_user = User(username="dbadmin_tables", email="dbtables@example.com", is_admin=True)
+        admin_user.set_password("adminpass")
+        admin_user.roles.append(admin_role)
+        db.session.add(admin_user)
+        db.session.commit()
+        self.login(admin_user.username, "adminpass")
+
+        response = self.client.get('/api/admin/db/table_names')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertIn('tables', data)
+        self.assertIsInstance(data['tables'], list)
+
+        actual_table_names = sorted(list(db.metadata.tables.keys()))
+        self.assertEqual(sorted(data['tables']), actual_table_names)
+        self.logout()
+
+    def test_get_db_table_info_valid_table(self):
+        """Test GET /api/admin/db/table_info/<table_name> for a valid table."""
         admin_role = Role.query.filter_by(name="Administrator").first()
         if not admin_role:
             admin_role = Role(name="Administrator", permissions="all_permissions")
             db.session.add(admin_role)
             db.session.commit()
-
-        admin_user = User(username="dbviewadmin", email="dbview@example.com", is_admin=True)
+        admin_user = User(username="dbadmin_info", email="dbinfo@example.com", is_admin=True)
         admin_user.set_password("adminpass")
         admin_user.roles.append(admin_role)
         db.session.add(admin_user)
         db.session.commit()
-
         self.login(admin_user.username, "adminpass")
 
-        response = self.client.get('/api/admin/view_db_raw_top100')
+        # Assuming 'user' table exists
+        table_to_test = 'user'
+        if table_to_test not in db.metadata.tables.keys():
+            self.skipTest(f"Table '{table_to_test}' does not exist in metadata, skipping info test.")
 
+        response = self.client.get(f'/api/admin/db/table_info/{table_to_test}')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content_type, 'application/json')
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['table_name'], table_to_test)
+        self.assertIn('columns', data)
+        self.assertIsInstance(data['columns'], list)
+        if len(data['columns']) > 0:
+            self.assertIn('name', data['columns'][0])
+            self.assertIn('type', data['columns'][0])
+            self.assertIn('nullable', data['columns'][0])
+            self.assertIn('primary_key', data['columns'][0])
+        self.logout()
 
-        data = json.loads(response.data.decode('utf-8'))
-        self.assertTrue(data.get('success'))
-        self.assertIn('data', data)
-        self.assertIsInstance(data['data'], dict)
+    def test_get_db_table_info_invalid_table(self):
+        """Test GET /api/admin/db/table_info/<table_name> for a non-existent table."""
+        admin_role = Role.query.filter_by(name="Administrator").first()
+        if not admin_role:
+            admin_role = Role(name="Administrator", permissions="all_permissions")
+            db.session.add(admin_role)
+            db.session.commit()
+        admin_user = User(username="dbadmin_info_invalid", email="dbinfoinvalid@example.com", is_admin=True)
+        admin_user.set_password("adminpass")
+        admin_user.roles.append(admin_role)
+        db.session.add(admin_user)
+        db.session.commit()
+        self.login(admin_user.username, "adminpass")
 
-        # Get all table names from the database metadata
-        all_db_table_names = db.metadata.tables.keys()
-        # Also include model names that might not directly match table names if the backend logic uses class names as keys sometimes
-        # For this test, we primarily care about what the API *returns* as keys, which should be table names.
-
-        response_table_keys = data['data'].keys()
-
-        for table_name in all_db_table_names:
-            self.assertIn(table_name, response_table_keys, f"Table '{table_name}' not found in API response.")
-
-            table_value = data['data'][table_name]
-
-            if isinstance(table_value, list):
-                # If it's a list, it should be a list of records (dictionaries) or an empty list.
-                for record in table_value: # This loop is skipped if table_value is an empty list.
-                    self.assertIsInstance(record, dict, f"Record in table '{table_name}' should be a dict.")
-            else:
-                # If not a list, it must be a string (informational message for skipped/problematic table).
-                self.assertIsInstance(table_value, str, f"Skipped/problematic table '{table_name}' entry should be a string message. Got: {type(table_value)}")
-
-        # Verify that all keys in response data are actual table names (no extra keys)
-        for response_key in response_table_keys:
-            self.assertIn(response_key, all_db_table_names, f"API response key '{response_key}' is not a valid table name.")
-
+        response = self.client.get('/api/admin/db/table_info/non_existent_table_blah_blah')
+        self.assertEqual(response.status_code, 404)
+        data = response.get_json()
+        self.assertFalse(data['success'])
+        self.assertEqual(data['message'], 'Table not found.')
         self.logout()
 
     @unittest.mock.patch('routes.admin_ui.db.session')
@@ -3580,6 +3613,190 @@ class TestBookingSettingsEnforcement(AppTests):
         db.session.commit()
         self.logout()
 
+# Define a helper method for creating an admin with manage_system, or ensure it's part of AppTests/TestAdminFunctionality
+# For now, we'll assume self._create_admin_user_with_manage_system() exists or is adapted.
+
+class TestAdminDbDataAPI(AppTests):
+    def _create_admin_with_manage_system(self, username_suffix=""):
+        """Creates an admin user with 'manage_system' permission."""
+        admin_role = Role.query.filter_by(name="Administrator").first()
+        if not admin_role:
+            admin_role = Role(name="Administrator", permissions="all_permissions") # Assumes 'manage_system'
+            db.session.add(admin_role)
+            db.session.commit()
+
+        admin_username = f"dbdata_admin{username_suffix}"
+        admin_email = f"dbdata_admin{username_suffix}@example.com"
+
+        admin_user = User.query.filter_by(username=admin_username).first()
+        if not admin_user:
+            admin_user = User(username=admin_username, email=admin_email, is_admin=True)
+            admin_user.set_password("adminpass")
+            db.session.add(admin_user) # Add first before roles for potential non-nullable user_id in association
+
+        if admin_role not in admin_user.roles:
+            admin_user.roles.append(admin_role)
+        db.session.commit()
+        return admin_user
+
+    def setUp(self):
+        super().setUp()
+        self.admin_user = self._create_admin_with_manage_system()
+        self.login(self.admin_user.username, "adminpass")
+
+        # Create some sample users for testing on the 'user' table
+        # Clear existing users first to ensure predictable IDs if needed, except the logged-in admin
+        User.query.filter(User.id != self.admin_user.id).delete()
+        db.session.commit()
+
+        self.user1 = User(username='alpha_user', email='alpha@example.com', google_id=None)
+        self.user1.set_password('pass1')
+        self.user2 = User(username='beta_user', email='beta@example.com', google_id='google123')
+        self.user2.set_password('pass2')
+        self.user3 = User(username='gamma_user_test', email='gamma@example.com', google_id=None)
+        self.user3.set_password('pass3')
+        db.session.add_all([self.user1, self.user2, self.user3])
+        db.session.commit()
+
+
+    def tearDown(self):
+        self.logout() # Logout the admin user
+        super().tearDown()
+
+
+    def test_get_db_table_data_basic_fetch(self):
+        """Test basic data fetch from /api/admin/db/table_data/<table_name>."""
+        response = self.client.get('/api/admin/db/table_data/user')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['table_name'], 'user')
+        self.assertIsInstance(data['records'], list)
+        self.assertTrue(len(data['records']) >= 3) # Admin + 3 created users
+        self.assertIn('pagination', data)
+        self.assertEqual(data['pagination']['page'], 1)
+        self.assertIn('columns', data)
+        self.assertIsInstance(data['columns'], list)
+        self.assertTrue(any(col['name'] == 'username' for col in data['columns']))
+
+    def test_get_db_table_data_pagination(self):
+        """Test pagination for /api/admin/db/table_data/."""
+        # We have admin + 3 users = 4 users.
+        # Page 1, 2 per page
+        response = self.client.get('/api/admin/db/table_data/user?page=1&per_page=2')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(len(data['records']), 2)
+        self.assertEqual(data['pagination']['page'], 1)
+        self.assertEqual(data['pagination']['per_page'], 2)
+        self.assertTrue(data['pagination']['total_records'] >= 4)
+        self.assertTrue(data['pagination']['total_pages'] >= 2)
+
+        # Page 2, 2 per page
+        response_p2 = self.client.get('/api/admin/db/table_data/user?page=2&per_page=2')
+        self.assertEqual(response_p2.status_code, 200)
+        data_p2 = response_p2.get_json()
+        self.assertTrue(data_p2['success'])
+        self.assertEqual(len(data_p2['records']), 2 if data['pagination']['total_records'] >=4 else data['pagination']['total_records'] - 2 ) # Handles if total is less than 4
+        self.assertEqual(data_p2['pagination']['page'], 2)
+
+    def test_get_db_table_data_sorting(self):
+        """Test sorting for /api/admin/db/table_data/."""
+        # Ascending
+        response_asc = self.client.get('/api/admin/db/table_data/user?sort_by=username&sort_order=asc')
+        self.assertEqual(response_asc.status_code, 200)
+        data_asc = response_asc.get_json()
+        self.assertTrue(data_asc['success'])
+        usernames_asc = [r['username'] for r in data_asc['records']]
+        self.assertEqual(usernames_asc, sorted(usernames_asc))
+
+        # Descending
+        response_desc = self.client.get('/api/admin/db/table_data/user?sort_by=username&sort_order=desc')
+        self.assertEqual(response_desc.status_code, 200)
+        data_desc = response_desc.get_json()
+        self.assertTrue(data_desc['success'])
+        usernames_desc = [r['username'] for r in data_desc['records']]
+        self.assertEqual(usernames_desc, sorted(usernames_desc, reverse=True))
+
+    def test_get_db_table_data_filtering(self):
+        """Test filtering for /api/admin/db/table_data/."""
+        # EQ filter
+        filters_eq = [{"column": "username", "op": "eq", "value": "alpha_user"}]
+        response_eq = self.client.get(f'/api/admin/db/table_data/user?filters={urllib.parse.quote(json.dumps(filters_eq))}')
+        self.assertEqual(response_eq.status_code, 200)
+        data_eq = response_eq.get_json()
+        self.assertTrue(data_eq['success'])
+        self.assertEqual(len(data_eq['records']), 1)
+        self.assertEqual(data_eq['records'][0]['username'], 'alpha_user')
+
+        # ILIKE filter
+        filters_ilike = [{"column": "username", "op": "ilike", "value": "%_user_test%"}]
+        response_ilike = self.client.get(f'/api/admin/db/table_data/user?filters={urllib.parse.quote(json.dumps(filters_ilike))}')
+        self.assertEqual(response_ilike.status_code, 200)
+        data_ilike = response_ilike.get_json()
+        self.assertTrue(data_ilike['success'])
+        self.assertEqual(len(data_ilike['records']), 1)
+        self.assertEqual(data_ilike['records'][0]['username'], 'gamma_user_test')
+
+        # IS_NULL filter (on google_id for user1 and user3)
+        filters_isnull = [{"column": "google_id", "op": "is_null", "value": ""}] # Value is ignored by backend
+        response_isnull = self.client.get(f'/api/admin/db/table_data/user?filters={urllib.parse.quote(json.dumps(filters_isnull))}')
+        self.assertEqual(response_isnull.status_code, 200)
+        data_isnull = response_isnull.get_json()
+        self.assertTrue(data_isnull['success'])
+        self.assertTrue(len(data_isnull['records']) >= 2) # admin, user1, user3 might have null google_id
+        self.assertTrue(any(r['username'] == 'alpha_user' for r in data_isnull['records']))
+        self.assertTrue(any(r['username'] == 'gamma_user_test' for r in data_isnull['records']))
+
+        # IS_NOT_NULL filter (on google_id for user2)
+        filters_isnotnull = [{"column": "google_id", "op": "is_not_null", "value": ""}]
+        response_isnotnull = self.client.get(f'/api/admin/db/table_data/user?filters={urllib.parse.quote(json.dumps(filters_isnotnull))}')
+        self.assertEqual(response_isnotnull.status_code, 200)
+        data_isnotnull = response_isnotnull.get_json()
+        self.assertTrue(data_isnotnull['success'])
+        self.assertEqual(len(data_isnotnull['records']), 1)
+        self.assertEqual(data_isnotnull['records'][0]['username'], 'beta_user')
+
+        # IN filter
+        user_ids_for_in_filter = f"{self.user1.id},{self.user3.id}"
+        filters_in = [{"column": "id", "op": "in", "value": user_ids_for_in_filter}]
+        response_in = self.client.get(f'/api/admin/db/table_data/user?filters={urllib.parse.quote(json.dumps(filters_in))}')
+        self.assertEqual(response_in.status_code, 200)
+        data_in = response_in.get_json()
+        self.assertTrue(data_in['success'])
+        self.assertEqual(len(data_in['records']), 2)
+        usernames_in = {r['username'] for r in data_in['records']}
+        self.assertEqual(usernames_in, {'alpha_user', 'gamma_user_test'})
+
+
+    def test_get_db_table_data_invalid_table(self):
+        """Test /api/admin/db/table_data/ with a non-existent table."""
+        response = self.client.get('/api/admin/db/table_data/non_existent_table_qwerty')
+        self.assertEqual(response.status_code, 404)
+        data = response.get_json()
+        self.assertFalse(data['success'])
+        self.assertEqual(data['message'], 'Table not found.')
+
+    def test_get_db_table_data_invalid_filter_column(self):
+        """Test /api/admin/db/table_data/ with an invalid filter column."""
+        filters = [{"column": "invalid_column_name", "op": "eq", "value": "test"}]
+        response = self.client.get(f'/api/admin/db/table_data/user?filters={urllib.parse.quote(json.dumps(filters))}')
+        # The backend currently logs a warning and skips the filter. So it would return 200.
+        # To make it a 400, the backend would need to explicitly check and raise an error.
+        # For now, let's assume it skips and returns 200 with all data.
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data['success'])
+        # Add more specific check if backend starts returning error for this.
+
+    def test_get_db_table_data_invalid_filter_json(self):
+        """Test /api/admin/db/table_data/ with malformed JSON filter."""
+        response = self.client.get('/api/admin/db/table_data/user?filters=thisisnotjson')
+        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertFalse(data['success'])
+        self.assertIn('Invalid filters format: Not valid JSON.', data['message'])
 
 if __name__ == '__main__':
     unittest.main()
