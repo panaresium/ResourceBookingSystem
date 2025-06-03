@@ -115,10 +115,10 @@ def serve_backup_restore_page():
         'admin_backup_restore.html',
         full_backups=full_backups,
         booking_csv_backups=paginated_booking_csv_backups,
-        booking_csv_pagination_current_page=page,
-        booking_csv_pagination_total_pages=total_pages,
-        booking_csv_pagination_has_prev=has_prev,
-        booking_csv_pagination_has_next=has_next
+        booking_csv_page=page,
+        booking_csv_total_pages=total_pages,
+        booking_csv_has_prev=has_prev,
+        booking_csv_has_next=has_next
     )
 
 @admin_ui_bp.route('/admin/restore_booking_csv/<timestamp_str>', methods=['POST'])
