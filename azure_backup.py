@@ -6,7 +6,8 @@ import json
 from datetime import datetime
 import tempfile # Added for temporary file
 import re # Added for regex parsing of CSV filenames
-from azure.core.exceptions import ResourceNotFoundError, HttpResponseError # Added HttpResponseError
+import time
+from azure.core.exceptions import ResourceNotFoundError, HttpResponseError, ServiceRequestError # Added HttpResponseError
 
 # Assuming models.py is in the same directory or accessible via PYTHONPATH
 # This import is tricky as azure_backup.py might be run in different contexts.
@@ -153,6 +154,47 @@ def _ensure_directory_exists(share_client, directory_path):
             raise
 
 
+# Helper function to create a share with retry logic
+def _create_share_with_retry(share_client, share_name, retries=3, delay_seconds=5, backoff_factor=2):
+    """
+    Attempts to create a share with retries on failure.
+
+    Args:
+        share_client: The Azure ShareClient.
+        share_name (str): Name of the share (for logging).
+        retries (int): Maximum number of retry attempts.
+        delay_seconds (int): Initial delay between retries.
+        backoff_factor (int): Factor by which the delay increases after each retry.
+
+    Returns:
+        bool: True if the share was created or already exists, False if all retries failed.
+              (Note: Will re-raise ServiceRequestError on final attempt failure)
+    """
+    current_delay = delay_seconds
+    for attempt_num in range(retries):
+        try:
+            share_client.create_share()
+            logger.info(f"Share '{share_name}' created successfully or already existed.")
+            return True
+        except ServiceRequestError as e:
+            logger.error(
+                f"Attempt {attempt_num + 1} of {retries}: Failed to create share '{share_name}'. "
+                f"Error: {e}. Retrying in {current_delay} seconds..."
+            )
+            if attempt_num == retries - 1:
+                logger.error(f"All {retries} retries failed for share '{share_name}'. Error: {e}")
+                raise  # Re-raise the exception on the last attempt
+            time.sleep(current_delay)
+            current_delay *= backoff_factor
+        except Exception as e: # Catch other unexpected exceptions
+            logger.error(
+                f"An unexpected error occurred while trying to create share '{share_name}' on attempt {attempt_num + 1}: {e}"
+            )
+            # For unexpected errors, re-raise immediately without retry.
+            # If retrying these is desired, this block needs to be more like the ServiceRequestError block.
+            raise
+
+
 def upload_file(share_client, source_path, file_path):
     directory_path = os.path.dirname(file_path)
     if directory_path:
@@ -218,7 +260,7 @@ def backup_database():
     share_name = os.environ.get('AZURE_DB_SHARE', 'db-backups')
     share_client = service_client.get_share_client(share_name)
     if not _client_exists(share_client):
-        share_client.create_share()
+        _create_share_with_retry(share_client, share_name) # MODIFIED
     db_path = os.path.join(DATA_DIR, 'site.db')
     timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
     file_name = f'site_{timestamp}.db'
@@ -232,7 +274,7 @@ def save_floor_map_to_share(local_path, dest_filename=None):
     share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media')
     share_client = service_client.get_share_client(share_name)
     if not _client_exists(share_client):
-        share_client.create_share()
+        _create_share_with_retry(share_client, share_name) # MODIFIED
     if dest_filename is None:
         dest_filename = os.path.basename(local_path)
     file_path = f'floor_map_uploads/{dest_filename}'
@@ -244,7 +286,7 @@ def backup_media():
     share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media')
     share_client = service_client.get_share_client(share_name)
     if not _client_exists(share_client):
-        share_client.create_share()
+        _create_share_with_retry(share_client, share_name) # MODIFIED
     # Upload floor map images
     for folder in (FLOOR_MAP_UPLOADS, RESOURCE_UPLOADS):
         if not os.path.isdir(folder):
@@ -271,7 +313,7 @@ def backup_if_changed():
     db_share = os.environ.get('AZURE_DB_SHARE', 'db-backups')
     db_client = service_client.get_share_client(db_share)
     if not _client_exists(db_client):
-        db_client.create_share()
+        _create_share_with_retry(db_client, db_share) # MODIFIED
     db_local = os.path.join(DATA_DIR, 'site.db')
     db_rel = 'site.db'
     db_hash = _hash_file(db_local) if os.path.exists(db_local) else None
@@ -288,7 +330,7 @@ def backup_if_changed():
     media_share = os.environ.get('AZURE_MEDIA_SHARE', 'media')
     media_client = service_client.get_share_client(media_share)
     if not _client_exists(media_client):
-        media_client.create_share()
+        _create_share_with_retry(media_client, media_share) # MODIFIED
     for folder in (FLOOR_MAP_UPLOADS, RESOURCE_UPLOADS):
         if not os.path.isdir(folder):
             continue
@@ -397,7 +439,7 @@ def backup_bookings_csv(app, socketio_instance=None, task_id=None, start_date_dt
         if not _client_exists(share_client):
             logger.info(f"Creating share '{share_name}' for booking CSV backups.")
             _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', f"Creating share '{share_name}'...")
-            share_client.create_share()
+            _create_share_with_retry(share_client, share_name) # MODIFIED
 
         _ensure_directory_exists(share_client, BOOKING_CSV_BACKUPS_DIR)
 
@@ -924,7 +966,7 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
     db_share_client = service_client.get_share_client(db_share_name)
     if not _client_exists(db_share_client):
         logger.info(f"Creating share '{db_share_name}' for database backups.")
-        db_share_client.create_share()
+        _create_share_with_retry(db_share_client, db_share_name) # MODIFIED
 
     _ensure_directory_exists(db_share_client, DB_BACKUPS_DIR)
 
@@ -979,7 +1021,7 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
     config_share_client = service_client.get_share_client(config_share_name)
     if not _client_exists(config_share_client):
         logger.info(f"Creating share '{config_share_name}' for config backups.")
-        config_share_client.create_share()
+        _create_share_with_retry(config_share_client, config_share_name) # MODIFIED
 
     _ensure_directory_exists(config_share_client, CONFIG_BACKUPS_DIR)
 
@@ -1052,7 +1094,7 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
     media_share_client = service_client.get_share_client(media_share_name)
     if not _client_exists(media_share_client):
         logger.info(f"Creating share '{media_share_name}' for media backups.")
-        media_share_client.create_share()
+        _create_share_with_retry(media_share_client, media_share_name) # MODIFIED
 
     # Ensure the base directory for all media backups exists first
     logger.info(f"Checking/Creating base media backup directory '{MEDIA_BACKUPS_DIR_BASE}' on share '{media_share_name}'.")
