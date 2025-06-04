@@ -487,8 +487,7 @@
                 const mapId = targetButton.dataset.mapId;
                 const row = event.target.closest('tr');
                 const offsetXInput = row.querySelector('.map-offset-x-input');
-                const row = targetButton.closest('tr');
-                const offsetXInput = row.querySelector('.map-offset-x-input');
+                // Removed duplicate: const row = targetButton.closest('tr');
                 const offsetYInput = row.querySelector('.map-offset-y-input');
 
                 const offsetX = parseInt(offsetXInput.value);
