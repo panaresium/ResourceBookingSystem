@@ -9,9 +9,9 @@ document.addEventListener('DOMContentLoaded', function () {
         return `${yyyy}-${mm}-${dd}`;
     }
 
-    const mapAvailabilityDateInput = document.getElementById('new-booking-map-availability-date');
+    // const mapAvailabilityDateInput = document.getElementById('new-booking-map-availability-date'); // Old input field, now removed from HTML
+    const calendarContainer = document.getElementById('inline-calendar-container'); // New container for inline flatpickr
     const mapLocationButtonsContainer = document.getElementById('new-booking-map-location-buttons-container'); // Will be used for combined buttons
-    // const mapFloorSelect = document.getElementById('new-booking-map-floor-select'); // Removed
     const mapContainer = document.getElementById('new-booking-map-container');
     const mapLoadingStatusDiv = document.getElementById('new-booking-map-loading-status');
     const resourceSelectBooking = document.getElementById('resource-select-booking');
@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // let selectedLocationName = null; // Removed
     let selectedMapId = null; // Stores the ID of the currently selected map
     let currentMapId = null; // Still used by loadMapDetails, perhaps can be merged with selectedMapId
+    let currentSelectedDateStr = getTodayDateString(); // Initialize with today's date
 
     const mainBookingFormDateInput = document.getElementById('booking-date');
     const mainFormStartTimeInput = document.getElementById('start-time');
@@ -66,25 +67,26 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    const today = getTodayDateString();
-    if (mapAvailabilityDateInput) {
-        // mapAvailabilityDateInput.value = today; // Flatpickr will handle defaultDate
-        flatpickr(mapAvailabilityDateInput, {
+    // const today = getTodayDateString(); // currentSelectedDateStr is initialized with this
+    if (calendarContainer) {
+        flatpickr(calendarContainer, {
+            inline: true, // Render the calendar inline
             dateFormat: "Y-m-d",
-            defaultDate: "today",
+            defaultDate: currentSelectedDateStr, // Use the global variable
             onChange: function(selectedDates, dateStr, instance) {
+                currentSelectedDateStr = dateStr; // Update global date string
                 // When date changes, update location/floor buttons (colors), then try to load map if one is selected
                 updateLocationFloorButtons().then(() => {
-                    if (selectedMapId) { // Check selectedMapId now
-                        loadMapDetails(selectedMapId, dateStr); // Directly call loadMapDetails
+                    if (selectedMapId) {
+                        loadMapDetails(selectedMapId, currentSelectedDateStr);
                     } else {
-                        loadMapDetails(null, dateStr); // Clear map if no map is selected
+                        loadMapDetails(null, currentSelectedDateStr); // Clear map if no map is selected
                     }
                 });
             }
         });
     } else {
-        console.error('Map availability date input not found.');
+        console.error('Inline calendar container not found.');
     }
     if (mainBookingFormDateInput) {
         mainBookingFormDateInput.value = today;
@@ -93,11 +95,13 @@ document.addEventListener('DOMContentLoaded', function () {
     // function updateFloorSelectOptions() { // Removed }
 
     async function updateLocationFloorButtons() {
-        if (!mapAvailabilityDateInput || !mapLocationButtonsContainer) {
-            console.error("Date input or location buttons container not found for updateLocationFloorButtons");
+        // Now uses currentSelectedDateStr instead of mapAvailabilityDateInput.value
+        if (!calendarContainer || !mapLocationButtonsContainer) {
+            console.error("Calendar container or location buttons container not found for updateLocationFloorButtons");
             return;
         }
-        const selectedDate = mapAvailabilityDateInput.value;
+        // const selectedDate = mapAvailabilityDateInput.value; // Old way
+        const selectedDate = currentSelectedDateStr; // Use global date string
         if (!selectedDate) {
             mapLocationButtonsContainer.innerHTML = "<p>Please select a date to see map availability.</p>";
             return;
@@ -153,7 +157,12 @@ document.addEventListener('DOMContentLoaded', function () {
                     });
                     this.classList.add('selected-map-button'); // Or 'selected-location-button'
 
-                    loadMapDetails(selectedMapId, mapAvailabilityDateInput.value);
+                    loadMapDetails(selectedMapId, currentSelectedDateStr); // Use global date string
+
+                    const mapDisplayArea = document.getElementById('new-booking-map-container');
+                    if (mapDisplayArea) {
+                        mapDisplayArea.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
                 });
                 mapLocationButtonsContainer.appendChild(button);
             });
@@ -394,26 +403,31 @@ document.addEventListener('DOMContentLoaded', function () {
         if (isSyncingDate) return; // Still useful if date syncing from main form
         isSyncingDate = true;
 
-        let newDate = mapAvailabilityDateInput ? mapAvailabilityDateInput.value : getTodayDateString();
+        // let newDate = mapAvailabilityDateInput ? mapAvailabilityDateInput.value : getTodayDateString(); // Old way
+        let newDate = currentSelectedDateStr; // Use global
 
         if (source === 'form' && mainBookingFormDateInput) { // If change initiated from main booking form's date
             newDate = mainBookingFormDateInput.value;
-            if (mapAvailabilityDateInput && mapAvailabilityDateInput.value !== newDate) {
-                // Update flatpickr instance if possible, or just its input value
-                if (mapAvailabilityDateInput._flatpickr) {
-                    mapAvailabilityDateInput._flatpickr.setDate(newDate, false); // Don't trigger flatpickr's onChange
-                } else {
-                    mapAvailabilityDateInput.value = newDate;
+            // if (mapAvailabilityDateInput && mapAvailabilityDateInput.value !== newDate) { // Old way
+            if (currentSelectedDateStr !== newDate) {
+                currentSelectedDateStr = newDate; // Update global
+                // Update flatpickr instance if possible
+                const flatpickrInstance = calendarContainer ? calendarContainer._flatpickr : null;
+                if (flatpickrInstance) {
+                    flatpickrInstance.setDate(newDate, false); // Update flatpickr without triggering its onChange
                 }
             }
-        } else if (mapAvailabilityDateInput) { // If flatpickr initiated or general call
-             newDate = mapAvailabilityDateInput.value;
+        } else { // If flatpickr initiated or general call, currentSelectedDateStr is already set by flatpickr's onChange
+             newDate = currentSelectedDateStr; // Ensure we use the global
              if (mainBookingFormDateInput && mainBookingFormDateInput.value !== newDate) {
                  mainBookingFormDateInput.value = newDate;
              }
         }
 
         // Primary action on date change is to update buttons and then reload map if one is active
+        // Flatpickr's onChange now calls updateLocationFloorButtons and then loadMapDetails directly.
+        // So, handleFilterChange, if called from mainBookingFormDateInput, needs to ensure flatpickr UI is updated
+        // and then trigger the same sequence.
         updateLocationFloorButtons().then(() => {
             if (selectedMapId) {
                 loadMapDetails(selectedMapId, newDate);
@@ -490,10 +504,10 @@ document.addEventListener('DOMContentLoaded', function () {
             // ensure its details are loaded for the current date.
             // This might be more relevant if we introduce persisting selectedMapId (e.g. in URL params or localStorage)
             if (selectedMapId) {
-                 loadMapDetails(selectedMapId, mapAvailabilityDateInput.value);
+                 loadMapDetails(selectedMapId, currentSelectedDateStr); // Use global
             } else {
                 // Ensure map is cleared if no specific map is selected on load
-                loadMapDetails(null, mapAvailabilityDateInput.value);
+                loadMapDetails(null, currentSelectedDateStr); // Use global
             }
 
         } catch (error) {
@@ -505,10 +519,10 @@ document.addEventListener('DOMContentLoaded', function () {
     if (mapContainer) {
         initializeMapSelectionUI(); // Call the renamed function
         document.addEventListener('refreshNewBookingMap', function(event) {
-            if (selectedMapId && mapAvailabilityDateInput) { // Use selectedMapId
-                loadMapDetails(selectedMapId, mapAvailabilityDateInput.value);
+            if (selectedMapId && currentSelectedDateStr) { // Use selectedMapId and global date string
+                loadMapDetails(selectedMapId, currentSelectedDateStr);
             } else {
-                console.warn('Cannot refresh new_booking_map: selectedMapId or mapAvailabilityDateInput is not set.');
+                console.warn('Cannot refresh new_booking_map: selectedMapId or currentSelectedDateStr is not set.');
             }
         });
     } else {
@@ -710,8 +724,8 @@ document.addEventListener('DOMContentLoaded', function () {
                         if (resourceDetailModal) resourceDetailModal.style.display = "none";
                         selectedTimeSlotForNewBooking = null;
                     }, 2000);
-                    if (currentMapId && mapAvailabilityDateInput) {
-                        loadMapDetails(currentMapId, mapAvailabilityDateInput.value);
+                    if (currentMapId && currentSelectedDateStr) { // Use global date string
+                        loadMapDetails(currentMapId, currentSelectedDateStr);
                     }
                 } else {
                     if (!modalStatusMessageP.classList.contains('error') && !modalStatusMessageP.classList.contains('success')) {
