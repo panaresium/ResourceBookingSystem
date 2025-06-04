@@ -3622,6 +3622,324 @@ class TestBulkUserOperationsAPI(AppTests):
         self.logout()
 
 
+class TestUserProfile(AppTests):
+    def setUp(self):
+        super().setUp()
+        # Create a more specific user for profile tests if needed, or use 'testuser'
+        self.profile_user = User.query.filter_by(username='testuser').first()
+        if not self.profile_user: # Should exist from parent setUp
+            self.profile_user = User(username='testuser', email='test@example.com')
+            self.profile_user.set_password('password')
+            db.session.add(self.profile_user)
+            db.session.commit()
+
+        # Ensure a clean state for social IDs for each test method if needed
+        self.profile_user.google_id = None
+        self.profile_user.google_email = None
+        self.profile_user.facebook_id = None
+        self.profile_user.instagram_id = None
+        db.session.commit()
+
+    def test_user_model_attributes(self):
+        """Test setting and retrieving all new User model attributes."""
+        user = User(
+            username='fullprofileuser',
+            email='fullprofile@example.com',
+            first_name='Full',
+            last_name='Profile',
+            phone='123-456-7890',
+            section='Test Section',
+            department='Test Department',
+            position='Tester',
+            google_id='test_google_123',
+            google_email='full_google@example.com',
+            facebook_id='test_facebook_123',
+            instagram_id='test_instagram_123'
+        )
+        user.set_password('password')
+        db.session.add(user)
+        db.session.commit()
+
+        retrieved_user = User.query.filter_by(username='fullprofileuser').first()
+        self.assertIsNotNone(retrieved_user)
+        self.assertEqual(retrieved_user.first_name, 'Full')
+        self.assertEqual(retrieved_user.last_name, 'Profile')
+        self.assertEqual(retrieved_user.phone, '123-456-7890')
+        self.assertEqual(retrieved_user.section, 'Test Section')
+        self.assertEqual(retrieved_user.department, 'Test Department')
+        self.assertEqual(retrieved_user.position, 'Tester')
+        self.assertEqual(retrieved_user.google_id, 'test_google_123')
+        self.assertEqual(retrieved_user.google_email, 'full_google@example.com')
+        self.assertEqual(retrieved_user.facebook_id, 'test_facebook_123')
+        self.assertEqual(retrieved_user.instagram_id, 'test_instagram_123')
+
+    def test_profile_page_display(self):
+        """Test GET /profile displays user information correctly."""
+        self.profile_user.first_name = "Test"
+        self.profile_user.last_name = "User"
+        self.profile_user.phone = "555-0101"
+        self.profile_user.section = "Engineering"
+        self.profile_user.department = "Software"
+        self.profile_user.position = "Lead Tester"
+        self.profile_user.google_id = "gid_123"
+        self.profile_user.google_email = "testuser_google@example.com"
+        # facebook_id and instagram_id remain None for this part of the test
+        db.session.commit()
+
+        self.login('testuser', 'password')
+        response = self.client.get('/profile')
+        self.assertEqual(response.status_code, 200)
+        html_content = response.data.decode('utf-8')
+
+        self.assertIn(self.profile_user.username, html_content)
+        self.assertIn(self.profile_user.email, html_content)
+        self.assertIn("Test", html_content) # First Name
+        self.assertIn("User", html_content) # Last Name
+        self.assertIn("555-0101", html_content) # Phone
+        self.assertIn("Engineering", html_content) # Section
+        self.assertIn("Software", html_content) # Department
+        self.assertIn("Lead Tester", html_content) # Position
+
+        self.assertIn("Google: Linked (testuser_google@example.com)", html_content)
+        self.assertIn("Facebook: Not Linked", html_content)
+        self.assertIn("Instagram: Not Linked", html_content)
+        self.assertIn(url_for('auth.unlink_google_account'), html_content) # Unlink button/form
+        self.assertIn(url_for('auth.link_facebook_auth'), html_content) # Link button
+        self.assertIn(url_for('auth.link_instagram_auth'), html_content) # Link button
+
+    def test_edit_profile_page_display(self):
+        """Test GET /profile/edit pre-fills form fields."""
+        self.profile_user.first_name = "Edit"
+        self.profile_user.last_name = "Me"
+        self.profile_user.phone = "555-0202"
+        self.profile_user.section = "QA"
+        self.profile_user.department = "Testing"
+        self.profile_user.position = "Senior Tester"
+        db.session.commit()
+
+        self.login('testuser', 'password')
+        response = self.client.get('/profile/edit')
+        self.assertEqual(response.status_code, 200)
+        html_content = response.data.decode('utf-8')
+
+        self.assertIn(f'value="{self.profile_user.email}"', html_content)
+        self.assertIn(f'value="Edit"', html_content)
+        self.assertIn(f'value="Me"', html_content)
+        self.assertIn(f'value="555-0202"', html_content)
+        self.assertIn(f'value="QA"', html_content)
+        self.assertIn(f'value="Testing"', html_content)
+        self.assertIn(f'value="Senior Tester"', html_content)
+
+    def test_profile_update_api(self):
+        """Test PUT /api/profile updates all fields including password."""
+        self.login('testuser', 'password')
+
+        update_payload = {
+            "email": "updated_test@example.com",
+            "first_name": "UpdatedFirst",
+            "last_name": "UpdatedLast",
+            "phone": "555-1234",
+            "section": "UpdatedSection",
+            "department": "UpdatedDept",
+            "position": "UpdatedPos",
+            "password": "newsecurepassword"
+        }
+        response = self.client.put('/api/profile', json=update_payload)
+        self.assertEqual(response.status_code, 200)
+        json_response = response.get_json()
+        self.assertTrue(json_response.get('success'))
+        self.assertEqual(json_response['user']['email'], "updated_test@example.com")
+        self.assertEqual(json_response['user']['first_name'], "UpdatedFirst")
+
+        db.session.refresh(self.profile_user) # Refresh from DB
+        self.assertEqual(self.profile_user.email, "updated_test@example.com")
+        self.assertEqual(self.profile_user.first_name, "UpdatedFirst")
+        self.assertEqual(self.profile_user.last_name, "UpdatedLast")
+        self.assertEqual(self.profile_user.phone, "555-1234")
+        self.assertEqual(self.profile_user.section, "UpdatedSection")
+        self.assertEqual(self.profile_user.department, "UpdatedDept")
+        self.assertEqual(self.profile_user.position, "UpdatedPos")
+        self.assertTrue(self.profile_user.check_password("newsecurepassword"))
+
+        # Test setting a nullable field to empty string (should become None or empty based on model)
+        empty_phone_payload = {"phone": ""}
+        response_empty_phone = self.client.put('/api/profile', json=empty_phone_payload)
+        self.assertEqual(response_empty_phone.status_code, 200)
+        db.session.refresh(self.profile_user)
+        self.assertIsNone(self.profile_user.phone) # Assuming empty string from API sets it to None in DB
+
+    @unittest.mock.patch('auth.id_token')
+    @unittest.mock.patch('auth.Flow') # Mock the entire Flow class
+    def test_google_account_linking_and_unlinking(self, MockFlow, mock_id_token):
+        """Test Google account linking and unlinking flow with mocks."""
+        self.login('testuser', 'password')
+
+        # --- Test Linking ---
+        # Mock Flow instance and its methods
+        mock_flow_instance = unittest.mock.Mock()
+        mock_flow_instance.authorization_url.return_value = ('https://google.com/auth_url_dummy', 'dummy_state_123')
+        MockFlow.from_client_config.return_value = mock_flow_instance
+
+        response_link_init = self.client.get(url_for('auth.link_google_auth'))
+        self.assertEqual(response_link_init.status_code, 302)
+        self.assertEqual(response_link_init.location, 'https://google.com/auth_url_dummy')
+        with self.client.session_transaction() as sess:
+            self.assertEqual(sess['oauth_link_state'], 'dummy_state_123')
+            self.assertEqual(sess['oauth_link_user_id'], self.profile_user.id)
+
+        # Mock callback phase
+        mock_flow_instance.fetch_token.return_value = None # Simulate token fetched internally
+        mock_flow_instance.credentials = unittest.mock.Mock(id_token='dummy_jwt_token')
+        mock_id_token.verify_oauth2_token.return_value = {
+            'sub': 'test_google_id_user1',
+            'email': 'user1_google@example.com'
+        }
+
+        # Simulate callback from Google
+        with self.client.session_transaction() as sess:
+            sess['oauth_link_state'] = 'dummy_state_123' # Restore state for callback
+            sess['oauth_link_user_id'] = self.profile_user.id
+
+        response_link_callback = self.client.get(url_for('auth.link_google_callback', state='dummy_state_123'))
+        self.assertEqual(response_link_callback.status_code, 302) # Redirect to profile
+        self.assertIn(url_for('ui.serve_profile_page'), response_link_callback.location)
+
+        db.session.refresh(self.profile_user)
+        self.assertEqual(self.profile_user.google_id, 'test_google_id_user1')
+        self.assertEqual(self.profile_user.google_email, 'user1_google@example.com')
+
+        # Check flash message (requires response.data from follow_redirects=True)
+        # For now, we check DB and audit log.
+        link_log = AuditLog.query.filter_by(action="LINK_GOOGLE_SUCCESS", user_id=self.profile_user.id).first()
+        self.assertIsNotNone(link_log)
+        self.assertIn('linked Google account', link_log.details)
+
+        # --- Test Unlinking ---
+        response_unlink = self.client.post(url_for('auth.unlink_google_account'))
+        self.assertEqual(response_unlink.status_code, 302)
+        self.assertIn(url_for('ui.serve_profile_page'), response_unlink.location)
+
+        db.session.refresh(self.profile_user)
+        self.assertIsNone(self.profile_user.google_id)
+        self.assertIsNone(self.profile_user.google_email)
+
+        unlink_log = AuditLog.query.filter_by(action="UNLINK_GOOGLE_SUCCESS", user_id=self.profile_user.id).first()
+        self.assertIsNotNone(unlink_log)
+        self.assertIn('unlinked Google account', unlink_log.details)
+
+    @unittest.mock.patch('auth.id_token')
+    @unittest.mock.patch('auth.Flow')
+    def test_google_link_conflict(self, MockFlow, mock_id_token):
+        """Test linking a Google account already linked to another user."""
+        # Create User A, linked to google_id_A
+        user_a = User(username='userA', email='a@example.com', google_id='google_id_A', google_email='a_google@example.com')
+        user_a.set_password('passA')
+        db.session.add(user_a)
+        db.session.commit()
+
+        # Log in as User B (self.profile_user)
+        self.login('testuser', 'password')
+
+        # Mock Google flow for User B's linking attempt
+        mock_flow_instance = unittest.mock.Mock()
+        mock_flow_instance.authorization_url.return_value = ('https://google.com/auth_url_dummy_b', 'dummy_state_B')
+        MockFlow.from_client_config.return_value = mock_flow_instance
+        self.client.get(url_for('auth.link_google_auth')) # Initiate linking for User B
+
+        # Mock callback to return google_id_A (already linked to User A)
+        mock_flow_instance.fetch_token.return_value = None
+        mock_flow_instance.credentials = unittest.mock.Mock(id_token='dummy_jwt_token_b')
+        mock_id_token.verify_oauth2_token.return_value = {
+            'sub': 'google_id_A', # This ID is User A's Google ID
+            'email': 'a_google@example.com'
+        }
+        with self.client.session_transaction() as sess: # Restore session for callback
+            sess['oauth_link_state'] = 'dummy_state_B'
+            sess['oauth_link_user_id'] = self.profile_user.id
+
+        response_callback_conflict = self.client.get(url_for('auth.link_google_callback', state='dummy_state_B'), follow_redirects=True)
+        self.assertEqual(response_callback_conflict.status_code, 200) # Lands on profile page
+        self.assertIn(b"already linked to another user", response_callback_conflict.data) # Check flash message
+
+        db.session.refresh(self.profile_user)
+        self.assertIsNone(self.profile_user.google_id) # User B should not be linked
+
+    @unittest.mock.patch('auth.oauth.facebook') # Mock the facebook client from authlib
+    def test_facebook_account_linking_and_unlinking(self, mock_facebook_client):
+        """Test Facebook account linking and unlinking with mocks."""
+        self.login('testuser', 'password')
+
+        # --- Test Linking ---
+        mock_facebook_client.authorize_redirect.return_value = redirect(url_for('ui.serve_index')) # Dummy redirect response
+
+        response_link_init = self.client.get(url_for('auth.link_facebook_auth'))
+        mock_facebook_client.authorize_redirect.assert_called_once()
+        # We can't easily check redirect URL here as it's handled by Authlib client directly
+        # Just ensure it was called and session is set.
+        with self.client.session_transaction() as sess:
+            self.assertIn('oauth_link_facebook_user_id', sess)
+            self.assertEqual(sess['oauth_link_facebook_user_id'], self.profile_user.id)
+
+        # Mock callback phase
+        mock_facebook_client.authorize_access_token.return_value = {'access_token': 'dummy_fb_token'}
+        mock_facebook_client.get.return_value = unittest.mock.Mock(json=lambda: {'id': 'test_facebook_id_user1'})
+
+        with self.client.session_transaction() as sess: # Restore session for callback
+            sess['oauth_link_facebook_user_id'] = self.profile_user.id
+
+        response_link_callback = self.client.get(url_for('auth.link_facebook_callback')) # State not used by Authlib typically
+        self.assertEqual(response_link_callback.status_code, 302)
+        self.assertIn(url_for('ui.serve_profile_page'), response_link_callback.location)
+
+        db.session.refresh(self.profile_user)
+        self.assertEqual(self.profile_user.facebook_id, 'test_facebook_id_user1')
+
+        link_log = AuditLog.query.filter_by(action="LINK_FACEBOOK_SUCCESS", user_id=self.profile_user.id).first()
+        self.assertIsNotNone(link_log)
+
+        # --- Test Unlinking ---
+        response_unlink = self.client.post(url_for('auth.unlink_facebook_account'))
+        self.assertEqual(response_unlink.status_code, 302)
+        db.session.refresh(self.profile_user)
+        self.assertIsNone(self.profile_user.facebook_id)
+        unlink_log = AuditLog.query.filter_by(action="UNLINK_FACEBOOK_SUCCESS", user_id=self.profile_user.id).first()
+        self.assertIsNotNone(unlink_log)
+
+    @unittest.mock.patch('auth.oauth.instagram') # Mock the instagram client
+    def test_instagram_account_linking_and_unlinking(self, mock_instagram_client):
+        """Test Instagram account linking and unlinking with mocks."""
+        self.login('testuser', 'password')
+
+        # --- Test Linking ---
+        mock_instagram_client.authorize_redirect.return_value = redirect(url_for('ui.serve_index'))
+
+        response_link_init = self.client.get(url_for('auth.link_instagram_auth'))
+        mock_instagram_client.authorize_redirect.assert_called_once()
+        with self.client.session_transaction() as sess:
+            self.assertIn('oauth_link_instagram_user_id', sess)
+
+        # Mock callback phase
+        mock_instagram_client.authorize_access_token.return_value = {'access_token': 'dummy_insta_token'}
+        mock_instagram_client.get.return_value = unittest.mock.Mock(json=lambda: {'id': 'test_instagram_id_user1'})
+
+        with self.client.session_transaction() as sess:
+            sess['oauth_link_instagram_user_id'] = self.profile_user.id
+
+        response_link_callback = self.client.get(url_for('auth.link_instagram_callback'))
+        self.assertEqual(response_link_callback.status_code, 302)
+        db.session.refresh(self.profile_user)
+        self.assertEqual(self.profile_user.instagram_id, 'test_instagram_id_user1')
+        link_log = AuditLog.query.filter_by(action="LINK_INSTAGRAM_SUCCESS", user_id=self.profile_user.id).first()
+        self.assertIsNotNone(link_log)
+
+        # --- Test Unlinking ---
+        response_unlink = self.client.post(url_for('auth.unlink_instagram_account'))
+        self.assertEqual(response_unlink.status_code, 302)
+        db.session.refresh(self.profile_user)
+        self.assertIsNone(self.profile_user.instagram_id)
+        unlink_log = AuditLog.query.filter_by(action="UNLINK_INSTAGRAM_SUCCESS", user_id=self.profile_user.id).first()
+        self.assertIsNotNone(unlink_log)
+
 class TestHomePage(AppTests):
     def test_home_page_not_authenticated(self):
         """Test home page when user is not authenticated."""

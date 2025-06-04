@@ -376,6 +376,114 @@ def unlink_facebook_account():
         flash('An error occurred while unlinking your Facebook account. Please try again.', 'error')
     return redirect(url_for('ui.serve_profile_page'))
 
+# --- Instagram Account Linking/Unlinking ---
+
+@auth_bp.route('/profile/link/instagram')
+@login_required
+def link_instagram_auth():
+    if current_user.instagram_id:
+        flash('Your account is already linked with Instagram.', 'info')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    redirect_uri = url_for('auth.link_instagram_callback', _external=True)
+    session['oauth_link_instagram_user_id'] = current_user.id
+    current_app.logger.info(f"User {current_user.username} initiating Instagram account linking.")
+
+    if not hasattr(oauth, 'instagram'):
+        current_app.logger.error("Instagram OAuth client 'oauth.instagram' not registered.")
+        flash('Instagram integration is not configured. Please contact support.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+    return oauth.instagram.authorize_redirect(redirect_uri)
+
+@auth_bp.route('/profile/link/instagram/callback')
+@login_required
+def link_instagram_callback():
+    logger = current_app.logger
+    link_user_id = session.pop('oauth_link_instagram_user_id', None)
+
+    if link_user_id is None:
+        logger.error("Missing user ID during Instagram link callback. Session issue.")
+        flash('Instagram linking failed due to a session issue. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    user_to_link = db.session.get(User, link_user_id)
+    if not user_to_link or user_to_link.id != current_user.id:
+        logger.error(f"User ID mismatch in Instagram link callback. Session user ID: {link_user_id}, Current user ID: {current_user.id}")
+        flash('Instagram linking failed due to a user mismatch. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    if not hasattr(oauth, 'instagram'):
+        current_app.logger.error("Instagram OAuth client 'oauth.instagram' not registered for callback.")
+        flash('Instagram integration is not configured. Please contact support.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    try:
+        token = oauth.instagram.authorize_access_token()
+    except Exception as e:
+        logger.error(f"Error authorizing Instagram access token: {e}", exc_info=True)
+        flash('Failed to authorize with Instagram. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    if not token or 'access_token' not in token: # Instagram might also return 'user_id' directly with short-lived token
+        logger.error(f"Failed to retrieve access token from Instagram during link. Token: {token}")
+        flash('Failed to retrieve access token from Instagram. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    try:
+        # For Instagram Basic Display API, user ID is often part of the access token response,
+        # or fetched via /me endpoint. The userinfo_endpoint should be https://graph.instagram.com/me?fields=id
+        # If the token is a short-lived token, it must be exchanged for a long-lived one ideally.
+        # This example assumes a simple get for user ID.
+        resp = oauth.instagram.get('me?fields=id') # User ID and username are common fields.
+        profile_data = resp.json()
+        instagram_user_id = profile_data.get('id')
+        # instagram_username = profile_data.get('username') # Optional, if needed
+
+        if not instagram_user_id:
+            logger.error(f"Instagram profile data missing 'id'. Data: {profile_data}")
+            flash('Instagram authentication was successful but necessary ID was not provided.', 'error')
+            return redirect(url_for('ui.serve_profile_page'))
+
+        existing_user_with_instagram_id = User.query.filter(User.instagram_id == instagram_user_id, User.id != user_to_link.id).first()
+        if existing_user_with_instagram_id:
+            logger.warning(f"User {user_to_link.username} attempted to link Instagram ID {instagram_user_id} which is already linked to user {existing_user_with_instagram_id.username}.")
+            flash(f"This Instagram account is already linked to another user ({existing_user_with_instagram_id.username}).", 'error')
+            return redirect(url_for('ui.serve_profile_page'))
+
+        user_to_link.instagram_id = instagram_user_id
+        db.session.commit()
+
+        logger.info(f"User {user_to_link.username} successfully linked Instagram account (ID: {instagram_user_id}).")
+        add_audit_log(action="LINK_INSTAGRAM_SUCCESS", details=f"User {user_to_link.username} linked Instagram account.", user_id=user_to_link.id)
+        flash('Successfully linked your Instagram account.', 'success')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Unexpected error during Instagram link callback for user {user_to_link.username}: {e}")
+        flash('An unexpected error occurred while linking your Instagram account. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+@auth_bp.route('/profile/unlink/instagram', methods=['POST'])
+@login_required
+# @csrf.protect
+def unlink_instagram_account():
+    logger = current_app.logger
+    if not current_user.instagram_id:
+        flash('Your account is not currently linked with Instagram.', 'info')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    current_user.instagram_id = None
+    try:
+        db.session.commit()
+        logger.info(f"User {current_user.username} unlinked Instagram account.")
+        add_audit_log(action="UNLINK_INSTAGRAM_SUCCESS", details=f"User {current_user.username} unlinked Instagram account.", user_id=current_user.id)
+        flash('Successfully unlinked your Instagram account.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Error unlinking Instagram account for user {current_user.username}:")
+        flash('An error occurred while unlinking your Instagram account. Please try again.', 'error')
+    return redirect(url_for('ui.serve_profile_page'))
 
 # --- Permission Decorator ---
 def permission_required(permission):
