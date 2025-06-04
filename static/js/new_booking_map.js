@@ -642,4 +642,4 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
 });
-// console.log('new_booking_map.js script execution finished.'); // Keep general load confirmation
+
