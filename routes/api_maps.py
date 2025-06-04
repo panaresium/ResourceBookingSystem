@@ -91,7 +91,7 @@ def get_locations_availability():
 
                     # Get current user's other bookings for the day to check for conflicts
                     user_other_bookings = Booking.query.filter(
-                        Booking.user_id == current_user.id,
+                        Booking.user_name == current_user.username,
                         Booking.resource_id != resource.id, # Bookings on OTHER resources
                         func.date(Booking.start_time) == target_date
                     ).all()
@@ -109,7 +109,7 @@ def get_locations_availability():
 
                         is_generally_booked = bool(general_bookings_overlap)
                         is_booked_by_current_user_on_this_resource = any(
-                            b.user_id == current_user.id for b in general_bookings_overlap
+                            b.user_name == current_user.username for b in general_bookings_overlap
                         )
 
                         # b. Check if slot is under maintenance (more granular than full day)
