@@ -460,6 +460,54 @@ input[type="button"]:focus {
     outline-offset: 2px;
 }
 
+/* Styles for analytics page */
+.chart-container {
+    max-height: 450px;
+    margin-bottom: 20px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background-color: #f9f9f9;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+.chart-container canvas {
+    max-width: 100%;
+}
+.filter-section {
+    margin-bottom: 30px;
+    padding: 15px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background-color: #f5f5f5;
+}
+.filter-section .form-group { /* This is the rule being targeted */
+    margin-right: 15px;
+    /* margin-bottom: 10px; */ /* Add some bottom margin for wrapped elements */
+    /* display: inline-flex; */ /* Commented out */
+}
+/* The h1, h2 rule below is specific to analytics.html context, moved from its own block */
+.container-fluid h1, .container-fluid h2 { /* More specific selectors for analytics page */
+    color: #333; /* Kept as is, as it's a general styling for this page */
+}
+/* Ensure select elements are visible and have some spacing - specific to .filter-section might be better */
+.filter-section select.form-control {
+    min-width: 150px;
+    /* display: inline-block; */ /* This might conflict with Bootstrap col structure, review if needed */
+    /* margin-right: 5px; */ /* No longer needed if labels are on top */
+}
+.filter-section label { /* Label styling within filter section */
+    /* margin-right: 5px; */ /* No longer needed if labels are on top */
+    /* d-block and mb-1 are now handled by Bootstrap classes in HTML */
+}
+/* This rule is too broad and was conflicting with Bootstrap grid */
+/* .form-inline .form-group {
+  display: flex;
+  align-items: center;
+} */
+
+
 /* Resource Page Selection Controls Container */
 #selection-controls-container {
     display: flex;
@@ -470,31 +518,23 @@ input[type="button"]:focus {
 
 #inline-calendar-container {
     width: max-content; /* Fit the width of the calendar content */
-    /* flex: 1; */ /* Removed */
-    /* min-width: 280px; */ /* Removed */
-    /* max-width: 320px; */ /* Removed */
-    /* Add border or subtle background if needed to visually contain it */
-    /* padding: 5px; */
-    /* border: 1px solid var(--border-color); */
-    /* border-radius: 5px; */
 }
 
 /* Flatpickr Calendar Minimal Overrides for Inline Display */
 #inline-calendar-container .flatpickr-calendar.inline {
-    box-shadow: none; /* Remove default box-shadow for inline version if desired */
-    border: 1px solid var(--border-color); /* Optional: add a border to match page style */
-    border-radius: 5px; /* Match other elements */
-    width: 100%; /* Make it responsive within its container */
-    max-width: none; /* Override flatpickr's default max-width for inline */
+    box-shadow: none;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    width: 100%;
+    max-width: none;
 }
-.flatpickr-calendar { /* General flatpickr font adjustment */
-    font-size: 0.9rem; /* Slightly smaller to fit compact areas */
+.flatpickr-calendar {
+    font-size: 0.9rem;
 }
-/* The input.flatpickr-input style is not relevant for inline calendar */
 
 
 /* Location/Map Button Styles for Resource Availability Page */
-#new-booking-map-location-buttons-container-wrapper { /* New wrapper referred to in HTML structure */
+#new-booking-map-location-buttons-container-wrapper {
     flex: 2;
     min-width: 300px;
 }
@@ -502,61 +542,47 @@ input[type="button"]:focus {
     display: flex;
     flex-wrap: wrap;
     gap: 5px;
-    /* margin-bottom: 10px; */ /* Margin now on the parent container */
 }
 
 .location-button {
     padding: 8px 12px;
-    margin: 0 5px 5px 0; /* Keep individual margins for items that might wrap */
+    margin: 0 5px 5px 0;
     border: 1px solid var(--border-color);
     border-radius: 4px;
     cursor: pointer;
-    font-size: 0.9rem; /* Match other secondary buttons or form elements */
+    font-size: 0.9rem;
     color: var(--text-color-dark);
-    background-color: #f0f0f0; /* Default neutral background */
+    background-color: #f0f0f0;
     transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
-    white-space: normal; /* Allow text wrapping */
-    word-break: break-word; /* Break words if necessary */
-    text-align: center; /* Center text if it wraps */
+    white-space: normal;
+    word-break: break-word;
+    text-align: center;
 }
 
 .location-button:hover {
-    background-color: #e0e0e0; /* Slightly darker on hover */
+    background-color: #e0e0e0;
     border-color: #bbb;
 }
 
-/* JS will set background-color directly for now based on previous implementation.
-   These classes are for when JS is updated to use classes for availability. */
 .location-button-available {
-    background-color: lightgreen; /* #90ee90 */
-    color: #155724; /* Dark green text for contrast */
+    background-color: lightgreen;
+    color: #155724;
 }
 .location-button-available:hover {
-    background-color: #78db78; /* Slightly darker green */
+    background-color: #78db78;
 }
 
 .location-button-unavailable {
-    background-color: lightcoral; /* #f08080 */
-    color: #721c24; /* Dark red text for contrast */
+    background-color: lightcoral;
+    color: #721c24;
 }
 .location-button-unavailable:hover {
-    background-color: #ea6a6a; /* Slightly darker red */
+    background-color: #ea6a6a;
 }
 
-.selected-map-button { /* Renamed from .selected-location-button */
-    border-color: var(--accent-color); /* Steel Blue for selected border */
-    box-shadow: 0 0 0 0.2rem rgba(70, 130, 180, .25); /* Subtle glow matching accent */
-    /* If the JS sets background color for availability, this ensures border/shadow are primary indicators */
-    /* To make selected background override availability color (e.g. always blue when selected): */
-    /* background-color: var(--primary-color) !important; */
-    /* color: var(--text-color-light) !important; */
-}
-/* Ensure selected style is prominent even if JS changes background */
-.selected-map-button.location-button-available, /* Renamed */
-.selected-map-button.location-button-unavailable { /* Renamed */
-    /* border-color: var(--accent-color); /* Already set */
-    /* box-shadow: 0 0 0 0.2rem rgba(70, 130, 180, .25); /* Already set */
-    /* Potentially make border thicker or add an inner shadow if needed for visibility over colored backgrounds */
+.selected-map-button {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 0.2rem rgba(70, 130, 180, .25);
 }
 
 
@@ -650,9 +676,6 @@ input[type="button"]:focus {
 
 #login-message { margin-top: 1.25rem; }
 
-/* REMOVED Auth Link Styles in Nav as it's moved to header */
-/* #auth-link-container span { margin-right: 0.625rem; } */
-
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 /* High Contrast Mode Styles - Review for conflicts with new layout */
@@ -666,7 +689,7 @@ body.high-contrast {
 body.high-contrast .app-header {
     background-color: #000000 !important;
     color: #ffffff !important;
-    border-bottom: 2px solid #ffffff !important; /* Ensure separation */
+    border-bottom: 2px solid #ffffff !important;
 }
 body.high-contrast .app-header #auth-link-container a,
 body.high-contrast .app-header #welcome-message-container,
@@ -674,14 +697,13 @@ body.high-contrast .app-header #user-dropdown-button {
     color: #ffffff !important;
 }
 
-/* Ensure all links in header are white in high contrast, overriding general high-contrast link styles */
 body.high-contrast .app-header a,
 body.high-contrast .app-header a:visited {
     color: #ffffff !important;
 }
 
 body.high-contrast .app-header a:hover,
-body.high-contrast .app-header a:focus { /* Also include focus for consistency */
+body.high-contrast .app-header a:focus {
     color: #ffffff !important;
     text-decoration: none !important;
 }
@@ -698,29 +720,26 @@ body.high-contrast .app-header #user-dropdown-menu a.dropdown-item:hover {
     color: #ffff00 !important;
 }
 
-/* Ensure header icons are visible */
 body.high-contrast .app-header .menu-icon,
 body.high-contrast .app-header .user-icon,
-body.high-contrast .app-header .dropdown-arrow { /* also style dropdown arrow if present */
+body.high-contrast .app-header .dropdown-arrow {
     color: #ffffff !important;
-    /* If using SVG/image icons that don't inherit color, filter might be needed: */
-    /* filter: invert(1) brightness(2); */
 }
-body.high-contrast .app-header a:hover .menu-icon, /* Keep icons white on link hover */
+body.high-contrast .app-header a:hover .menu-icon,
 body.high-contrast .app-header a:hover .user-icon,
 body.high-contrast .app-header button:hover .menu-icon,
 body.high-contrast .app-header button:hover .user-icon,
 body.high-contrast .app-header button:hover .dropdown-arrow {
-    color: #ffff00 !important; /* Icon color changes on hover for consistency with text */
+    color: #ffff00 !important;
 }
 
 
-body.high-contrast #sidebar { /* Was nav.sidebar */
+body.high-contrast #sidebar {
     background-color: #000000 !important;
     color: #ffffff !important;
     box-shadow: 2px 0 5px rgba(255,255,255,0.2) !important;
     text-align: left !important;
-    border-right: 2px solid #ffffff !important; /* Ensure separation */
+    border-right: 2px solid #ffffff !important;
 }
 body.high-contrast #sidebar ul li a { color: #ffffff !important; }
 body.high-contrast #sidebar ul li a:hover,
@@ -729,23 +748,20 @@ body.high-contrast #sidebar ul li button { color: #ffffff !important; }
 body.high-contrast #sidebar ul li button:hover,
 body.high-contrast #sidebar ul li button:focus { color: #ffff00 !important; text-decoration: underline !important; }
 
-/* Sidebar Icons */
 body.high-contrast #sidebar .menu-icon {
     color: #ffffff !important;
-    /* filter: invert(1) brightness(2); if SVG/image */
 }
 body.high-contrast #sidebar ul li a:hover .menu-icon,
 body.high-contrast #sidebar ul li a:focus .menu-icon,
 body.high-contrast #sidebar ul li button:hover .menu-icon,
 body.high-contrast #sidebar ul li button:focus .menu-icon {
-    color: #ffff00 !important; /* Icon color changes on hover/focus */
+    color: #ffff00 !important;
 }
 
-/* Sidebar Toggle Button */
 body.high-contrast #sidebar-toggle {
     background-color: #000000 !important;
     color: #ffffff !important;
-    border: 1px solid #ffffff !important; /* Simple border */
+    border: 1px solid #ffffff !important;
 }
 body.high-contrast #sidebar-toggle:hover,
 body.high-contrast #sidebar-toggle:focus {
@@ -754,18 +770,17 @@ body.high-contrast #sidebar-toggle:focus {
     border-color: #ffff00 !important;
 }
 
-/* Sidebar Admin Dropdown Summary */
 body.high-contrast #sidebar details summary {
     color: #ffffff !important;
-    border: 1px dashed transparent; /* For focus indication */
+    border: 1px dashed transparent;
 }
 body.high-contrast #sidebar details summary:hover,
 body.high-contrast #sidebar details summary:focus {
     color: #ffff00 !important;
-    border-color: #ffff00 !important; /* Indicate focus on summary */
-    background-color: #1a1a1a !important; /* Slight background change on hover/focus */
+    border-color: #ffff00 !important;
+    background-color: #1a1a1a !important;
 }
-body.high-contrast #sidebar details summary .menu-icon { /* Icon within summary */
+body.high-contrast #sidebar details summary .menu-icon {
     color: #ffffff !important;
 }
 body.high-contrast #sidebar details summary:hover .menu-icon,
@@ -773,7 +788,6 @@ body.high-contrast #sidebar details summary:focus .menu-icon {
     color: #ffff00 !important;
 }
 
-/* Ensure admin submenu items also get high contrast link styles */
 body.high-contrast #sidebar details ul.admin-menu li a {
     color: #ffffff !important;
 }
@@ -784,10 +798,9 @@ body.high-contrast #sidebar details ul.admin-menu li a:focus {
 }
 
 
-body.high-contrast #main-content { /* Added */
+body.high-contrast #main-content {
     background-color: #ffffff !important;
     color: #000000 !important;
-    /* margin adjustments are handled by non-high-contrast rules */
 }
 body.high-contrast main {
     background-color: #ffffff !important;
@@ -819,15 +832,14 @@ body.high-contrast input[type="submit"]:focus,
 body.high-contrast input[type="button"]:focus {
     outline: 3px solid #ffff00 !important;
     outline-offset: 1px;
-    box-shadow: 0 0 0 3px #ffff00 !important; /* Keep this if it's for focus */
+    box-shadow: 0 0 0 3px #ffff00 !important;
 }
 
-/* High contrast footer */
 body.high-contrast footer {
     background-color: #000000 !important;
     color: #ffffff !important;
     box-shadow: 0 -2px 5px rgba(255,255,255,0.2) !important;
-    border-top: 2px solid #ffffff !important; /* Ensure separation */
+    border-top: 2px solid #ffffff !important;
 }
 body.high-contrast .footer-accessibility-controls button {
     background-color: #000000 !important;
@@ -844,7 +856,7 @@ body.high-contrast footer #language-selector {
     border: 2px solid #ffffff !important;
 }
 body.high-contrast footer #language-selector option {
-    background-color: #ffffff !important; /* Or a neutral color */
+    background-color: #ffffff !important;
     color: #000000 !important;
 }
 
@@ -873,7 +885,6 @@ body.high-contrast .error { background-color: #ffdddd !important; color: #000000
 body.high-contrast #booking-form label, body.high-contrast #login-form label { color: #000000 !important; }
 body.high-contrast input, body.high-contrast select, body.high-contrast textarea { transition: none !important; }
 
-/* Aggressive shadow removal for high contrast, then re-apply essentials */
 body.high-contrast *, body.high-contrast *::before, body.high-contrast *::after {
     box-shadow: none !important;
 }
@@ -882,8 +893,8 @@ body.high-contrast input[type="submit"]:focus,
 body.high-contrast input[type="button"]:focus {
     box-shadow: 0 0 0 3px #ffff00 !important;
 }
-body.high-contrast .app-header { /* Re-apply essential shadows */
-    box-shadow: 0 2px 4px rgba(255,255,255,0.1) !important; /* Lighter shadow for dark bg */
+body.high-contrast .app-header {
+    box-shadow: 0 2px 4px rgba(255,255,255,0.1) !important;
 }
 body.high-contrast #sidebar {
     box-shadow: 2px 0 5px rgba(255,255,255,0.2) !important;
@@ -894,30 +905,26 @@ body.high-contrast footer {
 
 
 /* Responsive adjustments for smaller screens */
-@media (max-width: 768px) { /* Adjusted breakpoint for more common tablet/mobile changes */
-    :root { /* Smaller header/footer for mobile */
+@media (max-width: 768px) {
+    :root {
         --header-height: 50px;
         --footer-height: 40px;
-        --sidebar-width: 180px; /* Slightly smaller full sidebar */
-        --sidebar-collapsed-width: 0; /* Sidebar fully hidden, or very minimal */
+        --sidebar-width: 180px;
+        --sidebar-collapsed-width: 0;
     }
 
     #sidebar {
-        /* Optionally hide sidebar by default on very small screens, toggle with button in header */
-        /* Or make it overlay instead of pushing content */
-        /* For now, let's assume it collapses to 0 width */
-        transition: width 0.2s; /* Faster transition for mobile */
+        transition: width 0.2s;
     }
     #sidebar.collapsed {
         width: 0;
-        overflow: hidden; /* Ensure no content peeks out */
+        overflow: hidden;
     }
 
     body.sidebar-collapsed #main-content,
-    #main-content { /* When sidebar is 0 width, main content takes full width */
-        margin-left: var(--sidebar-collapsed-width); /* which is 0 if collapsed */
+    #main-content {
+        margin-left: var(--sidebar-collapsed-width);
     }
-    /* If sidebar is not collapsed on mobile, main content still needs its margin */
     #main-content {
          margin-left: var(--sidebar-width);
     }
@@ -927,48 +934,46 @@ body.high-contrast footer {
 
 
     .app-header {
-        padding: 0 0.5em; /* Less padding on mobile header */
+        padding: 0 0.5em;
     }
     .header-content {
-        gap: 10px; /* Less gap on mobile */
+        gap: 10px;
     }
     .app-header #user-dropdown-button {
-        padding: 8px; /* Smaller button padding */
+        padding: 8px;
     }
     .app-header .user-icon {
         font-size: 1em;
     }
 
-    /* User actions area in header */
     .header-content > #user-actions-area {
-        flex-wrap: wrap; /* Allow items to wrap */
-        justify-content: flex-end; /* Align items to the end when they wrap */
+        flex-wrap: wrap;
+        justify-content: flex-end;
     }
-    .header-content > #user-actions-area > * { /* Direct children of user-actions-area */
-        flex-shrink: 0; /* Prevent items from shrinking too much */
-        margin-bottom: 5px; /* Add some space if they wrap */
+    .header-content > #user-actions-area > * {
+        flex-shrink: 0;
+        margin-bottom: 5px;
     }
 
 
     footer {
-        padding: 0 0.5em; /* Less padding on mobile footer */
-        flex-direction: row; /* Ensure items are in a row */
-        flex-wrap: wrap; /* Allow footer items to wrap */
-        justify-content: space-between; /* Adjust justification */
-        align-items: center; /* Vertically center items in the row */
-        min-height: var(--footer-height); /* Use root defined footer height as min */
+        padding: 0 0.5em;
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        align-items: center;
+        min-height: var(--footer-height);
         padding-top: 5px;
         padding-bottom: 5px;
-        /* --footer-height: 70px; */ /* Removed explicit override, min-height uses variable */
     }
     .footer-accessibility-controls {
-        display: flex; /* Ensure flex context for children */
-        flex-direction: row; /* Explicitly set direction */
-        justify-content: center; /* Center icons horizontally */
-        align-items: center; /* Vertically align icons */
-        flex-wrap: wrap; /* Allow controls to wrap */
+        display: flex;
+        flex-direction: row;
+        justify-content: center;
+        align-items: center;
+        flex-wrap: wrap;
         gap: 5px;
-        margin-bottom: 0; /* Adjust margin as items are now centered in a single row */
+        margin-bottom: 0;
     }
     .footer-accessibility-controls button {
         padding: 4px 8px;
@@ -977,32 +982,24 @@ body.high-contrast footer {
     footer #language-form {
         margin-top: 5px;
     }
-    footer p { /* Copyright text */
+    footer p {
         font-size: 0.8em;
     }
 
 
     #main-content {
-        padding: 10px; /* Less padding on mobile */
+        padding: 10px;
     }
     main {
-        padding: 10px 0; /* Remove side padding from main, rely on #main-content */
+        padding: 10px 0;
     }
 
-    /* Example: Hide text for sidebar items, show only icons if sidebar is not fully collapsed to 0 */
-    /* This would apply if --sidebar-collapsed-width was > 0 on mobile */
-    /* #sidebar:not(.collapsed) li .menu-text { display: none; }
-       #sidebar:not(.collapsed) li .menu-icon { margin-right: 0; }
-       #sidebar:not(.collapsed) li { text-align: center; }
-    */
 
-    /* Responsive map container */
     #map-container, #new-booking-map-container {
-        width: 100%; /* Full width on mobile */
-        height: 400px; /* Adjust height or use aspect ratio */
+        width: 100%;
+        height: 400px;
     }
 
-    /* Ensure touch-friendliness for form elements and buttons */
     button,
     input[type="submit"],
     input[type="button"],
@@ -1017,11 +1014,9 @@ body.high-contrast footer {
     input[type="time"],
     select {
         min-height: 40px;
-        /* Re-evaluate padding if min-height makes them look too tall */
-        padding-top: 8px; /* Adjust padding for better text centering with min-height */
+        padding-top: 8px;
         padding-bottom: 8px;
     }
-    /* Specific adjustments if padding was too much for some inputs */
     #booking-form input[type="date"],
     #booking-form input[type="time"],
     #booking-form input[type="number"],
@@ -1031,105 +1026,90 @@ body.high-contrast footer {
     #login-form input[type="text"],
     #login-form input[type="password"],
     #room-select {
-        padding: 8px 0.625rem; /* Keep horizontal padding, adjust vertical */
+        padding: 8px 0.625rem;
     }
 
     button,
     input[type="submit"],
     input[type="button"] {
-        padding: 8px 15px; /* Adjust button padding to maintain appearance with min-height */
+        padding: 8px 15px;
     }
 
-    /* Responsive table containers */
     .responsive-table-container {
         display: block;
         width: 100%;
         overflow-x: auto;
-        -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+        -webkit-overflow-scrolling: touch;
     }
 
-    /* Reduce padding in calendar table cells */
     #calendar-table th,
     #calendar-table td {
-        padding: 0.5rem; /* Reduced padding */
+        padding: 0.5rem;
     }
-    /* General table cell padding reduction - use a common class if there are other tables */
-    /* For now, targeting admin tables if they exist or can be identified by a class */
-    .admin-table th, .admin-table td { /* Assuming an .admin-table class for admin section tables */
+    .admin-table th, .admin-table td {
         padding: 0.5rem;
     }
 
-    /* Resource Buttons Grid on /resources */
     .resource-buttons-grid .resource-availability-button {
-        flex-basis: calc(33.333% - 10px); /* 3 buttons per row */
+        flex-basis: calc(33.333% - 10px);
     }
-    /* Ensure buttons in grid have the min-height for touch */
     .resource-buttons-grid .resource-availability-button {
-        min-height: 44px; /* Standard button min-height for touch */
-        /* padding adjustment might be needed if text overflows, but flexbox should handle vertical centering. */
-        /* Let's ensure text is centered and wraps if necessary */
+        min-height: 44px;
         display: flex;
         align-items: center;
         justify-content: center;
-        text-align: center; /* Fallback */
+        text-align: center;
     }
 
-    /* Modal Dialogs */
     .modal-content {
-        width: 90%; /* More width on smaller screens */
-        margin: 5% auto; /* Smaller margin */
-        max-height: 90vh; /* Max height to prevent overflow */
-        overflow-y: auto; /* Allow content to scroll */
+        width: 90%;
+        margin: 5% auto;
+        max-height: 90vh;
+        overflow-y: auto;
     }
-    /* Ensure time slots container within modal is also responsive */
     .time-slots-container {
-        max-height: 60vh; /* Adjust based on modal content height */
+        max-height: 60vh;
     }
 
 }
 
-@media (max-width: 480px) { /* Even smaller screens */
+@media (max-width: 480px) {
     :root {
-        --sidebar-width: 100%; /* Sidebar could be full width if it overlays */
-        /* font-size: 14px; /* Slightly smaller base font if needed, affects rem units */
+        --sidebar-width: 100%;
     }
     body {
-        font-size: 0.9rem; /* Reduce default font size slightly */
+        font-size: 0.9rem;
     }
 
     #main-content {
-        padding: 5px; /* Further reduce padding */
+        padding: 5px;
     }
     main {
-        padding: 5px 0; /* Further reduce padding */
+        padding: 5px 0;
     }
 
-    /* Header user actions area - ensure it doesn't cause overflow */
     .header-content > #user-actions-area {
-        max-width: calc(100% - 100px); /* Example: ensure it doesn't overflow if logo/menu icon takes space */
-        /* This might need adjustment based on other header elements */
+        max-width: calc(100% - 100px);
     }
 
 
-    /* Footer elements stack vertically */
     footer {
         flex-direction: column;
-        align-items: center; /* Center items when stacked */
+        align-items: center;
         padding-top: 10px;
         padding-bottom: 10px;
-        height: auto; /* Allow height to adjust to content */
-         /* --footer-height variable might not be appropriate if height is auto */
+        height: auto;
     }
-    footer > * { /* Direct children of footer */
+    footer > * {
         margin-bottom: 5px;
     }
     .footer-accessibility-controls {
-        flex-wrap: wrap; /* Ensure they still wrap if many */
+        flex-wrap: wrap;
         justify-content: center;
-        order: 1; /* Example: Change order if needed */
+        order: 1;
     }
-    footer p { /* Copyright text */
-        font-size: 0.75em; /* Smaller copyright */
+    footer p {
+        font-size: 0.75em;
         order: 2;
         text-align: center;
     }
@@ -1139,23 +1119,17 @@ body.high-contrast footer {
     }
 
 
-    /* Resource Buttons Grid on /resources */
     .resource-buttons-grid .resource-availability-button {
-        flex-basis: calc(50% - 10px); /* 2 buttons per row */
+        flex-basis: calc(50% - 10px);
     }
-    /* Or for 1 button per row: */
-    /* .resource-buttons-grid .resource-availability-button {
-        flex-basis: 100%;
-    } */
 
-     /* Further reduce padding in calendar table cells if needed */
+
     #calendar-table th,
     #calendar-table td {
         padding: 0.3rem;
-        font-size: 0.85rem; /* Smaller font for table content */
+        font-size: 0.85rem;
     }
 
-    /* Modal Dialogs - slightly more width */
     .modal-content {
         width: 95%;
         margin: 2.5% auto;
@@ -1166,15 +1140,14 @@ body.high-contrast footer {
 /* Styles copied from map_view.html - Generally keep as is, ensure responsiveness */
 #map-container, #new-booking-map-container {
     position: relative;
-    /* width: 800px; REMOVED - will be 100% of parent or handled by responsive */
-    max-width: 800px; /* Added max-width */
-    width: 100%; /* Make it responsive */
-    height: 600px; /* Will be adjusted by @media if needed */
+    max-width: 800px;
+    width: 100%;
+    height: 600px;
     background-size: contain;
     background-repeat: no-repeat;
     background-position: center center;
     border: 1px solid var(--border-color);
-    margin: 20px auto; /* Center the map */
+    margin: 20px auto;
 }
 .resource-area {
     position: absolute; border: 2px solid blue; background-color: rgba(0, 0, 255, 0.3);
@@ -1187,7 +1160,7 @@ body.high-contrast footer {
 .resource-area-unknown { background-color: rgba(128, 128, 128, 0.3); border-color: #555; }
 .map-area-clickable:hover { cursor: pointer; filter: brightness(110%); }
 
-.modal { position: fixed; z-index: 1050; /* Higher than header/sidebar */ left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
+.modal { position: fixed; z-index: 1050; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
 .modal-content {
     background-color: var(--background-color-light);
     margin: 10% auto;
@@ -1197,16 +1170,15 @@ body.high-contrast footer {
     max-width: 500px;
     border-radius: 8px;
     position: relative;
-    color: #000000; /* Black text for modal content */
+    color: #000000;
 }
-/* Ensure headings within modal also get this color */
 .modal-content h1,
 .modal-content h2,
 .modal-content h3,
 .modal-content h4,
 .modal-content h5,
 .modal-content h6 {
-    color: #000000; /* Black text for headings in modal */
+    color: #000000;
 }
 .close-modal-btn { color: #aaa; float: right; font-size: 28px; font-weight: bold; pointer-events: auto !important; }
 .close-modal-btn:hover, .close-modal-btn:focus { color: var(--text-color-dark); text-decoration: none; cursor: pointer; }
@@ -1221,7 +1193,7 @@ body.high-contrast footer {
 .map-controls label { margin-right: 5px; }
 .resource-area-form-selected {
     border-width: 3px;
-    border-color: #007bff; /* A distinct highlight color */
+    border-color: #007bff;
     box-shadow: 0 0 10px #007bff;
 }
 
@@ -1263,108 +1235,86 @@ body.high-contrast footer {
 .map-specific-grid { margin-top: 15px; margin-bottom: 20px; }
 .unassigned-grid { margin-top: 15px; }
 
-/* REMOVED old sidebar layout rules like body.with-sidebar, #sidebar flex properties etc. as they are replaced by new fixed layout rules. */
-
-/* Final check to remove any specific old layout selectors that might conflict */
-/* e.g. body.with-sidebar nav ul, body.with-sidebar #main-content */
-/* These have been addressed by replacing or removing them in the sections above. */
 
 /* Mobile Menu Styles */
 .hamburger-icon {
-    display: none; /* Hidden by default */
+    display: none;
     background: none;
     border: none;
-    color: var(--text-color-light); /* Hamburger color to match header text */
-    font-size: 1.5rem; /* Adjust size as needed */
+    color: var(--text-color-light);
+    font-size: 1.5rem;
     cursor: pointer;
     padding: 0.25em 0.5em;
-    z-index: 1040; /* Above sidebar (1020) but below modals (1050) */
-    align-self: center; /* Align with other header items */
+    z-index: 1040;
+    align-self: center;
 }
 
 .hamburger-icon span {
     display: block;
     width: 22px;
     height: 3px;
-    background-color: var(--text-color-light); /* Color of the bars */
+    background-color: var(--text-color-light);
     margin: 4px 0;
     transition: background-color 0.3s ease;
 }
 
-/* Styles for the sidebar when it's opened via mobile toggle */
-/* This assumes #sidebar is the element to be shown/hidden */
-/* The .sidebar-open class will be toggled by JavaScript on #sidebar */
 nav#sidebar.sidebar-open {
-    display: block !important; /* Important to override other display states */
+    display: block !important;
     width: 80%;
-    max-width: 300px; /* Max width for the overlay menu */
+    max-width: 300px;
     position: fixed;
-    top: 0; /* Align to top, below header or covering header based on z-index */
+    top: 0;
     left: 0;
-    height: 100vh; /* Full viewport height */
-    background-color: var(--background-color-dark); /* Match existing sidebar bg */
-    z-index: 1035; /* Higher than header content, but hamburger icon itself is 1040 if it needs to be above this */
+    height: 100vh;
+    background-color: var(--background-color-dark);
+    z-index: 1035;
     overflow-y: auto;
     box-shadow: 3px 0 6px rgba(0,0,0,0.2);
     transition: transform 0.3s ease-in-out;
-    transform: translateX(0%); /* Default shown state if class is present */
+    transform: translateX(0%);
 }
-
-/* Initially hide the sidebar-open state off-screen if doing a slide-in animation */
-/* For simple display block/none, this is not needed.
-nav#sidebar {
-    transform: translateX(-100%);
-}
-*/
 
 
 @media (max-width: 767px) and (orientation: portrait) {
-    /* Show hamburger icon only for admins, matching sidebar visibility */
-    body:not(.no-sidebar) .hamburger-icon { /* Assumes body.no-sidebar is correctly set for non-admins */
-        display: flex; /* Or block/inline-block */
+    body:not(.no-sidebar) .hamburger-icon {
+        display: flex;
         flex-direction: column;
         justify-content: space-around;
     }
 
-    /* Hide the default desktop sidebar toggle if the mobile one is shown */
     body:not(.no-sidebar) nav#sidebar #sidebar-toggle {
         display: none;
     }
 
-    /* Hide the sidebar itself by default in mobile portrait */
-    /* The .sidebar-open class will override this to show it */
     body:not(.no-sidebar) nav#sidebar {
         display: none;
-        /* transform: translateX(-100%); */ /* Prepare for slide-in if using transform for open state */
     }
 
-    /* Ensure the main content takes full width when sidebar is hidden for mobile portrait */
     body:not(.no-sidebar) #main-content {
         margin-left: 0;
     }
 
-    /* Specific styles for items inside the opened mobile menu */
     nav#sidebar.sidebar-open ul li {
-        padding: 1em; /* More padding for tappable items */
+        padding: 1em;
     }
     nav#sidebar.sidebar-open ul li a,
     nav#sidebar.sidebar-open ul li button,
     nav#sidebar.sidebar-open details summary {
-        font-size: 1rem; /* Ensure readability */
-        white-space: normal; /* Allow text wrapping */
+        font-size: 1rem;
+        white-space: normal;
     }
     nav#sidebar.sidebar-open .menu-text {
-        display: inline-block !important; /* Ensure text is visible */
+        display: inline-block !important;
     }
     nav#sidebar.sidebar-open .menu-icon {
-        display: inline-block !important; /* Ensure icon is visible */
+        display: inline-block !important;
         margin-right: 0.8em;
     }
     nav#sidebar.sidebar-open details ul.admin-menu {
-        display: block !important; /* Ensure admin submenu is shown */
+        display: block !important;
         padding-left: 1.5em;
     }
-    nav#sidebar.sidebar-open details summary::after { /* Optional: better indicator for openable summary */
+    nav#sidebar.sidebar-open details summary::after {
         content: ' ▼';
         font-size: 0.8em;
     }
@@ -1372,35 +1322,29 @@ nav#sidebar {
         content: ' ▲';
     }
 
-    /* Remove collapsed styles from sidebar when it's in mobile overlay mode */
     nav#sidebar.sidebar-open.collapsed {
-        width: 80% !important; /* Override collapsed width */
+        width: 80% !important;
         max-width: 300px !important;
     }
     nav#sidebar.sidebar-open.collapsed li .menu-text,
     nav#sidebar.sidebar-open.collapsed details ul.admin-menu {
-        display: inline-block !important; /* Ensure text and submenus are visible */
+        display: inline-block !important;
     }
     nav#sidebar.sidebar-open.collapsed li {
-        text-align: left; /* Revert text alignment */
+        text-align: left;
     }
     nav#sidebar.sidebar-open.collapsed li a,
     nav#sidebar.sidebar-open.collapsed li button,
     nav#sidebar.sidebar-open.collapsed summary {
-        justify-content: flex-start; /* Revert justification */
+        justify-content: flex-start;
     }
 
 }
 
-/* Ensure admin dropdown in sidebar still looks okay */
 #sidebar details summary {
-    /* cursor: pointer; Removed to make it less interactive for always-open admin menu */
-    padding: 0.75em 1em; /* Match li padding */
+    padding: 0.75em 1em;
     display: flex;
     align-items: center;
-}
-#sidebar details summary .menu-icon { /* Already handled by general #sidebar li .menu-icon */
-    /* margin-right: 0.5em; */
 }
 #sidebar.collapsed details summary .menu-text {
     display: none;
@@ -1410,187 +1354,130 @@ nav#sidebar {
 }
 #sidebar details ul.admin-menu {
     list-style-type: none;
-    padding-left: 1em; /* Indent admin submenu items */
+    padding-left: 1em;
 }
 #sidebar details ul.admin-menu li {
-    padding: 0.5em 1em; /* Slightly less padding for submenu items */
-    font-size: 0.85rem; /* Slightly smaller font for submenu */
+    padding: 0.5em 1em;
+    font-size: 0.85rem;
 }
 #sidebar.collapsed details ul.admin-menu {
-    display: none; /* Hide submenu when sidebar is collapsed */
+    display: none;
 }
 
-/* Compact accessibility controls at top - this class was in old CSS, might be unused or need review */
-/* For now, keeping it commented out as new accessibility controls are in footer */
-/*
-.accessibility-top {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 0.25rem;
-    font-size: 0.85rem;
-    margin-bottom: 0.5rem;
-}
-.accessibility-top button {
-    font-size: 0.75rem;
-    padding: 2px 4px;
-}
-*/
-
-/* Ensure the main event anchor tag behaves as a block */
-a.fc-daygrid-event.fc-event { /* Targeting the <a> tag specifically */
+a.fc-daygrid-event.fc-event {
     display: block;
-    width: 100%; /* Ensure it takes full width of its cell container */
-    /* Note: FullCalendar's own CSS might have padding or other box model properties.
-       This change focuses on making the anchor itself a block-level element. */
+    width: 100%;
 }
 
-/* Styling for FullCalendar event content container */
-/* Properties like display and position are kept for basic layout. */
-/* Text wrapping, overflow, and max-height are removed as JS now handles truncation. */
 .fc-daygrid-event .fc-event-main-frame {
     display: block;
     position: relative;
-    /* white-space: normal !important; */ /* Removed */
-    /* overflow-wrap: break-word !important; */ /* Removed */
-    /* word-wrap: break-word !important; */ /* Removed */
-    /* max-height: 3.6em !important; */ /* Removed */
-    /* overflow-y: auto !important; */ /* Removed */
-    /* FullCalendar's default overflow behavior will apply (usually hidden for event segments) */
 }
 
-/* Styling for FullCalendar event titles */
-/* Text wrapping properties removed. */
-.fc-daygrid-event .fc-event-title { /* Common class for event titles */
-    display: block; /* Kept, as titles often benefit from block display */
-    width: 100%; /* Ensure it takes full width to push subsequent content to a new line */
-    /* white-space: normal !important; */ /* Removed */
-    /* overflow-wrap: break-word !important; */ /* Removed */
-    /* word-wrap: break-word !important; */ /* Removed */
+.fc-daygrid-event .fc-event-title {
+    display: block;
+    width: 100%;
 }
 
-/* Styling for the bold tag used for the title in calendar.js */
-/* Text wrapping properties removed. Max-width and display are kept. */
 .fc-daygrid-event .fc-event-main-frame b {
     display: block;
-    width: 100%; /* Ensure it takes full width to push subsequent content to a new line */
-    max-width: 100%; /* Can be useful to prevent breaking out of cell if FC doesn't handle it */
-    /* white-space: normal !important; */ /* Removed */
-    /* overflow-wrap: break-word !important; */ /* Removed */
-    /* word-wrap: break-word !important; */ /* Removed */
+    width: 100%;
+    max-width: 100%;
 }
 
-/* Time part (text node) will inherit default text handling. */
-/* JavaScript truncation now manages its length. */
 
 /* --------------- MAP RESOURCE AREA STYLES --------------- */
 .resource-area {
-    /* Existing styles from map_view.html: */
     position: absolute;
-    /* border: 2px solid blue; */ /* Will be overridden by specific states */
-    /* background-color: rgba(0, 0, 255, 0.3); */ /* Will be overridden by specific states */
     box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: center;
     text-align: center;
     overflow: hidden;
-    /* color: #000; */ /* Will be overridden by specific states */
-    /* font-size: 12px; */ /* Will be overridden by new styles */
-
-    /* New/refined general styles: */
     padding: 2px;
     text-overflow: ellipsis;
-    white-space: nowrap; /* Prevent text wrapping that breaks small boxes */
-    font-size: 0.8em; /* Suitable small font size */
-    border-width: 2px; /* Consistent border width */
-    border-style: solid; /* Consistent border style */
+    white-space: nowrap;
+    font-size: 0.8em;
+    border-width: 2px;
+    border-style: solid;
 }
 
-/* THESE STYLES BELOW ARE FOR THE NEW_BOOKING_MAP.JS SPECIFICALLY */
-/* AND SHOULD OVERRIDE THE GENERAL .resource-area-* STYLES IF THEY WERE TO APPLY */
-
 #new-booking-map-container .resource-area.map-area-green {
-    background-color: #d4edda !important; /* Light Green */
-    border-color: #5cb85c !important;    /* Green border */
-    color: #155724 !important;           /* Dark green text */
+    background-color: #d4edda !important;
+    border-color: #5cb85c !important;
+    color: #155724 !important;
 }
 
 #new-booking-map-container .resource-area.map-area-yellow {
-    background-color: #fff3cd !important; /* Light Yellow */
-    border-color: #ffc107 !important;    /* Amber/Gold border */
-    color: #856404 !important;           /* Dark yellow/brown text */
+    background-color: #fff3cd !important;
+    border-color: #ffc107 !important;
+    color: #856404 !important;
 }
 
 #new-booking-map-container .resource-area.map-area-light-blue {
-    background-color: #d1ecf1 !important; /* Light Cyan/Blue */
-    border-color: #75c6d9 !important;    /* Medium blue border */
-    color: #0c5460 !important;           /* Dark cyan/blue text */
+    background-color: #d1ecf1 !important;
+    border-color: #75c6d9 !important;
+    color: #0c5460 !important;
 }
 
 #new-booking-map-container .resource-area.map-area-red {
-    background-color: #f8d7da !important; /* Light Red/Pink */
-    border-color: #dc3545 !important;    /* Red border */
-    color: #721c24 !important;           /* Dark red text */
+    background-color: #f8d7da !important;
+    border-color: #dc3545 !important;
+    color: #721c24 !important;
 }
 
 #new-booking-map-container .resource-area.map-area-dark-orange {
-    background-color: #ffe8cc !important; /* Lighter Orange/Peach */
-    border-color: #fd7e14 !important;    /* Orange border */
-    color: #804000 !important;           /* Darker orange/brown text */
+    background-color: #ffe8cc !important;
+    border-color: #fd7e14 !important;
+    color: #804000 !important;
 }
 
-
-/* Older general states - these might be used by other map views or elements if any */
-/* It's better to keep them for now and ensure the new map specific styles override them due to selector specificity */
 .resource-area-available {
     background-color: rgba(0, 255, 0, 0.15);
     border-color: rgba(0, 200, 0, 0.6);
-    color: #333333; /* Darker text for light green background */
+    color: #333333;
 }
 
 .resource-area-partially-booked {
-    background-color: rgba(255, 140, 0, 0.3); /* Dark Orange background */
-    border-color: rgba(204, 112, 0, 0.7); /* Darker Orange border */
-    color: #ffffff; /* White text for readability */
+    background-color: rgba(255, 140, 0, 0.3);
+    border-color: rgba(204, 112, 0, 0.7);
+    color: #ffffff;
 }
 
 .resource-area-fully-booked {
-    background-color: rgba(255, 0, 0, 0.3); /* Red background */
-    border-color: rgba(200, 0, 0, 0.7); /* Darker Red border */
-    color: #ffffff; /* White text for readability */
+    background-color: rgba(255, 0, 0, 0.3);
+    border-color: rgba(200, 0, 0, 0.7);
+    color: #ffffff;
 }
 
 .resource-area-user-conflict {
-    background-color: rgba(255, 0, 0, 0.3); /* Red background */
-    border-color: rgba(200, 0, 0, 0.7); /* Darker Red border */
-    color: #ffffff; /* White text for readability */
+    background-color: rgba(255, 0, 0, 0.3);
+    border-color: rgba(200, 0, 0, 0.7);
+    color: #ffffff;
 }
 
 .resource-area-restricted {
-    background-color: rgba(128, 128, 128, 0.3); /* Grey background */
-    border-color: rgba(100, 100, 100, 0.7); /* Darker Grey border */
-    color: #ffffff; /* White text for readability */
+    background-color: rgba(128, 128, 128, 0.3);
+    border-color: rgba(100, 100, 100, 0.7);
+    color: #ffffff;
 }
 
 .resource-area-unknown {
-    background-color: rgba(200, 200, 200, 0.3); /* Light Grey background */
-    border-color: rgba(150, 150, 150, 0.7); /* Darker Grey border */
-    color: #333333; /* Darker text for light grey background */
+    background-color: rgba(200, 200, 200, 0.3);
+    border-color: rgba(150, 150, 150, 0.7);
+    color: #333333;
 }
 
-/* Clickable Cue (already exists, ensure it's compatible) */
 .map-area-clickable:hover {
     cursor: pointer;
     filter: brightness(110%);
 }
 
-/* Selected on form (already exists, ensure it's compatible) */
 .resource-area-form-selected {
-    border-width: 3px; /* Keep slightly thicker for emphasis */
-    border-color: #007bff; /* A distinct highlight color, maybe make this a variable if used elsewhere */
+    border-width: 3px;
+    border-color: #007bff;
     box-shadow: 0 0 10px #007bff;
-    /* filter: drop-shadow(0 0 5px #007bff); Could be an alternative to box-shadow */
 }
 
 /* --------------- END MAP RESOURCE AREA STYLES --------------- */
