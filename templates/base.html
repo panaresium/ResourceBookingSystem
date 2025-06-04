@@ -99,11 +99,11 @@
     </main>
     <footer>
         <div class="footer-accessibility-controls">
-            <button id="theme-toggle" type="button"><span class="menu-icon" aria-hidden="true">🌓</span><span class="menu-text">{{ _('Toggle Theme') }}</span></button>
-            <button id="toggle-high-contrast" type="button"><span class="menu-icon" aria-hidden="true">◐</span><span class="menu-text">{{ _('Toggle Contrast') }}</span></button>
-            <button id="increase-font-size" type="button"><span class="menu-icon" aria-hidden="true">Aa+</span><span class="menu-text">{{ _('Increase Font') }}</span></button>
-            <button id="decrease-font-size" type="button"><span class="menu-icon" aria-hidden="true">Aa-</span><span class="menu-text">{{ _('Decrease Font') }}</span></button>
-            <button id="reset-font-size" type="button"><span class="menu-icon" aria-hidden="true">Aa</span><span class="menu-text">{{ _('Reset Font') }}</span></button>
+            <button id="theme-toggle" type="button" aria-label="{{ _('Toggle Theme') }}"><span class="menu-icon" aria-hidden="true">🌓</span></button>
+            <button id="toggle-high-contrast" type="button" aria-label="{{ _('Toggle Contrast') }}"><span class="menu-icon" aria-hidden="true">◐</span></button>
+            <button id="increase-font-size" type="button" aria-label="{{ _('Increase Font') }}"><span class="menu-icon" aria-hidden="true">Aa+</span></button>
+            <button id="decrease-font-size" type="button" aria-label="{{ _('Decrease Font') }}"><span class="menu-icon" aria-hidden="true">Aa-</span></button>
+            <button id="reset-font-size" type="button" aria-label="{{ _('Reset Font') }}"><span class="menu-icon" aria-hidden="true">Aa</span></button>
         </div>
         <p>{{ _('&copy; 2024 Smart Resource Booking') }}</p>
         <form id="language-form" method="get" style="margin-top:5px;">
