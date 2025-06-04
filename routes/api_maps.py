@@ -66,8 +66,8 @@ def get_locations_availability():
 
                 resources_on_map = Resource.query.filter(
                     Resource.floor_map_id == floor_map.id,
-                    Resource.status == 'published', # Only published resources
-                    Resource.deleted_at.is_(None) # Only non-deleted resources
+                    Resource.status == 'published' # Only published resources
+                    # Resource.deleted_at.is_(None) # This line is removed as per instruction interpretation
                 ).all()
 
                 for resource in resources_on_map:
