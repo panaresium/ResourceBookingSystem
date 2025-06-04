@@ -65,9 +65,14 @@
         <p><strong>{{ _('Instagram:') }}</strong>
             {% if current_user.instagram_id %}
                 {{ _('Linked') }}
+                <form method="POST" action="{{ url_for('auth.unlink_instagram_account') }}" style="display: inline; margin-left: 10px;">
+                    {# Add CSRF token here if Flask-WTF/CSRFProtect is globally enabled for POST #}
+                    {# Example: <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"> #}
+                    <button type="submit" class="btn btn-danger btn-sm">{{ _('Unlink Instagram') }}</button>
+                </form>
             {% else %}
                 {{ _('Not Linked') }}
-                {# <a href="#">{{ _('Link Instagram Account') }}</a> #}
+                <a href="{{ url_for('auth.link_instagram_auth') }}" class="btn btn-primary btn-sm" style="margin-left: 10px;">{{ _('Link Instagram Account') }}</a>
             {% endif %}
         </p>
     </div>
