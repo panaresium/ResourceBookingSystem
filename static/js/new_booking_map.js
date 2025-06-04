@@ -71,6 +71,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (calendarContainer) {
         flatpickr(calendarContainer, {
             inline: true, // Render the calendar inline
+            static: true, // Added this line
             dateFormat: "Y-m-d",
             defaultDate: currentSelectedDateStr, // Use the global variable
             onChange: function(selectedDates, dateStr, instance) {
