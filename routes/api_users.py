@@ -25,9 +25,26 @@ def update_profile():
 
     email = data.get('email')
     password = data.get('password')
+    first_name = data.get('first_name')
+    last_name = data.get('last_name')
+    phone = data.get('phone')
+    section = data.get('section')
+    department = data.get('department')
+    position = data.get('position')
 
-    if not email and not password:
-        return jsonify({'error': 'No changes submitted.'}), 400
+    # Check if any data was submitted
+    if not any(data.values()): # Will be True if all values are None or empty strings after .get()
+        # More specific check:
+    # if email is None and password is None and first_name is None and last_name is None and phone is None and section is None and department is None and position is None:
+        # Check if all relevant fields are None or empty (if get() returned default None)
+        relevant_fields = ['email', 'password', 'first_name', 'last_name', 'phone', 'section', 'department', 'position']
+        if all(data.get(field) is None or data.get(field) == '' for field in relevant_fields if data.get(field) is not None): # handles if key not present vs key is present and empty
+             # Correction: if all provided fields are effectively empty or not provided.
+             # A better check: if no fields that can be updated were provided with actual values.
+            provided_values = {k: v for k, v in data.items() if v is not None and v != ''}
+            if not provided_values:
+                 return jsonify({'error': 'No changes submitted.'}), 400
+
 
     if email:
         if '@' not in email or '.' not in email.split('@')[-1]:
@@ -36,15 +53,45 @@ def update_profile():
         if existing:
             return jsonify({'error': f"Email '{email.strip()}' already registered."}), 409
         current_user.email = email.strip()
+    elif 'email' in data and data['email'] == '': # Explicitly setting email to empty is not allowed
+        return jsonify({'error': 'Email cannot be empty.'}), 400
+
 
     if password:
         current_user.set_password(password)
 
+    # Update new fields
+    # For nullable string fields, an empty string from payload should translate to None or empty string in DB
+    # based on how model handles it. Assuming empty string is acceptable or will be converted to None by ORM if needed.
+    current_user.first_name = first_name.strip() if first_name is not None else None
+    current_user.last_name = last_name.strip() if last_name is not None else None
+    current_user.phone = phone.strip() if phone is not None else None
+    current_user.section = section.strip() if section is not None else None
+    current_user.department = department.strip() if department is not None else None
+    current_user.position = position.strip() if position is not None else None
+
     try:
         db.session.commit()
-        user_data = {'id': current_user.id, 'username': current_user.username, 'email': current_user.email}
+        user_data = {
+            'id': current_user.id,
+            'username': current_user.username,
+            'email': current_user.email,
+            'first_name': current_user.first_name,
+            'last_name': current_user.last_name,
+            'phone': current_user.phone,
+            'section': current_user.section,
+            'department': current_user.department,
+            'position': current_user.position
+        }
         current_app.logger.info(f"User {current_user.username} updated their profile.")
-        add_audit_log(action="UPDATE_PROFILE", details=f"User {current_user.username} updated their profile. Email: {email}, Password changed: {'yes' if password else 'no'}", user_id=current_user.id)
+        log_details = f"User {current_user.username} updated profile. "
+        if email: log_details += f"Email changed. "
+        if password: log_details += f"Password changed. "
+        # Could add more details about which specific text fields changed if necessary
+        if any([first_name, last_name, phone, section, department, position]):
+            log_details += "Other profile fields updated."
+
+        add_audit_log(action="UPDATE_PROFILE", details=log_details, user_id=current_user.id)
         return jsonify({'success': True, 'user': user_data, 'message': 'Profile updated.'}), 200
     except Exception as e:
         db.session.rollback()

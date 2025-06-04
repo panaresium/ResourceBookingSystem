@@ -41,6 +41,14 @@ class User(db.Model, UserMixin):
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
     google_id = db.Column(db.String(200), nullable=True, unique=True)
     google_email = db.Column(db.String(200), nullable=True)
+    first_name = db.Column(db.String(100), nullable=True)
+    last_name = db.Column(db.String(100), nullable=True)
+    phone = db.Column(db.String(20), nullable=True)
+    section = db.Column(db.String(100), nullable=True)
+    department = db.Column(db.String(100), nullable=True)
+    position = db.Column(db.String(100), nullable=True)
+    facebook_id = db.Column(db.String(200), nullable=True, unique=True)
+    instagram_id = db.Column(db.String(200), nullable=True, unique=True)
 
     roles = db.relationship('Role', secondary=user_roles_table,
                             backref=db.backref('users', lazy='dynamic'))
