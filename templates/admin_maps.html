@@ -343,34 +343,81 @@
         let allRolesForAreaAssignment = []; // Store roles for area assignment
 
         async function loadAllRolesForAreaDefinition() {
-            if (allRolesForAreaAssignment.length > 0) return; // Already fetched
+            // Removed: if (allRolesForAreaAssignment.length > 0) return; // Let it re-fetch if needed, or rely on populate to show status
             const rolesLoadingMsg = document.getElementById('define-area-roles-loading-message');
+            if (rolesLoadingMsg) { // Show loading message initially
+                rolesLoadingMsg.textContent = '{{ _("Loading roles...") }}';
+                rolesLoadingMsg.style.display = 'block';
+            }
+
             try {
                 const response = await fetch('/api/admin/roles');
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                allRolesForAreaAssignment = await response.json();
-                if (rolesLoadingMsg) rolesLoadingMsg.style.display = 'none';
-                populateDefineAreaRolesSelect(); // Populate once loaded
+                if (!response.ok) {
+                    // This error will be caught by the catch block below
+                    throw new Error(`HTTP error! status: ${response.status}, message: ${response.statusText}`);
+                }
+                const data = await response.json(); // Assuming data is the array of roles or an object like {roles: []}
+                // Standardize to ensure allRolesForAreaAssignment is always an array
+                if (Array.isArray(data)) {
+                    allRolesForAreaAssignment = data;
+                } else if (data && Array.isArray(data.roles)) { // Handle if API returns {roles: [...]}
+                    allRolesForAreaAssignment = data.roles;
+                } else {
+                     allRolesForAreaAssignment = []; // Default to empty if structure is unexpected
+                }
+
+                if (allRolesForAreaAssignment.length === 0) {
+                    // This case (successful fetch, but no roles) will be handled by populateDefineAreaRolesSelect
+                }
+                // populateDefineAreaRolesSelect will hide the loading message if roles are found
             } catch (error) {
                 console.error('Error fetching all roles for area assignment:', error);
-                if (rolesLoadingMsg) rolesLoadingMsg.textContent = '{{ _("Error loading roles.") }}';
-                allRolesForAreaAssignment = [];
+                allRolesForAreaAssignment = []; // Reset on error
+                if (rolesLoadingMsg) {
+                    rolesLoadingMsg.textContent = '{{ _("Error loading roles. Please try again or contact support.") }}';
+                    rolesLoadingMsg.style.display = 'block';
+                }
             }
+            populateDefineAreaRolesSelect(); // Populate/update messages after fetch attempt
         }
 
         function populateDefineAreaRolesSelect(selectedRoleIds = []) {
             const selectElement = document.getElementById('define-area-roles-select');
+            const rolesLoadingMsg = document.getElementById('define-area-roles-loading-message');
             if (!selectElement) return;
-            selectElement.innerHTML = ''; // Clear previous options
 
-            if (allRolesForAreaAssignment.length === 0) {
-                const loadingMsg = document.getElementById('define-area-roles-loading-message');
-                if (loadingMsg && loadingMsg.style.display === 'none') { // Only show if not already showing error
-                     selectElement.innerHTML = '<option value="" disabled>{{ _("No roles available.") }}</option>';
-                } else if (!loadingMsg) { // If loading message element itself is gone
-                     selectElement.innerHTML = '<option value="" disabled>{{ _("Roles not loaded.") }}</option>';
+            selectElement.innerHTML = ''; // Clear previous options like "Loading..." or actual roles
+
+            // Default state for loading message: hide it. It will be shown if needed.
+            if (rolesLoadingMsg) {
+                rolesLoadingMsg.style.display = 'none';
+            }
+
+            if (!allRolesForAreaAssignment || allRolesForAreaAssignment.length === 0) {
+                if (rolesLoadingMsg) {
+                    // Check if the message is already an error message from loadAllRolesForAreaDefinition
+                    const currentText = rolesLoadingMsg.textContent || "";
+                    if (currentText.includes("{{ _("Error loading roles") }}")) {
+                        // Error message is already set by loadAllRolesForAreaDefinition, just ensure it's visible
+                        rolesLoadingMsg.style.display = 'block';
+                    } else {
+                        // No roles available, and not due to a fetch error shown above
+                        rolesLoadingMsg.textContent = '{{ _("No roles available to assign. Please create roles in user management first.") }}';
+                        rolesLoadingMsg.style.display = 'block';
+                    }
                 }
+                // Optionally, add a disabled option to the select as well, though the message above should be primary
+                const disabledOption = document.createElement('option');
+                disabledOption.value = "";
+                disabledOption.textContent = rolesLoadingMsg ? rolesLoadingMsg.textContent : "{{ _('No roles available.') }}"; // Use the message from rolesLoadingMsg
+                disabledOption.disabled = true;
+                selectElement.appendChild(disabledOption);
                 return;
+            }
+
+            // If we have roles, ensure the loading/error message is hidden
+            if (rolesLoadingMsg) {
+                rolesLoadingMsg.style.display = 'none';
             }
 
             allRolesForAreaAssignment.forEach(role => {
@@ -504,6 +551,10 @@
                 }
 
                 if(defineAreasSection) defineAreasSection.scrollIntoView({ behavior: 'smooth' });
+
+                // Ensure roles are loaded when map is selected for area definition
+                loadAllRolesForAreaDefinition();
+                populateDefineAreaRolesSelect(); // Clear and populate, any selected roles will be set by populateAreaForm if an area is later selected for edit
             } // End of select-map-btn logic
 
             else if (targetButton.classList.contains('delete-map-btn')) {
@@ -596,150 +647,107 @@
                 // Initial load of maps
         loadMaps();
         // Roles for area definition will be loaded when "Define Areas" is shown or area selected.
-    });
 
-    // --- Define Area Form Logic ---
-    const defineAreaForm = document.getElementById('define-area-form');
-    if (defineAreaForm) {
-        defineAreaForm.addEventListener('submit', async function(event) {
-            event.preventDefault();
-            const formData = new FormData(defineAreaForm);
-            const resourceId = formData.get('resource_id'); // This might be --CREATE_NEW--
-            const floorMapId = document.getElementById('selected-floor-map-id').value;
-            const areaStatusDiv = document.getElementById('area-definition-status');
+        // --- Define Area Form Logic (Moved into DOMContentLoaded) ---
+        const defineAreaForm = document.getElementById('define-area-form');
+        if (defineAreaForm) {
+            defineAreaForm.addEventListener('submit', async function(event) {
+                event.preventDefault();
+                const formData = new FormData(defineAreaForm);
+                const resourceId = formData.get('resource_id'); // This might be --CREATE_NEW--
+                const floorMapId = document.getElementById('selected-floor-map-id').value;
+                const areaStatusDiv = document.getElementById('area-definition-status');
 
-            const selectedAreaRoleIds = Array.from(document.getElementById('define-area-roles-select').selectedOptions)
-                                          .map(option => parseInt(option.value));
+                const selectedAreaRoleIds = Array.from(document.getElementById('define-area-roles-select').selectedOptions)
+                                              .map(option => parseInt(option.value));
 
-            const areaData = {
-                floor_map_id: floorMapId, // Keep this if API needs it separately
-                coordinates: { // This structure is what gets saved in Resource.map_coordinates
-                    type: formData.get('coordinates_type'),
-                    x: parseInt(formData.get('x')),
-                    y: parseInt(formData.get('y')),
-                    width: parseInt(formData.get('width')),
-                    height: parseInt(formData.get('height')),
-                    allowed_role_ids: selectedAreaRoleIds // New field
-                },
-                booking_restriction: formData.get('booking_restriction'), // This is a Resource field
-                // Other resource-specific fields if creating new
-                name: resourceId === '--CREATE_NEW--' ? 'New Resource from Map Area' : undefined, // Example name
-                status: resourceId === '--CREATE_NEW--' ? 'draft' : undefined // Example status
-            };
-
-            // Remove undefined fields for cleaner payload, especially for updates
-            Object.keys(areaData).forEach(key => areaData[key] === undefined && delete areaData[key]);
-            if (areaData.coordinates) {
-                 Object.keys(areaData.coordinates).forEach(key => areaData.coordinates[key] === undefined && delete areaData.coordinates[key]);
-            }
-
-
-            // Determine API endpoint and method
-            // This part needs to align with how resource creation/update and map assignment are handled.
-            // Assuming an endpoint like PUT /api/admin/resources/<resource_id> that handles 'map_coordinates'
-            // or a dedicated one like /api/admin/resources/<resource_id>/map_definition
-            // For now, let's assume the existing resource update endpoint handles `map_coordinates`.
-
-            let targetResourceId = resourceId;
-            let method = 'PUT'; // Default to update existing resource's map info
-
-            if (resourceId === '--CREATE_NEW--') {
-                // This flow is more complex: needs to create resource first, then assign map area.
-                // The current form seems to mix resource creation with area definition.
-                // For simplicity, this example will focus on updating an *existing* resource's map area.
-                // A real implementation would need a robust way to handle resource creation + mapping.
-                showStatus(areaStatusDiv, '{{ _("Resource creation from this form is complex. Please map to existing resources for now.") }}', true);
-                console.error("Resource creation from define-area-form is not fully implemented in this example script block.");
-                return;
-            }
-
-            if (!targetResourceId || targetResourceId === '--CREATE_NEW--') {
-                 showStatus(areaStatusDiv, '{{ _("Please select a valid resource to map.") }}', true);
-                 return;
-            }
-
-            showStatus(areaStatusDiv, '{{ _("Saving area definition...") }}', false);
-            const csrfToken = csrfTokenMeta ? csrfTokenMeta.getAttribute('content') : document.querySelector('input[name="csrf_token"]')?.value;
-
-            try {
-                // The payload for updating a resource should include all fields the API expects for a PUT.
-                // Here, we are primarily focused on updating 'map_coordinates' and potentially 'floor_map_id'.
-                // Other fields like 'booking_restriction' are also Resource fields.
-                // The existing PUT /api/admin/resources/<id> takes these directly.
-                const payloadForResourceUpdate = {
-                    floor_map_id: floorMapId, // This is a direct field on Resource model
-                    map_coordinates: areaData.coordinates, // This is a direct field (JSON string)
-                    booking_restriction: areaData.booking_restriction, // Direct field
-                    // Other fields like 'name', 'capacity' would be part of a full resource update.
-                    // For map area definition, we primarily care about map_coordinates and floor_map_id.
+                const areaData = {
+                    floor_map_id: floorMapId,
+                    coordinates: {
+                        type: formData.get('coordinates_type'),
+                        x: parseInt(formData.get('x')),
+                        y: parseInt(formData.get('y')),
+                        width: parseInt(formData.get('width')),
+                        height: parseInt(formData.get('height')),
+                        allowed_role_ids: selectedAreaRoleIds
+                    },
+                    booking_restriction: formData.get('booking_restriction'),
+                    name: resourceId === '--CREATE_NEW--' ? 'New Resource from Map Area' : undefined,
+                    status: resourceId === '--CREATE_NEW--' ? 'draft' : undefined
                 };
 
-
-                const response = await fetch(`/api/admin/resources/${targetResourceId}`, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': csrfToken
-                    },
-                    body: JSON.stringify(payloadForResourceUpdate)
-                });
-                const result = await response.json();
-                if (!response.ok) {
-                    throw new Error(result.error || `HTTP error! status: ${response.status}`);
+                Object.keys(areaData).forEach(key => areaData[key] === undefined && delete areaData[key]);
+                if (areaData.coordinates) {
+                     Object.keys(areaData.coordinates).forEach(key => areaData.coordinates[key] === undefined && delete areaData.coordinates[key]);
                 }
-                showStatus(areaStatusDiv, result.message || '{{ _("Area definition saved successfully!") }}', false);
 
-                // Refresh areas on map
-                if (typeof window.fetchAndDrawExistingMapAreas === 'function') {
-                    window.fetchAndDrawExistingMapAreas(floorMapId);
+                let targetResourceId = resourceId;
+                if (resourceId === '--CREATE_NEW--') {
+                    showStatus(areaStatusDiv, '{{ _("Resource creation from this form is complex. Please map to existing resources for now.") }}', true);
+                    console.error("Resource creation from define-area-form is not fully implemented in this example script block.");
+                    return;
                 }
-                 // Potentially clear form or update UI for selected area
-                document.getElementById('define-area-form').reset();
-                populateDefineAreaRolesSelect(); // Clear selections in role dropdown
 
-            } catch (error) {
-                console.error('Error saving area definition:', error);
-                showStatus(areaStatusDiv, `{{ _("Error saving area definition: ${error.message}") }}`, true);
+                if (!targetResourceId || targetResourceId === '--CREATE_NEW--') {
+                     showStatus(areaStatusDiv, '{{ _("Please select a valid resource to map.") }}', true);
+                     return;
+                }
+
+                showStatus(areaStatusDiv, '{{ _("Saving area definition...") }}', false);
+                // csrfTokenMeta is now in scope as this block is inside DOMContentLoaded
+                const csrfToken = csrfTokenMeta ? csrfTokenMeta.getAttribute('content') : document.querySelector('input[name="csrf_token"]')?.value;
+
+                try {
+                    const payloadForResourceUpdate = {
+                        floor_map_id: floorMapId,
+                        map_coordinates: areaData.coordinates,
+                        booking_restriction: areaData.booking_restriction,
+                    };
+
+                    const response = await fetch(`/api/admin/resources/${targetResourceId}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': csrfToken
+                        },
+                        body: JSON.stringify(payloadForResourceUpdate)
+                    });
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.error || `HTTP error! status: ${response.status}`);
+                    }
+                    showStatus(areaStatusDiv, result.message || '{{ _("Area definition saved successfully!") }}', false);
+
+                    if (typeof window.fetchAndDrawExistingMapAreas === 'function') {
+                        window.fetchAndDrawExistingMapAreas(floorMapId);
+                    }
+                    document.getElementById('define-area-form').reset();
+                    populateDefineAreaRolesSelect(); // populateDefineAreaRolesSelect is now in scope
+                } catch (error) {
+                    console.error('Error saving area definition:', error);
+                    showStatus(areaStatusDiv, `{{ _("Error saving area definition: ${error.message}") }}`, true);
+                }
+            });
+        }
+
+        // Modify window.populateAreaForm to handle `allowed_role_ids` (Moved into DOMContentLoaded)
+        const originalPopulateAreaForm = window.populateAreaForm;
+        window.populateAreaForm = function(area, resourceId) {
+            if (originalPopulateAreaForm) {
+                originalPopulateAreaForm(area, resourceId);
+            } else {
+                document.getElementById('coord-x').value = area.x || '';
+                document.getElementById('coord-y').value = area.y || '';
+                document.getElementById('coord-width').value = area.width || '';
+                document.getElementById('coord-height').value = area.height || '';
+                document.getElementById('resource-to-map').value = resourceId || '';
             }
-        });
-    }
+            const selectedRoleIds = area.allowed_role_ids || [];
+            populateDefineAreaRolesSelect(selectedRoleIds); // populateDefineAreaRolesSelect is now in scope
+        };
 
-    // Modify window.populateAreaForm to handle `allowed_role_ids`
-    const originalPopulateAreaForm = window.populateAreaForm;
-    window.populateAreaForm = function(area, resourceId) {
-        if (originalPopulateAreaForm) {
-            originalPopulateAreaForm(area, resourceId); // Call original logic
-        } else { // Fallback if original was not defined (e.g. if it was in admin_resource_edit.js not yet loaded/modified)
-            document.getElementById('coord-x').value = area.x || '';
-            document.getElementById('coord-y').value = area.y || '';
-            document.getElementById('coord-width').value = area.width || '';
-            document.getElementById('coord-height').value = area.height || '';
-            document.getElementById('resource-to-map').value = resourceId || '';
-            // Other fields from original populateAreaForm if it existed...
-        }
+    }); // End of DOMContentLoaded
 
-        // Populate roles
-        const selectedRoleIds = area.allowed_role_ids || [];
-        populateDefineAreaRolesSelect(selectedRoleIds);
-    };
-
-    // Ensure roles are loaded when "Define Areas" section is activated
-    // This could be tied to the 'select-map-btn' click listener or a MutationObserver for display style change.
-    // For simplicity, let's add it to the 'select-map-btn' logic.
-    // The 'select-map-btn' logic in the main event listener for mapsTableBody needs to call loadAllRolesForAreaDefinition.
-    // (This part requires modifying the existing 'select-map-btn' block in the DOMContentLoaded listener)
-
-    // Call to load roles when define areas section is shown
-    const selectMapBtnHandler = async function(event) { // Re-wrapping part of the existing handler
-        if (event.target.classList.contains('select-map-btn')) {
-            // ... (existing code for map selection) ...
-            loadAllRolesForAreaDefinition(); // Load roles when map is selected for area definition
-            populateDefineAreaRolesSelect(); // Clear and populate with no pre-selection initially
-            // ... (rest of existing code) ...
-        }
-    };
-    mapsTableBody.addEventListener('click', selectMapBtnHandler); // Add as a separate listener for clarity OR integrate into existing one.
-                                                                // Simpler to integrate into existing. This is just for illustration.
-
+    // The problematic duplicated selectMapBtnHandler and its listener are removed from here.
 </script>
 {% endblock %}

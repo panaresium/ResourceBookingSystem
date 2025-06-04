@@ -2277,20 +2277,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (count === 0) showSuccess(defineAreasStatusDiv, "No new resources available for mapping to this map.");
                     else if (!defineAreasStatusDiv.classList.contains('error')) hideMessage(defineAreasStatusDiv);
                 }
-
-                // Populate roles checkboxes for the define area section
-                if (typeof window.populateRolesCheckboxesForResource === 'function') {
-                    window.populateRolesCheckboxesForResource('define-area-authorized-roles-checkbox-container');
-                } else {
-                    console.error('populateRolesCheckboxesForResource function not found. Roles for define area cannot be loaded.');
-                    // Optionally, display an error in a relevant status div for the user
-                    const defineAreasStatusDiv = document.getElementById('define-areas-status');
-                    if (defineAreasStatusDiv) {
-                        showError(defineAreasStatusDiv, 'Error: Could not load role selection options.');
-                    }
-                }
+                // The section for populating role checkboxes ('define-area-authorized-roles-checkbox-container')
+                // has been removed from here. The "Define Area" section in admin_maps.html uses a <select> dropdown
+                // (#define-area-roles-select) and has its own specific logic for loading and populating roles
+                // (loadAllRolesForAreaDefinition and populateDefineAreaRolesSelect in admin_maps.html).
+                // Calling populateRolesCheckboxesForResource here was incorrect for that context as it targets a
+                // checkbox container that doesn't exist in the "Define Area" form and uses a different UI paradigm.
             } catch (error) {
                 resourceToMapSelect.innerHTML = '<option value="">Error loading resources</option>';
+                // If defineAreasStatusDiv was used for loading message by apiCall, error will be shown there.
+                // Consider explicitly showing error here if needed for this specific catch.
+                const defineAreasStatusDiv = document.getElementById('define-areas-status');
+                if (defineAreasStatusDiv && !defineAreasStatusDiv.classList.contains('error')) { // Avoid overwriting specific API errors
+                    showError(defineAreasStatusDiv, 'Failed to load resources for mapping.');
+                }
             }
         }
         window.populateResourcesForMapping = populateResourcesForMapping; // Expose it
