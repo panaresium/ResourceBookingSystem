@@ -1220,42 +1220,72 @@ a.fc-daygrid-event.fc-event { /* Targeting the <a> tag specifically */
     border-style: solid; /* Consistent border style */
 }
 
-/* Available State (Green) */
+/* THESE STYLES BELOW ARE FOR THE NEW_BOOKING_MAP.JS SPECIFICALLY */
+/* AND SHOULD OVERRIDE THE GENERAL .resource-area-* STYLES IF THEY WERE TO APPLY */
+
+#new-booking-map-container .resource-area.map-area-green {
+    background-color: #d4edda !important; /* Light Green */
+    border-color: #5cb85c !important;    /* Green border */
+    color: #155724 !important;           /* Dark green text */
+}
+
+#new-booking-map-container .resource-area.map-area-yellow {
+    background-color: #fff3cd !important; /* Light Yellow */
+    border-color: #ffc107 !important;    /* Amber/Gold border */
+    color: #856404 !important;           /* Dark yellow/brown text */
+}
+
+#new-booking-map-container .resource-area.map-area-light-blue {
+    background-color: #d1ecf1 !important; /* Light Cyan/Blue */
+    border-color: #75c6d9 !important;    /* Medium blue border */
+    color: #0c5460 !important;           /* Dark cyan/blue text */
+}
+
+#new-booking-map-container .resource-area.map-area-red {
+    background-color: #f8d7da !important; /* Light Red/Pink */
+    border-color: #dc3545 !important;    /* Red border */
+    color: #721c24 !important;           /* Dark red text */
+}
+
+#new-booking-map-container .resource-area.map-area-dark-orange {
+    background-color: #ffe8cc !important; /* Lighter Orange/Peach */
+    border-color: #fd7e14 !important;    /* Orange border */
+    color: #804000 !important;           /* Darker orange/brown text */
+}
+
+
+/* Older general states - these might be used by other map views or elements if any */
+/* It's better to keep them for now and ensure the new map specific styles override them due to selector specificity */
 .resource-area-available {
     background-color: rgba(0, 255, 0, 0.15);
     border-color: rgba(0, 200, 0, 0.6);
     color: #333333; /* Darker text for light green background */
 }
 
-/* Partially Booked State (Dark Orange) */
 .resource-area-partially-booked {
     background-color: rgba(255, 140, 0, 0.3); /* Dark Orange background */
     border-color: rgba(204, 112, 0, 0.7); /* Darker Orange border */
     color: #ffffff; /* White text for readability */
 }
 
-/* Fully Booked State (Red) */
 .resource-area-fully-booked {
     background-color: rgba(255, 0, 0, 0.3); /* Red background */
     border-color: rgba(200, 0, 0, 0.7); /* Darker Red border */
     color: #ffffff; /* White text for readability */
 }
 
-/* User Conflict State (Red) - Same as Fully Booked */
 .resource-area-user-conflict {
     background-color: rgba(255, 0, 0, 0.3); /* Red background */
     border-color: rgba(200, 0, 0, 0.7); /* Darker Red border */
     color: #ffffff; /* White text for readability */
 }
 
-/* Restricted State (Grey) */
 .resource-area-restricted {
     background-color: rgba(128, 128, 128, 0.3); /* Grey background */
     border-color: rgba(100, 100, 100, 0.7); /* Darker Grey border */
     color: #ffffff; /* White text for readability */
 }
 
-/* Unknown State (Light Grey) */
 .resource-area-unknown {
     background-color: rgba(200, 200, 200, 0.3); /* Light Grey background */
     border-color: rgba(150, 150, 150, 0.7); /* Darker Grey border */
