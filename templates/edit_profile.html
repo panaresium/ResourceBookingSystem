@@ -51,6 +51,7 @@
         if (form) {
             form.addEventListener('submit', async function(event) {
                 event.preventDefault();
+                const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
                 const email = document.getElementById('email').value.trim();
                 const first_name = document.getElementById('first_name').value.trim();
                 const last_name = document.getElementById('last_name').value.trim();
@@ -70,7 +71,7 @@
                 try {
                     const response = await fetch('/api/profile', {
                         method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
                         body: JSON.stringify({
                             email: email || null,
                             password: password || null,
