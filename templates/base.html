@@ -20,9 +20,7 @@
             <a href="{{ url_for('ui.serve_resources') }}"><span class="menu-icon" aria-hidden="true">📁</span><span class="menu-text">{{ _('View Resources') }}</span></a>
             <a href="{{ url_for('ui.serve_calendar') }}"><span class="menu-icon" aria-hidden="true">📅</span><span class="menu-text">{{ _('Calendar') }}</span></a>
             <a href="{{ url_for('ui.serve_my_bookings_page') }}"><span class="menu-icon" aria-hidden="true">📖</span><span class="menu-text">{{ _('My Bookings') }}</span></a>
-            <div id="auth-link-container" style="display: none; margin-left:auto;">
-                <a href="{{ url_for('ui.serve_login') }}"><span class="menu-icon" aria-hidden="true">🔑</span><span class="menu-text">{{ _('Login') }}</span></a>
-            </div>
+            <a href="{{ url_for('ui.serve_login') }}"><span class="menu-icon" aria-hidden="true">🔑</span><span class="menu-text">{{ _('Login') }}</span></a>
             <div id="user-actions-area" style="display: none;"> <!-- New wrapper div, initially hidden. JS will control its display. -->
                 <div id="welcome-message-container" style="display: none; margin-right: 15px; align-self: center;"></div>
                 <div id="user-dropdown-container" style="display: none; position: relative;">
