@@ -58,42 +58,44 @@
     <div class="filter-section card">
         <div class="card-body">
             <h2 class="card-title">{{ _('Filters') }}</h2>
-            <form id="analyticsFiltersForm" class="form-inline flex-wrap"> {/* Allow wrapping */}
-                <div class="form-group">
-                    <label for="filterResourceTag">{{ _('Resource Tag:') }}</label>
-                    <select id="filterResourceTag" class="form-control custom-select"><option value="">{{ _('All Tags') }}</option></select>
-                </div>
-                <div class="form-group">
-                    <label for="filterResourceStatus">{{ _('Resource Status:') }}</label>
-                    <select id="filterResourceStatus" class="form-control custom-select"><option value="">{{ _('All Statuses') }}</option></select>
-                </div>
-                <div class="form-group">
-                    <label for="filterUser">{{ _('User:') }}</label>
-                    <select id="filterUser" class="form-control custom-select"><option value="">{{ _('All Users') }}</option></select>
-                </div>
-                <div class="form-group">
-                    <label for="filterLocation">{{ _('Location:') }}</label>
-                    <select id="filterLocation" class="form-control custom-select"><option value="">{{ _('All Locations') }}</option></select>
-                </div>
-                <div class="form-group">
-                    <label for="filterFloor">{{ _('Floor:') }}</label>
-                    <select id="filterFloor" class="form-control custom-select"><option value="">{{ _('All Floors') }}</option></select>
-                </div>
-                <div class="form-group">
-                    <label for="filterMonth">{{ _('Month:') }}</label>
-                    <select id="filterMonth" class="form-control custom-select"><option value="">{{ _('All Months') }}</option></select>
-                </div>
-                <div class="form-group">
-                    <label for="filterDayOfWeek">{{ _('Day of Week:') }}</label>
-                    <select id="filterDayOfWeek" class="form-control custom-select"><option value="">{{ _('All Days') }}</option></select>
-                </div>
-                <div class="form-group">
-                    <label for="filterHourOfDay">{{ _('Hour of Day:') }}</label>
-                    <select id="filterHourOfDay" class="form-control custom-select"><option value="">{{ _('All Hours') }}</option></select>
-                </div>
-                <div class="form-group align-self-end"> {/* Align button to bottom if filters wrap */}
-                    <button type="button" id="applyFiltersBtn" class="btn btn-primary">{{ _('Apply Filters') }}</button>
-                    <button type="button" id="resetFiltersBtn" class="btn btn-secondary ml-2">{{ _('Reset Filters') }}</button>
+            <form id="analyticsFiltersForm"> {/* Removed form-inline flex-wrap */}
+                <div class="row align-items-end"> {/* Added row wrapper */}
+                    <div class="col-sm-6 col-md-4 col-lg-3 mb-3">
+                        <label for="filterResourceTag" class="d-block mb-1">{{ _('Resource Tag:') }}</label>
+                        <select id="filterResourceTag" class="form-control custom-select"><option value="">{{ _('All Tags') }}</option></select>
+                    </div>
+                    <div class="col-sm-6 col-md-4 col-lg-3 mb-3">
+                        <label for="filterResourceStatus" class="d-block mb-1">{{ _('Resource Status:') }}</label>
+                        <select id="filterResourceStatus" class="form-control custom-select"><option value="">{{ _('All Statuses') }}</option></select>
+                    </div>
+                    <div class="col-sm-6 col-md-4 col-lg-3 mb-3">
+                        <label for="filterUser" class="d-block mb-1">{{ _('User:') }}</label>
+                        <select id="filterUser" class="form-control custom-select"><option value="">{{ _('All Users') }}</option></select>
+                    </div>
+                    <div class="col-sm-6 col-md-4 col-lg-3 mb-3">
+                        <label for="filterLocation" class="d-block mb-1">{{ _('Location:') }}</label>
+                        <select id="filterLocation" class="form-control custom-select"><option value="">{{ _('All Locations') }}</option></select>
+                    </div>
+                    <div class="col-sm-6 col-md-4 col-lg-3 mb-3">
+                        <label for="filterFloor" class="d-block mb-1">{{ _('Floor:') }}</label>
+                        <select id="filterFloor" class="form-control custom-select"><option value="">{{ _('All Floors') }}</option></select>
+                    </div>
+                    <div class="col-sm-6 col-md-4 col-lg-3 mb-3">
+                        <label for="filterMonth" class="d-block mb-1">{{ _('Month:') }}</label>
+                        <select id="filterMonth" class="form-control custom-select"><option value="">{{ _('All Months') }}</option></select>
+                    </div>
+                    <div class="col-sm-6 col-md-4 col-lg-3 mb-3">
+                        <label for="filterDayOfWeek" class="d-block mb-1">{{ _('Day of Week:') }}</label>
+                        <select id="filterDayOfWeek" class="form-control custom-select"><option value="">{{ _('All Days') }}</option></select>
+                    </div>
+                    <div class="col-sm-6 col-md-4 col-lg-3 mb-3">
+                        <label for="filterHourOfDay" class="d-block mb-1">{{ _('Hour of Day:') }}</label>
+                        <select id="filterHourOfDay" class="form-control custom-select"><option value="">{{ _('All Hours') }}</option></select>
+                    </div>
+                    <div class="col-sm-12 col-md-auto mb-3"> {/* Button group column */}
+                        <button type="button" id="applyFiltersBtn" class="btn btn-primary">{{ _('Apply Filters') }}</button>
+                        <button type="button" id="resetFiltersBtn" class="btn btn-secondary ml-2">{{ _('Reset Filters') }}</button>
+                    </div>
                 </div>
             </form>
         </div>
@@ -481,6 +483,16 @@ document.addEventListener('DOMContentLoaded', function () {
         renderBookingsByDayOfWeekChart(originalData.aggregations, filters);
         renderBookingsByMonthChart(originalData.aggregations, filters);
         renderResourceDistributionChart(originalData.aggregations, filters);
+
+        // Scroll to the charts section after applying filters
+        const chartWrapper = document.getElementById('allChartsWrapper');
+        if (chartWrapper) {
+            // Timeout to ensure DOM updates and chart rendering have a moment to complete
+            // before scrolling, which can sometimes be janky otherwise.
+            setTimeout(() => {
+                chartWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 100); // 100ms delay, can be adjusted
+        }
     }
 
     fetch("{{ url_for('admin_ui.analytics_bookings_data') }}")
