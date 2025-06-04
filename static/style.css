@@ -494,6 +494,9 @@ input.flatpickr-input {
     color: var(--text-color-dark);
     background-color: #f0f0f0; /* Default neutral background */
     transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+    white-space: normal; /* Allow text wrapping */
+    word-break: break-word; /* Break words if necessary */
+    text-align: center; /* Center text if it wraps */
 }
 
 .location-button:hover {
@@ -519,7 +522,7 @@ input.flatpickr-input {
     background-color: #ea6a6a; /* Slightly darker red */
 }
 
-.selected-location-button {
+.selected-map-button { /* Renamed from .selected-location-button */
     border-color: var(--accent-color); /* Steel Blue for selected border */
     box-shadow: 0 0 0 0.2rem rgba(70, 130, 180, .25); /* Subtle glow matching accent */
     /* If the JS sets background color for availability, this ensures border/shadow are primary indicators */
@@ -528,8 +531,8 @@ input.flatpickr-input {
     /* color: var(--text-color-light) !important; */
 }
 /* Ensure selected style is prominent even if JS changes background */
-.selected-location-button.location-button-available,
-.selected-location-button.location-button-unavailable {
+.selected-map-button.location-button-available, /* Renamed */
+.selected-map-button.location-button-unavailable { /* Renamed */
     /* border-color: var(--accent-color); /* Already set */
     /* box-shadow: 0 0 0 0.2rem rgba(70, 130, 180, .25); /* Already set */
     /* Potentially make border thicker or add an inner shadow if needed for visibility over colored backgrounds */
