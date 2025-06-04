@@ -24,9 +24,54 @@
     <h2>{{ _('User Profile') }}</h2>
     <div id="profile-message" aria-live="polite" style="margin-bottom: 15px;"></div>
     <div class="profile-info">
-        <p><strong>{{ _('Username:') }}</strong> {{ username }}</p>
-        <p><strong>{{ _('Email:') }}</strong> {{ email }}</p>
+        <p><strong>{{ _('Username:') }}</strong> {{ current_user.username }}</p>
+        <p><strong>{{ _('Email:') }}</strong> {{ current_user.email }}</p>
+        <p><strong>{{ _('First Name:') }}</strong> {{ current_user.first_name if current_user.first_name else '-' }}</p>
+        <p><strong>{{ _('Last Name:') }}</strong> {{ current_user.last_name if current_user.last_name else '-' }}</p>
+        <p><strong>{{ _('Phone:') }}</strong> {{ current_user.phone if current_user.phone else '-' }}</p>
+        <p><strong>{{ _('Section:') }}</strong> {{ current_user.section if current_user.section else '-' }}</p>
+        <p><strong>{{ _('Department:') }}</strong> {{ current_user.department if current_user.department else '-' }}</p>
+        <p><strong>{{ _('Position:') }}</strong> {{ current_user.position if current_user.position else '-' }}</p>
     </div>
-    <p><a href="{{ url_for('ui.serve_edit_profile_page') }}">{{ _('Edit Profile') }}</a></p>
+
+    <div class="social-media-linking" style="margin-top: 20px;">
+        <h4>{{ _('Social Media Accounts') }}</h4>
+        <p><strong>{{ _('Google:') }}</strong>
+            {% if current_user.google_id %}
+                {{ _('Linked') }} ({{ current_user.google_email or _('Email not available') }})
+                <form method="POST" action="{{ url_for('auth.unlink_google_account') }}" style="display: inline; margin-left: 10px;">
+                    {# Add CSRF token here if Flask-WTF/CSRFProtect is globally enabled for POST #}
+                    {# Example: <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"> #}
+                    <button type="submit" class="btn btn-danger btn-sm">{{ _('Unlink Google') }}</button>
+                </form>
+            {% else %}
+                {{ _('Not Linked') }}
+                <a href="{{ url_for('auth.link_google_auth') }}" class="btn btn-primary btn-sm" style="margin-left: 10px;">{{ _('Link Google Account') }}</a>
+            {% endif %}
+        </p>
+        <p><strong>{{ _('Facebook:') }}</strong>
+            {% if current_user.facebook_id %}
+                {{ _('Linked') }}
+                <form method="POST" action="{{ url_for('auth.unlink_facebook_account') }}" style="display: inline; margin-left: 10px;">
+                    {# Add CSRF token here if Flask-WTF/CSRFProtect is globally enabled for POST #}
+                    {# Example: <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"> #}
+                    <button type="submit" class="btn btn-danger btn-sm">{{ _('Unlink Facebook') }}</button>
+                </form>
+            {% else %}
+                {{ _('Not Linked') }}
+                <a href="{{ url_for('auth.link_facebook_auth') }}" class="btn btn-primary btn-sm" style="margin-left: 10px;">{{ _('Link Facebook Account') }}</a>
+            {% endif %}
+        </p>
+        <p><strong>{{ _('Instagram:') }}</strong>
+            {% if current_user.instagram_id %}
+                {{ _('Linked') }}
+            {% else %}
+                {{ _('Not Linked') }}
+                {# <a href="#">{{ _('Link Instagram Account') }}</a> #}
+            {% endif %}
+        </p>
+    </div>
+
+    <p style="margin-top: 20px;"><a href="{{ url_for('ui.serve_edit_profile_page') }}">{{ _('Edit Profile') }}</a></p>
 </div>
 {% endblock %}

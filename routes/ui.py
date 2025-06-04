@@ -64,15 +64,13 @@ def logout_and_redirect():
 @login_required # from flask_login
 def serve_profile_page():
     current_app.logger.info(f"User {current_user.username} accessed their profile page.")
-    return render_template("profile.html",
-                           username=current_user.username,
-                           email=current_user.email)
+    return render_template("profile.html", current_user=current_user)
 
 @ui_bp.route("/profile/edit")
 @login_required
 def serve_edit_profile_page():
     current_app.logger.info(f"User {current_user.username} accessed edit profile page.")
-    return render_template("edit_profile.html", email=current_user.email)
+    return render_template("edit_profile.html", current_user=current_user)
 
 @ui_bp.route("/my_bookings")
 @login_required

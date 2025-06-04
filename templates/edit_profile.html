@@ -7,7 +7,31 @@
 <form id="edit-profile-form">
     <div>
         <label for="email">{{ _('Email:') }}</label>
-        <input type="email" id="email" name="email" value="{{ email }}">
+        <input type="email" id="email" name="email" value="{{ current_user.email or '' }}">
+    </div>
+    <div>
+        <label for="first_name">{{ _('First Name:') }}</label>
+        <input type="text" id="first_name" name="first_name" value="{{ current_user.first_name or '' }}">
+    </div>
+    <div>
+        <label for="last_name">{{ _('Last Name:') }}</label>
+        <input type="text" id="last_name" name="last_name" value="{{ current_user.last_name or '' }}">
+    </div>
+    <div>
+        <label for="phone">{{ _('Phone:') }}</label>
+        <input type="text" id="phone" name="phone" value="{{ current_user.phone or '' }}">
+    </div>
+    <div>
+        <label for="section">{{ _('Section:') }}</label>
+        <input type="text" id="section" name="section" value="{{ current_user.section or '' }}">
+    </div>
+    <div>
+        <label for="department">{{ _('Department:') }}</label>
+        <input type="text" id="department" name="department" value="{{ current_user.department or '' }}">
+    </div>
+    <div>
+        <label for="position">{{ _('Position:') }}</label>
+        <input type="text" id="position" name="position" value="{{ current_user.position or '' }}">
     </div>
     <div>
         <label for="password">{{ _('New Password:') }}</label>
@@ -28,6 +52,12 @@
             form.addEventListener('submit', async function(event) {
                 event.preventDefault();
                 const email = document.getElementById('email').value.trim();
+                const first_name = document.getElementById('first_name').value.trim();
+                const last_name = document.getElementById('last_name').value.trim();
+                const phone = document.getElementById('phone').value.trim();
+                const section = document.getElementById('section').value.trim();
+                const department = document.getElementById('department').value.trim();
+                const position = document.getElementById('position').value.trim();
                 const password = document.getElementById('password').value;
                 const confirm = document.getElementById('confirm-password').value;
                 if(password && password !== confirm){
@@ -41,7 +71,16 @@
                     const response = await fetch('/api/profile', {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email: email || null, password: password || null })
+                        body: JSON.stringify({
+                            email: email || null,
+                            password: password || null,
+                            first_name: first_name || null,
+                            last_name: last_name || null,
+                            phone: phone || null,
+                            section: section || null,
+                            department: department || null,
+                            position: position || null
+                        })
                     });
                     const data = await response.json();
                     if (response.ok) {

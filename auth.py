@@ -139,6 +139,244 @@ def login_google_callback():
         logger.exception("Unexpected error during Google login callback:")
         return redirect(url_for('ui.serve_login'))
 
+# --- Google Account Linking/Unlinking ---
+
+def get_google_link_flow():
+    scopes = current_app.config.get('SCOPES', ['openid', 'email', 'profile'])
+    # IMPORTANT: This redirect_uri MUST match exactly what's configured in Google Cloud Console
+    # for the OAuth client, under "Authorized redirect URIs".
+    redirect_uri_dynamic = url_for('auth.link_google_callback', _external=True)
+    current_app.logger.info(f"Generated Google Link Flow redirect URI: {redirect_uri_dynamic}")
+    return Flow.from_client_config(
+        client_config={'web': {
+            'client_id': current_app.config['GOOGLE_CLIENT_ID'],
+            'client_secret': current_app.config['GOOGLE_CLIENT_SECRET'],
+            'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
+            'token_uri': 'https://oauth2.googleapis.com/token',
+            'redirect_uris': [redirect_uri_dynamic], # Must be a list
+            'javascript_origins': [current_app.config.get('GOOGLE_JAVASCRIPT_ORIGIN', 'http://127.0.0.1:5000')]
+        }},
+        scopes=scopes,
+        redirect_uri=redirect_uri_dynamic
+    )
+
+@auth_bp.route('/profile/link/google')
+@login_required
+def link_google_auth():
+    if current_user.google_id:
+        flash('Your account is already linked with Google.', 'info')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    flow = get_google_link_flow()
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+        # prompt='consent' # Optional: to ensure refresh token, or if user previously denied scopes
+    )
+    session['oauth_link_state'] = state
+    session['oauth_link_user_id'] = current_user.id # Store user ID to link in callback
+    current_app.logger.info(f"User {current_user.username} initiating Google account linking. State: {state}")
+    return redirect(authorization_url)
+
+@auth_bp.route('/profile/link/google/callback')
+@login_required
+def link_google_callback():
+    logger = current_app.logger
+    state = session.pop('oauth_link_state', None)
+    link_user_id = session.pop('oauth_link_user_id', None)
+
+    if state is None or state != request.args.get('state') or link_user_id is None:
+        logger.error("Invalid OAuth state or missing user ID during Google link callback. Potential CSRF or session issue.")
+        flash('Google linking failed due to an invalid state. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    user_to_link = db.session.get(User, link_user_id)
+    if not user_to_link or user_to_link.id != current_user.id:
+        logger.error(f"User ID mismatch in Google link callback. Session user ID: {link_user_id}, Current user ID: {current_user.id}")
+        flash('Google linking failed due to a user mismatch. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    flow = get_google_link_flow()
+    try:
+        flow.fetch_token(authorization_response=request.url)
+    except Exception as e:
+        logger.error(f"Error fetching OAuth token from Google during link: {e}", exc_info=True)
+        flash('Failed to fetch authentication token from Google. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    if not flow.credentials:
+        logger.error("Failed to retrieve credentials from Google after token fetch during link.")
+        flash('Failed to retrieve credentials from Google. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    id_token_jwt = flow.credentials.id_token
+    try:
+        id_info = id_token.verify_oauth2_token(
+            id_token_jwt, google_requests.Request(), current_app.config['GOOGLE_CLIENT_ID']
+        )
+        google_user_id = id_info.get('sub')
+        google_user_email = id_info.get('email')
+
+        if not google_user_id or not google_user_email:
+            logger.error(f"Google ID token missing 'sub' or 'email' during link. Email: {google_user_email}, Sub: {google_user_id}")
+            flash('Google authentication was successful but necessary ID or email was not provided.', 'error')
+            return redirect(url_for('ui.serve_profile_page'))
+
+        # Check if this Google account is already linked to ANOTHER user
+        existing_user_with_google_id = User.query.filter(User.google_id == google_user_id, User.id != user_to_link.id).first()
+        if existing_user_with_google_id:
+            logger.warning(f"User {user_to_link.username} attempted to link Google ID {google_user_id} which is already linked to user {existing_user_with_google_id.username}.")
+            flash(f"This Google account ({google_user_email}) is already linked to another user ({existing_user_with_google_id.username}).", 'error')
+            return redirect(url_for('ui.serve_profile_page'))
+
+        user_to_link.google_id = google_user_id
+        user_to_link.google_email = google_user_email
+        db.session.commit()
+
+        logger.info(f"User {user_to_link.username} successfully linked Google account (ID: {google_user_id}, Email: {google_user_email}).")
+        add_audit_log(action="LINK_GOOGLE_SUCCESS", details=f"User {user_to_link.username} linked Google account (Email: {google_user_email}).", user_id=user_to_link.id)
+        flash(f'Successfully linked your Google account ({google_user_email}).', 'success')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    except ValueError as e: # Specific error for token verification
+        logger.error(f"Invalid Google ID token during link: {e}", exc_info=True)
+        flash('Invalid Google authentication token received. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Unexpected error during Google link callback for user {user_to_link.username}:")
+        flash('An unexpected error occurred while linking your Google account. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+@auth_bp.route('/profile/unlink/google', methods=['POST'])
+@login_required
+# @csrf.protect # Add this if you have CSRFProtect initialized and are using Flask-WTF forms for the button
+def unlink_google_account():
+    logger = current_app.logger
+    if not current_user.google_id:
+        flash('Your account is not currently linked with Google.', 'info')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    unlinked_google_email = current_user.google_email
+    current_user.google_id = None
+    current_user.google_email = None
+    try:
+        db.session.commit()
+        logger.info(f"User {current_user.username} unlinked Google account (was {unlinked_google_email}).")
+        add_audit_log(action="UNLINK_GOOGLE_SUCCESS", details=f"User {current_user.username} unlinked Google account (was {unlinked_google_email}).", user_id=current_user.id)
+        flash('Successfully unlinked your Google account.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Error unlinking Google account for user {current_user.username}:")
+        flash('An error occurred while unlinking your Google account. Please try again.', 'error')
+    return redirect(url_for('ui.serve_profile_page'))
+
+# --- Facebook Account Linking/Unlinking ---
+
+@auth_bp.route('/profile/link/facebook')
+@login_required
+def link_facebook_auth():
+    if current_user.facebook_id:
+        flash('Your account is already linked with Facebook.', 'info')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    redirect_uri = url_for('auth.link_facebook_callback', _external=True)
+    session['oauth_link_facebook_user_id'] = current_user.id # Store user ID to link in callback
+    current_app.logger.info(f"User {current_user.username} initiating Facebook account linking.")
+    # Assuming oauth.facebook is registered and configured
+    if not hasattr(oauth, 'facebook'):
+        current_app.logger.error("Facebook OAuth client 'oauth.facebook' not registered.")
+        flash('Facebook integration is not configured. Please contact support.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+    return oauth.facebook.authorize_redirect(redirect_uri)
+
+@auth_bp.route('/profile/link/facebook/callback')
+@login_required
+def link_facebook_callback():
+    logger = current_app.logger
+    link_user_id = session.pop('oauth_link_facebook_user_id', None)
+
+    if link_user_id is None:
+        logger.error("Missing user ID during Facebook link callback. Session issue.")
+        flash('Facebook linking failed due to a session issue. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    user_to_link = db.session.get(User, link_user_id)
+    if not user_to_link or user_to_link.id != current_user.id:
+        logger.error(f"User ID mismatch in Facebook link callback. Session user ID: {link_user_id}, Current user ID: {current_user.id}")
+        flash('Facebook linking failed due to a user mismatch. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    if not hasattr(oauth, 'facebook'):
+        current_app.logger.error("Facebook OAuth client 'oauth.facebook' not registered for callback.")
+        flash('Facebook integration is not configured. Please contact support.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    try:
+        token = oauth.facebook.authorize_access_token()
+    except Exception as e: # Authlib specific errors can be caught if known, e.g., OAuthError
+        logger.error(f"Error authorizing Facebook access token: {e}", exc_info=True)
+        flash('Failed to authorize with Facebook. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    if not token or 'access_token' not in token:
+        logger.error("Failed to retrieve access token from Facebook during link.")
+        flash('Failed to retrieve access token from Facebook. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    try:
+        # Assuming userinfo_endpoint was 'https://graph.facebook.com/me?fields=id,email'
+        resp = oauth.facebook.get('me?fields=id') # Only ID is strictly needed for linking
+        profile_data = resp.json()
+        facebook_user_id = profile_data.get('id')
+
+        if not facebook_user_id:
+            logger.error("Facebook profile data missing 'id'.")
+            flash('Facebook authentication was successful but necessary ID was not provided.', 'error')
+            return redirect(url_for('ui.serve_profile_page'))
+
+        existing_user_with_facebook_id = User.query.filter(User.facebook_id == facebook_user_id, User.id != user_to_link.id).first()
+        if existing_user_with_facebook_id:
+            logger.warning(f"User {user_to_link.username} attempted to link Facebook ID {facebook_user_id} which is already linked to user {existing_user_with_facebook_id.username}.")
+            flash(f"This Facebook account is already linked to another user ({existing_user_with_facebook_id.username}).", 'error')
+            return redirect(url_for('ui.serve_profile_page'))
+
+        user_to_link.facebook_id = facebook_user_id
+        db.session.commit()
+
+        logger.info(f"User {user_to_link.username} successfully linked Facebook account (ID: {facebook_user_id}).")
+        add_audit_log(action="LINK_FACEBOOK_SUCCESS", details=f"User {user_to_link.username} linked Facebook account.", user_id=user_to_link.id)
+        flash('Successfully linked your Facebook account.', 'success')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Unexpected error during Facebook link callback for user {user_to_link.username}: {e}")
+        flash('An unexpected error occurred while linking your Facebook account. Please try again.', 'error')
+        return redirect(url_for('ui.serve_profile_page'))
+
+@auth_bp.route('/profile/unlink/facebook', methods=['POST'])
+@login_required
+# @csrf.protect # Add this if CSRFProtect is globally enabled
+def unlink_facebook_account():
+    logger = current_app.logger
+    if not current_user.facebook_id:
+        flash('Your account is not currently linked with Facebook.', 'info')
+        return redirect(url_for('ui.serve_profile_page'))
+
+    current_user.facebook_id = None
+    try:
+        db.session.commit()
+        logger.info(f"User {current_user.username} unlinked Facebook account.")
+        add_audit_log(action="UNLINK_FACEBOOK_SUCCESS", details=f"User {current_user.username} unlinked Facebook account.", user_id=current_user.id)
+        flash('Successfully unlinked your Facebook account.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Error unlinking Facebook account for user {current_user.username}:")
+        flash('An error occurred while unlinking your Facebook account. Please try again.', 'error')
+    return redirect(url_for('ui.serve_profile_page'))
+
+
 # --- Permission Decorator ---
 def permission_required(permission):
     def decorator(f):
