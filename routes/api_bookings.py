@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone, time
 # Assuming extensions.py contains db, socketio, mail
 from extensions import db, socketio, mail
 # Assuming models.py contains these model definitions
-from models import Booking, Resource, User, WaitlistEntry, BookingSettings
+from models import Booking, Resource, User, WaitlistEntry, BookingSettings, FloorMap # Added FloorMap
 # Assuming utils.py contains these helper functions
 from utils import add_audit_log, parse_simple_rrule, send_email, send_slack_notification, send_teams_notification
 # Assuming auth.py contains permission_required decorator
@@ -68,40 +68,87 @@ def create_booking():
     # enable_check_in_out_effective = booking_settings.enable_check_in_out if booking_settings else False # Not used in this function directly
 
     # Permission Enforcement Logic
-    can_book = False
+    can_book_overall = False
     current_app.logger.info(f"Checking booking permissions for user '{current_user.username}' (ID: {current_user.id}, IsAdmin: {current_user.is_admin}) on resource ID {resource_id} ('{resource.name}').")
     current_app.logger.debug(f"Resource booking_restriction: '{resource.booking_restriction}', Allowed User IDs: '{resource.allowed_user_ids}', Resource Roles: {[role.name for role in resource.roles]}")
+    floor_map = resource.floor_map # Get the FloorMap associated with the resource
 
     if current_user.is_admin:
-        current_app.logger.info(f"Booking permitted for admin user '{current_user.username}' on resource {resource_id}.")
-        can_book = True
+        current_app.logger.info(f"Permission granted: User '{current_user.username}' is an admin.")
+        can_book_overall = True
     elif resource.booking_restriction == 'admin_only':
-        current_app.logger.warning(f"Booking denied: Non-admin user '{current_user.username}' attempted to book admin-only resource {resource_id}.")
+        current_app.logger.warning(f"Permission denied: Non-admin user '{current_user.username}' attempted to book admin-only resource {resource_id}.")
+        # can_book_overall remains False
     else:
-        if resource.allowed_user_ids:
+        # Check resource-specific permissions first
+        can_book_resource_level = False
+        allowed_ids_list = set() # Define to ensure it's available for map check too
+
+        if resource.allowed_user_ids and resource.allowed_user_ids.strip():
             allowed_ids_list = {int(uid.strip()) for uid in resource.allowed_user_ids.split(',') if uid.strip()}
             if current_user.id in allowed_ids_list:
-                current_app.logger.info(f"Booking permitted: User '{current_user.username}' (ID: {current_user.id}) is in allowed_user_ids for resource {resource_id}.")
-                can_book = True
+                can_book_resource_level = True
+                current_app.logger.info(f"Permission granted at resource level: User '{current_user.username}' (ID: {current_user.id}) is in resource.allowed_user_ids.")
 
-        if not can_book and resource.roles:
+        if not can_book_resource_level and resource.roles:
             user_role_ids = {role.id for role in current_user.roles}
             resource_allowed_role_ids = {role.id for role in resource.roles}
             current_app.logger.debug(f"User role IDs: {user_role_ids}, Resource allowed role IDs: {resource_allowed_role_ids}")
             if not user_role_ids.isdisjoint(resource_allowed_role_ids):
-                current_app.logger.info(f"Booking permitted: User '{current_user.username}' has a matching role for resource {resource_id}.")
-                can_book = True
+                can_book_resource_level = True
+                current_app.logger.info(f"Permission granted at resource level: User '{current_user.username}' has a matching role for the resource.")
 
-        if not can_book and \
+        if not can_book_resource_level and \
            not (resource.allowed_user_ids and resource.allowed_user_ids.strip()) and \
-           not resource.roles and \
-           resource.booking_restriction != 'admin_only':
-            current_app.logger.info(f"Booking permitted: Resource {resource_id} is open to all authenticated users (no specific user/role restrictions).")
-            can_book = True
+           not resource.roles:
+            # This means the resource itself has no specific user ID restrictions and no role restrictions.
+            # booking_restriction != 'admin_only' is already handled.
+            can_book_resource_level = True
+            current_app.logger.info(f"Permission granted at resource level: Resource {resource_id} is open to all authenticated users (no specific user/role restrictions).")
 
-    if not can_book:
-        current_app.logger.warning(f"Booking denied for user '{current_user.username}' on resource {resource_id} based on evaluated permissions.")
-        return jsonify({'error': 'You are not authorized to book this resource based on its permission settings.'}), 403
+        # Now, if the resource is on a map with specific roles, apply additional checks
+        # unless the user is admin (already handled) or specifically allowed on the resource.
+        if can_book_resource_level:
+            if floor_map and floor_map.roles: # Resource is on a map AND that map has role restrictions
+                current_app.logger.info(f"Resource {resource_id} is on FloorMap '{floor_map.name}' (ID: {floor_map.id}) which has role restrictions: {[role.name for role in floor_map.roles]}.")
+                is_specifically_allowed_on_resource = current_user.id in allowed_ids_list # Check against already parsed list
+
+                if not is_specifically_allowed_on_resource:
+                    user_map_role_ids = {role.id for role in current_user.roles}
+                    map_allowed_role_ids = {role.id for role in floor_map.roles}
+                    current_app.logger.debug(f"User map role IDs: {user_map_role_ids}, Map allowed role IDs: {map_allowed_role_ids} for map {floor_map.id}")
+                    if user_map_role_ids.isdisjoint(map_allowed_role_ids): # No common roles
+                        current_app.logger.warning(f"Permission denied: User '{current_user.username}' has resource-level permission for {resource_id}, but does not have any required roles for FloorMap '{floor_map.name}'.")
+                        can_book_overall = False # Override: Map roles not met
+                    else:
+                        current_app.logger.info(f"Permission granted: User '{current_user.username}' has resource-level permission AND a required role for FloorMap '{floor_map.name}'.")
+                        can_book_overall = True # Explicitly set true based on resource + map roles
+                else:
+                    current_app.logger.info(f"Permission maintained: User '{current_user.username}' is in resource.allowed_user_ids, bypassing FloorMap '{floor_map.name}' role check.")
+                    can_book_overall = True # User is specifically allowed on resource, map roles don't block them
+            else:
+                # Resource has no map roles or not on a map, so resource-level permission is enough
+                current_app.logger.info(f"Permission granted: Resource {resource_id} is not on a map with role restrictions, or map has no roles. Resource-level permission suffices.")
+                can_book_overall = True
+        else:
+            # Did not get permission at resource level, and no map logic to potentially override (as resource level failed)
+            current_app.logger.warning(f"Permission denied: User '{current_user.username}' did not meet resource-level criteria for resource {resource_id}.")
+            can_book_overall = False
+
+    if not can_book_overall:
+        # Centralized final denial message
+        current_app.logger.warning(f"Final booking permission check DENIED for user '{current_user.username}' on resource {resource_id} ('{resource.name}').")
+        # Check if floor_map and its roles were the reason for denial to provide a more specific message
+        if not current_user.is_admin and \
+           resource.booking_restriction != 'admin_only' and \
+           floor_map and floor_map.roles and \
+           not (current_user.id in allowed_ids_list) and \
+           ({role.id for role in current_user.roles}).isdisjoint({role.id for role in floor_map.roles}):
+            # This complex condition tries to pinpoint if map roles were the blocker
+            error_message = f"You are not authorized to book this resource. Access to this resource via the map '{floor_map.name}' is restricted by specific roles, and you do not have the required map area roles."
+        else:
+            error_message = "You are not authorized to book this resource based on its permission settings."
+        return jsonify({'error': error_message}), 403
 
     try:
         booking_date = datetime.strptime(date_str, '%Y-%m-%d').date()
