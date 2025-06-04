@@ -9,7 +9,7 @@ from sqlalchemy import func # For func.date in get_map_details
 
 # Local imports
 from extensions import db
-from models import FloorMap, Resource, Booking, Role # Added Role
+from models import FloorMap, Resource, Booking # Role removed if no longer needed
 from auth import permission_required
 # Assuming these utils will be moved to utils.py or are already there
 from utils import add_audit_log, allowed_file, _get_map_configuration_data, _import_map_configuration_data
@@ -169,10 +169,10 @@ def get_floor_maps():
                 'id': m.id, 'name': m.name, 'image_filename': m.image_filename,
                 'location': m.location, 'floor': m.floor,
                 'offset_x': m.offset_x, 'offset_y': m.offset_y,
-                'image_url': url_for('static', filename=f'floor_map_uploads/{m.image_filename}', _external=False),
-                'assigned_role_ids': [role.id for role in m.roles]  # Add assigned role IDs
+                'image_url': url_for('static', filename=f'floor_map_uploads/{m.image_filename}', _external=False)
+                # 'assigned_role_ids' removed
             })
-        current_app.logger.info(f"Admin {current_user.username} fetched all floor maps with role assignments.")
+        current_app.logger.info(f"Admin {current_user.username} fetched all floor maps.") # Log message reverted
         return jsonify(maps_list), 200
     except Exception as e:
         current_app.logger.exception("Error fetching floor maps for admin:")
@@ -393,65 +393,4 @@ def update_floor_map_offsets(map_id):
             username=current_user.username
         )
         return jsonify({'error': f'Failed to update map offsets due to a server error: {str(e)}'}), 500
-
-@api_maps_bp.route('/admin/maps/<int:map_id>/roles', methods=['POST'])
-@login_required
-@permission_required('manage_floor_maps') # Or a more specific permission if available
-def update_map_roles(map_id):
-    floor_map = FloorMap.query.get(map_id)
-    if not floor_map:
-        current_app.logger.warning(f"Attempt to update roles for non-existent floor map ID: {map_id} by user {current_user.username}")
-        return jsonify({'error': 'Floor map not found.'}), 404
-
-    data = request.get_json()
-    if not data or 'role_ids' not in data:
-        current_app.logger.warning(f"Missing role_ids in request to update roles for map ID: {map_id} by user {current_user.username}")
-        return jsonify({'error': 'Invalid request. JSON data with "role_ids" (list of integers) expected.'}), 400
-
-    requested_role_ids = data.get('role_ids', [])
-    if not isinstance(requested_role_ids, list) or not all(isinstance(role_id, int) for role_id in requested_role_ids):
-        current_app.logger.warning(f"Invalid role_ids format for map ID: {map_id}. Expected list of integers. Received: {requested_role_ids}")
-        return jsonify({'error': 'Invalid role_ids format. Expected a list of integers.'}), 400
-
-    try:
-        # Fetch valid Role objects from the database based on requested_role_ids
-        # This also serves as validation that the roles exist
-        valid_roles = Role.query.filter(Role.id.in_(requested_role_ids)).all()
-
-        # Check if all requested role_ids were found
-        if len(valid_roles) != len(set(requested_role_ids)): # Use set to handle potential duplicates in input
-            current_app.logger.warning(f"Some role_ids provided for map {map_id} do not exist. Requested: {requested_role_ids}, Found: {[r.id for r in valid_roles]}")
-            # Potentially return an error or just proceed with valid ones
-            # For now, let's be strict:
-            return jsonify({'error': 'One or more provided role IDs are invalid or do not exist.'}), 400
-
-        # Update the roles for the floor map
-        floor_map.roles = valid_roles  # Assign the list of Role objects directly
-
-        db.session.commit()
-
-        current_app.logger.info(f"Roles for floor map ID {map_id} ('{floor_map.name}') updated by {current_user.username}. New role IDs: {[role.id for role in valid_roles]}")
-        add_audit_log(
-            action="UPDATE_MAP_ROLES_SUCCESS",
-            details=f"Roles for floor map ID {map_id} ('{floor_map.name}') updated to IDs: {[role.id for role in valid_roles]} by {current_user.username}.",
-            user_id=current_user.id,
-            username=current_user.username
-        )
-        return jsonify({
-            'message': 'Floor map roles updated successfully.',
-            'map': {
-                'id': floor_map.id,
-                'name': floor_map.name,
-                'assigned_role_ids': [role.id for role in floor_map.roles] # Return updated list
-            }
-        }), 200
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.exception(f"Error updating roles for floor map ID {map_id}:")
-        add_audit_log(
-            action="UPDATE_MAP_ROLES_FAILED",
-            details=f"Failed to update roles for map ID {map_id} by {current_user.username}. Error: {str(e)}",
-            user_id=current_user.id,
-            username=current_user.username
-        )
-        return jsonify({'error': f'Failed to update map roles due to a server error: {str(e)}'}), 500
+# Removed the update_map_roles endpoint that was here.

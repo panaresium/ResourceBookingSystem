@@ -21,17 +21,8 @@ class Role(db.Model):
     description = db.Column(db.String(255), nullable=True)
     permissions = db.Column(db.Text, nullable=True)  # e.g., comma-separated: "edit_resource,delete_user"
 
-    # Backref 'allowed_floor_maps' will be added by FloorMap.roles relationship
-    # No explicit relationship needed here if backref is sufficient
-
     def __repr__(self):
         return f'<Role {self.name}>'
-
-# Association table for FloorMap and Role (Many-to-Many)
-floor_map_roles = db.Table('floor_map_roles',
-    db.Column('floor_map_id', db.Integer, db.ForeignKey('floor_map.id'), primary_key=True),
-    db.Column('role_id', db.Integer, db.ForeignKey('role.id'), primary_key=True)
-)
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
@@ -83,9 +74,6 @@ class FloorMap(db.Model):
     # New offset columns
     offset_x = db.Column(db.Integer, nullable=False, default=0)
     offset_y = db.Column(db.Integer, nullable=False, default=0)
-
-    roles = db.relationship('Role', secondary=floor_map_roles,
-                            backref=db.backref('allowed_floor_maps', lazy='dynamic'))
 
     def __repr__(self):
         # Consider adding offsets to repr if useful for debugging
