@@ -1459,6 +1459,207 @@ class TestMapBookingAPI(AppTests):
         self.assertEqual(response.status_code, 404) # Expect Not Found for resource
         self.assertIn('Resource not found', response.get_json().get('error', ''))
 
+    # --- Integration Tests for Booking Workflow with Map Area Roles ---
+    # These tests will be within TestMapBookingAPI or a new dedicated class.
+    # For now, adding to TestMapBookingAPI.
+
+    def _create_user_with_roles(self, username, password, role_names=None, is_admin=False):
+        """Helper to create a user and assign them roles by name."""
+        user = User.query.filter_by(username=username).first()
+        if user: # Delete if exists to ensure clean state for roles
+            db.session.delete(user)
+            db.session.commit()
+
+        user = User(username=username, email=f"{username}@example.com", is_admin=is_admin)
+        user.set_password(password)
+        if role_names:
+            for role_name in role_names:
+                role = Role.query.filter_by(name=role_name).first()
+                if not role: # Create role if it doesn't exist (e.g. from TestFloorMapRoles setup)
+                    role = Role(name=role_name, description=f"Role for {role_name}")
+                    db.session.add(role)
+                    db.session.commit()
+                user.roles.append(role)
+        db.session.add(user)
+        db.session.commit()
+        return user
+
+    def _setup_booking_scenario(self, map_roles_names=None, resource_roles_names=None, resource_allowed_user_id=None, resource_on_map=True):
+        """Helper to set up common elements for booking scenarios."""
+        # Create a map (or use one from TestFloorMapRoles setup if applicable)
+        test_scenario_map = FloorMap.query.filter_by(name="ScenarioMap").first()
+        if not test_scenario_map:
+            test_scenario_map = FloorMap(name="ScenarioMap", image_filename="scenario_map.png")
+            db.session.add(test_scenario_map)
+            db.session.commit()
+
+        if map_roles_names:
+            test_scenario_map.roles = [] # Clear existing
+            for role_name in map_roles_names:
+                role = Role.query.filter_by(name=role_name).first()
+                if role: # Roles should be created by _create_user_with_roles or in TestFloorMapRoles.setUp
+                    test_scenario_map.roles.append(role)
+            db.session.commit()
+
+        # Create a resource
+        scenario_resource = Resource.query.filter_by(name="ScenarioResource").first()
+        if scenario_resource:
+            db.session.delete(scenario_resource) # Delete to reset its roles/map assignment
+            db.session.commit()
+
+        scenario_resource = Resource(name="ScenarioResource", status="published")
+        if resource_on_map:
+            scenario_resource.floor_map_id = test_scenario_map.id
+        else:
+            scenario_resource.floor_map_id = None
+
+        if resource_roles_names:
+            scenario_resource.roles = [] # Clear existing
+            for role_name in resource_roles_names:
+                role = Role.query.filter_by(name=role_name).first()
+                if role:
+                    scenario_resource.roles.append(role)
+
+        if resource_allowed_user_id:
+            scenario_resource.allowed_user_ids = str(resource_allowed_user_id)
+
+        db.session.add(scenario_resource)
+        db.session.commit()
+        return test_scenario_map, scenario_resource
+
+    def test_booking_map_roles_user_has_map_role(self):
+        """Scenario 1: Resource on Map with Roles, User Has Map Role."""
+        # Setup: Map M has RoleX. User U has RoleX. Resource R on Map M.
+        map_role_name = "MapRoleX"
+        user_u = self._create_user_with_roles("user_scenario1", "password", [map_role_name])
+        _, resource_r = self._setup_booking_scenario(map_roles_names=[map_role_name])
+
+        self.login(user_u.username, "password")
+        payload = self._make_booking_payload(resource_r.id, user_name=user_u.username)
+        response = self.client.post('/api/bookings', json=payload)
+
+        self.assertEqual(response.status_code, 201, f"Booking failed: {response.get_json()}")
+        self.logout()
+
+    def test_booking_map_roles_user_lacks_map_role(self):
+        """Scenario 2: Resource on Map with Roles, User Lacks Map Role."""
+        map_role_name = "MapRoleX_S2" # Unique role name for this test
+        user_y_role_name = "UserRoleY_S2"
+        user_u = self._create_user_with_roles("user_scenario2", "password", [user_y_role_name])
+        _, resource_r = self._setup_booking_scenario(map_roles_names=[map_role_name])
+
+        self.login(user_u.username, "password")
+        payload = self._make_booking_payload(resource_r.id, user_name=user_u.username)
+        response = self.client.post('/api/bookings', json=payload)
+
+        self.assertEqual(response.status_code, 403, f"Booking should be forbidden: {response.get_json()}")
+        self.assertIn("Access to this resource via the map", response.get_json().get('error', ''))
+        self.assertIn("is restricted by specific roles", response.get_json().get('error', ''))
+        self.logout()
+
+    def test_booking_map_roles_admin_lacks_map_role(self):
+        """Scenario 3: Resource on Map with Roles, Admin User Lacks Map Role."""
+        map_role_name = "MapRoleX_S3"
+        admin_user = self._create_user_with_roles("admin_scenario3", "password", is_admin=True) # Admin, no specific map role
+        _, resource_r = self._setup_booking_scenario(map_roles_names=[map_role_name])
+
+        self.login(admin_user.username, "password")
+        payload = self._make_booking_payload(resource_r.id, user_name=admin_user.username)
+        response = self.client.post('/api/bookings', json=payload)
+
+        self.assertEqual(response.status_code, 201, f"Admin booking failed: {response.get_json()}")
+        self.logout()
+
+    def test_booking_map_roles_user_specifically_allowed_bypasses_map_role(self):
+        """Scenario 4: User in resource.allowed_user_ids bypasses map role check."""
+        map_role_name = "MapRoleX_S4"
+        user_lacks_map_role = "UserRoleY_S4"
+        user_u = self._create_user_with_roles("user_scenario4", "password", [user_lacks_map_role])
+        # User U is specifically allowed on the resource
+        _, resource_r = self._setup_booking_scenario(map_roles_names=[map_role_name], resource_allowed_user_id=user_u.id)
+
+        self.login(user_u.username, "password")
+        payload = self._make_booking_payload(resource_r.id, user_name=user_u.username)
+        response = self.client.post('/api/bookings', json=payload)
+
+        self.assertEqual(response.status_code, 201, f"Booking failed for specifically allowed user: {response.get_json()}")
+        self.logout()
+
+    def test_booking_map_with_no_roles_assigned(self):
+        """Scenario 5: Resource on Map with NO Roles Assigned."""
+        # User has a general resource role or resource is open
+        resource_role_name = "ResourceRoleGeneral_S5"
+        user_u = self._create_user_with_roles("user_scenario5", "password", [resource_role_name])
+        # Map has no roles. Resource R allows RoleGeneral_S5.
+        _, resource_r = self._setup_booking_scenario(map_roles_names=[], resource_roles_names=[resource_role_name])
+
+        self.login(user_u.username, "password")
+        payload = self._make_booking_payload(resource_r.id, user_name=user_u.username)
+        response = self.client.post('/api/bookings', json=payload)
+
+        self.assertEqual(response.status_code, 201, f"Booking failed on map with no roles: {response.get_json()}")
+        self.logout()
+
+        # Also test for open resource on map with no roles
+        user_no_specific_roles = self._create_user_with_roles("user_scenario5_open", "password")
+        # Map has no roles. Resource R is open (no roles, no allowed_user_ids).
+        _, resource_r_open = self._setup_booking_scenario(map_roles_names=[], resource_roles_names=None, resource_allowed_user_id=None)
+        self.login(user_no_specific_roles.username, "password")
+        payload_open = self._make_booking_payload(resource_r_open.id, user_name=user_no_specific_roles.username)
+        response_open = self.client.post('/api/bookings', json=payload_open)
+        self.assertEqual(response_open.status_code, 201, f"Booking for open resource on map with no roles failed: {response_open.get_json()}")
+        self.logout()
+
+
+    def test_booking_resource_not_on_any_map(self):
+        """Scenario 6: Resource NOT on any Map."""
+        resource_role_name = "ResourceRoleGeneral_S6"
+        user_u = self._create_user_with_roles("user_scenario6", "password", [resource_role_name])
+        # Resource R is not on a map. Resource R allows RoleGeneral_S6.
+        _, resource_r = self._setup_booking_scenario(resource_on_map=False, resource_roles_names=[resource_role_name])
+
+        self.login(user_u.username, "password")
+        payload = self._make_booking_payload(resource_r.id, user_name=user_u.username)
+        response = self.client.post('/api/bookings', json=payload)
+
+        self.assertEqual(response.status_code, 201, f"Booking failed for resource not on map: {response.get_json()}")
+        self.logout()
+
+    def test_booking_map_roles_user_has_resource_role_not_map_role(self):
+        """Scenario 7: Resource on Map, User has Resource Role but not Map Role."""
+        map_role_x = "MapRoleX_S7"
+        resource_role_y = "ResourceRoleY_S7"
+        user_u = self._create_user_with_roles("user_scenario7", "password", [resource_role_y])
+        # Map M allows RoleX. Resource R allows RoleY. User U has RoleY.
+        _, resource_r = self._setup_booking_scenario(map_roles_names=[map_role_x], resource_roles_names=[resource_role_y])
+
+        self.login(user_u.username, "password")
+        payload = self._make_booking_payload(resource_r.id, user_name=user_u.username)
+        response = self.client.post('/api/bookings', json=payload)
+
+        self.assertEqual(response.status_code, 403, f"Booking should be forbidden: {response.get_json()}")
+        self.assertIn("Access to this resource via the map", response.get_json().get('error', ''))
+        self.logout()
+
+    def test_booking_map_roles_user_has_map_role_not_resource_role(self):
+        """Scenario 8: Resource on Map, User has Map Role but not Resource Role (and resource not open)."""
+        map_role_x = "MapRoleX_S8"
+        resource_role_y = "ResourceRoleY_S8" # Resource requires this role
+        user_u = self._create_user_with_roles("user_scenario8", "password", [map_role_x])
+        # Map M allows RoleX. Resource R requires RoleY. User U has RoleX.
+        _, resource_r = self._setup_booking_scenario(map_roles_names=[map_role_x], resource_roles_names=[resource_role_y])
+
+        self.login(user_u.username, "password")
+        payload = self._make_booking_payload(resource_r.id, user_name=user_u.username)
+        response = self.client.post('/api/bookings', json=payload)
+
+        self.assertEqual(response.status_code, 403, f"Booking should be forbidden: {response.get_json()}")
+        # Default message "You are not authorized to book this resource based on its permission settings." is expected
+        # because the failure happens at the resource-level check, before map roles would be reconsidered to deny.
+        self.assertNotIn("Access to this resource via the map", response.get_json().get('error', ''))
+        self.assertIn("not authorized to book this resource based on its permission settings", response.get_json().get('error', ''))
+        self.logout()
+
 
 class TestBulkResourceCreation(AppTests):
     def test_bulk_resource_creation(self):
@@ -2552,6 +2753,176 @@ class TestAdminBookings(AppTests):
         self.assertIn("allowPastBookingsCheckbox.addEventListener('change', updatePastBookingAdjustmentFieldState);", html_b)
 
         self.logout()
+
+
+# --- Test Class for FloorMap Role Functionality ---
+class TestFloorMapRoles(AppTests):
+    def setUp(self):
+        super().setUp()
+        # Create admin user for API tests
+        self.admin_user = User(username='maproleadmin', email='maproleadmin@example.com', is_admin=True)
+        self.admin_user.set_password('adminpass')
+        db.session.add(self.admin_user)
+
+        # Create some roles for testing
+        self.role_map_viewer = Role(name='MapViewer', description='Can view maps')
+        self.role_map_editor = Role(name='MapEditor', description='Can edit maps')
+        self.role_general_booker = Role(name='GeneralBooker', description='Can book general resources')
+        db.session.add_all([self.role_map_viewer, self.role_map_editor, self.role_general_booker])
+        db.session.commit()
+
+        # Create a floor map instance specific to these tests
+        self.test_map1 = FloorMap(name="Role Test Map 1", image_filename="map_roles1.png")
+        self.test_map2 = FloorMap(name="Role Test Map 2", image_filename="map_roles2.png")
+        db.session.add_all([self.test_map1, self.test_map2])
+        db.session.commit()
+
+    def test_add_roles_to_floor_map_model(self):
+        """Test assigning roles to a FloorMap instance directly."""
+        self.test_map1.roles.append(self.role_map_viewer)
+        self.test_map1.roles.append(self.role_map_editor)
+        db.session.commit()
+
+        # Verify roles are associated with the map
+        retrieved_map = FloorMap.query.get(self.test_map1.id)
+        self.assertIsNotNone(retrieved_map)
+        self.assertEqual(len(retrieved_map.roles), 2)
+        self.assertIn(self.role_map_viewer, retrieved_map.roles)
+        self.assertIn(self.role_map_editor, retrieved_map.roles)
+
+        # Verify backref from Role to FloorMap
+        self.assertIn(retrieved_map, self.role_map_viewer.allowed_floor_maps)
+        self.assertIn(retrieved_map, self.role_map_editor.allowed_floor_maps)
+        self.assertNotIn(retrieved_map, self.role_general_booker.allowed_floor_maps)
+
+    def test_get_admin_maps_api_with_assigned_roles(self):
+        """Test GET /api/admin/maps returns maps with assigned_role_ids."""
+        self.login(self.admin_user.username, 'adminpass')
+
+        # Assign roles to test_map1
+        self.test_map1.roles.append(self.role_map_viewer)
+        self.test_map1.roles.append(self.role_map_editor)
+        db.session.commit()
+
+        # self.floor_map from parent AppTests.setUp should have no roles assigned initially
+        # self.test_map2 should have no roles
+
+        response = self.client.get('/api/admin/maps')
+        self.assertEqual(response.status_code, 200)
+        maps_data = response.get_json()
+        self.assertIsInstance(maps_data, list)
+
+        map1_data = next((m for m in maps_data if m['id'] == self.test_map1.id), None)
+        self.assertIsNotNone(map1_data)
+        self.assertIn('assigned_role_ids', map1_data)
+        self.assertIsInstance(map1_data['assigned_role_ids'], list)
+        self.assertEqual(len(map1_data['assigned_role_ids']), 2)
+        self.assertIn(self.role_map_viewer.id, map1_data['assigned_role_ids'])
+        self.assertIn(self.role_map_editor.id, map1_data['assigned_role_ids'])
+
+        map2_data = next((m for m in maps_data if m['id'] == self.test_map2.id), None)
+        self.assertIsNotNone(map2_data)
+        self.assertIn('assigned_role_ids', map2_data)
+        self.assertEqual(len(map2_data['assigned_role_ids']), 0)
+
+        # Check parent's self.floor_map as well
+        parent_map_data = next((m for m in maps_data if m['id'] == self.floor_map.id), None)
+        self.assertIsNotNone(parent_map_data)
+        self.assertIn('assigned_role_ids', parent_map_data)
+        self.assertEqual(len(parent_map_data['assigned_role_ids']), 0, "Parent setup map should have no roles by default")
+
+        self.logout()
+
+    def test_post_map_roles_api_assign_and_clear(self):
+        """Test POST /api/admin/maps/<map_id>/roles to assign and clear roles."""
+        self.login(self.admin_user.username, 'adminpass')
+        map_id_to_test = self.test_map1.id
+
+        # 1. Assign roles
+        payload_assign = {'role_ids': [self.role_map_viewer.id, self.role_map_editor.id]}
+        response_assign = self.client.post(f'/api/admin/maps/{map_id_to_test}/roles', json=payload_assign)
+        self.assertEqual(response_assign.status_code, 200)
+        data_assign = response_assign.get_json()
+        self.assertEqual(data_assign['map']['id'], map_id_to_test)
+        self.assertEqual(len(data_assign['map']['assigned_role_ids']), 2)
+        self.assertIn(self.role_map_viewer.id, data_assign['map']['assigned_role_ids'])
+
+        db.session.refresh(self.test_map1) # Refresh from DB
+        self.assertEqual(len(self.test_map1.roles), 2)
+
+        # 2. Clear roles
+        payload_clear = {'role_ids': []}
+        response_clear = self.client.post(f'/api/admin/maps/{map_id_to_test}/roles', json=payload_clear)
+        self.assertEqual(response_clear.status_code, 200)
+        data_clear = response_clear.get_json()
+        self.assertEqual(len(data_clear['map']['assigned_role_ids']), 0)
+
+        db.session.refresh(self.test_map1)
+        self.assertEqual(len(self.test_map1.roles), 0)
+
+        # 3. Assign one role
+        payload_assign_one = {'role_ids': [self.role_general_booker.id]}
+        response_assign_one = self.client.post(f'/api/admin/maps/{map_id_to_test}/roles', json=payload_assign_one)
+        self.assertEqual(response_assign_one.status_code, 200)
+        data_assign_one = response_assign_one.get_json()
+        self.assertEqual(len(data_assign_one['map']['assigned_role_ids']), 1)
+        self.assertIn(self.role_general_booker.id, data_assign_one['map']['assigned_role_ids'])
+
+        db.session.refresh(self.test_map1)
+        self.assertIn(self.role_general_booker, self.test_map1.roles)
+
+        self.logout()
+
+    def test_post_map_roles_api_invalid_inputs(self):
+        """Test POST /api/admin/maps/<map_id>/roles with invalid inputs."""
+        self.login(self.admin_user.username, 'adminpass')
+
+        # Invalid map_id
+        response_invalid_map = self.client.post('/api/admin/maps/99999/roles', json={'role_ids': [self.role_map_viewer.id]})
+        self.assertEqual(response_invalid_map.status_code, 404)
+        self.assertIn('Floor map not found', response_invalid_map.get_json().get('error', ''))
+
+        # Non-existent role ID
+        map_id_to_test = self.test_map1.id
+        payload_invalid_role = {'role_ids': [99999, self.role_map_viewer.id]} # 99999 is non-existent
+        response_invalid_role = self.client.post(f'/api/admin/maps/{map_id_to_test}/roles', json=payload_invalid_role)
+        self.assertEqual(response_invalid_role.status_code, 400) # Expecting 400 due to invalid role ID
+        self.assertIn('One or more provided role IDs are invalid or do not exist', response_invalid_role.get_json().get('error', ''))
+
+        db.session.refresh(self.test_map1)
+        self.assertEqual(len(self.test_map1.roles), 0, "Roles should not have changed if one ID was invalid.")
+
+        # Malformed payload (e.g., not a list of integers)
+        payload_malformed = {'role_ids': 'not-a-list'}
+        response_malformed = self.client.post(f'/api/admin/maps/{map_id_to_test}/roles', json=payload_malformed)
+        self.assertEqual(response_malformed.status_code, 400)
+        self.assertIn('Invalid role_ids format. Expected a list of integers.', response_malformed.get_json().get('error', ''))
+
+        # Missing 'role_ids' key
+        payload_missing_key = {'roles': [self.role_map_viewer.id]}
+        response_missing_key = self.client.post(f'/api/admin/maps/{map_id_to_test}/roles', json=payload_missing_key)
+        self.assertEqual(response_missing_key.status_code, 400)
+        self.assertIn('Invalid request. JSON data with "role_ids"', response_missing_key.get_json().get('error', ''))
+
+        self.logout()
+
+    def test_post_map_roles_api_permissions(self):
+        """Test access control for POST /api/admin/maps/<map_id>/roles."""
+        # Log out admin, log in as normal user
+        self.logout()
+        normal_user = User.query.filter_by(username='testuser').first() # from AppTests.setUp
+        self.login(normal_user.username, 'password')
+
+        map_id_to_test = self.test_map1.id
+        payload_assign = {'role_ids': [self.role_map_viewer.id]}
+        response_assign = self.client.post(f'/api/admin/maps/{map_id_to_test}/roles', json=payload_assign)
+
+        # Expect 403 Forbidden if permission_required('manage_floor_maps') is effective
+        # The default 'testuser' does not have this permission.
+        self.assertEqual(response_assign.status_code, 403)
+        self.logout()
+
+# --- End of TestFloorMapRoles ---
 
 
 class TestBulkUserOperationsAPI(AppTests):

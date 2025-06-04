@@ -74,6 +74,7 @@
             <td>
                 <button class="button button-small update-map-offsets-btn" data-map-id="MAP_ID_HERE">Update Offsets</button>
                 <button class="button button-small select-map-btn" data-map-id="MAP_ID_HERE" data-map-name="MAP_NAME" data-image-url="MAP_IMAGE_URL" data-offset-x="MAP_OFFSET_X" data-offset-y="MAP_OFFSET_Y">Define Areas</button>
+                <button class="button button-primary button-small manage-map-roles-btn" data-map-id="MAP_ID_HERE" data-map-name="MAP_NAME_HERE">Manage Roles</button> {# Added data-map-name for modal title #}
                 <button class="button button-danger button-small delete-map-btn" data-map-id="MAP_ID_HERE">Delete</button>
             </td>
         </tr>
@@ -81,6 +82,27 @@
     </section>
 
     <hr>
+
+    <!-- Modal for Managing FloorMap Roles -->
+    <div id="manage-map-roles-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close-modal-btn" data-modal-id="manage-map-roles-modal">&times;</span>
+            <h3>{{ _('Manage Roles for Floor Map') }} <span id="map-roles-modal-map-name" style="font-weight:normal;"></span></h3>
+            <form id="manage-map-roles-form">
+                <input type="hidden" id="map-roles-modal-map-id" value="">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"> {# CSRF token for form submission if needed, though JS sends it in header #}
+                <div>
+                    <label for="map-roles-select">{{ _('Assign Roles:') }}</label>
+                    <p class="small-text">{{ _('Select roles that are allowed to access/utilize this map according to defined policies. Users with these roles may gain specific privileges related to this map.') }}</p>
+                    <select id="map-roles-select" multiple="multiple" style="width: 100%; min-height: 150px;">
+                        <!-- Roles will be populated by JavaScript -->
+                    </select>
+                </div>
+                <div id="map-roles-status-message" class="status-message" style="margin-top: 10px; display: none;"></div>
+                <button type="submit" class="button" style="margin-top: 15px;">{{ _('Save Roles for Map') }}</button>
+            </form>
+        </div>
+    </div>
 
     <section id="define-areas-section" style="display:none;">
         <h2>{{ _('Define Areas on Selected Map') }}</h2>
@@ -223,14 +245,19 @@
     <script>
     document.addEventListener('DOMContentLoaded', function() {
         const mapsTableBody = document.getElementById('maps-table-body');
-        const adminMapsListStatus = document.getElementById('admin-maps-list-status'); // For status messages
+        const adminMapsListStatus = document.getElementById('admin-maps-list-status');
+        const csrfTokenMeta = document.querySelector('meta[name="csrf-token"]'); // CSRF token for AJAX
 
         // Function to display status messages
         function showStatus(element, message, isError = false) {
             if (element) {
                 element.textContent = message;
-                element.className = isError ? 'status-message error' : 'status-message success'; // Assuming these classes exist
-                // Make sure status-message is styled to be visible
+                element.className = 'status-message ' + (isError ? 'error' : 'success');
+                if (message) {
+                    element.style.display = 'block'; // Show the message element
+                } else {
+                    element.style.display = 'none'; // Hide if no message
+                }
             }
         }
 
@@ -299,6 +326,16 @@
                 defineAreasButton.style.marginLeft = '5px';
                 actionsCell.appendChild(defineAreasButton);
 
+                // Add Manage Roles button
+                const manageRolesButton = document.createElement('button');
+                manageRolesButton.className = 'button button-primary button-small manage-map-roles-btn';
+                manageRolesButton.dataset.mapId = map.id;
+                manageRolesButton.dataset.mapName = map.name;
+                // Store assigned_role_ids as a JSON string for easy parsing later
+                manageRolesButton.dataset.assignedRoleIds = JSON.stringify(map.assigned_role_ids || []);
+                manageRolesButton.textContent = '{{ _("Manage Roles") }}';
+                manageRolesButton.style.marginLeft = '5px';
+                actionsCell.appendChild(manageRolesButton);
 
                 // Add Delete button (from example structure)
                 const deleteButton = document.createElement('button');
@@ -312,28 +349,145 @@
 
         // Function to fetch maps
         async function loadMaps() {
-            showStatus(adminMapsListStatus, '{{ _("Loading maps...") }}');
+            showStatus(adminMapsListStatus, '{{ _("Loading maps...") }}', false);
             try {
-                const response = await fetch('/api/admin/maps'); // This API now returns offsets
+                const response = await fetch('/api/admin/maps'); // This API now returns 'assigned_role_ids'
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const maps = await response.json();
-                renderMaps(maps);
+                renderMaps(maps); // maps should contain 'assigned_role_ids' for each map
                 showStatus(adminMapsListStatus, '{{ _("Maps loaded.") }}', false);
-                setTimeout(() => { if(adminMapsListStatus && adminMapsListStatus.textContent === '{{ _("Maps loaded.") }}') adminMapsListStatus.textContent = ''; }, 3000);
+                setTimeout(() => { if(adminMapsListStatus && adminMapsListStatus.textContent === '{{ _("Maps loaded.") }}') showStatus(adminMapsListStatus, '', false); }, 3000);
             } catch (error) {
                 console.error('Error loading maps:', error);
                 showStatus(adminMapsListStatus, '{{ _("Error loading maps.") }}', true);
-                mapsTableBody.innerHTML = '<tr><td colspan="7">{{ _("Error loading maps.") }}</td></tr>';
+                mapsTableBody.innerHTML = `<tr><td colspan="7">{{ _("Error loading maps.") }}</td></tr>`;
             }
         }
 
-        // Event listener for updating offsets (using event delegation)
+        // --- Start of Map Roles Modal Logic ---
+        const manageMapRolesModal = document.getElementById('manage-map-roles-modal');
+        const closeMapRolesModalBtn = manageMapRolesModal.querySelector('.close-modal-btn');
+        const mapRolesSelect = document.getElementById('map-roles-select');
+        const mapRolesForm = document.getElementById('manage-map-roles-form');
+        const mapRolesModalMapIdInput = document.getElementById('map-roles-modal-map-id');
+        const mapRolesModalMapNameEl = document.getElementById('map-roles-modal-map-name');
+        const mapRolesStatusMessage = document.getElementById('map-roles-status-message');
+        let allRolesData = []; // To store roles fetched from API
+
+        async function fetchAllRolesForMapAssignment() {
+            if (allRolesData.length > 0) return; // Already fetched
+            try {
+                const response = await fetch('/api/admin/roles');
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                allRolesData = await response.json();
+            } catch (error) {
+                console.error('Error fetching all roles for map assignment:', error);
+                showStatus(mapRolesStatusMessage, '{{ _("Error loading roles data.") }}', true);
+                allRolesData = [];
+            }
+        }
+
+        function populateRolesForMapModal(assignedRoleIds = []) {
+            mapRolesSelect.innerHTML = '';
+            if (allRolesData.length === 0) {
+                mapRolesSelect.innerHTML = '<option value="" disabled>{{ _("No roles available or error loading roles.") }}</option>';
+                return;
+            }
+            allRolesData.forEach(role => {
+                const option = document.createElement('option');
+                option.value = role.id;
+                option.textContent = role.name + (role.description ? ` (${role.description})` : '');
+                if (assignedRoleIds.includes(role.id)) {
+                    option.selected = true;
+                }
+                mapRolesSelect.appendChild(option);
+            });
+        }
+
+        async function openManageMapRolesModal(mapId, mapName, assignedRoleIdsAttr) {
+            showStatus(mapRolesStatusMessage, '', false);
+            mapRolesModalMapIdInput.value = mapId;
+            mapRolesModalMapNameEl.textContent = `(${mapName})`;
+
+            await fetchAllRolesForMapAssignment();
+
+            let assignedRoleIds = [];
+            try {
+                // assignedRoleIdsAttr is expected to be a JSON string of an array from the button's dataset
+                assignedRoleIds = JSON.parse(assignedRoleIdsAttr || "[]");
+            } catch (e) {
+                console.error("Error parsing assignedRoleIds: ", e, "Attr was: ", assignedRoleIdsAttr);
+                assignedRoleIds = [];
+            }
+
+            populateRolesForMapModal(assignedRoleIds);
+            manageMapRolesModal.style.display = 'block';
+        }
+
+        if(closeMapRolesModalBtn) {
+            closeMapRolesModalBtn.addEventListener('click', () => {
+                manageMapRolesModal.style.display = 'none';
+            });
+        }
+        window.addEventListener('click', (event) => {
+            if (event.target === manageMapRolesModal) {
+                manageMapRolesModal.style.display = 'none';
+            }
+        });
+
+        if (mapRolesForm) {
+            mapRolesForm.addEventListener('submit', async function(event) {
+                event.preventDefault();
+                const mapId = mapRolesModalMapIdInput.value;
+                const selectedRoleIds = Array.from(mapRolesSelect.selectedOptions).map(option => parseInt(option.value));
+
+                showStatus(mapRolesStatusMessage, '{{ _("Saving roles...") }}', false);
+                const currentCsrfToken = csrfTokenMeta ? csrfTokenMeta.getAttribute('content') : document.querySelector('input[name="csrf_token"]')?.value;
+                 if (!currentCsrfToken) {
+                    showStatus(mapRolesStatusMessage, '{{ _("CSRF token not found. Cannot save.") }}', true);
+                    console.error('CSRF token not found for saving map roles.');
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`/api/admin/maps/${mapId}/roles`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': currentCsrfToken
+                        },
+                        body: JSON.stringify({ role_ids: selectedRoleIds })
+                    });
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.error || `HTTP error! status: ${response.status}`);
+                    }
+                    showStatus(mapRolesStatusMessage, result.message || '{{ _("Roles updated successfully!") }}', false);
+                    loadMaps();
+                    setTimeout(() => {
+                        manageMapRolesModal.style.display = 'none';
+                        showStatus(mapRolesStatusMessage, '', false); // Clear message after closing
+                    }, 1500);
+                } catch (error) {
+                    console.error('Error saving map roles:', error);
+                    showStatus(mapRolesStatusMessage, `{{ _("Error saving roles: ${error.message}") }}`, true);
+                }
+            });
+        }
+        // --- End of Map Roles Modal Logic ---
+
+        // Event listener for map actions (using event delegation on mapsTableBody)
         mapsTableBody.addEventListener('click', async function(event) {
-            if (event.target.classList.contains('update-map-offsets-btn')) {
-                const mapId = event.target.dataset.mapId;
+            const targetButton = event.target.closest('button'); // Get the button element if a child was clicked
+            if (!targetButton) return;
+
+            if (targetButton.classList.contains('update-map-offsets-btn')) {
+                const mapId = targetButton.dataset.mapId;
                 const row = event.target.closest('tr');
+                const offsetXInput = row.querySelector('.map-offset-x-input');
+                const row = targetButton.closest('tr');
                 const offsetXInput = row.querySelector('.map-offset-x-input');
                 const offsetYInput = row.querySelector('.map-offset-y-input');
 
@@ -345,12 +499,12 @@
                     return;
                 }
 
-                showStatus(adminMapsListStatus, `{{ _("Updating offsets for map ID ${mapId}...") }}`);
+                showStatus(adminMapsListStatus, `{{ _("Updating offsets for map ID ${mapId}...") }}`, false);
                 try {
-                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-                    if (!csrfToken) {
+                    const currentCsrfToken = csrfTokenMeta ? csrfTokenMeta.getAttribute('content') : document.querySelector('input[name="csrf_token"]')?.value;
+                    if (!currentCsrfToken) {
                         showStatus(adminMapsListStatus, '{{ _("CSRF token not found. Cannot update.") }}', true);
-                        console.error('CSRF token not found in meta tag.');
+                        console.error('CSRF token not found for offset update.');
                         return;
                     }
 
@@ -358,7 +512,7 @@
                         method: 'PUT',
                         headers: {
                             'Content-Type': 'application/json',
-                            'X-CSRFToken': csrfToken // Added CSRF token
+                            'X-CSRFToken': currentCsrfToken
                         },
                         body: JSON.stringify({ offset_x: offsetX, offset_y: offsetY })
                     });
@@ -367,10 +521,14 @@
                         throw new Error(result.error || `HTTP error! status: ${response.status}`);
                     }
                     showStatus(adminMapsListStatus, result.message || '{{ _("Offsets updated successfully.") }}', false);
-                    // Optionally update the input fields to the returned values if API sanitizes/changes them
                     if(result.map) {
                         offsetXInput.value = result.map.offset_x;
                         offsetYInput.value = result.map.offset_y;
+                        const defineAreasBtn = row.querySelector('.select-map-btn');
+                        if(defineAreasBtn) {
+                            defineAreasBtn.dataset.offsetX = result.map.offset_x;
+                            defineAreasBtn.dataset.offsetY = result.map.offset_y;
+                        }
                     }
                 } catch (error) {
                     console.error('Error updating map offsets:', error);
@@ -378,13 +536,19 @@
                 }
             } // End of update-map-offsets-btn logic
 
-            else if (event.target.classList.contains('select-map-btn')) {
-                const button = event.target;
-                const mapId = button.dataset.mapId;
-                const mapName = button.dataset.mapName;
-                const imageUrl = button.dataset.imageUrl;
-                const offsetX = parseInt(button.dataset.offsetX || '0');
-                const offsetY = parseInt(button.dataset.offsetY || '0');
+            else if (targetButton.classList.contains('manage-map-roles-btn')) {
+                const mapId = targetButton.dataset.mapId;
+                const mapName = targetButton.dataset.mapName;
+                const assignedRoleIdsAttr = targetButton.dataset.assignedRoleIds;
+                openManageMapRolesModal(mapId, mapName, assignedRoleIdsAttr);
+            } // End of manage-map-roles-btn logic
+
+            else if (targetButton.classList.contains('select-map-btn')) {
+                const mapId = targetButton.dataset.mapId;
+                const mapName = targetButton.dataset.mapName;
+                const imageUrl = targetButton.dataset.imageUrl;
+                const offsetX = parseInt(targetButton.dataset.offsetX || '0');
+                const offsetY = parseInt(targetButton.dataset.offsetY || '0');
 
                 console.log(`Define Areas clicked for map ID: ${mapId}, Name: ${mapName}, Image: ${imageUrl}, OffsetX: ${offsetX}, OffsetY: ${offsetY}`);
 
@@ -443,9 +607,9 @@
                 if(defineAreasSection) defineAreasSection.scrollIntoView({ behavior: 'smooth' });
             } // End of select-map-btn logic
 
-            else if (event.target.classList.contains('delete-map-btn')) {
-                const mapId = event.target.dataset.mapId;
-                const mapRow = event.target.closest('tr');
+            else if (targetButton.classList.contains('delete-map-btn')) {
+                const mapId = targetButton.dataset.mapId;
+                const mapRow = targetButton.closest('tr');
                 const mapName = mapRow ? (mapRow.cells[0] ? mapRow.cells[0].textContent : `Map ID ${mapId}`) : `Map ID ${mapId}`;
 
                 if (!confirm(`{{ _("Are you sure you want to delete map '${mapName}' (ID: ${mapId})? This will also remove any associated resource area mappings.") }}`)) {
@@ -453,8 +617,8 @@
                 }
 
                 showStatus(adminMapsListStatus, `{{ _("Deleting map ${mapName}...") }}`, false);
-                const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-                if (!csrfToken) {
+                const currentCsrfToken = csrfTokenMeta ? csrfTokenMeta.getAttribute('content') : document.querySelector('input[name="csrf_token"]')?.value;
+                if (!currentCsrfToken) {
                     showStatus(adminMapsListStatus, '{{ _("CSRF token not found. Cannot delete.") }}', true);
                     console.error('CSRF token not found for delete operation.');
                     return;
@@ -464,7 +628,7 @@
                     const response = await fetch(`/api/admin/maps/${mapId}`, {
                         method: 'DELETE',
                         headers: {
-                            'X-CSRFToken': csrfToken
+                            'X-CSRFToken': currentCsrfToken
                         }
                     });
                     const result = await response.json();
@@ -508,34 +672,14 @@
 
                 showStatus(uploadStatusDiv, '{{ _("Uploading map...") }}');
                 const formData = new FormData(uploadMapForm);
+                // CSRF token is included as a hidden field in formData: <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 try {
-                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-                    // Note: For FormData with fetch, CSRF is often handled by cookies or server-side framework integration,
-                    // but if a header is needed, it would be added here similarly. However, Flask-WTF usually protects
-                    // forms submitted via POST more automatically if the form includes the CSRF field,
-                    // or AJAX POSTs if the token is in headers. For FormData, it's less common to manually set Content-Type
-                    // and X-CSRFToken as the browser handles multipart/form-data.
-                    // For now, assuming existing mechanism for form POST is sufficient or will be reviewed separately if it fails.
-                    // The primary concern for this task was the PUT request.
-
-                    const fetchOptions = {
+                    const response = await fetch('/api/admin/maps', {
                         method: 'POST',
-                        body: formData,
-                        headers: {} // Initialize headers object
-                    };
-
-                    if (csrfToken) {
-                        // It's not standard to send X-CSRFToken with FormData POSTs like this,
-                        // as Flask-WTF usually checks a hidden form field `csrf_token`.
-                        // However, if the server is set up to check this header for POST AJAX too:
-                        // fetchOptions.headers['X-CSRFToken'] = csrfToken;
-                        // For now, let's assume the form POST CSRF is handled by Flask-WTF via a hidden field if needed,
-                        // or that the existing setup for POSTs doesn't require this explicit header for FormData.
-                        // The original code didn't have explicit CSRF for POST, so we maintain that unless specified.
-                    }
-
-
-                    const response = await fetch('/api/admin/maps', fetchOptions);
+                        body: formData
+                        // No 'X-CSRFToken' header needed for FormData when using Flask-WTF's hidden field.
+                        // No 'Content-Type' header needed, browser sets it for FormData.
+                    });
                     const result = await response.json();
                     if (!response.ok) {
                         throw new Error(result.error || `HTTP error! status: ${response.status}`);
@@ -549,6 +693,10 @@
                 }
             });
         }
+
+        // Initial load of maps and roles
+        loadMaps();
+        fetchAllRolesForMapAssignment(); // Fetch roles once on page load for the modal
     });
     </script>
 {% endblock %}
