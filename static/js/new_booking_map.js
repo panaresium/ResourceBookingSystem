@@ -234,14 +234,17 @@ document.addEventListener('DOMContentLoaded', function () {
                                 // REMOVED: console.log("DEBUG MAP: Path C2 for " + resource.name + ". Assigning map-area-light-blue (Fully Booked by Others).");
                                 finalClass = 'map-area-light-blue';
                                 finalTitle += ' (Fully Booked by Others)';
-                            } else if (numGenerallyBooked === 0) {
-                                // REMOVED: console.log("DEBUG MAP: Path C3 for " + resource.name + " (Generally fully available)");
-                                if (numBookableByCurrentUser === numPrimarySlots) {
-                                    // REMOVED: console.log("DEBUG MAP: Path C3a for " + resource.name + ". Assigning map-area-green.");
+                            } else if (numGenerallyBooked === 0) { // Generally FULLY available (no bookings by anyone on this resource)
+                                if (numBookableByCurrentUser === numPrimarySlots) { // And current user can book all of it (no conflicts from their *other* bookings)
+                                    // console.log("DEBUG MAP: Condition for " + resource.name + ": Generally fully available, all slots available to current user. Assigning map-area-green.");
                                     finalClass = 'map-area-green';
                                     finalTitle += ' (Available)';
-                                } else {
-                                    // REMOVED: console.log("DEBUG MAP: Path C3b for " + resource.name + ". Assigning map-area-light-blue (User schedule conflicts).");
+                                } else if (numBookableByCurrentUser > 0) { // Generally fully available, but user's other conflicts block SOME (but not all) slots
+                                    // console.log("DEBUG MAP: Condition for " + resource.name + ": Generally fully available, but user conflicts block SOME slots. User can still book " + numBookableByCurrentUser + " slots. Assigning map-area-yellow.");
+                                    finalClass = 'map-area-yellow';
+                                    finalTitle += ' (Partially Available to You - Schedule Conflicts)';
+                                } else { // Generally fully available, but user's other schedule conflicts block ALL slots (numBookableByCurrentUser === 0)
+                                    // console.log("DEBUG MAP: Condition for " + resource.name + ": Generally fully available, but user conflicts block ALL slots. Assigning map-area-light-blue.");
                                     finalClass = 'map-area-light-blue';
                                     finalTitle += ' (Unavailable - Your Schedule Conflicts)';
                                 }
@@ -642,4 +645,4 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
 });
-
+// console.log('new_booking_map.js script execution finished.'); // Keep general load confirmation
