@@ -459,6 +459,83 @@ input[type="button"]:focus {
     outline-offset: 2px;
 }
 
+/* Flatpickr Calendar Minimal Overrides */
+.flatpickr-calendar {
+    font-size: 0.95rem; /* Adjust to match general form element font size if needed */
+    /* Example: Match border radius with other elements */
+    /* border-radius: 5px; */ /* flatpickr already has its own border-radius */
+}
+/* Ensure input for flatpickr looks like other text inputs if not using altInput */
+input.flatpickr-input {
+    width: 100%; /* This might be too aggressive if not desired for all flatpickr inputs */
+    /* padding: 0.625rem; */ /* Use existing form input padding if needed */
+    /* border: 1px solid var(--border-color); */
+    /* border-radius: 5px; */
+    /* box-sizing: border-box; */
+    /* font-size: 1rem; */
+}
+
+
+/* Location Button Styles for Resource Availability Page */
+#new-booking-map-location-buttons-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px; /* Replaces inline style from HTML */
+    margin-bottom: 10px; /* Replaces inline style from HTML */
+}
+
+.location-button {
+    padding: 8px 12px;
+    margin: 0 5px 5px 0; /* Keep individual margins for items that might wrap */
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem; /* Match other secondary buttons or form elements */
+    color: var(--text-color-dark);
+    background-color: #f0f0f0; /* Default neutral background */
+    transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.location-button:hover {
+    background-color: #e0e0e0; /* Slightly darker on hover */
+    border-color: #bbb;
+}
+
+/* JS will set background-color directly for now based on previous implementation.
+   These classes are for when JS is updated to use classes for availability. */
+.location-button-available {
+    background-color: lightgreen; /* #90ee90 */
+    color: #155724; /* Dark green text for contrast */
+}
+.location-button-available:hover {
+    background-color: #78db78; /* Slightly darker green */
+}
+
+.location-button-unavailable {
+    background-color: lightcoral; /* #f08080 */
+    color: #721c24; /* Dark red text for contrast */
+}
+.location-button-unavailable:hover {
+    background-color: #ea6a6a; /* Slightly darker red */
+}
+
+.selected-location-button {
+    border-color: var(--accent-color); /* Steel Blue for selected border */
+    box-shadow: 0 0 0 0.2rem rgba(70, 130, 180, .25); /* Subtle glow matching accent */
+    /* If the JS sets background color for availability, this ensures border/shadow are primary indicators */
+    /* To make selected background override availability color (e.g. always blue when selected): */
+    /* background-color: var(--primary-color) !important; */
+    /* color: var(--text-color-light) !important; */
+}
+/* Ensure selected style is prominent even if JS changes background */
+.selected-location-button.location-button-available,
+.selected-location-button.location-button-unavailable {
+    /* border-color: var(--accent-color); /* Already set */
+    /* box-shadow: 0 0 0 0.2rem rgba(70, 130, 180, .25); /* Already set */
+    /* Potentially make border thicker or add an inner shadow if needed for visibility over colored backgrounds */
+}
+
+
 #upcoming-bookings, #quick-actions {
     margin-top: 25px;
     padding: 15px;

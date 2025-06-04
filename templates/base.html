@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <title>{% block title %}{{ _('Smart Resource Booking') }}{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='libs/flatpickr/flatpickr.min.css') }}">
     {% block head_extra %}{% endblock %}
 </head>
 <body class="{{ 'no-sidebar' if not (current_user and current_user.is_authenticated and current_user.is_admin) else '' }}">
@@ -121,6 +122,7 @@
     {% block scripts %}
     <!-- <script src="/socket.io/socket.io.js"></script> -->
     <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='libs/flatpickr/flatpickr.min.js') }}"></script>
     {% endblock %}
 </body>
 </html>

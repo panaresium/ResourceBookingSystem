@@ -10,13 +10,16 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     const mapAvailabilityDateInput = document.getElementById('new-booking-map-availability-date');
-    const mapLocationSelect = document.getElementById('new-booking-map-location-select');
+    // const mapLocationSelect = document.getElementById('new-booking-map-location-select'); // Removed
+    const mapLocationButtonsContainer = document.getElementById('new-booking-map-location-buttons-container');
     const mapFloorSelect = document.getElementById('new-booking-map-floor-select');
     const mapContainer = document.getElementById('new-booking-map-container');
     const mapLoadingStatusDiv = document.getElementById('new-booking-map-loading-status');
     const resourceSelectBooking = document.getElementById('resource-select-booking');
 
     let allMapInfo = [];
+    let allUniqueLocations = [];
+    let selectedLocationName = null;
     let currentMapId = null;
 
     const mainBookingFormDateInput = document.getElementById('booking-date');
@@ -30,14 +33,17 @@ document.addEventListener('DOMContentLoaded', function () {
         if (isError) {
             showError(mapLoadingStatusDiv, message);
         } else {
-            showSuccess(mapLoadingStatusDiv, message); 
+            showSuccess(mapLoadingStatusDiv, message);
         }
     }
 
     function disableMapSelectors() {
-        if (mapLocationSelect) {
-            mapLocationSelect.innerHTML = '<option value="">-- Not Available --</option>';
-            mapLocationSelect.disabled = true;
+        // if (mapLocationSelect) { // Removed
+        //     mapLocationSelect.innerHTML = '<option value="">-- Not Available --</option>';
+        //     mapLocationSelect.disabled = true;
+        // }
+        if (mapLocationButtonsContainer) {
+            mapLocationButtonsContainer.innerHTML = '<p>No locations available or date not selected.</p>';
         }
         if (mapFloorSelect) {
             mapFloorSelect.innerHTML = '<option value="">-- Not Available --</option>';
@@ -62,7 +68,19 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const today = getTodayDateString();
     if (mapAvailabilityDateInput) {
-        mapAvailabilityDateInput.value = today;
+        // mapAvailabilityDateInput.value = today; // Flatpickr will handle defaultDate
+        flatpickr(mapAvailabilityDateInput, {
+            dateFormat: "Y-m-d",
+            defaultDate: "today",
+            onChange: function(selectedDates, dateStr, instance) {
+                // When date changes, first update location buttons (colors), then try to load map if a location is selected
+                updateLocationButtons().then(() => {
+                    if (selectedLocationName) {
+                        handleFilterChange('map');
+                    }
+                });
+            }
+        });
     } else {
         console.error('Map availability date input not found.'); // Keep this error
     }
@@ -71,18 +89,18 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function updateFloorSelectOptions() {
-        if (!mapFloorSelect || !mapLocationSelect) {
-            console.error("Floor or Location select dropdown not found for updateFloorSelectOptions"); // Keep this error
+        // Now uses selectedLocationName
+        if (!mapFloorSelect) {
+            console.error("Floor select dropdown not found for updateFloorSelectOptions");
             return;
         }
-        const selectedLocation = mapLocationSelect.value;
         mapFloorSelect.innerHTML = '<option value="">-- Select Floor --</option>';
-        if (!selectedLocation) {
+        if (!selectedLocationName) {
             mapFloorSelect.disabled = true;
             return;
         }
         const availableFloors = [...new Set(allMapInfo
-            .filter(map => map.location === selectedLocation && map.floor)
+            .filter(map => map.location === selectedLocationName && map.floor)
             .map(map => map.floor)
             .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
         )];
@@ -93,6 +111,82 @@ document.addEventListener('DOMContentLoaded', function () {
             mapFloorSelect.disabled = true;
         }
     }
+
+    async function updateLocationButtons() {
+        if (!mapAvailabilityDateInput || !mapLocationButtonsContainer) {
+            console.error("Date input or location buttons container not found for updateLocationButtons");
+            return;
+        }
+        const selectedDate = mapAvailabilityDateInput.value;
+        if (!selectedDate) {
+            mapLocationButtonsContainer.innerHTML = "<p>Please select a date to see location availability.</p>";
+            return;
+        }
+
+        showLoading(mapLoadingStatusDiv, 'Fetching location availability...');
+        try {
+            const availabilityData = await apiCall(`/api/locations-availability?date=${selectedDate}`, {}, mapLoadingStatusDiv);
+            mapLocationButtonsContainer.innerHTML = ''; // Clear previous buttons
+
+            if (!allUniqueLocations || allUniqueLocations.length === 0) {
+                mapLocationButtonsContainer.innerHTML = "<p>No locations configured.</p>";
+                hideMessage(mapLoadingStatusDiv);
+                return;
+            }
+
+            allUniqueLocations.forEach(locName => {
+                const button = document.createElement('button');
+                button.textContent = locName;
+                button.classList.add('location-button', 'button'); // Added 'button' class for general styling
+
+                // Remove previous availability classes and inline styles
+                button.classList.remove('location-button-available', 'location-button-unavailable');
+                button.style.backgroundColor = ''; // Clear any inline style
+
+                const availabilityInfo = availabilityData.find(l => l.location_name === locName);
+                if (availabilityInfo) {
+                    if (availabilityInfo.is_available) {
+                        button.classList.add('location-button-available');
+                    } else {
+                        button.classList.add('location-button-unavailable');
+                    }
+                    button.title = `${locName} - ${availabilityInfo.is_available ? 'Available' : 'No Availability'}`;
+                } else {
+                    // Default appearance (from .location-button) will apply. No specific class needed for 'unknown'.
+                    // button.style.backgroundColor = 'lightgray'; // Removed, rely on base class or a new CSS class if specific styling for "unknown" is needed
+                    button.title = `${locName} - Availability unknown`;
+                }
+
+                if (locName === selectedLocationName) {
+                    button.classList.add('selected-location-button'); // This class should be styled in CSS
+                }
+
+                button.addEventListener('click', function() {
+                    selectedLocationName = locName;
+                    // Visually update selected button
+                    document.querySelectorAll('#new-booking-map-location-buttons-container .location-button').forEach(btn => {
+                        btn.classList.remove('selected-location-button');
+                    });
+                    this.classList.add('selected-location-button');
+
+                    updateFloorSelectOptions();
+                    handleFilterChange('map');
+                });
+                mapLocationButtonsContainer.appendChild(button);
+            });
+            if (!mapLoadingStatusDiv.classList.contains('error') && !mapLoadingStatusDiv.classList.contains('success')) {
+                 hideMessage(mapLoadingStatusDiv);
+            }
+
+        } catch (error) {
+            console.error('Error fetching location availability:', error);
+            mapLocationButtonsContainer.innerHTML = `<p style="color: red;">Error loading location availability: ${error.message}</p>`;
+            if (!mapLoadingStatusDiv.classList.contains('error')) {
+                 showError(mapLoadingStatusDiv, `Error loading location availability: ${error.message}`);
+            }
+        }
+    }
+
 
     async function loadMapDetails(mapId, dateString) {
         if (!mapId) {
@@ -316,7 +410,8 @@ document.addEventListener('DOMContentLoaded', function () {
     function handleFilterChange(source = 'map') {
         if (isSyncingDate) return;
         isSyncingDate = true;
-        const selectedLocation = mapLocationSelect ? mapLocationSelect.value : null;
+        // const selectedLocation = mapLocationSelect ? mapLocationSelect.value : null; // Replaced by selectedLocationName
+        const currentSelectedLocation = selectedLocationName; // Use the global variable
         const selectedFloor = mapFloorSelect ? mapFloorSelect.value : null;
         let selectedDate = mapAvailabilityDateInput ? mapAvailabilityDateInput.value : null;
 
@@ -332,17 +427,17 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         }
 
-        if (!selectedLocation || !selectedFloor) {
+        if (!currentSelectedLocation || !selectedFloor) { // Changed selectedLocation to currentSelectedLocation
             loadMapDetails(null, selectedDate).finally(() => { isSyncingDate = false; });
             isSyncingDate = false; 
             return;
         }
-        const mapToLoad = allMapInfo.find(map => map.location === selectedLocation && map.floor === selectedFloor);
+        const mapToLoad = allMapInfo.find(map => map.location === currentSelectedLocation && map.floor === selectedFloor); // Use currentSelectedLocation
         if (mapToLoad && mapToLoad.id) {
             loadMapDetails(mapToLoad.id, selectedDate).finally(() => { isSyncingDate = false; });
         } else {
             loadMapDetails(null, selectedDate).finally(() => { isSyncingDate = false; });
-            if (mapLoadingStatusDiv && selectedLocation && selectedFloor) {
+            if (mapLoadingStatusDiv && currentSelectedLocation && selectedFloor) { // Use currentSelectedLocation
                  showError(mapLoadingStatusDiv, 'No map found for the selected location and floor combination.');
             } else if (mapLoadingStatusDiv) {
                  showSuccess(mapLoadingStatusDiv, 'Please complete location and floor selection.');
@@ -351,15 +446,16 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     async function loadAvailableMaps() {
-        if (!mapLocationSelect || !mapFloorSelect || !mapLoadingStatusDiv) {
-            console.error("One or more critical map control elements are missing from the DOM."); // Keep this error
+        // Removed mapLocationSelect from critical elements check
+        if (!mapFloorSelect || !mapLoadingStatusDiv || !mapLocationButtonsContainer) {
+            console.error("One or more critical map control elements are missing from the DOM.");
             updateMapLoadingStatus("Map interface error. Please contact support.", true);
             disableMapSelectors();
             return;
         }
-        updateMapLoadingStatus("Loading available maps...", false);
+        updateMapLoadingStatus("Loading map configurations...", false);
         try {
-            const response = await fetch('/api/admin/maps');
+            const response = await fetch('/api/admin/maps'); // This endpoint provides all map details including locations
             const responseText = await response.text();
             if (!response.ok) {
                 let userErrorMessage = `Error fetching map list: ${response.statusText || 'Server error'} (Status: ${response.status})`;
@@ -384,37 +480,49 @@ document.addEventListener('DOMContentLoaded', function () {
             allMapInfo = maps;
             if (!allMapInfo || allMapInfo.length === 0) {
                 updateMapLoadingStatus('No maps configured.', false);
-                disableMapSelectors();
+                disableMapSelectors(); // This will now clear the button container
                 return;
             }
-            const locations = [...new Set(allMapInfo.map(map => map.location).filter(loc => loc))].sort();
-            if (mapLocationSelect) {
-                mapLocationSelect.innerHTML = '<option value="">-- Select Location --</option>';
-                if (locations.length > 0) {
-                    locations.forEach(location => mapLocationSelect.add(new Option(location, location)));
-                    mapLocationSelect.disabled = false;
-                } else {
-                    mapLocationSelect.innerHTML = '<option value="">-- No Locations --</option>';
-                    mapLocationSelect.disabled = true;
-                }
-            }
+
+            allUniqueLocations = [...new Set(allMapInfo.map(map => map.location).filter(loc => loc))].sort();
+
+            // Initial population of location buttons
+            // updateLocationButtons will fetch availability for the default/current date
+            await updateLocationButtons();
+
             if (mapFloorSelect) {
                 mapFloorSelect.innerHTML = '<option value="">-- Select Floor --</option>';
-                mapFloorSelect.disabled = true;
+                mapFloorSelect.disabled = true; // Disabled until a location is chosen
             }
-            if (mapLocationSelect) mapLocationSelect.addEventListener('change', () => { updateFloorSelectOptions(); handleFilterChange('map'); });
+
+            // Removed event listener for mapLocationSelect
             if (mapFloorSelect) mapFloorSelect.addEventListener('change', () => handleFilterChange('map'));
-            if (mapAvailabilityDateInput) mapAvailabilityDateInput.addEventListener('change', () => handleFilterChange('map'));
+            // Flatpickr's onChange handles date changes and calls updateLocationButtons -> handleFilterChange
             if (mainBookingFormDateInput) mainBookingFormDateInput.addEventListener('change', () => handleFilterChange('form'));
             if (resourceSelectBooking) resourceSelectBooking.addEventListener('change', highlightSelectedResourceOnMap);
             
             if (mapLoadingStatusDiv && !mapLoadingStatusDiv.classList.contains('error') && !mapLoadingStatusDiv.classList.contains('success')) {
-                updateMapLoadingStatus('Please select a location and floor to see the map.', false);
+                if (allUniqueLocations.length > 0) {
+                    updateMapLoadingStatus('Please select a location to see available floors and maps.', false);
+                } else {
+                    updateMapLoadingStatus('No locations found in map configurations.', false);
+                }
             }
-            highlightSelectedResourceOnMap(); 
+            highlightSelectedResourceOnMap();
+
+            // If there's a default date and some locations, and if a location was pre-selected (e.g. from query param in future)
+            // ensure map loads. For now, after buttons are drawn, if selectedLocationName is set, it implies a previous state or click.
+            if (selectedLocationName) {
+                 updateFloorSelectOptions(); // Ensure floors are populated for the selected location
+                 if (mapFloorSelect && mapFloorSelect.value) { // If a floor is also selected
+                     handleFilterChange('map');
+                 }
+            }
+
+
         } catch (error) {
             updateMapLoadingStatus('Could not load map options. Network or server error.', true);
-            disableMapSelectors();
+            disableMapSelectors(); // Clears location buttons and disables floor select
         }
     }
 
