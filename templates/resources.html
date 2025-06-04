@@ -5,17 +5,18 @@
 {% block content %}
     <h1>{{ _('Resource Availability') }}</h1>
 
-    <div>
-        <label for="new-booking-map-availability-date">{{ _('Select Date:') }}</label>
-        <input type="text" id="new-booking-map-availability-date" name="new-booking-map-availability-date" placeholder="Select Date...">
-    </div>
-    <div style="margin-top: 10px; margin-bottom: 10px;">
-        <label>{{ _('Location:') }}</label> <!-- Consider removing or updating this label -->
-        <div id="new-booking-map-location-buttons-container" style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 5px;">
-            <!-- Combined Location-Floor buttons will be populated here -->
+    <div id="selection-controls-container" style="display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 20px;">
+        <div id="inline-calendar-container" style="flex: 1; min-width: 280px; max-width: 320px;">
+            <!-- Flatpickr inline calendar will render here -->
         </div>
-        <!-- Floor select label and dropdown removed -->
+        <div style="flex: 2; min-width: 300px;"> <!-- Wrapper for location buttons and their label -->
+            <label>{{ _('Select Map:') }}</label> <!-- Updated label -->
+            <div id="new-booking-map-location-buttons-container" style="display: flex; flex-wrap: wrap; gap: 5px;">
+                <!-- Combined Location-Floor buttons will be populated here -->
+            </div>
+        </div>
     </div>
+    <!-- Old date input and separate location/floor controls removed -->
 
     <div id="new-booking-map-container" style="position: relative; width: 800px; height: 600px; background-size: contain; background-repeat: no-repeat; background-position: center center; border: 1px solid #ccc; margin-bottom: 20px;">
         <!-- Resource areas will be populated by JavaScript -->

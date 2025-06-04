@@ -459,29 +459,48 @@ input[type="button"]:focus {
     outline-offset: 2px;
 }
 
-/* Flatpickr Calendar Minimal Overrides */
-.flatpickr-calendar {
-    font-size: 0.95rem; /* Adjust to match general form element font size if needed */
-    /* Example: Match border radius with other elements */
-    /* border-radius: 5px; */ /* flatpickr already has its own border-radius */
+/* Resource Page Selection Controls Container */
+#selection-controls-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-bottom: 20px;
 }
-/* Ensure input for flatpickr looks like other text inputs if not using altInput */
-input.flatpickr-input {
-    width: 100%; /* This might be too aggressive if not desired for all flatpickr inputs */
-    /* padding: 0.625rem; */ /* Use existing form input padding if needed */
+
+#inline-calendar-container {
+    flex: 1;
+    min-width: 280px; /* Minimum width before wrapping */
+    max-width: 320px; /* Maximum width to keep it compact */
+    /* Add border or subtle background if needed to visually contain it */
+    /* padding: 5px; */
     /* border: 1px solid var(--border-color); */
     /* border-radius: 5px; */
-    /* box-sizing: border-box; */
-    /* font-size: 1rem; */
 }
 
+/* Flatpickr Calendar Minimal Overrides for Inline Display */
+#inline-calendar-container .flatpickr-calendar.inline {
+    box-shadow: none; /* Remove default box-shadow for inline version if desired */
+    border: 1px solid var(--border-color); /* Optional: add a border to match page style */
+    border-radius: 5px; /* Match other elements */
+    width: 100%; /* Make it responsive within its container */
+    max-width: none; /* Override flatpickr's default max-width for inline */
+}
+.flatpickr-calendar { /* General flatpickr font adjustment */
+    font-size: 0.9rem; /* Slightly smaller to fit compact areas */
+}
+/* The input.flatpickr-input style is not relevant for inline calendar */
 
-/* Location Button Styles for Resource Availability Page */
+
+/* Location/Map Button Styles for Resource Availability Page */
+#new-booking-map-location-buttons-container-wrapper { /* New wrapper referred to in HTML structure */
+    flex: 2;
+    min-width: 300px;
+}
 #new-booking-map-location-buttons-container {
     display: flex;
     flex-wrap: wrap;
-    gap: 5px; /* Replaces inline style from HTML */
-    margin-bottom: 10px; /* Replaces inline style from HTML */
+    gap: 5px;
+    /* margin-bottom: 10px; */ /* Margin now on the parent container */
 }
 
 .location-button {
