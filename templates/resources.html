@@ -6,6 +6,9 @@
     <h1>{{ _('Resource Availability') }}</h1>
 
     <div id="selection-controls-container" style="display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 20px;">
+        <div id="inline-calendar-container" style="flex: 1; min-width: 280px; max-width: 320px;">
+            <!-- Flatpickr inline calendar will render here -->
+        </div>
         <div style="flex: 2; min-width: 300px;"> <!-- Wrapper for location buttons and their label -->
             <label>{{ _('Select Map:') }}</label> <!-- Updated label -->
             <div id="new-booking-map-location-buttons-container" style="display: flex; flex-wrap: wrap; gap: 5px;">
