@@ -7,11 +7,13 @@
 
     <div>
         <label for="new-booking-map-availability-date">{{ _('Select Date:') }}</label>
-        <input type="date" id="new-booking-map-availability-date" name="new-booking-map-availability-date">
+        <input type="text" id="new-booking-map-availability-date" name="new-booking-map-availability-date" placeholder="Select Date...">
     </div>
     <div style="margin-top: 10px; margin-bottom: 10px;">
-        <label for="new-booking-map-location-select">{{ _('Location:') }}</label>
-        <select id="new-booking-map-location-select" style="margin-right: 10px;"></select>
+        <label>{{ _('Location:') }}</label> <!-- Consider removing or updating this label -->
+        <div id="new-booking-map-location-buttons-container" style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 5px;">
+            <!-- Location buttons will be populated here -->
+        </div>
         <label for="new-booking-map-floor-select">{{ _('Floor:') }}</label>
         <select id="new-booking-map-floor-select"></select>
     </div>
