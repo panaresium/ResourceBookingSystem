@@ -48,52 +48,101 @@
     document.addEventListener('DOMContentLoaded', function() {
         const form = document.getElementById('edit-profile-form');
         const msg = document.getElementById('edit-profile-message');
+
+        // Store initial values
+        const initialValues = {
+            email: document.getElementById('email').value.trim(),
+            first_name: document.getElementById('first_name').value.trim(),
+            last_name: document.getElementById('last_name').value.trim(),
+            phone: document.getElementById('phone').value.trim(),
+            section: document.getElementById('section').value.trim(),
+            department: document.getElementById('department').value.trim(),
+            position: document.getElementById('position').value.trim()
+            // Password is not stored, its change is determined by whether it's filled
+        };
+
         if (form) {
             form.addEventListener('submit', async function(event) {
                 event.preventDefault();
-                const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-                const email = document.getElementById('email').value.trim();
-                const first_name = document.getElementById('first_name').value.trim();
-                const last_name = document.getElementById('last_name').value.trim();
-                const phone = document.getElementById('phone').value.trim();
-                const section = document.getElementById('section').value.trim();
-                const department = document.getElementById('department').value.trim();
-                const position = document.getElementById('position').value.trim();
+
+                const currentValues = {
+                    email: document.getElementById('email').value.trim(),
+                    first_name: document.getElementById('first_name').value.trim(),
+                    last_name: document.getElementById('last_name').value.trim(),
+                    phone: document.getElementById('phone').value.trim(),
+                    section: document.getElementById('section').value.trim(),
+                    department: document.getElementById('department').value.trim(),
+                    position: document.getElementById('position').value.trim()
+                };
+
                 const password = document.getElementById('password').value;
                 const confirm = document.getElementById('confirm-password').value;
+
+                let changed = false;
+                if (currentValues.email !== initialValues.email) changed = true;
+                if (currentValues.first_name !== initialValues.first_name) changed = true;
+                if (currentValues.last_name !== initialValues.last_name) changed = true;
+                if (currentValues.phone !== initialValues.phone) changed = true;
+                if (currentValues.section !== initialValues.section) changed = true;
+                if (currentValues.department !== initialValues.department) changed = true;
+                if (currentValues.position !== initialValues.position) changed = true;
+                if (password) changed = true; // Password field being filled is a change
+
+                if (!changed) {
+                    msg.textContent = '{{ _('No changes detected.') }}';
+                    msg.className = 'info'; // Or some other appropriate class
+                    return;
+                }
+
                 if(password && password !== confirm){
                     msg.textContent = '{{ _('Passwords do not match.') }}';
                     msg.className = 'error';
                     return;
                 }
+
                 msg.textContent = '{{ _('Saving...') }}';
-                msg.className = '';
+                msg.className = ''; // Clear previous status class
+
                 try {
                     const response = await fetch('/api/profile', {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
                         body: JSON.stringify({
-                            email: email || null,
-                            password: password || null,
-                            first_name: first_name || null,
-                            last_name: last_name || null,
-                            phone: phone || null,
-                            section: section || null,
-                            department: department || null,
-                            position: position || null
+                            email: currentValues.email || null,
+                            password: password || null, // Send password only if provided
+                            first_name: currentValues.first_name || null,
+                            last_name: currentValues.last_name || null,
+                            phone: currentValues.phone || null,
+                            section: currentValues.section || null,
+                            department: currentValues.department || null,
+                            position: currentValues.position || null
                         })
                     });
-                    const data = await response.json();
+                    // Try to parse JSON regardless of response.ok, as error responses might also contain JSON
+                    let data;
+                    try {
+                        data = await response.json();
+                    } catch (jsonError) {
+                        // If JSON parsing fails, create a default error object
+                        console.error('Error parsing JSON response:', jsonError);
+                        data = { error: '{{ _('Invalid server response.') }}' };
+                    }
+
                     if (response.ok) {
                         msg.textContent = data.message || '{{ _('Profile updated.') }}';
                         msg.className = 'success';
+                        // Update initialValues to currentValues after successful update
+                        Object.assign(initialValues, currentValues);
+                        // Clear password fields after successful submission
+                        document.getElementById('password').value = '';
+                        document.getElementById('confirm-password').value = '';
                     } else {
-                        msg.textContent = data.error || '{{ _('Update failed.') }}';
+                        msg.textContent = data.error || data.message || `{{ _('Update failed. Status: ${response.status}') }}`;
                         msg.className = 'error';
                     }
                 } catch(err){
-                    console.error(err);
-                    msg.textContent = '{{ _('Update failed.') }}';
+                    console.error('Error during profile update fetch:', err);
+                    msg.textContent = '{{ _('Update failed due to a network or unexpected error.') }}';
                     msg.className = 'error';
                 }
             });
