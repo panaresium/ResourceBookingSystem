@@ -483,7 +483,7 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             // highlightSelectedResourceOnMap(); // Removed duplicate call, one at the end of the function is sufficient
 
-            }
+            
             highlightSelectedResourceOnMap();
 
             // If a map was previously selected (e.g. selectedMapId is not null from a previous state or default)
