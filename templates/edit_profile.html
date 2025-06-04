@@ -64,6 +64,7 @@
         if (form) {
             form.addEventListener('submit', async function(event) {
                 event.preventDefault();
+
                 const currentValues = {
                     email: document.getElementById('email').value.trim(),
                     first_name: document.getElementById('first_name').value.trim(),
@@ -73,6 +74,7 @@
                     department: document.getElementById('department').value.trim(),
                     position: document.getElementById('position').value.trim()
                 };
+
                 const password = document.getElementById('password').value;
                 const confirm = document.getElementById('confirm-password').value;
 
@@ -104,7 +106,7 @@
                 try {
                     const response = await fetch('/api/profile', {
                         method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
                         body: JSON.stringify({
                             email: currentValues.email || null,
                             password: password || null, // Send password only if provided
