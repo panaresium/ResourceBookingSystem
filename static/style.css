@@ -939,9 +939,22 @@ body.high-contrast footer {
         font-size: 1em;
     }
 
+    /* User actions area in header */
+    .header-content > #user-actions-area {
+        flex-wrap: wrap; /* Allow items to wrap */
+        justify-content: flex-end; /* Align items to the end when they wrap */
+    }
+    .header-content > #user-actions-area > * { /* Direct children of user-actions-area */
+        flex-shrink: 0; /* Prevent items from shrinking too much */
+        margin-bottom: 5px; /* Add some space if they wrap */
+    }
+
+
     footer {
         padding: 0 0.5em; /* Less padding on mobile footer */
         flex-direction: row; /* Ensure items are in a row */
+        flex-wrap: wrap; /* Allow footer items to wrap */
+        justify-content: space-between; /* Adjust justification */
         align-items: center; /* Vertically center items in the row */
         min-height: var(--footer-height); /* Use root defined footer height as min */
         padding-top: 5px;
@@ -953,7 +966,7 @@ body.high-contrast footer {
         flex-direction: row; /* Explicitly set direction */
         justify-content: center; /* Center icons horizontally */
         align-items: center; /* Vertically align icons */
-        flex-wrap: nowrap; /* Prevent wrapping to multiple lines */
+        flex-wrap: wrap; /* Allow controls to wrap */
         gap: 5px;
         margin-bottom: 0; /* Adjust margin as items are now centered in a single row */
     }
@@ -988,20 +1001,164 @@ body.high-contrast footer {
         width: 100%; /* Full width on mobile */
         height: 400px; /* Adjust height or use aspect ratio */
     }
+
+    /* Ensure touch-friendliness for form elements and buttons */
+    button,
+    input[type="submit"],
+    input[type="button"],
+    input[type="text"],
+    input[type="password"],
+    input[type="email"],
+    input[type="number"],
+    input[type="tel"],
+    input[type="url"],
+    input[type="search"],
+    input[type="date"],
+    input[type="time"],
+    select {
+        min-height: 40px;
+        /* Re-evaluate padding if min-height makes them look too tall */
+        padding-top: 8px; /* Adjust padding for better text centering with min-height */
+        padding-bottom: 8px;
+    }
+    /* Specific adjustments if padding was too much for some inputs */
+    #booking-form input[type="date"],
+    #booking-form input[type="time"],
+    #booking-form input[type="number"],
+    #booking-form input[type="text"],
+    #booking-form input[type="password"],
+    #booking-form select,
+    #login-form input[type="text"],
+    #login-form input[type="password"],
+    #room-select {
+        padding: 8px 0.625rem; /* Keep horizontal padding, adjust vertical */
+    }
+
+    button,
+    input[type="submit"],
+    input[type="button"] {
+        padding: 8px 15px; /* Adjust button padding to maintain appearance with min-height */
+    }
+
+    /* Responsive table containers */
+    .responsive-table-container {
+        display: block;
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+    }
+
+    /* Reduce padding in calendar table cells */
+    #calendar-table th,
+    #calendar-table td {
+        padding: 0.5rem; /* Reduced padding */
+    }
+    /* General table cell padding reduction - use a common class if there are other tables */
+    /* For now, targeting admin tables if they exist or can be identified by a class */
+    .admin-table th, .admin-table td { /* Assuming an .admin-table class for admin section tables */
+        padding: 0.5rem;
+    }
+
+    /* Resource Buttons Grid on /resources */
+    .resource-buttons-grid .resource-availability-button {
+        flex-basis: calc(33.333% - 10px); /* 3 buttons per row */
+    }
+    /* Ensure buttons in grid have the min-height for touch */
+    .resource-buttons-grid .resource-availability-button {
+        min-height: 44px; /* Standard button min-height for touch */
+        /* padding adjustment might be needed if text overflows, but flexbox should handle vertical centering. */
+        /* Let's ensure text is centered and wraps if necessary */
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center; /* Fallback */
+    }
+
+    /* Modal Dialogs */
+    .modal-content {
+        width: 90%; /* More width on smaller screens */
+        margin: 5% auto; /* Smaller margin */
+        max-height: 90vh; /* Max height to prevent overflow */
+        overflow-y: auto; /* Allow content to scroll */
+    }
+    /* Ensure time slots container within modal is also responsive */
+    .time-slots-container {
+        max-height: 60vh; /* Adjust based on modal content height */
+    }
+
 }
 
 @media (max-width: 480px) { /* Even smaller screens */
     :root {
         --sidebar-width: 100%; /* Sidebar could be full width if it overlays */
+        /* font-size: 14px; /* Slightly smaller base font if needed, affects rem units */
     }
-    /* Further adjustments for very small screens if needed */
+    body {
+        font-size: 0.9rem; /* Reduce default font size slightly */
+    }
+
+    #main-content {
+        padding: 5px; /* Further reduce padding */
+    }
+    main {
+        padding: 5px 0; /* Further reduce padding */
+    }
+
+    /* Header user actions area - ensure it doesn't cause overflow */
+    .header-content > #user-actions-area {
+        max-width: calc(100% - 100px); /* Example: ensure it doesn't overflow if logo/menu icon takes space */
+        /* This might need adjustment based on other header elements */
+    }
+
+
+    /* Footer elements stack vertically */
+    footer {
+        flex-direction: column;
+        align-items: center; /* Center items when stacked */
+        padding-top: 10px;
+        padding-bottom: 10px;
+        height: auto; /* Allow height to adjust to content */
+         /* --footer-height variable might not be appropriate if height is auto */
+    }
+    footer > * { /* Direct children of footer */
+        margin-bottom: 5px;
+    }
     .footer-accessibility-controls {
-        /* flex-wrap: wrap; */ /* Changed to nowrap for a single horizontal line */
-        flex-wrap: nowrap;
+        flex-wrap: wrap; /* Ensure they still wrap if many */
         justify-content: center;
+        order: 1; /* Example: Change order if needed */
     }
-     .footer-accessibility-controls button {
-        /* flex-basis: calc(50% - 5px); */ /* Removed as items are now in a single line and should not wrap */
+    footer p { /* Copyright text */
+        font-size: 0.75em; /* Smaller copyright */
+        order: 2;
+        text-align: center;
+    }
+    footer #language-form {
+        margin-top: 5px;
+        order: 3;
+    }
+
+
+    /* Resource Buttons Grid on /resources */
+    .resource-buttons-grid .resource-availability-button {
+        flex-basis: calc(50% - 10px); /* 2 buttons per row */
+    }
+    /* Or for 1 button per row: */
+    /* .resource-buttons-grid .resource-availability-button {
+        flex-basis: 100%;
+    } */
+
+     /* Further reduce padding in calendar table cells if needed */
+    #calendar-table th,
+    #calendar-table td {
+        padding: 0.3rem;
+        font-size: 0.85rem; /* Smaller font for table content */
+    }
+
+    /* Modal Dialogs - slightly more width */
+    .modal-content {
+        width: 95%;
+        margin: 2.5% auto;
     }
 }
 

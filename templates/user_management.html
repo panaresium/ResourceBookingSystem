@@ -33,6 +33,7 @@
 
     <div id="user-management-status" class="status-message" style="margin-top: 15px;"></div>
 
+    <div class="responsive-table-container">
     <table id="users-table" class="styled-table" style="margin-top: 15px;">
         <thead>
             <tr>
@@ -50,6 +51,7 @@
             <!-- User rows will be populated by JavaScript -->
         </tbody>
     </table>
+    </div>
 
     <!-- Modal for Add/Edit User -->
     <div id="user-form-modal" class="modal" style="display: none;">
@@ -222,6 +224,7 @@
         <button id="add-new-role-btn" class="button">{{ _('Add New Role') }}</button>
         <div id="role-management-status" class="status-message" style="margin-top: 15px;"></div>
 
+        <div class="responsive-table-container">
         <table id="roles-table" class="styled-table" style="margin-top: 15px;">
             <thead>
                 <tr>
@@ -236,6 +239,7 @@
                 <!-- Role rows will be populated by JavaScript -->
             </tbody>
         </table>
+        </div>
     </section>
 
     <!-- Modal for Add/Edit Role -->
