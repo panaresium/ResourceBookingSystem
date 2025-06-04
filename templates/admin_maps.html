@@ -46,6 +46,7 @@
         <input type="file" id="import-map-config-file" accept=".json" style="display: none; margin-left: 10px;">
         <button id="import-map-config-btn" class="button" style="margin-bottom: 10px; margin-left: 5px;">{{ _('Import Map Configuration') }}</button>
         <div id="admin-maps-list-status"></div>
+        <div class="responsive-table-container">
         <table class="table" id="maps-table" style="width:100%;">
             <thead>
                 <tr>
@@ -62,6 +63,7 @@
                 <tr><td colspan="7">{{ _('Loading maps...') }}</td></tr>
             </tbody>
         </table>
+        </div>
         <!--
         Example row structure for JavaScript to populate into #maps-table-body:
         <tr data-map-id="MAP_ID_HERE">
