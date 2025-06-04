@@ -941,15 +941,21 @@ body.high-contrast footer {
 
     footer {
         padding: 0 0.5em; /* Less padding on mobile footer */
-        flex-direction: column; /* Stack footer items */
-        height: auto; /* Adjust height for multi-line */
+        flex-direction: row; /* Ensure items are in a row */
+        align-items: center; /* Vertically center items in the row */
+        min-height: var(--footer-height); /* Use root defined footer height as min */
         padding-top: 5px;
         padding-bottom: 5px;
-        --footer-height: 70px; /* Example if stacking makes it taller */
+        /* --footer-height: 70px; */ /* Removed explicit override, min-height uses variable */
     }
     .footer-accessibility-controls {
+        display: flex; /* Ensure flex context for children */
+        flex-direction: row; /* Explicitly set direction */
+        justify-content: center; /* Center icons horizontally */
+        align-items: center; /* Vertically align icons */
+        flex-wrap: nowrap; /* Prevent wrapping to multiple lines */
         gap: 5px;
-        margin-bottom: 5px; /* Space between controls and other footer items */
+        margin-bottom: 0; /* Adjust margin as items are now centered in a single row */
     }
     .footer-accessibility-controls button {
         padding: 4px 8px;
@@ -990,11 +996,12 @@ body.high-contrast footer {
     }
     /* Further adjustments for very small screens if needed */
     .footer-accessibility-controls {
-        flex-wrap: wrap; /* Allow accessibility buttons to wrap */
+        /* flex-wrap: wrap; */ /* Changed to nowrap for a single horizontal line */
+        flex-wrap: nowrap;
         justify-content: center;
     }
      .footer-accessibility-controls button {
-        flex-basis: calc(50% - 5px); /* Two buttons per row */
+        /* flex-basis: calc(50% - 5px); */ /* Removed as items are now in a single line and should not wrap */
     }
 }
 
