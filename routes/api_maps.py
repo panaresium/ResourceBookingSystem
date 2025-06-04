@@ -156,6 +156,106 @@ def get_locations_availability():
         current_app.logger.exception(f"Error fetching locations availability for date {target_date}:")
         return jsonify({'error': 'Failed to fetch locations availability due to a server error.'}), 500
 
+@api_maps_bp.route('/maps-availability', methods=['GET'])
+@login_required
+def get_maps_availability():
+    date_str = request.args.get('date')
+    target_date = None
+    if date_str:
+        try:
+            target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            current_app.logger.warning(f"Invalid date format for maps-availability: {date_str}")
+            return jsonify({'error': 'Invalid date format. Please use YYYY-MM-DD.'}), 400
+    else:
+        target_date = date.today()
+
+    try:
+        all_floor_maps = FloorMap.query.all()
+        results = []
+
+        primary_slots = [
+            (time(8, 0), time(12, 0)),
+            (time(13, 0), time(17, 0))
+        ]
+
+        for floor_map_item in all_floor_maps:
+            map_is_available_for_user = False
+
+            resources_on_map = Resource.query.filter(
+                Resource.floor_map_id == floor_map_item.id,
+                Resource.status == 'published'
+            ).all()
+
+            for resource in resources_on_map:
+                if map_is_available_for_user: # Already found an available resource on this map
+                    break
+
+                resource_has_bookable_slot_for_user = False
+
+                # Check maintenance for the entire day
+                if resource.is_under_maintenance and resource.maintenance_until and resource.maintenance_until.date() >= target_date:
+                    if resource.maintenance_until.date() > target_date:
+                        continue
+
+                user_other_bookings = Booking.query.filter(
+                    Booking.user_name == current_user.username,
+                    Booking.resource_id != resource.id,
+                    func.date(Booking.start_time) == target_date
+                ).all()
+
+                for slot_start, slot_end in primary_slots:
+                    slot_start_dt = datetime.combine(target_date, slot_start)
+                    slot_end_dt = datetime.combine(target_date, slot_end)
+
+                    general_bookings_overlap = Booking.query.filter(
+                        Booking.resource_id == resource.id,
+                        Booking.start_time < slot_end_dt,
+                        Booking.end_time > slot_start_dt
+                    ).all()
+
+                    is_generally_booked = bool(general_bookings_overlap)
+                    is_booked_by_current_user_on_this_resource = any(
+                        b.user_name == current_user.username for b in general_bookings_overlap
+                    )
+
+                    slot_is_under_maintenance = False
+                    if resource.is_under_maintenance and resource.maintenance_until:
+                         if resource.maintenance_until > slot_start_dt:
+                             slot_is_under_maintenance = True
+
+                    is_conflicting_with_user_other_bookings = False
+                    for other_booking in user_other_bookings:
+                        if max(slot_start_dt, other_booking.start_time) < min(slot_end_dt, other_booking.end_time):
+                            is_conflicting_with_user_other_bookings = True
+                            break
+
+                    if is_booked_by_current_user_on_this_resource:
+                        resource_has_bookable_slot_for_user = True
+                        break
+
+                    if not is_generally_booked and not slot_is_under_maintenance and not is_conflicting_with_user_other_bookings:
+                        resource_has_bookable_slot_for_user = True
+                        break
+
+                if resource_has_bookable_slot_for_user:
+                    map_is_available_for_user = True
+
+            results.append({
+                "map_id": floor_map_item.id,
+                "map_name": floor_map_item.name,
+                "location": floor_map_item.location,
+                "floor": floor_map_item.floor,
+                "is_available_for_user": map_is_available_for_user
+            })
+
+        return jsonify(results), 200
+
+    except Exception as e:
+        current_app.logger.exception(f"Error fetching maps availability for date {target_date}:")
+        return jsonify({'error': 'Failed to fetch maps availability due to a server error.'}), 500
+
+
 @api_maps_bp.route('/maps', methods=['GET'])
 def get_public_floor_maps():
     try:
