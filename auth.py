@@ -3,7 +3,7 @@ from functools import wraps
 from flask import (
     Blueprint, request, session, redirect, url_for, jsonify, current_app, abort
 )
-from flask_login import current_user, login_user, logout_user
+from flask_login import current_user, login_user, logout_user, login_required
 
 from google_auth_oauthlib.flow import Flow
 from google.oauth2 import id_token
