@@ -22,11 +22,11 @@
             <div id="my-bookings-nav-link" style="display: none;">
                  <a href="{{ url_for('ui.serve_my_bookings_page') }}"><span class="menu-icon" aria-hidden="true">📖</span><span class="menu-text">{{ _('My Bookings') }}</span></a>
             </div>
-            <div id="welcome-message-container" style="display: none; margin-right: 10px; color: white; align-self: center;"></div>
             <div id="auth-link-container" style="display: none; margin-left:auto;">
                 <a href="{{ url_for('ui.serve_login') }}"><span class="menu-icon" aria-hidden="true">🔑</span><span class="menu-text">{{ _('Login') }}</span></a>
             </div>
-            <div id="user-dropdown-container" style="display: none; position: relative; margin-left:auto;">
+            <div id="welcome-message-container" style="display: none; margin-right: 15px; align-self: center;"></div>
+            <div id="user-dropdown-container" style="display: none; position: relative;">
                 <button id="user-dropdown-button" aria-haspopup="true" aria-expanded="false" style="background: none; border: none; color: white; font-size: 1em; cursor: pointer; padding: 10px; font-weight: bold; display:flex; align-items:center;">
                     <span class="user-icon" style="font-size:1.2em;">&#x1F464;</span><span class="dropdown-arrow"> &#9662;</span>
                 </button>

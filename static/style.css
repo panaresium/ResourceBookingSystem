@@ -61,6 +61,14 @@ body {
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
+/* Reset list-like styles for all elements within the header */
+.app-header * {
+    list-style-type: none !important; /* Remove list bullets/numbers */
+    margin-block-start: 0 !important; /* Remove default margins for list-like elements */
+    margin-block-end: 0 !important;
+    padding-inline-start: 0 !important; /* Remove default padding for list-like elements */
+}
+
 .header-content {
     display: flex;
     width: 100%;
@@ -72,7 +80,8 @@ body {
 /* Style for the moved navigation links and containers */
 .header-content > a, /* Direct <a> links like Home, Resources, Calendar */
 .header-content > div { /* Wrappers for My Bookings, Welcome, Auth, User Dropdown */
-    color: var(--text-color-light);
+    color: #000000 !important;
+    font-weight: bold !important;
     text-decoration: none;
     padding: 0.5em 0.75em; /* Uniform padding for clickable areas */
     border-radius: 4px;
@@ -83,7 +92,7 @@ body {
 .header-content > a:hover,
 .header-content > div:hover:not(#user-dropdown-container):not(#welcome-message-container) { /* Avoid hover on non-interactive divs unless they contain an <a> that handles it */
     background-color: var(--secondary-color);
-    color: var(--text-color-light);
+    /* color is already set to black and important, hover shouldn't change it unless specified */
     text-decoration: none;
 }
 /* Specifically target <a> tags within the divs for hover, if the div itself shouldn't have hover */
@@ -91,12 +100,13 @@ body {
 .header-content #auth-link-container a:hover {
     background-color: var(--secondary-color); /* Apply hover to the link itself */
     border-radius: 4px; /* Ensure hover matches overall item shape */
-    color: var(--text-color-light);
+    /* color is already set to black and important */
     text-decoration: none;
 }
 .header-content #my-bookings-nav-link a,
 .header-content #auth-link-container a {
-    color: var(--text-color-light);
+    /* Properties like color and font-weight will be inherited from .header-content > div or .header-content > a */
+    /* Or specifically overridden if necessary, but the general rule should cover them. */
     text-decoration: none;
     padding: 0; /* Remove padding from inner link if parent div has it */
 }
@@ -116,11 +126,11 @@ body {
     align-items: center;
     background: none;
     border: none;
-    color: var(--text-color-light); /* Ensure color from header */
+    color: #000000 !important; /* Ensure color from header */
+    font-weight: bold !important;
     font-size: 1em; /* Or inherit */
     cursor: pointer;
     padding: 10px; /* Adjust as needed */
-    font-weight: bold;
 }
 .app-header .user-icon { /* Copied from existing .user-icon */
     font-size: 1.2em;
@@ -160,7 +170,8 @@ body {
 
 .app-header #auth-link-container a,
 .app-header #welcome-message-container {
-    color: var(--text-color-light);
+    color: #000000 !important; /* Applied new style */
+    font-weight: bold !important; /* Applied new style */
     text-decoration: none;
     display: flex; /* To align icon and text if icons are used in #auth-link-container */
     align-items: center;
