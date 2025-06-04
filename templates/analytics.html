@@ -20,8 +20,8 @@
         max-width: 100%;
     }
     .filter-section {
-        margin-bottom: 30px;
-        padding: 15px;
+        margin-bottom: 20px;
+        padding: 10px;
         border: 1px solid #ddd;
         border-radius: 8px;
         background-color: #f5f5f5;
@@ -30,6 +30,10 @@
         margin-right: 15px;
         /* margin-bottom: 10px; */ /* Add some bottom margin for wrapped elements */
         display: inline-flex;
+    }
+    .filter-section .card-title {
+        font-size: 1.25rem; /* Reduce font size for "Filters" text */
+        margin-bottom: 0.5rem; /* Optional: Adjust margin if needed */
     }
     h1, h2 {
         color: #333;
@@ -40,12 +44,29 @@
         display: inline-block; /* Or block if they are on their own line */
         margin-right: 5px; /* Spacing between label and select */
     }
+    .filter-section select.form-control.form-control-sm {
+        min-width: 120px; /* Slightly reduce min-width if desired, or keep at 150px */
+        /* Height will be controlled by form-control-sm, padding is already set by it */
+        /* Ensure vertical alignment is good. align-items-center on parent helps. */
+    }
     label {
         margin-right: 5px;
     }
     .form-inline .form-group {
       display: flex; /* Use flex for better alignment */
       align-items: center; /* Vertically align items in the middle */
+    }
+    .filter-section .col-auto > * {
+        margin-right: 0.5rem !important; /* Add small right margin to each element */
+        margin-bottom: 0.5rem !important; /* Add bottom margin for wrapping cases on smaller screens */
+    }
+    .filter-section .col-auto > button:last-of-type {
+        margin-right: 0 !important; /* No right margin for the very last button */
+    }
+    .filter-section .btn { /* Target buttons specifically within the filter section */
+        padding: 0.25rem 0.5rem; /* Smaller padding, similar to Bootstrap's .btn-sm */
+        font-size: 0.875rem;  /* Smaller font size, similar to Bootstrap's .btn-sm */
+        /* line-height: 1.5; /* Default Bootstrap btn line-height, adjust if necessary */
     }
 </style>
 {% endblock %}
@@ -59,23 +80,23 @@
         <div class="card-body">
             <h2 class="card-title">{{ _('Filters') }}</h2>
 <form id="analyticsFiltersForm">
-    <div class="row gx-2 gy-2 align-items-center"> <!-- gx-2 for horizontal gutter, gy-2 for vertical gutter on wrap, align-items-center for vertical alignment -->
+    <div class="row gx-2 gy-1 align-items-center"> <!-- gx-2 for horizontal gutter, gy-1 for vertical gutter on wrap, align-items-center for vertical alignment -->
         <div class="col-auto">
-            <select id="filterResourceTag" class="form-control custom-select" aria-label="{{ _('Resource Tag filter') }}"><option value="">{{ _('All Tags') }}</option></select>
+            <select id="filterResourceTag" class="form-control custom-select form-control-sm" aria-label="{{ _('Resource Tag filter') }}"><option value="">{{ _('All Tags') }}</option></select>
 
-            <select id="filterResourceStatus" class="form-control custom-select" aria-label="{{ _('Resource Status filter') }}"><option value="">{{ _('All Statuses') }}</option></select>
+            <select id="filterResourceStatus" class="form-control custom-select form-control-sm" aria-label="{{ _('Resource Status filter') }}"><option value="">{{ _('All Statuses') }}</option></select>
 
-            <select id="filterUser" class="form-control custom-select" aria-label="{{ _('User filter') }}"><option value="">{{ _('All Users') }}</option></select>
+            <select id="filterUser" class="form-control custom-select form-control-sm" aria-label="{{ _('User filter') }}"><option value="">{{ _('All Users') }}</option></select>
 
-            <select id="filterLocation" class="form-control custom-select" aria-label="{{ _('Location filter') }}"><option value="">{{ _('All Locations') }}</option></select>
+            <select id="filterLocation" class="form-control custom-select form-control-sm" aria-label="{{ _('Location filter') }}"><option value="">{{ _('All Locations') }}</option></select>
 
-            <select id="filterFloor" class="form-control custom-select" aria-label="{{ _('Floor filter') }}"><option value="">{{ _('All Floors') }}</option></select>
+            <select id="filterFloor" class="form-control custom-select form-control-sm" aria-label="{{ _('Floor filter') }}"><option value="">{{ _('All Floors') }}</option></select>
 
-            <select id="filterMonth" class="form-control custom-select" aria-label="{{ _('Month filter') }}"><option value="">{{ _('All Months') }}</option></select>
+            <select id="filterMonth" class="form-control custom-select form-control-sm" aria-label="{{ _('Month filter') }}"><option value="">{{ _('All Months') }}</option></select>
 
-            <select id="filterDayOfWeek" class="form-control custom-select" aria-label="{{ _('Day of Week filter') }}"><option value="">{{ _('All Days') }}</option></select>
+            <select id="filterDayOfWeek" class="form-control custom-select form-control-sm" aria-label="{{ _('Day of Week filter') }}"><option value="">{{ _('All Days') }}</option></select>
 
-            <select id="filterHourOfDay" class="form-control custom-select" aria-label="{{ _('Hour of Day filter') }}"><option value="">{{ _('All Hours') }}</option></select>
+            <select id="filterHourOfDay" class="form-control custom-select form-control-sm" aria-label="{{ _('Hour of Day filter') }}"><option value="">{{ _('All Hours') }}</option></select>
 
             <button type="button" id="applyFiltersBtn" class="btn btn-primary">{{ _('Apply Filters') }}</button>
 
