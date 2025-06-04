@@ -263,6 +263,50 @@ export TEAMS_WEBHOOK_URL="https://outlook.office.com/webhook/your-webhook-url"
 
 Users must have an email address set in their profile to receive Teams alerts for booking creation, cancellation and waitlist releases.
 
+## Social Authentication Setup
+
+### Google OAuth
+
+To enable Google authentication for admin login and account linking, you need to configure credentials in your Google Cloud Console and set the following environment variables:
+
+*   `GOOGLE_CLIENT_ID`: Your Google OAuth 2.0 Client ID.
+*   `GOOGLE_CLIENT_SECRET`: Your Google OAuth 2.0 Client Secret.
+*   `GOOGLE_DISCOVERY_URL`: The Google OpenID Connect discovery document URL (typically `https://accounts.google.com/.well-known/openid-configuration`).
+*   `SCOPES` (Optional): A space-separated string of scopes to request. Defaults to `openid email profile`.
+
+**Redirect URIs:**
+
+In your Google Cloud Console, under your OAuth 2.0 Client ID settings, you must add the following "Authorized redirect URIs" (replace `your-app-domain.com` with your application's actual domain and port):
+
+*   `http://your-app-domain.com/login/google/callback` (for admin login)
+*   `https://your-app-domain.com/login/google/callback` (if using HTTPS for admin login)
+*   `http://your-app-domain.com/profile/link/google/callback` (for user account linking)
+*   `https://your-app-domain.com/profile/link/google/callback` (if using HTTPS for user account linking)
+
+Make sure to include both `http` and `https` versions if your application might run on either. The application dynamically generates these callback URLs, so ensure they match what's configured in Google Cloud.
+
+### Facebook OAuth
+
+To enable Facebook account linking, you need to configure your Facebook App credentials and set them as environment variables. While the exact registration code for Facebook OAuth isn't visible in this part of the codebase, Authlib typically uses environment variables such as:
+
+*   `FACEBOOK_CLIENT_ID`: Your Facebook App ID.
+*   `FACEBOOK_CLIENT_SECRET`: Your Facebook App Secret.
+
+**Important:** The specific environment variable names might differ if the OAuth client for Facebook is registered with custom keys. If you encounter issues, you may need to verify these in the application's OAuth registration code for Facebook.
+
+**Redirect URIs:**
+
+In your Facebook App settings (under "Facebook Login" -> "Settings"), you must add the following "Valid OAuth Redirect URIs" (replace `your-app-domain.com` with your application's actual domain and port):
+
+*   `http://your-app-domain.com/profile/link/facebook/callback`
+*   `https://your-app-domain.com/profile/link/facebook/callback` (if using HTTPS)
+
+Ensure these match the callback URL used by the application.
+
+### Instagram OAuth
+
+Currently, Instagram OAuth is not implemented in this application. If this is a desired feature, it would require adding the necessary integration code and configuration.
+
 ### Running Tests
 
 To run the test suite:
