@@ -153,7 +153,8 @@ async function updateAuthLink() {
     const userDropdownButton = document.getElementById('user-dropdown-button');
     const userDropdownMenu = document.getElementById('user-dropdown-menu');
     const logoutLinkDropdown = document.getElementById('logout-link-dropdown');
-    const myBookingsNavLink = document.getElementById('my-bookings-nav-link'); 
+    const myBookingsNavLink = document.getElementById('my-bookings-nav-link');
+    const userActionsArea = document.getElementById('user-actions-area'); // Added
     const analyticsNavLink = document.getElementById('analytics-nav-link');
     const adminBookingsNavLink = document.getElementById('admin-bookings-nav-link');
     const backupRestoreNavLink = document.getElementById('backup-restore-nav-link'); // Added
@@ -170,6 +171,7 @@ async function updateAuthLink() {
         const localBackupRestoreNavLink = document.getElementById('backup-restore-nav-link'); // Added for this scope
         const localTroubleshootingNavLink = document.getElementById('troubleshooting-nav-link');
         const localBookingSettingsNavLink = document.getElementById('booking-settings-nav-link'); // Added for Booking Settings
+        const localUserActionsArea = document.getElementById('user-actions-area'); // Added
 
         sessionStorage.removeItem('loggedInUserUsername');
         sessionStorage.removeItem('loggedInUserIsAdmin');
@@ -181,6 +183,7 @@ async function updateAuthLink() {
         }
         if (userDropdownContainer) userDropdownContainer.style.display = 'none';
         if (userDropdownMenu) userDropdownMenu.style.display = 'none';
+        if (localUserActionsArea) localUserActionsArea.style.display = 'none'; // Added
 
         if (authLinkContainer) {
             authLinkContainer.innerHTML = `<a href="${loginUrl}">Login</a>`;
@@ -218,12 +221,13 @@ async function updateAuthLink() {
             sessionStorage.removeItem('explicitlyLoggedOut'); 
             sessionStorage.removeItem('autoLoggedOutDueToStartupSession');
 
+            if (userActionsArea) userActionsArea.style.display = 'flex'; // Added, use flex
             if (welcomeMessageContainer) {
                 welcomeMessageContainer.textContent = `Welcome, ${data.user.username}!`;
-                welcomeMessageContainer.style.display = 'list-item';
+                welcomeMessageContainer.style.display = 'list-item'; // This will be flex item
             }
 
-            if (userDropdownContainer) userDropdownContainer.style.display = 'list-item';
+            if (userDropdownContainer) userDropdownContainer.style.display = 'list-item'; // This will be flex item
             if (userDropdownButton) {
                 userDropdownButton.innerHTML = `<span class="user-icon">&#x1F464;</span><span class="dropdown-arrow"> &#9662;</span>`;
                 userDropdownButton.setAttribute('aria-expanded', 'false');
@@ -302,13 +306,15 @@ async function updateAuthLink() {
                 logoutLinkDropdown.removeEventListener('click', handleLogout); 
                 logoutLinkDropdown.addEventListener('click', handleLogout);
             }
-        } else { 
+        } else {
+            // Also hide userActionsArea if not logged in (already handled by setStateLoggedOut)
             setStateLoggedOut();
             if (sessionStorage.getItem('autoLoggedOutDueToStartupSession') === 'true') {
                 sessionStorage.removeItem('autoLoggedOutDueToStartupSession');
             }
         }
     } catch (error) {
+        // Also hide userActionsArea on error (already handled by setStateLoggedOut)
         setStateLoggedOut();
     }
 }

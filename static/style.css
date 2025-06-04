@@ -113,10 +113,21 @@ body {
 
 
 .header-content > #user-dropdown-container {
-    margin-left: auto; /* This will push the user dropdown to the far right */
+    /* margin-left: auto; MOVED to #user-actions-area */
     position: relative; /* Needed for dropdown positioning */
     padding: 0; /* User dropdown button itself has padding */
 }
+
+/* Style for the new wrapper for welcome message and user dropdown */
+.header-content > #user-actions-area {
+    margin-left: auto; /* Push the group to the far right */
+    display: flex;
+    align-items: center;
+    padding: 0; /* Override default padding from .header-content > div if any */
+    /* Other styles like border-radius might be inherited from .header-content > div,
+       but padding: 0 is a good start to make it a neutral layout container. */
+}
+
 .header-content > #user-dropdown-container:hover {
     background-color: transparent; /* Prevent hover on the container itself */
 }
