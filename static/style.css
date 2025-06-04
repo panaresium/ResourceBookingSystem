@@ -468,9 +468,10 @@ input[type="button"]:focus {
 }
 
 #inline-calendar-container {
-    flex: 1;
-    min-width: 280px; /* Minimum width before wrapping */
-    max-width: 320px; /* Maximum width to keep it compact */
+    width: max-content; /* Fit the width of the calendar content */
+    /* flex: 1; */ /* Removed */
+    /* min-width: 280px; */ /* Removed */
+    /* max-width: 320px; */ /* Removed */
     /* Add border or subtle background if needed to visually contain it */
     /* padding: 5px; */
     /* border: 1px solid var(--border-color); */
