@@ -166,7 +166,7 @@ def verify_db_schema():
         'role': {'id', 'name', 'description', 'permissions'},
         'user_roles': {'user_id', 'role_id'},
         'floor_map': {'id', 'name', 'image_filename', 'location', 'floor'},
-        'resource': {'id', 'name', 'capacity', 'equipment', 'tags', 'booking_restriction', 'status', 'published_at', 'allowed_user_ids', 'image_filename', 'is_under_maintenance', 'maintenance_until', 'max_recurrence_count', 'scheduled_status', 'scheduled_status_at', 'floor_map_id', 'map_coordinates'},
+        'resource': {'id', 'name', 'capacity', 'equipment', 'tags', 'booking_restriction', 'status', 'published_at', 'allowed_user_ids', 'image_filename', 'is_under_maintenance', 'maintenance_until', 'max_recurrence_count', 'scheduled_status', 'scheduled_status_at', 'floor_map_id', 'map_coordinates', 'map_allowed_role_ids'},
         'resource_roles': {'resource_id', 'role_id'},
         'booking': {'id', 'resource_id', 'user_name', 'start_time', 'end_time', 'title', 'checked_in_at', 'checked_out_at', 'status', 'recurrence_rule'},
         'waitlist_entry': {'id', 'resource_id', 'user_id', 'timestamp'},
