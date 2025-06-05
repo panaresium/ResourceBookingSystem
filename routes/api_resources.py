@@ -199,17 +199,24 @@ def update_resource_details_admin(resource_id):
     allowed_fields = ['name', 'capacity', 'equipment', 'status', 'tags', 'booking_restriction', 'allowed_user_ids', 'is_under_maintenance', 'maintenance_until', 'max_recurrence_count', 'scheduled_status', 'scheduled_status_at', 'floor_map_id', 'map_coordinates']
     for field in allowed_fields:
         if field in data:
-            if field == 'map_coordinates' and data[field] is not None:
-                map_coords_data = data[field]
-                current_app.logger.debug(f"Before json.dumps, map_coordinates data: {map_coords_data}")
-                current_app.logger.debug(f"Type of map_coordinates data: {type(map_coords_data)}")
-                if isinstance(map_coords_data, dict):
-                    current_app.logger.debug(f"Type of allowed_role_ids before dumps: {type(map_coords_data.get('allowed_role_ids'))}")
+            if field == 'map_coordinates':
+                map_coords_payload = data[field] # data[field] is safe due to 'if field in data'
+                if map_coords_payload is not None and isinstance(map_coords_payload, dict):
+                    # Extract allowed_role_ids and remove it from the payload for map_coordinates
+                    roles_list = map_coords_payload.pop('allowed_role_ids', None)
 
-                json_string_coords = json.dumps(map_coords_data)
-                current_app.logger.debug(f"After json.dumps, map_coordinates string: {json_string_coords}")
-                setattr(resource, field, json_string_coords)
-            else:
+                    # Set map_allowed_role_ids
+                    resource.map_allowed_role_ids = json.dumps(roles_list) if roles_list is not None else None
+
+                    # Set map_coordinates with the remaining data (now without allowed_role_ids)
+                    resource.map_coordinates = json.dumps(map_coords_payload)
+                    current_app.logger.debug(f"Processed map_coordinates. Roles: {resource.map_allowed_role_ids}, Coords: {resource.map_coordinates}")
+
+                else: # Handles map_coords_payload being None or not a dict
+                    resource.map_coordinates = None
+                    resource.map_allowed_role_ids = None
+                    current_app.logger.debug("map_coordinates payload was None or not a dict, clearing DB fields.")
+            else: # For fields other than 'map_coordinates'
                 setattr(resource, field, data[field])
 
     if 'role_ids' in data and isinstance(data['role_ids'], list):

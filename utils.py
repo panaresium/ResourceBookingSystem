@@ -83,7 +83,7 @@ def resource_to_dict(resource: Resource) -> dict:
     except RuntimeError: # Outside of application context
         image_url = None # Or some placeholder
 
-    return {
+    resource_dict = {
         'id': resource.id,
         'name': resource.name,
         'capacity': resource.capacity,
@@ -96,13 +96,35 @@ def resource_to_dict(resource: Resource) -> dict:
         'allowed_user_ids': resource.allowed_user_ids,
         'roles': [{'id': r.id, 'name': r.name} for r in resource.roles],
         'floor_map_id': resource.floor_map_id,
-        'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
+        # map_coordinates will be added below after processing
         'is_under_maintenance': resource.is_under_maintenance,
         'maintenance_until': resource.maintenance_until.replace(tzinfo=timezone.utc).isoformat() if resource.maintenance_until else None,
         'max_recurrence_count': resource.max_recurrence_count,
         'scheduled_status': resource.scheduled_status,
         'scheduled_status_at': resource.scheduled_status_at.replace(tzinfo=timezone.utc).isoformat() if resource.scheduled_status_at else None
     }
+
+    # Handle map_coordinates and map_allowed_role_ids
+    parsed_coords = json.loads(resource.map_coordinates) if resource.map_coordinates else None
+    parsed_map_roles = [] # Default to empty list
+
+    if resource.map_allowed_role_ids:
+        try:
+            loaded_roles = json.loads(resource.map_allowed_role_ids)
+            if isinstance(loaded_roles, list):
+                parsed_map_roles = loaded_roles
+        except json.JSONDecodeError:
+            # Optional: current_app.logger.warning(f"Invalid JSON in map_allowed_role_ids for resource {resource.id}: {resource.map_allowed_role_ids}")
+            pass # Defaults to empty list if JSON is invalid or field is empty
+
+    if parsed_coords is not None: # If there are base coordinates (it's a dict)
+        parsed_coords['allowed_role_ids'] = parsed_map_roles
+    # If parsed_coords was None (no map_coordinates defined for the resource),
+    # it remains None, correctly indicating no coordinate data.
+
+    resource_dict['map_coordinates'] = parsed_coords
+
+    return resource_dict
 
 def send_email(to_address: str, subject: str, body: str):
     logger = current_app.logger if current_app else logging.getLogger(__name__)
