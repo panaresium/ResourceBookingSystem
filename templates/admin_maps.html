@@ -943,7 +943,10 @@
                     showStatus(defineAreasStatus, {{ _("No saved area selected to delete.")|tojson }}, true);
                     return;
                 }
-                if (!confirm({{ _("Are you sure you want to remove the area mapping for resource '%s'? The resource itself will not be deleted.")|format(selectedArea.name || selectedArea.resource_id)|tojson }})) {
+                const confirmMsgBase = {{ _("Are you sure you want to remove the area mapping for resource '%s'? The resource itself will not be deleted.")|tojson }};
+                const resourceNameOrId = selectedArea.name || selectedArea.resource_id || 'Unnamed Resource';
+                const confirmMsg = confirmMsgBase.replace('%s', resourceNameOrId);
+                if (!confirm(confirmMsg)) {
                     return;
                 }
 
