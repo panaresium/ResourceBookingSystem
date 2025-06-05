@@ -454,7 +454,7 @@ function checkUserPermissionForResource(resource, currentUserId, currentUserIsAd
     return true; 
 }
 
-
+/*
 document.addEventListener('DOMContentLoaded', function() {
     document.body.dataset.loginUrl = document.getElementById('login-form') ? "#" : "/login";
     updateAuthLink();
@@ -3319,4 +3319,5 @@ async function fetchAndDisplayMaps() {
         });
     }
 });
+*/
 
