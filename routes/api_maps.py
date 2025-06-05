@@ -110,20 +110,31 @@ def get_maps_availability():
         for floor_map_item in all_floor_maps:
             map_is_available_for_user = False
 
-            resources_on_map = Resource.query.filter(
+            # Check if the current_user has any active bookings on any resource on the floor_map_item for the target_date
+            existing_booking = db.session.query(Booking).join(Resource).filter(
                 Resource.floor_map_id == floor_map_item.id,
-                Resource.status == 'published'
-            ).all()
+                Booking.user_id == current_user.id,
+                func.date(Booking.start_time) <= target_date,
+                func.date(Booking.end_time) >= target_date
+            ).first()
 
-            if resources_on_map:
-                map_is_available_for_user = check_resources_availability_for_user(
-                    resources_on_map,
-                    target_date,
-                    current_user,
-                    primary_slots,
-                    current_app.logger
-                )
-            # If no resources on map, map_is_available_for_user remains False
+            if existing_booking:
+                map_is_available_for_user = True
+            else:
+                resources_on_map = Resource.query.filter(
+                    Resource.floor_map_id == floor_map_item.id,
+                    Resource.status == 'published'
+                ).all()
+
+                if resources_on_map:
+                    map_is_available_for_user = check_resources_availability_for_user(
+                        resources_on_map,
+                        target_date,
+                        current_user,
+                        primary_slots,
+                        current_app.logger
+                    )
+                # If no resources on map and no existing booking, map_is_available_for_user remains False
 
             results.append({
                 "map_id": floor_map_item.id,
