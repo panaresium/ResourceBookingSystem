@@ -114,10 +114,10 @@
             <div>
                 <label for="define-area-roles-select">{{ _('Restrict to Roles for this Area (Optional):') }}</label>
                 <p class="small-text">{{ _('If roles are selected, only users with AT LEAST ONE of these roles will be able to book this resource when accessed via this specific map area. This is in addition to other resource-level permissions. Admins and users explicitly allowed on the resource can bypass this map area role check.') }}</p>
-                <select id="define-area-roles-select" multiple="multiple" style="width: 100%; min-height: 100px;">
-                    <!-- Roles will be populated by JavaScript -->
-                </select>
-                <small id="define-area-roles-loading-message">{{ _('Loading roles...') }}</small>
+                <div id="define-area-roles-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;">
+                    <small id="define-area-roles-loading-message">{{ _('Loading roles...') }}</small>
+                    <!-- Checkboxes will be populated by JavaScript -->
+                </div>
             </div>
             <div>
                 <label>{{ _('Coordinates Type: Rectangle (fixed for now)') }}</label>
@@ -380,56 +380,61 @@
                     rolesLoadingMsg.style.display = 'block';
                 }
             }
-            populateDefineAreaRolesSelect(); // Populate/update messages after fetch attempt
+            populateDefineAreaRolesCheckboxes(); // Populate/update messages after fetch attempt
         }
 
-        function populateDefineAreaRolesSelect(selectedRoleIds = []) {
-            const selectElement = document.getElementById('define-area-roles-select');
+        function populateDefineAreaRolesCheckboxes(selectedRoleIds = []) {
+            const checkboxContainer = document.getElementById('define-area-roles-checkbox-container');
             const rolesLoadingMsg = document.getElementById('define-area-roles-loading-message');
-            if (!selectElement) return;
+            if (!checkboxContainer) return;
 
-            selectElement.innerHTML = ''; // Clear previous options like "Loading..." or actual roles
+            // Clear previous content except the loading message itself
+            checkboxContainer.innerHTML = '';
+            checkboxContainer.appendChild(rolesLoadingMsg); // Re-append loading message so it's not lost
 
-            // Default state for loading message: hide it. It will be shown if needed.
             if (rolesLoadingMsg) {
-                rolesLoadingMsg.style.display = 'none';
+                rolesLoadingMsg.style.display = 'none'; // Hide by default, show if needed
             }
 
             if (!allRolesForAreaAssignment || allRolesForAreaAssignment.length === 0) {
                 if (rolesLoadingMsg) {
-                    // Check if the message is already an error message from loadAllRolesForAreaDefinition
                     const currentText = rolesLoadingMsg.textContent || "";
                     if (currentText.includes("{{ _("Error loading roles") }}")) {
-                        // Error message is already set by loadAllRolesForAreaDefinition, just ensure it's visible
-                        rolesLoadingMsg.style.display = 'block';
+                         rolesLoadingMsg.style.display = 'block';
                     } else {
-                        // No roles available, and not due to a fetch error shown above
                         rolesLoadingMsg.textContent = '{{ _("No roles available to assign. Please create roles in user management first.") }}';
                         rolesLoadingMsg.style.display = 'block';
                     }
                 }
-                // Optionally, add a disabled option to the select as well, though the message above should be primary
-                const disabledOption = document.createElement('option');
-                disabledOption.value = "";
-                disabledOption.textContent = rolesLoadingMsg ? rolesLoadingMsg.textContent : "{{ _('No roles available.') }}"; // Use the message from rolesLoadingMsg
-                disabledOption.disabled = true;
-                selectElement.appendChild(disabledOption);
                 return;
             }
 
             // If we have roles, ensure the loading/error message is hidden
             if (rolesLoadingMsg) {
-                rolesLoadingMsg.style.display = 'none';
+                 rolesLoadingMsg.style.display = 'none';
             }
 
             allRolesForAreaAssignment.forEach(role => {
-                const option = document.createElement('option');
-                option.value = role.id;
-                option.textContent = role.name + (role.description ? ` (${role.description})` : '');
+                const div = document.createElement('div');
+                div.className = 'checkbox-item'; // For styling if needed
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `area-role-checkbox-${role.id}`;
+                checkbox.value = role.id;
+                checkbox.name = 'area_roles'; // Consistent name for grouping
+
                 if (selectedRoleIds.includes(role.id)) {
-                    option.selected = true;
+                    checkbox.checked = true;
                 }
-                selectElement.appendChild(option);
+
+                const label = document.createElement('label');
+                label.htmlFor = checkbox.id;
+                label.textContent = role.name + (role.description ? ` (${role.description})` : '');
+
+                div.appendChild(checkbox);
+                div.appendChild(label);
+                checkboxContainer.appendChild(div);
             });
         }
 
@@ -660,8 +665,10 @@
                 const floorMapId = document.getElementById('selected-floor-map-id').value;
                 const areaStatusDiv = document.getElementById('area-definition-status');
 
-                const selectedAreaRoleIds = Array.from(document.getElementById('define-area-roles-select').selectedOptions)
-                                              .map(option => parseInt(option.value));
+                const selectedAreaRoleIds = [];
+                document.querySelectorAll('#define-area-roles-checkbox-container input[type="checkbox"]:checked').forEach(checkbox => {
+                    selectedAreaRoleIds.push(parseInt(checkbox.value));
+                });
 
                 const areaData = {
                     floor_map_id: floorMapId,
@@ -724,7 +731,7 @@
                         window.fetchAndDrawExistingMapAreas(floorMapId);
                     }
                     document.getElementById('define-area-form').reset();
-                    populateDefineAreaRolesSelect(); // populateDefineAreaRolesSelect is now in scope
+                    populateDefineAreaRolesCheckboxes(); // Call the renamed function
                 } catch (error) {
                     console.error('Error saving area definition:', error);
                     showStatus(areaStatusDiv, `{{ _("Error saving area definition: ${error.message}") }}`, true);
@@ -745,7 +752,7 @@
                 document.getElementById('resource-to-map').value = resourceId || '';
             }
             const selectedRoleIds = area.allowed_role_ids || [];
-            populateDefineAreaRolesSelect(selectedRoleIds); // populateDefineAreaRolesSelect is now in scope
+            populateDefineAreaRolesCheckboxes(selectedRoleIds); // Call the renamed function
         };
 
     }); // End of DOMContentLoaded
