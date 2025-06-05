@@ -210,12 +210,10 @@ def update_resource_details_admin(resource_id):
 
                     # Set map_coordinates with the remaining data (now without allowed_role_ids)
                     resource.map_coordinates = json.dumps(map_coords_payload)
-                    current_app.logger.debug(f"Processed map_coordinates. Roles: {resource.map_allowed_role_ids}, Coords: {resource.map_coordinates}")
 
                 else: # Handles map_coords_payload being None or not a dict
                     resource.map_coordinates = None
                     resource.map_allowed_role_ids = None
-                    current_app.logger.debug("map_coordinates payload was None or not a dict, clearing DB fields.")
             else: # For fields other than 'map_coordinates'
                 setattr(resource, field, data[field])
 
