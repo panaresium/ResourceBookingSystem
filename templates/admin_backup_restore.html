@@ -555,9 +555,16 @@
             restoreStatusMessageEl.className = `alert alert-${messageType === 'error' ? 'danger' : (messageType === 'success' ? 'success' : 'info')}`;
 
             const lowerStatus = data.status.toLowerCase();
-            if (lowerStatus.includes("fully completed") || lowerStatus.includes("failed") || lowerStatus.includes("error") || lowerStatus.includes("critical error") || lowerStatus.includes("finished")) {
+            if (
+                lowerStatus.includes("fully completed") ||
+                lowerStatus.includes("failed") ||
+                lowerStatus.includes("error") ||
+                lowerStatus.includes("critical error") ||
+                lowerStatus.includes("finished") || // Keep existing general "finished"
+                lowerStatus.includes("restore dry run completed.") // Add specific check for dry run
+            ) {
                 enablePageInteractions();
-                console.log('Final restore status displayed:', restoreStatusMessageEl.textContent);
+                console.log('Final restore/dry run status displayed:', restoreStatusMessageEl.textContent);
                 currentRestoreTaskId = null; // Clear task ID after processing final message
             }
 
@@ -788,32 +795,22 @@
                 // verifyBtn.setAttribute('data-timestamp', timestamp);
                 // cellAction.appendChild(verifyBtn);
 
-                // New Verify Form for Full Backups
-                const verifyForm = document.createElement('form');
-                verifyForm.method = 'POST';
-                // IMPORTANT: Constructing URL for Flask's url_for in JS is tricky.
-                // This will be a literal string. The route needs to match this.
-                verifyForm.action = `/admin/verify_full_backup/${timestamp}`;
-                verifyForm.style.display = 'inline';
-                verifyForm.style.marginLeft = '5px';
-
-                const csrfInputVerify = document.createElement('input');
-                csrfInputVerify.type = 'hidden';
-                csrfInputVerify.name = 'csrf_token';
-                csrfInputVerify.value = csrfToken; // Assumes csrfToken is available in this scope
-                verifyForm.appendChild(csrfInputVerify);
-
-                const verifySubmitBtn = document.createElement('button');
-                verifySubmitBtn.type = 'submit';
-                verifySubmitBtn.className = 'btn btn-info btn-sm';
-                verifySubmitBtn.innerHTML = '<i class="fas fa-check-circle"></i> {{ _("Verify") }}'; // Use innerHTML for icon
-                // No onclick confirmation for verify, as it's not directly destructive.
-                verifyForm.appendChild(verifySubmitBtn);
-                cellAction.appendChild(verifyForm);
+                // New Verify Button for Full Backups (JS handled)
+                const verifyBtnJs = document.createElement('button');
+                verifyBtnJs.type = 'button'; // Changed from submit
+                verifyBtnJs.className = 'btn btn-info btn-sm verify-backup-btn-js'; // Added new class
+                verifyBtnJs.innerHTML = '<i class="fas fa-check-circle"></i> {{ _("Verify") }}';
+                verifyBtnJs.setAttribute('data-timestamp', timestamp);
+                verifyBtnJs.style.marginLeft = '5px'; // Keep styling if needed
+                cellAction.appendChild(verifyBtnJs);
 
                 const deleteBtn = document.createElement('button');
                 deleteBtn.textContent = "{{ _('Delete') }}";
-                deleteBtn.className = 'btn btn-sm btn-danger delete-backup-btn'; // Removed ms-2, as verifyBtn now has me-2
+                // Ensure correct spacing if verifyBtnJs has margin-left and deleteBtn needs to be next to it.
+                // If verifyBtnJs is the last item before delete, or has margin that pushes deleteBtn, adjust as needed.
+                // Assuming verifyBtnJs's margin-left is for its own spacing from previous, and deleteBtn needs its own.
+                deleteBtn.className = 'btn btn-sm btn-danger delete-backup-btn';
+                deleteBtn.style.marginLeft = '5px'; // Add margin if it's now needed due to form removal
                 deleteBtn.setAttribute('data-timestamp', timestamp);
                 cellAction.appendChild(deleteBtn);
             });
@@ -852,10 +849,11 @@
             const targetButton = event.target;
             let isRestore = targetButton.classList.contains('restore-btn');
             let isDryRun = targetButton.classList.contains('restore-dry-run-btn');
-            let isVerify = targetButton.classList.contains('verify-backup-btn');
+            // let isVerify = targetButton.classList.contains('verify-backup-btn'); // Old handler removed/replaced
             let isDelete = targetButton.classList.contains('delete-backup-btn');
+            let isVerifyJs = targetButton.classList.contains('verify-backup-btn-js'); // New handler
 
-            if (isVerify) {
+            if (isVerifyJs) { // Target the new class
                 const timestampToVerify = targetButton.getAttribute('data-timestamp');
                 
                 currentVerifyTaskId = null; 
@@ -866,42 +864,45 @@
                 restoreLogAreaEl.innerHTML = ''; 
                 restoreLogAreaEl.style.display = 'block';
                 backupLogAreaEl.style.display = 'none';
-                appendLog('restore-log-area', `VERIFY: Initiating for ${timestampToVerify}...`, '', 'info');
+                appendLog('restore-log-area', `{{ _('VERIFY: Initiating verification for backup') }} ${timestampToVerify}...`, '', 'info');
 
                 disablePageInteractions();
                 
                 restoreStatusMessageEl.textContent = `{{ _('Initiating verification for') }} ${timestampToVerify}...`;
                 restoreStatusMessageEl.className = 'alert alert-info';
 
-                fetch('/api/admin/verify_backup', {
+                fetch('/api/admin/verify_backup', { // This API endpoint already exists and supports SocketIO
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-CSRFToken': csrfToken,
+                        'X-CSRFToken': csrfToken, // Ensure csrfToken is available in this scope
                         'Accept': 'application/json'
                     },
                     body: JSON.stringify({ backup_timestamp: timestampToVerify })
                 })
                 .then(response => response.json())
                 .then(data => {
-                    currentVerifyTaskId = data.task_id; 
+                    currentVerifyTaskId = data.task_id; // Store task_id for SocketIO
                     const messageType = data.success ? 'info' : 'error';
-                    appendLog('restore-log-area', `VERIFY: ${data.message || (data.success ? '{{ _("Verification process started.") }}' : '{{ _("Failed to start verification.") }}')}`, `Task ID: ${data.task_id || 'N/A'}`, messageType);
+                    // Log initial response to the dedicated log area
+                    appendLog('restore-log-area', `{{ _('VERIFY:') }} ${data.message || (data.success ? '{{ _("Verification process started on server.") }}' : '{{ _("Failed to start verification process.") }}')}`, `Task ID: ${data.task_id || 'N/A'}`, messageType);
+                    // Update the main status message too
                     restoreStatusMessageEl.textContent = data.message; 
                     restoreStatusMessageEl.className = `alert alert-${messageType}`;
 
                     if (!data.success) { 
-                        enablePageInteractions();
+                        enablePageInteractions(); // Re-enable if initiation failed
                         currentVerifyTaskId = null; 
                     }
+                    // If successful, SocketIO 'verify_backup_progress' will handle further updates and eventual re-enabling
                 })
                 .catch(error => {
-                    console.error('Verify backup error:', error);
+                    console.error('Verify backup AJAX error:', error);
                     const errorMsg = `{{ _('Verification request for ${timestampToVerify} failed:') }} ${error.toString()}`;
                     appendLog('restore-log-area', errorMsg, '', 'error');
                     restoreStatusMessageEl.textContent = errorMsg;
                     restoreStatusMessageEl.className = 'alert alert-danger';
-                    enablePageInteractions();
+                    enablePageInteractions(); // Re-enable on AJAX error
                     currentVerifyTaskId = null; 
                 });
 
