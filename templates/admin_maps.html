@@ -669,6 +669,7 @@
                 document.querySelectorAll('#define-area-roles-checkbox-container input[type="checkbox"]:checked').forEach(checkbox => {
                     selectedAreaRoleIds.push(parseInt(checkbox.value));
                 });
+                console.log('Selected Area Role IDs (from checkboxes):', selectedAreaRoleIds);
 
                 const areaData = {
                     floor_map_id: floorMapId,
@@ -684,6 +685,7 @@
                     name: resourceId === '--CREATE_NEW--' ? 'New Resource from Map Area' : undefined,
                     status: resourceId === '--CREATE_NEW--' ? 'draft' : undefined
                 };
+                console.log('Constructed areaData.coordinates:', areaData.coordinates);
 
                 Object.keys(areaData).forEach(key => areaData[key] === undefined && delete areaData[key]);
                 if (areaData.coordinates) {
@@ -712,6 +714,7 @@
                         map_coordinates: areaData.coordinates,
                         booking_restriction: areaData.booking_restriction,
                     };
+                    console.log('Final payloadForResourceUpdate being sent:', payloadForResourceUpdate);
 
                     const response = await fetch(`/api/admin/resources/${targetResourceId}`, {
                         method: 'PUT',
@@ -742,6 +745,23 @@
         // Modify window.populateAreaForm to handle `allowed_role_ids` (Moved into DOMContentLoaded)
         const originalPopulateAreaForm = window.populateAreaForm;
         window.populateAreaForm = function(area, resourceId) {
+            console.log('populateAreaForm CALLED. resourceId:', resourceId, 'Raw area data received:', area);
+            if (area && typeof area === 'object') {
+                console.log('populateAreaForm: area.allowed_role_ids IS:', area.allowed_role_ids);
+            } else if (area) {
+                console.log('populateAreaForm: area is NOT an object. Raw area:', area, 'Attempting to parse if string...');
+                try {
+                    const parsedArea = JSON.parse(area);
+                    console.log('populateAreaForm: Parsed area from string:', parsedArea);
+                    if (parsedArea && typeof parsedArea === 'object') {
+                        console.log('populateAreaForm: Parsed area.allowed_role_ids IS:', parsedArea.allowed_role_ids);
+                    }
+                } catch (e) {
+                    console.error('populateAreaForm: Error parsing area string:', e);
+                }
+            } else {
+                console.log('populateAreaForm: area is null or undefined.');
+            }
             if (originalPopulateAreaForm) {
                 originalPopulateAreaForm(area, resourceId);
             } else {
