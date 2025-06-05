@@ -354,6 +354,76 @@ def import_resources_admin():
     return jsonify({'message': summary, 'created': created, 'updated': updated}), 200
 
 
+# Helper function for bulk updates
+def _apply_resource_changes(resource: Resource, changes: dict, resource_errors: list, logger_instance, db_session):
+    """
+    Applies a set of changes to a single resource object.
+    Validates data types and existence of related entities.
+    Appends errors to resource_errors list.
+
+    Args:
+        resource: The Resource instance to update.
+        changes (dict): A dictionary of field names to new values.
+        resource_errors (list): A list to append error dictionaries to.
+        logger_instance: The logger instance.
+        db_session: The SQLAlchemy database session.
+
+    Returns:
+        bool: True if all applied changes were valid, False otherwise.
+    """
+    has_errored_on_field = False # This variable is part of the helper now
+
+    # The main loop for iterating resource_ids and applying changes
+    for resource_id_item in resource_ids: # Renamed to avoid conflict with outer resource_id
+        current_resource_errors = [] # Errors specific to this resource_id
+        resource_id_val = None # To store the validated int resource_id
+
+        if not isinstance(resource_id_item, int):
+            errors.append({'id': str(resource_id_item), 'error': 'Invalid resource ID type, must be integer.'})
+            continue # Skip to the next resource_id
+
+        resource_id_val = resource_id_item
+        resource = Resource.query.get(resource_id_val)
+
+        if not resource:
+            errors.append({'id': resource_id_val, 'error': 'Resource not found.'})
+            continue # Skip to the next resource_id
+
+        # Call the helper to apply changes to this specific resource
+        # Pass db.session for potential DB queries within the helper (e.g., validating Role IDs)
+        if _apply_resource_changes(resource, changes_to_apply, current_resource_errors, logger, db.session):
+            updated_ids.append(resource_id_val)
+        else:
+            # Add specific errors for this resource to the main errors list
+            for err_detail in current_resource_errors:
+                errors.append({
+                    'id': resource_id_val,
+                    'field': err_detail['field'],
+                    'error': err_detail['error']
+                })
+
+    if updated_ids: # Only commit if there were successful updates prepped
+        try:
+            db.session.commit()
+            logger.info(f"User {current_user.username} bulk updated resources. IDs successfully processed (pre-commit): {updated_ids}. Changes attempted: {changes_to_apply}. Errors for other resources: {errors}")
+            add_audit_log(action="BULK_UPDATE_RESOURCES", details=f"User {current_user.username} bulk updated resources. IDs successfully updated: {updated_ids}. Changes applied: {changes_to_apply}. Errors during process: {errors}")
+        except Exception as e:
+            db.session.rollback()
+            logger.exception(f"Error committing bulk resource update by {current_user.username}:")
+            # Mark all intended updates as failed due to commit error
+            commit_error_msg = f'Failed to commit changes due to server error: {str(e)}'
+            for uid in updated_ids: # These were thought to be successful but failed at commit
+                # Check if this ID already has other errors logged
+                if not any(err.get('id') == uid and err.get('error') != commit_error_msg for err in errors):
+                     # If not, or if existing errors are different, add/replace with commit error
+                    # This logic can be refined to preserve original errors and add a general commit error
+                    errors.append({'id': uid, 'error': commit_error_msg})
+            updated_ids = [] # Reset as commit failed
+
+    response_data = {'updated_count': len(updated_ids), 'updated_ids': updated_ids, 'errors': errors}
+    status_code = 207 if errors else 200
+    return jsonify(response_data), status_code
+
 @api_resources_bp.route('/admin/resources/bulk', methods=['POST'])
 @login_required
 @permission_required('manage_resources')

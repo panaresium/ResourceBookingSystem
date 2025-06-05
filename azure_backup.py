@@ -61,27 +61,22 @@ def _get_service_client():
 
 
 def _client_exists(client):
-
-    """Return True if the given Share/File/Directory client exists."""
-    if hasattr(client, 'exists'):
+    """
+    Return True if the given Share/File/Directory client exists.
+    Relies on the `exists()` method being available on the client object
+    (ShareClient, ShareDirectoryClient, ShareFileClient from azure-storage-file-share).
+    """
+    # Assuming current Azure SDK version provides a consistent .exists() method
+    # for ShareClient, ShareDirectoryClient, and ShareFileClient.
+    # If issues arise, this might need to revert to a try-except properties check.
+    try:
         return client.exists()
-    check_methods = [
-        'get_file_properties',
-        'get_share_properties',
-        'get_directory_properties'
-    ]
-    for name in check_methods:
-        method = getattr(client, name, None)
-        if not method:
-            continue
-        try:
-            method()
-            return True
-        except ResourceNotFoundError:
-            return False
-        except Exception:
-            continue
-    return False
+    except ResourceNotFoundError: # Should be caught by .exists() ideally, but as a fallback.
+        return False
+    except Exception as e:
+        # Log unexpected errors during the exists() check for diagnostics
+        logger.warning(f"Unexpected error when checking client existence for '{getattr(client, 'name', 'Unknown Client')}': {e}", exc_info=True)
+        return False # Safely assume not exists on unexpected error
 
 def _get_hash_conn():
     os.makedirs(os.path.dirname(HASH_DB), exist_ok=True)
@@ -121,24 +116,31 @@ def _hash_file(path):
             h.update(chunk)
     return h.hexdigest()
 
-def _emit_progress(socketio_instance, task_id, event_name, message, detail=''):
+def _emit_progress(socketio_instance, task_id, event_name, message, detail='', level='INFO'):
+    """
+    Emits a progress event via SocketIO if an instance and task_id are provided.
+
+    Args:
+        socketio_instance: The SocketIO instance.
+        task_id (str): The ID of the task for which progress is being reported.
+        event_name (str): The name of the SocketIO event to emit.
+        message (str): The main progress message.
+        detail (str, optional): Additional details for the progress. Defaults to ''.
+        level (str, optional): The severity level of the progress message (e.g., 'INFO',
+                               'WARNING', 'ERROR', 'SUCCESS'). Defaults to 'INFO'.
+    """
     if socketio_instance and task_id:
         try:
-            # Assuming 'level' is a new parameter for _emit_progress based on previous subtask's user feedback.
-            # If _emit_progress definition doesn't support 'level', this will need adjustment.
-            # For now, proceeding with the assumption it's supported.
-            payload = {'task_id': task_id, 'status': message, 'detail': detail}
-            if hasattr(_emit_progress, 'level_param_exists_marker'): # Check if level is a real param
-                payload['level'] = detail.split(':')[0] if detail and ':' in detail else 'INFO' # Simplistic level derive
+            payload = {
+                'task_id': task_id,
+                'status': message,
+                'detail': detail,
+                'level': level.upper()  # Ensure level is uppercase for consistency
+            }
             socketio_instance.emit(event_name, payload)
-            # logger.debug(f"Emitted {event_name} for {task_id}: {message} - {detail}")
+            # logger.debug(f"Emitted {event_name} for {task_id}: {message} - {detail} - Level: {level}")
         except Exception as e:
-            logger.error(f"Failed to emit SocketIO event {event_name} for task {task_id}: {e}")
-
-# Marker to indicate if the level parameter was considered during a refactor.
-# This is a temporary solution for the agent to remember context across turns.
-# In a real scenario, one would check the function signature directly.
-_emit_progress.level_param_exists_marker = True
+            logger.error(f"Failed to emit SocketIO event {event_name} for task {task_id} (Level: {level}): {e}")
 
 def _ensure_directory_exists(share_client, directory_path):
     """Ensure the specified directory exists on the share, creating it if necessary."""
@@ -318,11 +320,11 @@ def backup_if_changed():
     db_rel = 'site.db'
     db_hash = _hash_file(db_local) if os.path.exists(db_local) else None
     if db_hash is None:
-        logger.warning("Database file not found: %s", db_local)
+        logger.warning(f"Database file not found: {db_local}")
     elif hashes.get(db_rel) != db_hash:
         upload_file(db_client, db_local, db_rel)
         hashes[db_rel] = db_hash
-        logger.info("Uploaded database '%s' to share '%s'", db_rel, db_share)
+        logger.info(f"Uploaded database '{db_rel}' to share '{db_share}'.")
     else:
         logger.info("Database unchanged; skipping upload")
 
@@ -343,7 +345,7 @@ def backup_if_changed():
             if hashes.get(rel) != f_hash:
                 upload_file(media_client, fpath, rel)
                 hashes[rel] = f_hash
-                logger.info("Uploaded media file '%s' to share '%s'", rel, media_share)
+                logger.info(f"Uploaded media file '{rel}' to share '{media_share}'.")
 
 
     _save_hashes(hashes)
@@ -406,7 +408,7 @@ def backup_bookings_csv(app, socketio_instance=None, task_id=None, start_date_dt
         log_msg_detail += f", to: {end_date_dt.strftime('%Y-%m-%d %H:%M:%S') if end_date_dt else 'any'}"
 
     logger.info(f"Starting booking CSV backup process ({log_msg_detail}). Task ID: {task_id}")
-    _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', f'Starting booking CSV backup ({effective_range_label})...', log_msg_detail)
+    _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', f'Starting booking CSV backup ({effective_range_label})...', detail=log_msg_detail, level='INFO')
 
     try:
         timestamp_str = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
@@ -415,14 +417,14 @@ def backup_bookings_csv(app, socketio_instance=None, task_id=None, start_date_dt
         csv_data_string = ""
         # The export_bookings_to_csv_string function now handles app_context and querying
         logger.info(f"Exporting bookings ({log_msg_detail}) to CSV format for backup file {remote_filename}.")
-        _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', f'Exporting bookings ({effective_range_label})...', log_msg_detail)
+        _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', f'Exporting bookings ({effective_range_label})...', detail=log_msg_detail, level='INFO')
         csv_data_string = export_bookings_to_csv_string(app, start_date=start_date_dt, end_date=end_date_dt)
 
         # Check if csv_data_string is empty or only contains the header
         # (A simple check for number of newlines; header + 1 data row means at least 2 newlines)
         if not csv_data_string or csv_data_string.count('\n') < 2 :
             logger.info("CSV data is empty or contains only headers. Skipping upload of empty booking CSV backup.")
-            _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', 'No data to backup after CSV export.', 'INFO')
+            _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', 'No data to backup after CSV export.', detail='CSV data empty or headers only.', level='INFO')
             return True
 
         with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.csv', encoding='utf-8') as tmp_file:
@@ -438,7 +440,7 @@ def backup_bookings_csv(app, socketio_instance=None, task_id=None, start_date_dt
 
         if not _client_exists(share_client):
             logger.info(f"Creating share '{share_name}' for booking CSV backups.")
-            _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', f"Creating share '{share_name}'...")
+            _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', f"Creating share '{share_name}'...", level='INFO')
             _create_share_with_retry(share_client, share_name) # MODIFIED
 
         _ensure_directory_exists(share_client, BOOKING_CSV_BACKUPS_DIR)
@@ -446,17 +448,17 @@ def backup_bookings_csv(app, socketio_instance=None, task_id=None, start_date_dt
         remote_path_on_azure = f"{BOOKING_CSV_BACKUPS_DIR}/{remote_filename}"
 
         logger.info(f"Attempting to upload booking CSV backup: {temp_file_path} to {share_name}/{remote_path_on_azure}")
-        _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', f'Uploading {remote_filename} to {share_name}...')
+        _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', f'Uploading {remote_filename} to {share_name}...', level='INFO')
 
         upload_file(share_client, temp_file_path, remote_path_on_azure)
 
         logger.info(f"Successfully backed up bookings CSV to '{share_name}/{remote_path_on_azure}'.")
-        _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', 'Booking CSV backup complete.', 'SUCCESS')
+        _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', 'Booking CSV backup complete.', detail=f'{share_name}/{remote_path_on_azure}', level='SUCCESS')
         return True
 
     except Exception as e:
         logger.error(f"Failed to backup bookings CSV: {e}", exc_info=True)
-        _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', 'Booking CSV backup failed.', f'ERROR: {str(e)}')
+        _emit_progress(socketio_instance, task_id, 'booking_csv_backup_progress', 'Booking CSV backup failed.', detail=str(e), level='ERROR')
         return False
     finally:
         if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
@@ -510,7 +512,11 @@ def list_available_booking_csv_backups():
         # e.g. bookings_YYYYMMDD_HHMMSS.csv or bookings_somelabel_YYYYMMDD_HHMMSS.csv
         # The key is that range_label part must end with an underscore if present.
         # If BOOKING_CSV_FILENAME_PREFIX is "bookings_", then:
-        # filename_part = filename[len(BOOKING_CSV_FILENAME_PREFIX):-len('.csv')] # e.g., "all_20230101_100000" or "3days_20230101_100000" or "20230101_100000"
+        # filename_part = filename[len(BOOKING_CSV_FILENAME_PREFIX):-len('.csv')]
+        # Example filename_part:
+        #   "all_20230101_100000"
+        #   "3days_20230101_100000"
+        #   "20230101_100000" (older format, implicitly "all")
 
         for item in backup_dir_client.list_directories_and_files():
             if item['is_directory']:
@@ -524,29 +530,43 @@ def list_available_booking_csv_backups():
                 logger.warning(f"Skipping file with incorrect prefix/suffix: {filename}")
                 continue
 
-            name_part = filename[len(BOOKING_CSV_FILENAME_PREFIX):-len('.csv')]
+            name_part = filename[len(BOOKING_CSV_FILENAME_PREFIX):-len('.csv')] # Strip prefix and suffix
 
+            # Parsing logic:
+            # The timestamp is always the last two parts if split by '_',
+            # e.g., YYYYMMDD_HHMMSS.
+            # Any parts before that constitute the range_label.
+            # If there are no parts before the timestamp, it's an older format
+            # or an implicit "all" range.
             parts = name_part.split('_')
             timestamp_str = ""
-            range_label = "all" # Default
+            range_label = "all" # Default to "all"
 
-            if len(parts) >= 2 and len(parts[-2]) == 8 and len(parts[-1]) == 6: # Checks if last two parts form YYYYMMDD_HHMMSS
+            # Check if the last two parts could form a valid timestamp based on length and digits
+            if len(parts) >= 2 and \
+               len(parts[-2]) == 8 and re.match(r'^\d{8}$', parts[-2]) and \
+               len(parts[-1]) == 6 and re.match(r'^\d{6}$', parts[-1]):
                 try:
+                    # Potential timestamp found, construct and validate its format
                     timestamp_str = f"{parts[-2]}_{parts[-1]}"
-                    datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S') # Validate format
+                    datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S') # Validate actual date/time format
 
+                    # The remaining parts (if any) form the range_label
                     label_parts = parts[:-2]
                     if label_parts:
                         range_label = "_".join(label_parts)
-                    # If label_parts is empty, range_label remains "all" (e.g. bookings_YYYYMMDD_HHMMSS.csv)
+                    # If label_parts is empty, it means the filename was like "bookings_YYYYMMDD_HHMMSS.csv",
+                    # so range_label correctly remains "all" (the default).
                 except ValueError:
-                    logger.warning(f"Skipping CSV backup with invalid timestamp in name: {filename} (parsed as {timestamp_str})")
-                    continue # Invalid timestamp format
+                    # Timestamp format was incorrect (e.g., invalid date like 20231301)
+                    logger.warning(f"Skipping CSV backup with invalid timestamp in name: {filename} (parsed timestamp as {timestamp_str})")
+                    continue
             else:
-                logger.warning(f"Skipping CSV backup with unexpected filename format after prefix: {name_part} from {filename}")
+                # Filename does not match the expected pattern for timestamp (e.g., not enough parts, incorrect length/format)
+                logger.warning(f"Skipping CSV backup with unexpected filename format after prefix: {name_part} (from full filename: {filename})")
                 continue
 
-            # Create a user-friendly display name
+            # Create a user-friendly display name for UI
             display_range = range_label.replace("_", " ").replace("day", " Day").replace("days", " Days").title()
             if display_range == "All":
                 display_range = "All Bookings"
@@ -599,7 +619,7 @@ def restore_bookings_from_csv_backup(app, timestamp_str, socketio_instance=None,
         'errors': []
     }
     logger.info(actions_summary['message'])
-    _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'])
+    _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], level='INFO')
 
     temp_csv_path = None  # Initialize to ensure it's available in finally block
 
@@ -613,7 +633,7 @@ def restore_bookings_from_csv_backup(app, timestamp_str, socketio_instance=None,
             actions_summary['message'] = f"Azure share '{share_name}' not found."
             actions_summary['errors'].append(actions_summary['message'])
             logger.error(actions_summary['message'])
-            _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], 'ERROR')
+            _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], detail=f"Share '{share_name}' not found.", level='ERROR')
             return actions_summary
 
         # Filename might now include a range label.
@@ -652,7 +672,7 @@ def restore_bookings_from_csv_backup(app, timestamp_str, socketio_instance=None,
             actions_summary['message'] = f"Booking CSV backup for timestamp '{timestamp_str}' not found in available list."
             actions_summary['errors'].append(actions_summary['message'])
             logger.error(actions_summary['message'])
-            _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], 'ERROR')
+            _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], detail=f"Timestamp '{timestamp_str}' not in list.", level='ERROR')
             return actions_summary
 
         remote_csv_filename = target_backup_item['filename'] # Use the actual filename
@@ -664,10 +684,10 @@ def restore_bookings_from_csv_backup(app, timestamp_str, socketio_instance=None,
             actions_summary['message'] = f"Booking CSV backup file '{remote_azure_path}' not found on share '{share_name}'."
             actions_summary['errors'].append(actions_summary['message'])
             logger.error(actions_summary['message'])
-            _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], 'ERROR')
+            _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], detail=f"File '{remote_azure_path}' not on share.", level='ERROR')
             return actions_summary
 
-        _emit_progress(socketio_instance, task_id, event_name, f"Downloading booking CSV: {remote_azure_path}")
+        _emit_progress(socketio_instance, task_id, event_name, f"Downloading booking CSV: {remote_azure_path}", level='INFO')
 
         # Create a temporary file to download the CSV into
         # delete=False is important because we need to pass the path to another function
@@ -684,12 +704,12 @@ def restore_bookings_from_csv_backup(app, timestamp_str, socketio_instance=None,
             actions_summary['message'] = f"Failed to download booking CSV '{remote_azure_path}'."
             actions_summary['errors'].append(actions_summary['message'])
             logger.error(actions_summary['message'])
-            _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], 'ERROR')
+            _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], detail=f"Download failed for '{remote_azure_path}'.", level='ERROR')
             # temp_csv_path might still exist if download_file created it but failed writing, handled in finally
             return actions_summary
 
         logger.info(f"Successfully downloaded booking CSV to '{temp_csv_path}'. Starting import.")
-        _emit_progress(socketio_instance, task_id, event_name, "Download complete. Starting import from CSV.")
+        _emit_progress(socketio_instance, task_id, event_name, "Download complete. Starting import from CSV.", level='INFO')
 
         import_summary = import_bookings_from_csv_file(temp_csv_path, app)
 
@@ -699,11 +719,11 @@ def restore_bookings_from_csv_backup(app, timestamp_str, socketio_instance=None,
         if import_summary.get('errors'):
             actions_summary['status'] = 'completed_with_errors'
             logger.warning(f"Booking CSV import for {timestamp_str} completed with errors. Summary: {import_summary}")
-            _emit_progress(socketio_instance, task_id, event_name, "Import completed with errors.", f"Errors: {len(import_summary['errors'])}")
+            _emit_progress(socketio_instance, task_id, event_name, "Import completed with errors.", detail=f"Errors: {len(import_summary['errors'])}", level='WARNING')
         else:
             actions_summary['status'] = 'completed_successfully'
             logger.info(f"Booking CSV import for {timestamp_str} completed successfully. Summary: {import_summary}")
-            _emit_progress(socketio_instance, task_id, event_name, "Import completed successfully.", 'SUCCESS')
+            _emit_progress(socketio_instance, task_id, event_name, "Import completed successfully.", detail="All records imported.", level='SUCCESS')
 
     except Exception as e:
         error_message = f"An unexpected error occurred during booking CSV restore: {str(e)}"
@@ -712,7 +732,7 @@ def restore_bookings_from_csv_backup(app, timestamp_str, socketio_instance=None,
         actions_summary['message'] = error_message
         if str(e) not in actions_summary['errors']: # Avoid duplicate generic error
             actions_summary['errors'].append(str(e))
-        _emit_progress(socketio_instance, task_id, event_name, error_message, 'CRITICAL_ERROR')
+        _emit_progress(socketio_instance, task_id, event_name, error_message, detail=str(e), level='CRITICAL_ERROR')
     finally:
         if temp_csv_path and os.path.exists(temp_csv_path):
             try:
@@ -746,7 +766,7 @@ def verify_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=Non
     }
 
     logger.info(f"Starting verification for booking CSV backup: {timestamp_str}")
-    _emit_progress(socketio_instance, task_id, event_name, 'Starting booking CSV verification...', f'Timestamp: {timestamp_str}')
+    _emit_progress(socketio_instance, task_id, event_name, 'Starting booking CSV verification...', detail=f'Timestamp: {timestamp_str}', level='INFO')
 
     try:
         service_client = _get_service_client()
@@ -757,7 +777,7 @@ def verify_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=Non
             result['status'] = 'error'
             result['message'] = f"Azure share '{share_name}' not found."
             logger.error(result['message'])
-            _emit_progress(socketio_instance, task_id, event_name, result['message'], 'ERROR')
+            _emit_progress(socketio_instance, task_id, event_name, result['message'], detail=f"Share '{share_name}' not found.", level='ERROR')
             return result
 
         # Similar logic adjustment needed for verify_booking_csv_backup as in restore
@@ -772,7 +792,7 @@ def verify_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=Non
             result['status'] = 'error' # Changed from not_found to error, as it implies an issue if called for a non-listed ts
             result['message'] = f"Booking CSV backup for timestamp '{timestamp_str}' not found in available list for verification."
             logger.error(result['message'])
-            _emit_progress(socketio_instance, task_id, event_name, result['message'], 'ERROR')
+            _emit_progress(socketio_instance, task_id, event_name, result['message'], detail=f"Timestamp '{timestamp_str}' not in list.", level='ERROR')
             return result
 
         remote_csv_filename = target_backup_item_verify['filename']
@@ -785,91 +805,24 @@ def verify_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=Non
             result['status'] = 'success'
             result['message'] = f"Booking CSV backup file '{remote_csv_filename}' verified successfully (found) on share '{share_name}' at path '{remote_azure_path}'."
             logger.info(result['message'])
-            _emit_progress(socketio_instance, task_id, event_name, 'Verification successful: File found.', remote_azure_path)
+            _emit_progress(socketio_instance, task_id, event_name, 'Verification successful: File found.', detail=remote_azure_path, level='SUCCESS')
         else:
             result['status'] = 'not_found'
             result['message'] = f"Booking CSV backup file '{remote_csv_filename}' NOT found on Azure share '{share_name}' at path '{remote_azure_path}'."
             logger.warning(result['message'])
-            _emit_progress(socketio_instance, task_id, event_name, 'Verification failed: File not found.', remote_azure_path)
+            _emit_progress(socketio_instance, task_id, event_name, 'Verification failed: File not found.', detail=remote_azure_path, level='WARNING')
 
     except RuntimeError as rte: # Specifically catch RuntimeError from _get_service_client
         result['status'] = 'error'
         result['message'] = str(rte)
         logger.error(f"Error during booking CSV verification for {timestamp_str}: {result['message']}", exc_info=True)
-        _emit_progress(socketio_instance, task_id, event_name, result['message'], 'ERROR')
+        _emit_progress(socketio_instance, task_id, event_name, result['message'], detail=str(rte), level='ERROR')
     except Exception as e:
         result['status'] = 'error'
         result['message'] = f"An unexpected error occurred during verification: {str(e)}"
         logger.error(f"Unexpected error during booking CSV verification for {timestamp_str}: {result['message']}", exc_info=True)
-        _emit_progress(socketio_instance, task_id, event_name, result['message'], 'CRITICAL_ERROR')
+        _emit_progress(socketio_instance, task_id, event_name, result['message'], detail=str(e), level='CRITICAL_ERROR')
 
-    return result
-
-
-def verify_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=None):
-    """
-    Verifies the existence of a specific Booking CSV backup file in Azure File Share.
-
-    Args:
-        timestamp_str (str): The timestamp of the booking CSV backup to verify.
-        socketio_instance: Optional SocketIO instance for progress emitting.
-        task_id: Optional task ID for SocketIO progress emitting.
-
-    Returns:
-        dict: A result dictionary with 'status', 'message', and 'file_path'.
-    """
-    event_name = 'booking_csv_verify_progress' # Specific event name for this type of verification
-    result = {
-        'status': 'unknown', # Possible: unknown, success (found), not_found, error
-        'message': '',
-        'file_path': ''
-    }
-
-    logger.info(f"Starting verification for booking CSV backup: {timestamp_str}. Task ID: {task_id}")
-    _emit_progress(socketio_instance, task_id, event_name, 'Starting booking CSV verification...', f'Timestamp: {timestamp_str}')
-
-    try:
-        service_client = _get_service_client()
-        # Booking CSVs are stored in AZURE_CONFIG_SHARE, under BOOKING_CSV_BACKUPS_DIR
-        share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
-        share_client = service_client.get_share_client(share_name)
-
-        if not _client_exists(share_client):
-            result['status'] = 'error'
-            result['message'] = f"Azure share '{share_name}' not found for booking CSV backups."
-            logger.error(result['message'])
-            _emit_progress(socketio_instance, task_id, event_name, result['message'], 'ERROR')
-            return result
-
-        remote_csv_filename = f"{BOOKING_CSV_FILENAME_PREFIX}{timestamp_str}.csv"
-        remote_azure_path = f"{BOOKING_CSV_BACKUPS_DIR}/{remote_csv_filename}"
-        result['file_path'] = remote_azure_path
-
-        file_client = share_client.get_file_client(remote_azure_path)
-
-        if file_client.exists():
-            result['status'] = 'success'
-            result['message'] = f"Booking CSV backup file '{remote_csv_filename}' verified successfully (found) on share '{share_name}' at path '{remote_azure_path}'."
-            logger.info(result['message'])
-            _emit_progress(socketio_instance, task_id, event_name, 'Verification successful: File found.', remote_azure_path)
-        else:
-            result['status'] = 'not_found'
-            result['message'] = f"Booking CSV backup file '{remote_csv_filename}' NOT found on share '{share_name}' at path '{remote_azure_path}'."
-            logger.warning(result['message'])
-            _emit_progress(socketio_instance, task_id, event_name, 'Verification failed: File not found.', remote_azure_path)
-
-    except RuntimeError as rte:
-        result['status'] = 'error'
-        result['message'] = str(rte)
-        logger.error(f"Configuration error during booking CSV verification for {timestamp_str}: {result['message']}", exc_info=True)
-        _emit_progress(socketio_instance, task_id, event_name, result['message'], 'ERROR')
-    except Exception as e:
-        result['status'] = 'error'
-        result['message'] = f"An unexpected error occurred during booking CSV verification: {str(e)}"
-        logger.error(f"Unexpected error during booking CSV verification for {timestamp_str}: {result['message']}", exc_info=True)
-        _emit_progress(socketio_instance, task_id, event_name, result['message'], 'CRITICAL_ERROR')
-
-    _emit_progress(socketio_instance, task_id, event_name, f"Verification for {timestamp_str} finished. Status: {result['status']}.", result['status'].upper())
     return result
 
 
@@ -887,7 +840,7 @@ def delete_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=Non
     """
     event_name = 'booking_csv_delete_progress' # Could be a more generic event if preferred
     logger.info(f"Attempting to delete booking CSV backup for timestamp: {timestamp_str}")
-    _emit_progress(socketio_instance, task_id, event_name, f"Starting deletion of booking CSV backup: {timestamp_str}")
+    _emit_progress(socketio_instance, task_id, event_name, f"Starting deletion of booking CSV backup: {timestamp_str}", level='INFO')
 
     try:
         service_client = _get_service_client()
@@ -896,7 +849,7 @@ def delete_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=Non
 
         if not _client_exists(share_client):
             logger.error(f"Azure share '{share_name}' not found. Cannot delete booking CSV backup.")
-            _emit_progress(socketio_instance, task_id, event_name, f"Share '{share_name}' not found.", 'ERROR')
+            _emit_progress(socketio_instance, task_id, event_name, f"Share '{share_name}' not found.", detail=f"Share name: {share_name}", level='ERROR')
             return False
 
         # Similar logic adjustment needed for delete_booking_csv_backup as in restore and verify
@@ -911,7 +864,7 @@ def delete_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=Non
             # If we are asked to delete a timestamp that's not listed, it might mean it's already gone
             # or the list is stale. For deletion, this is usually fine.
             logger.info(f"Booking CSV backup for timestamp '{timestamp_str}' not found in available list. Assuming already deleted.")
-            _emit_progress(socketio_instance, task_id, event_name, f"Backup for '{timestamp_str}' not found. Assuming already deleted.", 'INFO')
+            _emit_progress(socketio_instance, task_id, event_name, f"Backup for '{timestamp_str}' not found. Assuming already deleted.", detail=f"Timestamp {timestamp_str} not in list.", level='INFO')
             return True # Effectively deleted
 
         remote_csv_filename = target_backup_item_delete['filename']
@@ -921,27 +874,192 @@ def delete_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=Non
 
         if _client_exists(file_client):
             logger.info(f"Booking CSV backup '{remote_azure_path}' found on share '{share_name}'. Attempting deletion.")
-            _emit_progress(socketio_instance, task_id, event_name, f"File '{remote_csv_filename}' found. Deleting...")
+            _emit_progress(socketio_instance, task_id, event_name, f"File '{remote_csv_filename}' found. Deleting...", detail=remote_azure_path, level='INFO')
             try:
                 file_client.delete_file()
                 logger.info(f"Successfully deleted booking CSV backup '{remote_azure_path}'.")
-                _emit_progress(socketio_instance, task_id, event_name, f"File '{remote_csv_filename}' deleted successfully.", 'SUCCESS')
+                _emit_progress(socketio_instance, task_id, event_name, f"File '{remote_csv_filename}' deleted successfully.", detail=remote_azure_path, level='SUCCESS')
                 return True
             except Exception as e_delete:
                 logger.error(f"Failed to delete booking CSV backup '{remote_azure_path}': {e_delete}", exc_info=True)
-                _emit_progress(socketio_instance, task_id, event_name, f"Error deleting file '{remote_csv_filename}': {str(e_delete)}", 'ERROR')
+                _emit_progress(socketio_instance, task_id, event_name, f"Error deleting file '{remote_csv_filename}'.", detail=str(e_delete), level='ERROR')
                 return False
         else:
             # This case should ideally be covered by the check against all_backup_files_details_delete
             # But if it occurs due to a race condition or inconsistency:
             logger.info(f"Booking CSV backup '{remote_azure_path}' confirmed not found on share '{share_name}' by _client_exists. No action needed.")
-            _emit_progress(socketio_instance, task_id, event_name, f"File '{remote_csv_filename}' not found by _client_exists. Already deleted or never existed.", 'INFO')
+            _emit_progress(socketio_instance, task_id, event_name, f"File '{remote_csv_filename}' not found by _client_exists. Already deleted or never existed.", detail=remote_azure_path, level='INFO')
             return True
 
     except Exception as e:
         logger.error(f"An unexpected error occurred during deletion of booking CSV backup for {timestamp_str}: {e}", exc_info=True)
-        _emit_progress(socketio_instance, task_id, event_name, f"Unexpected error deleting CSV backup: {str(e)}", 'CRITICAL_ERROR')
+        _emit_progress(socketio_instance, task_id, event_name, f"Unexpected error deleting CSV backup for {timestamp_str}.", detail=str(e), level='CRITICAL_ERROR')
         return False
+
+
+# --- Backup Component Functions ---
+
+def backup_database_component(timestamp_str, db_share_client, local_db_path, socketio_instance=None, task_id=None):
+    """
+    Backs up the database file, including WAL checkpoint.
+
+    Args:
+        timestamp_str (str): The timestamp for the backup.
+        db_share_client: The Azure ShareClient for database backups.
+        local_db_path (str): Path to the local database file.
+        socketio_instance: Optional SocketIO instance.
+        task_id: Optional task ID for SocketIO.
+
+    Returns:
+        tuple: (bool success, str remote_db_path_or_error_msg)
+    """
+    remote_db_filename = f"{DB_FILENAME_PREFIX}{timestamp_str}.db"
+    remote_db_path = f"{DB_BACKUPS_DIR}/{remote_db_filename}"
+    event_name = 'backup_progress' # Assuming 'backup_progress' is the common event
+
+    _emit_progress(socketio_instance, task_id, event_name, 'Backing up database...', detail=f'{local_db_path} to {db_share_client.share_name}/{remote_db_path}', level='INFO')
+
+    if not os.path.exists(local_db_path):
+        logger.warning(f"Local database file not found at '{local_db_path}'. Skipping database backup.")
+        _emit_progress(socketio_instance, task_id, event_name, 'Database backup skipped (local file not found).', detail=local_db_path, level='WARNING')
+        return False, f"Local database file not found: {local_db_path}"
+
+    try:
+        # Perform WAL checkpoint before backup
+        logger.info(f"Attempting to perform WAL checkpoint on {local_db_path} before backup.")
+        _emit_progress(socketio_instance, task_id, event_name, 'Performing database WAL checkpoint...', detail=local_db_path, level='INFO')
+        try:
+            conn = sqlite3.connect(local_db_path)
+            conn.execute("PRAGMA busy_timeout = 5000;") # 5 seconds
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+            conn.close()
+            logger.info(f"Successfully performed WAL checkpoint on {local_db_path}.")
+            _emit_progress(socketio_instance, task_id, event_name, 'Database WAL checkpoint successful.', level='INFO')
+        except sqlite3.Error as e_sqlite:
+            logger.error(f"Error during WAL checkpoint on {local_db_path}: {e_sqlite}. Proceeding with backup attempt.", exc_info=True)
+            _emit_progress(socketio_instance, task_id, event_name, f'Database WAL checkpoint failed: {e_sqlite}. Continuing backup.', detail=str(e_sqlite), level='WARNING')
+        except Exception as e_generic_checkpoint:
+            logger.error(f"A non-SQLite error occurred during WAL checkpoint on {local_db_path}: {e_generic_checkpoint}. Proceeding with backup attempt.", exc_info=True)
+            _emit_progress(socketio_instance, task_id, event_name, f'Database WAL checkpoint failed with a non-SQLite error: {e_generic_checkpoint}. Continuing backup.', detail=str(e_generic_checkpoint), level='WARNING')
+
+        logger.info(f"Attempting database backup: Share='{db_share_client.share_name}', Path='{remote_db_path}', LocalSource='{local_db_path}'")
+        _ensure_directory_exists(db_share_client, DB_BACKUPS_DIR) # Ensure parent directory exists
+        upload_file(db_share_client, local_db_path, remote_db_path)
+        logger.info(f"Successfully backed up database to '{db_share_client.share_name}/{remote_db_path}'.")
+        _emit_progress(socketio_instance, task_id, event_name, 'Database backup complete.', detail=f'{db_share_client.share_name}/{remote_db_path}', level='SUCCESS')
+        _emit_progress(socketio_instance, task_id, event_name, 'Database backup includes all tables (e.g., users, bookings, resources).', detail='Informational note.', level='INFO')
+        return True, remote_db_path
+    except Exception as e:
+        logger.error(f"Failed to backup database to '{db_share_client.share_name}/{remote_db_path}': {e}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, 'Database backup failed.', detail=str(e), level='ERROR')
+        return False, str(e)
+
+
+def backup_json_config_component(config_name, timestamp_str, config_data, config_share_client, remote_dir, remote_filename_prefix, socketio_instance=None, task_id=None):
+    """
+    Backs up a JSON configuration file.
+
+    Args:
+        config_name (str): User-friendly name of the configuration (e.g., "Map Configuration").
+        timestamp_str (str): The timestamp for the backup.
+        config_data (dict or list): The configuration data to back up.
+        config_share_client: The Azure ShareClient for config backups.
+        remote_dir (str): The remote directory on the share (e.g., CONFIG_BACKUPS_DIR).
+        remote_filename_prefix (str): Prefix for the remote filename (e.g., MAP_CONFIG_FILENAME_PREFIX).
+        socketio_instance: Optional SocketIO instance.
+        task_id: Optional task ID for SocketIO.
+
+    Returns:
+        tuple: (bool success, str remote_config_path_or_error_msg)
+    """
+    event_name = 'backup_progress'
+    remote_filename = f"{remote_filename_prefix}{timestamp_str}.json"
+    remote_config_path = f"{remote_dir}/{remote_filename}"
+
+    _emit_progress(socketio_instance, task_id, event_name, f'Backing up {config_name}...', detail=f'To {config_share_client.share_name}/{remote_config_path}', level='INFO')
+
+    if not config_data:
+        logger.warning(f"No {config_name} data provided for timestamp {timestamp_str}. Skipping {config_name} backup.")
+        _emit_progress(socketio_instance, task_id, event_name, f'{config_name} backup skipped (no data provided).', level='INFO')
+        return True, f"No data provided for {config_name}" # Not a failure of backup itself, but no data to backup
+
+    try:
+        _ensure_directory_exists(config_share_client, remote_dir) # Ensure parent directory exists
+        file_client = config_share_client.get_file_client(remote_config_path)
+        config_json_bytes = json.dumps(config_data, indent=2).encode('utf-8')
+
+        logger.info(f"Attempting {config_name} backup: Share='{config_share_client.share_name}', Path='{remote_config_path}'")
+        file_client.upload_file(data=config_json_bytes) # Default is overwrite=True if file exists
+
+        logger.info(f"Successfully backed up {config_name} to '{config_share_client.share_name}/{remote_config_path}'.")
+        _emit_progress(socketio_instance, task_id, event_name, f'{config_name} backup complete.', detail=f'{config_share_client.share_name}/{remote_config_path}', level='SUCCESS')
+        return True, remote_config_path
+    except Exception as e:
+        logger.error(f"Failed to backup {config_name} to '{config_share_client.share_name}/{remote_config_path}': {e}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, f'{config_name} backup failed.', detail=str(e), level='ERROR')
+        return False, str(e)
+
+
+def backup_media_component(media_type_name, timestamp_str, local_media_dir_path, remote_media_dir_base_name, media_share_client, socketio_instance=None, task_id=None):
+    """
+    Backs up a directory of media files.
+
+    Args:
+        media_type_name (str): User-friendly name (e.g., "Floor Maps").
+        timestamp_str (str): Timestamp for the backup.
+        local_media_dir_path (str): Path to the local directory of media files.
+        remote_media_dir_base_name (str): Base name for the remote subdirectory (e.g., "floor_map_uploads").
+        media_share_client: Azure ShareClient for media backups.
+        socketio_instance: Optional SocketIO instance.
+        task_id: Optional task ID for SocketIO.
+
+    Returns:
+        tuple: (bool success, str status_message)
+    """
+    event_name = 'backup_progress'
+    remote_media_timestamped_dir = f"{MEDIA_BACKUPS_DIR_BASE}/{remote_media_dir_base_name}_{timestamp_str}"
+
+    _emit_progress(socketio_instance, task_id, event_name, f'Backing up {media_type_name}...', detail=f'Local: {local_media_dir_path} to Remote: {media_share_client.share_name}/{remote_media_timestamped_dir}', level='INFO')
+
+    if not os.path.isdir(local_media_dir_path):
+        warn_msg = f"Local directory for {media_type_name} not found at '{local_media_dir_path}'. Skipping {media_type_name} backup."
+        logger.warning(warn_msg)
+        _emit_progress(socketio_instance, task_id, event_name, f'{media_type_name} backup skipped (directory not found).', detail=local_media_dir_path, level='WARNING')
+        return True, warn_msg # Not a failure of backup itself, but no data
+
+    try:
+        # Ensure the base directory for all media backups exists first (e.g., 'media_backups')
+        _ensure_directory_exists(media_share_client, MEDIA_BACKUPS_DIR_BASE)
+        # Ensure the specific timestamped subdirectory for this media type exists (e.g., 'media_backups/floor_map_uploads_20230101_120000')
+        _ensure_directory_exists(media_share_client, remote_media_timestamped_dir)
+
+        files_backed_up = 0
+        files_failed = 0
+        for filename in os.listdir(local_media_dir_path):
+            local_file_path = os.path.join(local_media_dir_path, filename)
+            if os.path.isfile(local_file_path):
+                remote_file_path = f"{remote_media_timestamped_dir}/{filename}"
+                _emit_progress(socketio_instance, task_id, event_name, f'Backing up {media_type_name} file: {filename}', detail=local_file_path, level='INFO')
+                try:
+                    logger.info(f"Attempting {media_type_name} file backup: Share='{media_share_client.share_name}', Path='{remote_file_path}', LocalSource='{local_file_path}'")
+                    upload_file(media_share_client, local_file_path, remote_file_path)
+                    logger.info(f"Successfully backed up {media_type_name} file '{filename}' to '{media_share_client.share_name}/{remote_file_path}'.")
+                    files_backed_up += 1
+                except Exception as e_file:
+                    files_failed += 1
+                    logger.error(f"Failed to backup {media_type_name} file '{local_file_path}' to '{media_share_client.share_name}/{remote_file_path}': {e_file}", exc_info=True)
+                    _emit_progress(socketio_instance, task_id, event_name, f'Failed to backup {media_type_name} file: {filename}', detail=str(e_file), level='ERROR')
+
+        status_msg = f"{media_type_name} backup phase complete. Backed up: {files_backed_up}, Failed: {files_failed}."
+        _emit_progress(socketio_instance, task_id, event_name, status_msg, level='INFO' if files_failed == 0 else 'WARNING')
+        logger.info(status_msg)
+        return files_failed == 0, status_msg
+
+    except Exception as e:
+        err_msg = f"Critical error during {media_type_name} backup to '{media_share_client.share_name}/{remote_media_timestamped_dir}': {e}"
+        logger.error(err_msg, exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, f'{media_type_name} backup failed critically.', detail=str(e), level='ERROR')
+        return False, err_msg
 
 
 def create_full_backup(timestamp_str, map_config_data=None, resource_configs_data=None, user_configs_data=None, socketio_instance=None, task_id=None):
@@ -956,7 +1074,7 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
         socketio_instance: Optional SocketIO instance for progress emitting.
         task_id: Optional task ID for SocketIO progress emitting.
     """
-    _emit_progress(socketio_instance, task_id, 'backup_progress', 'Starting full backup processing...', f'Timestamp: {timestamp_str}')
+    _emit_progress(socketio_instance, task_id, 'backup_progress', 'Starting full backup processing...', detail=f'Timestamp: {timestamp_str}', level='INFO')
     logger.info(f"Starting full backup for timestamp: {timestamp_str}")
     service_client = _get_service_client()
     overall_success = True
@@ -964,247 +1082,159 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
     # Database Backup
     db_share_name = os.environ.get('AZURE_DB_SHARE', 'db-backups')
     db_share_client = service_client.get_share_client(db_share_name)
+    remote_db_path = None # Initialize for manifest
     if not _client_exists(db_share_client):
         logger.info(f"Creating share '{db_share_name}' for database backups.")
-        _create_share_with_retry(db_share_client, db_share_name) # MODIFIED
+        _create_share_with_retry(db_share_client, db_share_name)
 
-    _ensure_directory_exists(db_share_client, DB_BACKUPS_DIR)
-
-    remote_db_filename = f"{DB_FILENAME_PREFIX}{timestamp_str}.db"
-    remote_db_path = f"{DB_BACKUPS_DIR}/{remote_db_filename}"
     local_db_path = os.path.join(DATA_DIR, 'site.db')
-    _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backing up database...', f'{local_db_path} to {db_share_name}/{remote_db_path}')
-
-    if os.path.exists(local_db_path):
-        try:
-            # Perform WAL checkpoint before backup
-            logger.info(f"Attempting to perform WAL checkpoint on {local_db_path} before backup.")
-            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Performing database WAL checkpoint...', local_db_path)
-            try:
-                conn = sqlite3.connect(local_db_path)
-                # Set a timeout for the connection and checkpoint operations
-                conn.execute("PRAGMA busy_timeout = 5000;") # 5 seconds
-                # Try wal_checkpoint with TRUNCATE first.
-                # TRUNCATE is often preferred for backups as it commits and shrinks the WAL file.
-                # FULL or RESTART are other options if TRUNCATE causes issues or is not supported
-                # in some very old sqlite versions (though unlikely here).
-                conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
-                conn.close()
-                logger.info(f"Successfully performed WAL checkpoint on {local_db_path}.")
-                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Database WAL checkpoint successful.')
-            except sqlite3.Error as e_sqlite:
-                # Log the error but proceed with backup attempt anyway,
-                # as the DB file might still be mostly consistent.
-                logger.error(f"Error during WAL checkpoint on {local_db_path}: {e_sqlite}. Proceeding with backup attempt.", exc_info=True)
-                _emit_progress(socketio_instance, task_id, 'backup_progress', f'Database WAL checkpoint failed: {e_sqlite}. Continuing backup.', 'WARNING')
-            except Exception as e_generic_checkpoint:
-                logger.error(f"A non-SQLite error occurred during WAL checkpoint on {local_db_path}: {e_generic_checkpoint}. Proceeding with backup attempt.", exc_info=True)
-                _emit_progress(socketio_instance, task_id, 'backup_progress', f'Database WAL checkpoint failed with a non-SQLite error: {e_generic_checkpoint}. Continuing backup.', 'WARNING')
-
-            # Existing code continues here:
-            logger.info(f"Attempting database backup: Share='{db_share_client.share_name}', Path='{remote_db_path}', LocalSource='{local_db_path}'")
-            upload_file(db_share_client, local_db_path, remote_db_path)
-            logger.info(f"Successfully backed up database to '{db_share_name}/{remote_db_path}'.")
-            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Database backup complete.')
-            _emit_progress(socketio_instance, task_id, 'backup_progress', '(Note: Database backup includes all tables e.g., users, bookings, resources.)', 'info')
-        except Exception as e:
-            logger.error(f"Failed to backup database to '{db_share_name}/{remote_db_path}': {e}")
-            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Database backup failed.', str(e))
-            overall_success = False
+    db_backup_success, db_path_or_msg = backup_database_component(
+        timestamp_str, db_share_client, local_db_path, socketio_instance, task_id
+    )
+    if db_backup_success:
+        remote_db_path = db_path_or_msg # Store path for manifest
     else:
-        logger.warning(f"Local database file not found at '{local_db_path}'. Skipping database backup.")
-        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Database backup skipped (local file not found).')
-        overall_success = False # Deem DB backup essential for overall success
+        overall_success = False
+        # db_path_or_msg contains error message, already logged by component
 
-    # Map Configuration JSON Backup
+    # JSON Configurations Backup
     config_share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
     config_share_client = service_client.get_share_client(config_share_name)
+    remote_config_path = None # Initialize for manifest (map_config)
+    remote_resource_configs_path = None # Initialize for manifest
+    remote_user_configs_path = None # Initialize for manifest
+
     if not _client_exists(config_share_client):
         logger.info(f"Creating share '{config_share_name}' for config backups.")
-        _create_share_with_retry(config_share_client, config_share_name) # MODIFIED
+        _create_share_with_retry(config_share_client, config_share_name)
 
-    _ensure_directory_exists(config_share_client, CONFIG_BACKUPS_DIR)
+    # Map Configuration
+    map_config_backup_success, map_path_or_msg = backup_json_config_component(
+        "Map Configuration", timestamp_str, map_config_data, config_share_client,
+        CONFIG_BACKUPS_DIR, MAP_CONFIG_FILENAME_PREFIX, socketio_instance, task_id
+    )
+    if map_config_backup_success:
+        if map_config_data: # Only store path if data was actually backed up
+             remote_config_path = map_path_or_msg
+    elif map_config_data : # If data was present but backup failed
+        overall_success = False
 
-    remote_config_filename = f"{MAP_CONFIG_FILENAME_PREFIX}{timestamp_str}.json"
-    remote_config_path = f"{CONFIG_BACKUPS_DIR}/{remote_config_filename}"
-    _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backing up map configuration...', f'To {config_share_name}/{remote_config_path}')
+    # Resource Configurations
+    resource_configs_backup_success, rc_path_or_msg = backup_json_config_component(
+        "Resource Configurations", timestamp_str, resource_configs_data, config_share_client,
+        CONFIG_BACKUPS_DIR, "resource_configs_", socketio_instance, task_id
+    )
+    if resource_configs_backup_success:
+        if resource_configs_data:
+            remote_resource_configs_path = rc_path_or_msg
+    elif resource_configs_data:
+        overall_success = False
 
-    if map_config_data:
-        try:
-            # Ensure parent directory for the file itself is created by get_file_client logic
-            # This is usually handled by upload_file, but here we use file_client directly.
-            # Parent dir of remote_config_path is CONFIG_BACKUPS_DIR, which is already ensured.
-            file_client = config_share_client.get_file_client(remote_config_path)
-            config_json_bytes = json.dumps(map_config_data, indent=2).encode('utf-8')
-            logger.info(f"Attempting map configuration backup: Share='{config_share_client.share_name}', Path='{remote_config_path}'")
-            file_client.upload_file(data=config_json_bytes)
-            logger.info(f"Successfully backed up map configuration to '{config_share_name}/{remote_config_path}'.")
-            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Map configuration backup complete.')
-        except Exception as e:
-            logger.error(f"Failed to backup map configuration to '{config_share_name}/{remote_config_path}': {e}", exc_info=True)
-            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Map configuration backup failed.', str(e))
-            overall_success = False # If map config was provided but failed to upload
-    else:
-        logger.warning(f"No map_config_data provided for timestamp {timestamp_str}. Skipping map configuration backup.")
-        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Map configuration backup skipped (no data provided).')
+    # User and Role Configurations
+    user_configs_backup_success, uc_path_or_msg = backup_json_config_component(
+        "User/Role Configurations", timestamp_str, user_configs_data, config_share_client,
+        CONFIG_BACKUPS_DIR, "user_configs_", socketio_instance, task_id
+    )
+    if user_configs_backup_success:
+        if user_configs_data:
+            remote_user_configs_path = uc_path_or_msg
+    elif user_configs_data:
+        overall_success = False
 
-    # Resource Configurations Backup
-    remote_resource_configs_filename = f"resource_configs_{timestamp_str}.json"
-    remote_resource_configs_path = f"{CONFIG_BACKUPS_DIR}/{remote_resource_configs_filename}"
-    _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backing up resource configurations...', f'To {config_share_name}/{remote_resource_configs_path}')
-    if resource_configs_data: # resource_configs_data is the list passed to the function
-        try:
-            resource_configs_json_bytes = json.dumps(resource_configs_data, indent=2).encode('utf-8')
-            # config_share_client is already initialized from map config backup section
-            file_client_rc = config_share_client.get_file_client(remote_resource_configs_path)
-            logger.info(f"Attempting resource configurations backup: Share='{config_share_client.share_name}', Path='{remote_resource_configs_path}'")
-            file_client_rc.upload_file(data=resource_configs_json_bytes) # No overwrite=True
-            logger.info(f"Successfully backed up resource configurations to '{config_share_name}/{remote_resource_configs_path}'.")
-            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Resource configurations backup complete.')
-        except Exception as e:
-            logger.error(f"Failed to backup resource configurations to '{config_share_name}/{remote_resource_configs_path}': {e}", exc_info=True)
-            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Resource configurations backup failed.', str(e))
-            overall_success = False # If resource configs were provided but failed to upload
-    else:
-        logger.warning(f"No resource_configs_data provided for timestamp {timestamp_str}. Skipping resource configurations backup.")
-        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Resource configurations backup skipped (no data).')
-
-    # User and Role Configurations Backup
-    remote_user_configs_filename = f"user_configs_{timestamp_str}.json"
-    remote_user_configs_path = f"{CONFIG_BACKUPS_DIR}/{remote_user_configs_filename}"
-    _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backing up user/role configurations...', f'To {config_share_name}/{remote_user_configs_path}')
-    if user_configs_data: # user_configs_data is the dict {'users': [...], 'roles': [...]}
-        try:
-            user_configs_json_bytes = json.dumps(user_configs_data, indent=2).encode('utf-8')
-            file_client_uc = config_share_client.get_file_client(remote_user_configs_path)
-            logger.info(f"Attempting user/role configurations backup: Share='{config_share_client.share_name}', Path='{remote_user_configs_path}'")
-            file_client_uc.upload_file(data=user_configs_json_bytes) # No overwrite=True
-            logger.info(f"Successfully backed up user/role configurations to '{config_share_name}/{remote_user_configs_path}'.")
-            _emit_progress(socketio_instance, task_id, 'backup_progress', 'User/role configurations backup complete.')
-        except Exception as e:
-            logger.error(f"Failed to backup user/role configurations to '{config_share_name}/{remote_user_configs_path}': {e}", exc_info=True)
-            _emit_progress(socketio_instance, task_id, 'backup_progress', 'User/role configurations backup failed.', str(e))
-            overall_success = False # If user configs were provided but failed to upload
-    else:
-        logger.warning(f"No user_configs_data provided for timestamp {timestamp_str}. Skipping user/role configurations backup.")
-        _emit_progress(socketio_instance, task_id, 'backup_progress', 'User/role configurations backup skipped (no data).')
-
-    # Media Backup (Floor Maps & Resource Uploads)
+    # Media Backup
     media_share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media')
     media_share_client = service_client.get_share_client(media_share_name)
+    remote_floor_map_dir = None # Initialize for manifest
+    remote_resource_uploads_dir = None # Initialize for manifest
+
     if not _client_exists(media_share_client):
         logger.info(f"Creating share '{media_share_name}' for media backups.")
-        _create_share_with_retry(media_share_client, media_share_name) # MODIFIED
+        _create_share_with_retry(media_share_client, media_share_name)
 
-    # Ensure the base directory for all media backups exists first
-    logger.info(f"Checking/Creating base media backup directory '{MEDIA_BACKUPS_DIR_BASE}' on share '{media_share_name}'.")
-    media_base_dir_client = media_share_client.get_directory_client(MEDIA_BACKUPS_DIR_BASE)
-    if not _client_exists(media_base_dir_client):
-        try:
-            logger.info(f"Base media backup directory '{MEDIA_BACKUPS_DIR_BASE}' not found on share '{media_share_name}'. Attempting to create.")
-            media_base_dir_client.create_directory()
-            logger.info(f"Successfully created base media backup directory '{MEDIA_BACKUPS_DIR_BASE}' on share '{media_share_name}'.")
-        except Exception as e:
-            logger.error(f"CRITICAL: Failed to create base media backup directory '{MEDIA_BACKUPS_DIR_BASE}' on share '{media_share_name}': {e}", exc_info=True)
-            raise RuntimeError(f"Could not create base media backup directory '{MEDIA_BACKUPS_DIR_BASE}'. Error: {e}")
-    else:
-        logger.info(f"Base media backup directory '{MEDIA_BACKUPS_DIR_BASE}' already exists on share '{media_share_name}'.")
+    # Check/Create base media backup directory (can be done once if backup_media_component doesn't)
+    # Note: backup_media_component now handles this.
 
-    # Backup FLOOR_MAP_UPLOADS
-    remote_floor_map_dir = f"{MEDIA_BACKUPS_DIR_BASE}/floor_map_uploads_{timestamp_str}"
-    # Now, _ensure_directory_exists should correctly create 'floor_map_uploads_TIMESTAMP' inside 'media_backups'
-    _ensure_directory_exists(media_share_client, remote_floor_map_dir)
-    if os.path.isdir(FLOOR_MAP_UPLOADS):
-        for filename in os.listdir(FLOOR_MAP_UPLOADS):
-            local_file_path = os.path.join(FLOOR_MAP_UPLOADS, filename)
-            if os.path.isfile(local_file_path):
-                remote_file_path = f"{remote_floor_map_dir}/{filename}"
-                _emit_progress(socketio_instance, task_id, 'backup_progress', f'Backing up floor map: {filename}', local_file_path)
-                try:
-                    logger.info(f"Attempting floor map backup: Share='{media_share_client.share_name}', Path='{remote_file_path}', LocalSource='{local_file_path}'")
-                    upload_file(media_share_client, local_file_path, remote_file_path)
-                    logger.info(f"Successfully backed up media file to '{media_share_name}/{remote_file_path}'.")
-                except Exception as e:
-                    logger.error(f"Failed to backup media file '{local_file_path}' to '{media_share_name}/{remote_file_path}': {e}")
-                    _emit_progress(socketio_instance, task_id, 'backup_progress', f'Failed to backup floor map: {filename}', str(e))
-    else:
-        logger.warning(f"Local directory for floor maps not found at '{FLOOR_MAP_UPLOADS}'. Skipping floor map backup.")
-        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Floor map backup skipped (directory not found).')
-    _emit_progress(socketio_instance, task_id, 'backup_progress', 'Floor map backup phase complete.')
+    # Floor Maps
+    fm_backup_success, fm_status_msg = backup_media_component(
+        "Floor Maps", timestamp_str, FLOOR_MAP_UPLOADS, "floor_map_uploads",
+        media_share_client, socketio_instance, task_id
+    )
+    if fm_backup_success: # Store path for manifest if successful
+        remote_floor_map_dir = f"{MEDIA_BACKUPS_DIR_BASE}/floor_map_uploads_{timestamp_str}"
+    elif os.path.isdir(FLOOR_MAP_UPLOADS) : # If directory existed but backup failed
+        overall_success = False # Consider it a failure if local dir exists but backup fails
 
-    # Backup RESOURCE_UPLOADS
-    remote_resource_uploads_dir = f"{MEDIA_BACKUPS_DIR_BASE}/resource_uploads_{timestamp_str}"
-    _ensure_directory_exists(media_share_client, remote_resource_uploads_dir)
-    if os.path.isdir(RESOURCE_UPLOADS):
-        for filename in os.listdir(RESOURCE_UPLOADS):
-            local_file_path = os.path.join(RESOURCE_UPLOADS, filename)
-            if os.path.isfile(local_file_path):
-                remote_file_path = f"{remote_resource_uploads_dir}/{filename}"
-                _emit_progress(socketio_instance, task_id, 'backup_progress', f'Backing up resource file: {filename}', local_file_path)
-                try:
-                    logger.info(f"Attempting resource image backup: Share='{media_share_client.share_name}', Path='{remote_file_path}', LocalSource='{local_file_path}'")
-                    upload_file(media_share_client, local_file_path, remote_file_path)
-                    logger.info(f"Successfully backed up media file to '{media_share_name}/{remote_file_path}'.")
-                except Exception as e:
-                    logger.error(f"Failed to backup media file '{local_file_path}' to '{media_share_name}/{remote_file_path}': {e}")
-                    _emit_progress(socketio_instance, task_id, 'backup_progress', f'Failed to backup resource file: {filename}', str(e))
-    else:
-        logger.warning(f"Local directory for resource uploads not found at '{RESOURCE_UPLOADS}'. Skipping resource uploads backup.")
-        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Resource uploads backup skipped (directory not found).')
-    _emit_progress(socketio_instance, task_id, 'backup_progress', 'Resource uploads backup phase complete.')
+    # Resource Uploads
+    ru_backup_success, ru_status_msg = backup_media_component(
+        "Resource Uploads", timestamp_str, RESOURCE_UPLOADS, "resource_uploads",
+        media_share_client, socketio_instance, task_id
+    )
+    if ru_backup_success: # Store path for manifest
+        remote_resource_uploads_dir = f"{MEDIA_BACKUPS_DIR_BASE}/resource_uploads_{timestamp_str}"
+    elif os.path.isdir(RESOURCE_UPLOADS):
+        overall_success = False
 
-    _emit_progress(socketio_instance, task_id, 'backup_progress', f'Main backup process completed. Overall success so far: {overall_success}')
+    _emit_progress(socketio_instance, task_id, 'backup_progress', f'Main backup process completed. Overall success so far: {overall_success}', level='INFO')
 
     if overall_success:
-        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Checking retention policy...')
+        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Checking retention policy...', level='INFO')
         try:
             retention_days_str = os.environ.get('BACKUP_RETENTION_DAYS')
             if not retention_days_str:
                 logger.info("BACKUP_RETENTION_DAYS not set. Skipping retention policy.")
-                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Retention policy skipped (not configured).')
+                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Retention policy skipped (not configured).', level='INFO')
                 return overall_success
 
             try:
                 retention_days = int(retention_days_str)
             except ValueError:
                 logger.error(f"Invalid BACKUP_RETENTION_DAYS value: '{retention_days_str}'. Must be an integer.")
-                _emit_progress(socketio_instance, task_id, 'backup_progress', f'Retention policy error (invalid config value: {retention_days_str}).')
+                _emit_progress(socketio_instance, task_id, 'backup_progress', f'Retention policy error (invalid config value: {retention_days_str}).', detail=f"Value: {retention_days_str}", level='WARNING')
                 return overall_success # Still return true as backup itself was successful
 
             if retention_days <= 0:
                 logger.info(f"Backup retention is disabled (BACKUP_RETENTION_DAYS={retention_days}). Skipping.")
-                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Retention policy skipped (disabled).')
+                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Retention policy skipped (disabled).', level='INFO')
                 return overall_success
 
             logger.info(f"Applying backup retention policy: Keep last {retention_days} days/sets.")
-            _emit_progress(socketio_instance, task_id, 'backup_progress', f'Applying retention: keep last {retention_days} backups.')
+            _emit_progress(socketio_instance, task_id, 'backup_progress', f'Applying retention: keep last {retention_days} backups.', level='INFO')
             available_backups = list_available_backups() # Sorted newest first
 
             if len(available_backups) > retention_days:
                 backups_to_delete_count = len(available_backups) - retention_days
                 logger.info(f"Found {len(available_backups)} backups. Need to delete {backups_to_delete_count} oldest backup(s).")
-                _emit_progress(socketio_instance, task_id, 'backup_progress', f'Found {len(available_backups)} backups, deleting {backups_to_delete_count} oldest ones.')
+                _emit_progress(socketio_instance, task_id, 'backup_progress', f'Found {len(available_backups)} backups, deleting {backups_to_delete_count} oldest ones.', level='INFO')
 
                 timestamps_to_delete = available_backups[retention_days:]
 
                 for ts_to_delete in timestamps_to_delete:
                     logger.info(f"Retention policy: Deleting backup set for timestamp {ts_to_delete}.")
-                    _emit_progress(socketio_instance, task_id, 'backup_progress', f'Retention: Deleting backup set {ts_to_delete}')
+                    _emit_progress(socketio_instance, task_id, 'backup_progress', f'Retention: Deleting backup set {ts_to_delete}', level='INFO')
                     delete_success = delete_backup_set(ts_to_delete) # delete_backup_set has its own logging for success/failure of individual components
-                    _emit_progress(socketio_instance, task_id, 'backup_progress', f'Deletion of {ts_to_delete} {"completed" if delete_success else "had issues"}.')
+                    _emit_progress(socketio_instance, task_id, 'backup_progress', f'Deletion of {ts_to_delete} {"completed" if delete_success else "had issues"}.', level='SUCCESS' if delete_success else 'WARNING')
             else:
                 logger.info(f"Number of available backups ({len(available_backups)}) is within retention limit ({retention_days}). No old backups to delete.")
-                _emit_progress(socketio_instance, task_id, 'backup_progress', 'No old backups to delete due to retention policy.')
-            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Retention policy check complete.')
+                _emit_progress(socketio_instance, task_id, 'backup_progress', 'No old backups to delete due to retention policy.', level='INFO')
+            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Retention policy check complete.', level='INFO')
         except Exception as e:
             logger.error(f"Error during backup retention policy execution: {e}", exc_info=True)
-            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error during retention policy execution.', str(e))
+            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error during retention policy execution.', detail=str(e), level='ERROR')
             # Do not change overall_success here, as the backup itself was successful.
             # Retention is a secondary operation.
 
     # --- Manifest Creation ---
+    # The manifest file provides a record of all components included in this backup set.
+    # It helps in verifying the integrity and completeness of the backup during restoration.
+    # It includes:
+    #   - timestamp: The unique identifier for this backup set.
+    #   - files: A list of individual files backed up (DB, JSON configs), their remote paths,
+    #            types, SHA256 hashes (of local files/data before upload), and target Azure shares.
+    #   - media_directories_expected: A list of media directories, their remote paths, types,
+    #                                 expected file counts (based on local source at backup time),
+    #                                 and target Azure shares.
     if overall_success: # Only create manifest if all primary backup operations were successful
-        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Creating backup manifest...')
+        _emit_progress(socketio_instance, task_id, 'backup_progress', 'Creating backup manifest...', level='INFO')
         logger.info(f"Creating backup manifest for timestamp: {timestamp_str}")
         manifest_data = {'timestamp': timestamp_str, 'files': [], 'media_directories_expected': []}
 
@@ -1214,13 +1244,13 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
                 db_hash = _hash_file(local_db_path)
                 manifest_data['files'].append({
                     'path': remote_db_path, # remote_db_path defined earlier in the function
-                    'type': 'database',
-                    'sha256': db_hash,
-                    'share': db_share_name
+                    'type': 'database', # Type identifier for the backup component
+                    'sha256': db_hash, # Hash of the local DB file at the time of backup
+                    'share': db_share_name # Azure share where this file is stored
                 })
             except Exception as e:
                 logger.error(f"Failed to hash local database for manifest: {e}")
-                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing database for manifest.', str(e))
+                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing database for manifest.', detail=str(e), level='ERROR')
                 # Potentially mark manifest as incomplete or skip it
 
         # Map Configuration entry in manifest
@@ -1231,12 +1261,12 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
                 manifest_data['files'].append({
                     'path': remote_config_path, # remote_config_path defined earlier
                     'type': 'map_config',
-                    'sha256': config_hash,
+                    'sha256': config_hash, # Hash of the config data at the time of backup
                     'share': config_share_name
                 })
             except Exception as e:
                 logger.error(f"Failed to hash map configuration for manifest: {e}")
-                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing map_config for manifest.', str(e))
+                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing map_config for manifest.', detail=str(e), level='ERROR')
 
         # Resource Configurations entry in manifest
         if resource_configs_data: # Check if data was provided and presumably uploaded
@@ -1247,12 +1277,12 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
                 manifest_data['files'].append({
                     'path': remote_resource_configs_path, # Defined earlier in the function
                     'type': 'resource_configs',
-                    'sha256': rc_hash,
+                    'sha256': rc_hash, # Hash of the resource configs data
                     'share': config_share_name # Defined earlier
                 })
             except Exception as e:
                 logger.error(f"Failed to hash resource_configs for manifest: {e}")
-                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing resource_configs for manifest.', str(e))
+                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing resource_configs for manifest.', detail=str(e), level='ERROR')
 
         # User Configurations entry in manifest
         if user_configs_data: # Check if data was provided and presumably uploaded
@@ -1262,20 +1292,23 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
                 manifest_data['files'].append({
                     'path': remote_user_configs_path, # Defined earlier
                     'type': 'user_configs',
-                    'sha256': uc_hash,
+                    'sha256': uc_hash, # Hash of the user configs data
                     'share': config_share_name # Defined earlier
                 })
             except Exception as e:
                 logger.error(f"Failed to hash user_configs for manifest: {e}")
-                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing user_configs for manifest.', str(e))
+                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing user_configs for manifest.', detail=str(e), level='ERROR')
 
         # Media Directories entries in manifest
+        # For media, we record the directory path and the expected number of files.
+        # Individual file hashes are not stored in the manifest for media to keep it concise,
+        # but verification can check if the expected number of files exists.
         if os.path.isdir(FLOOR_MAP_UPLOADS):
             num_floor_maps = len([name for name in os.listdir(FLOOR_MAP_UPLOADS) if os.path.isfile(os.path.join(FLOOR_MAP_UPLOADS, name))])
             manifest_data['media_directories_expected'].append({
                 'path': remote_floor_map_dir, # remote_floor_map_dir defined earlier
                 'type': 'floor_maps',
-                'expected_file_count': num_floor_maps,
+                'expected_file_count': num_floor_maps, # Number of files in local source dir
                 'share': media_share_name
             })
 
@@ -1284,11 +1317,11 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             manifest_data['media_directories_expected'].append({
                 'path': remote_resource_uploads_dir, # remote_resource_uploads_dir defined earlier
                 'type': 'resource_uploads',
-                'expected_file_count': num_resource_uploads,
+                'expected_file_count': num_resource_uploads, # Number of files in local source dir
                 'share': media_share_name
             })
 
-        # Upload Manifest File (to DB share for simplicity)
+        # Upload Manifest File (to DB share for simplicity, as it's central to a backup set)
         manifest_filename = f"backup_manifest_{timestamp_str}.json"
         remote_manifest_path = f"{DB_BACKUPS_DIR}/{manifest_filename}"
         try:
@@ -1298,16 +1331,16 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             logger.info(f"Attempting manifest upload: Share='{db_share_client.share_name}', Path='{remote_manifest_path}'")
             manifest_file_client.upload_file(data=manifest_json_bytes, overwrite=True)
             logger.info(f"Successfully uploaded backup manifest to '{db_share_name}/{remote_manifest_path}'.")
-            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backup manifest uploaded successfully.')
+            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backup manifest uploaded successfully.', level='SUCCESS')
         except Exception as e:
             logger.error(f"Error during backup manifest creation or upload to '{db_share_name}/{remote_manifest_path}': {e}", exc_info=True)
-            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backup manifest creation/upload FAILED.', str(e))
+            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backup manifest creation/upload FAILED.', detail=str(e), level='ERROR')
             overall_success = False # Crucial change
 
     if overall_success:
-        _emit_progress(socketio_instance, task_id, 'backup_progress', f'Backup completed with overall success: True', 'SUCCESS')
+        _emit_progress(socketio_instance, task_id, 'backup_progress', f'Backup completed with overall success: True', detail="All components backed up successfully.", level='SUCCESS')
     else:
-        _emit_progress(socketio_instance, task_id, 'backup_progress', f'Backup completed with overall success: False. Check server logs for details.', 'ERROR')
+        _emit_progress(socketio_instance, task_id, 'backup_progress', f'Backup completed with overall success: False. Check server logs for details.', detail="One or more components failed to backup.", level='ERROR')
     return overall_success
 
 
@@ -1616,7 +1649,7 @@ def restore_database_component(timestamp_str, db_share_client, dry_run=False, so
     component_name = "Database"
     restored_db_path = None
 
-    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {component_name} restore component...', f'Timestamp: {timestamp_str}')
+    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {component_name} restore component...', detail=f'Timestamp: {timestamp_str}', level='INFO')
 
     remote_db_filename = f"{DB_FILENAME_PREFIX}{timestamp_str}.db"
     azure_db_path = f"{DB_BACKUPS_DIR}/{remote_db_filename}"
@@ -1627,33 +1660,33 @@ def restore_database_component(timestamp_str, db_share_client, dry_run=False, so
     if not _client_exists(db_file_client):
         err_msg = f"{dry_run_prefix}{component_name} backup file '{azure_db_path}' not found on share '{db_share_client.share_name}'."
         logger.error(err_msg)
-        _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg, "ERROR")
+        _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg, detail=azure_db_path, level='ERROR')
         if dry_run: actions.append(err_msg)
         return False, err_msg, actions, None
 
     if dry_run:
         action_msg = f"DRY RUN: Would download {component_name} from '{db_share_client.share_name}/{azure_db_path}' to '{local_db_target_path}'."
         actions.append(action_msg)
-        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg, level='INFO')
         logger.info(action_msg)
         restored_db_path = "DRY_RUN_DB_PATH_PLACEHOLDER"
         success_msg = f"DRY RUN: {component_name} component finished."
-        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg, level='INFO')
         logger.info(success_msg)
         return True, success_msg, actions, restored_db_path
     else:
-        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Restoring {component_name}...', f'{azure_db_path} to {local_db_target_path}')
+        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Restoring {component_name}...', detail=f'{azure_db_path} to {local_db_target_path}', level='INFO')
         logger.info(f"Restoring {component_name} from '{db_share_client.share_name}/{azure_db_path}' to '{local_db_target_path}'.")
         if download_file(db_share_client, azure_db_path, local_db_target_path):
             success_msg = f"{component_name} restored successfully."
             logger.info(success_msg)
-            _emit_progress(socketio_instance, task_id, 'restore_progress', f'{component_name} download complete.')
+            _emit_progress(socketio_instance, task_id, 'restore_progress', f'{component_name} download complete.', detail=local_db_target_path, level='SUCCESS')
             restored_db_path = local_db_target_path
             return True, success_msg, actions, restored_db_path
         else:
             err_msg = f"{component_name} restoration failed during download."
             logger.error(err_msg)
-            _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg, "ERROR")
+            _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg, detail=azure_db_path, level='ERROR')
             return False, err_msg, actions, None
 
 
@@ -1669,7 +1702,7 @@ def download_map_config_component(timestamp_str, config_share_client, dry_run=Fa
     component_name = "Map Configuration"
     downloaded_config_path = None
 
-    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {component_name} download component...', f'Timestamp: {timestamp_str}')
+    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {component_name} download component...', detail=f'Timestamp: {timestamp_str}', level='INFO')
 
     remote_config_filename = f"{MAP_CONFIG_FILENAME_PREFIX}{timestamp_str}.json"
     azure_config_path = f"{CONFIG_BACKUPS_DIR}/{remote_config_filename}"
@@ -1681,7 +1714,7 @@ def download_map_config_component(timestamp_str, config_share_client, dry_run=Fa
     if not _client_exists(config_file_client):
         warn_msg = f"{dry_run_prefix}{component_name} backup file '{azure_config_path}' not found on share '{config_share_client.share_name}'. Skipping."
         logger.warning(warn_msg)
-        _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, azure_config_path)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, detail=azure_config_path, level='WARNING')
         if dry_run: actions.append(warn_msg)
         # This is not a critical failure for the overall restore, so return True.
         return True, warn_msg, actions, None
@@ -1689,27 +1722,27 @@ def download_map_config_component(timestamp_str, config_share_client, dry_run=Fa
     if dry_run:
         action_msg = f"DRY RUN: Would download {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'."
         actions.append(action_msg)
-        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg, level='INFO')
         logger.info(action_msg)
         downloaded_config_path = "DRY_RUN_MAP_CONFIG_PATH_PLACEHOLDER"
         success_msg = f"DRY RUN: {component_name} component finished (simulated download)."
-        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg, level='INFO')
         logger.info(success_msg)
         return True, success_msg, actions, downloaded_config_path
     else:
-        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Downloading {component_name}...', f'{azure_config_path} to {local_config_target_path}')
+        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Downloading {component_name}...', detail=f'{azure_config_path} to {local_config_target_path}', level='INFO')
         logger.info(f"Downloading {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'.")
         if download_file(config_share_client, azure_config_path, local_config_target_path):
             success_msg = f"{component_name} JSON downloaded successfully."
             logger.info(success_msg)
-            _emit_progress(socketio_instance, task_id, 'restore_progress', f'{component_name} download complete.')
+            _emit_progress(socketio_instance, task_id, 'restore_progress', f'{component_name} download complete.', detail=local_config_target_path, level='SUCCESS')
             downloaded_config_path = local_config_target_path
             return True, success_msg, actions, downloaded_config_path
         else:
             # Log as warning because map config might be optional for some restore scenarios.
             warn_msg = f"{component_name} JSON download failed from '{azure_config_path}'."
             logger.warning(warn_msg)
-            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, "WARNING")
+            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, detail=azure_config_path, level='WARNING')
             return True, warn_msg, actions, None # Non-critical failure, return True
 
 
@@ -1725,7 +1758,7 @@ def download_resource_configs_component(timestamp_str, config_share_client, dry_
     component_name = "Resource Configurations"
     downloaded_config_path = None
 
-    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {component_name} download component...', f'Timestamp: {timestamp_str}')
+    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {component_name} download component...', detail=f'Timestamp: {timestamp_str}', level='INFO')
 
     remote_config_filename = f"resource_configs_{timestamp_str}.json" # Changed filename
     azure_config_path = f"{CONFIG_BACKUPS_DIR}/{remote_config_filename}"
@@ -1736,33 +1769,33 @@ def download_resource_configs_component(timestamp_str, config_share_client, dry_
     if not _client_exists(config_file_client):
         warn_msg = f"{dry_run_prefix}{component_name} backup file '{azure_config_path}' not found on share '{config_share_client.share_name}'. Skipping."
         logger.warning(warn_msg)
-        _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, azure_config_path)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, detail=azure_config_path, level='WARNING')
         if dry_run: actions.append(warn_msg)
         return True, warn_msg, actions, None # Not critical failure
 
     if dry_run:
         action_msg = f"DRY RUN: Would download {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'."
         actions.append(action_msg)
-        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg, level='INFO')
         logger.info(action_msg)
         downloaded_config_path = "DRY_RUN_RESOURCE_CONFIGS_PATH_PLACEHOLDER" # Placeholder
         success_msg = f"DRY RUN: {component_name} component finished (simulated download)."
-        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg, level='INFO')
         logger.info(success_msg)
         return True, success_msg, actions, downloaded_config_path
     else:
-        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Downloading {component_name}...', f'{azure_config_path} to {local_config_target_path}')
+        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Downloading {component_name}...', detail=f'{azure_config_path} to {local_config_target_path}', level='INFO')
         logger.info(f"Downloading {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'.")
         if download_file(config_share_client, azure_config_path, local_config_target_path):
             success_msg = f"{component_name} JSON downloaded successfully."
             logger.info(success_msg)
-            _emit_progress(socketio_instance, task_id, 'restore_progress', f'{component_name} download complete.')
+            _emit_progress(socketio_instance, task_id, 'restore_progress', f'{component_name} download complete.', detail=local_config_target_path, level='SUCCESS')
             downloaded_config_path = local_config_target_path
             return True, success_msg, actions, downloaded_config_path
         else:
             warn_msg = f"{component_name} JSON download failed from '{azure_config_path}'." # Non-critical
             logger.warning(warn_msg)
-            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, "WARNING")
+            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, detail=azure_config_path, level='WARNING')
             return True, warn_msg, actions, None
 
 
@@ -1778,7 +1811,7 @@ def download_user_configs_component(timestamp_str, config_share_client, dry_run=
     component_name = "User/Role Configurations" # Changed component name
     downloaded_config_path = None
 
-    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {component_name} download component...', f'Timestamp: {timestamp_str}')
+    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {component_name} download component...', detail=f'Timestamp: {timestamp_str}', level='INFO')
 
     remote_config_filename = f"user_configs_{timestamp_str}.json" # Changed filename
     azure_config_path = f"{CONFIG_BACKUPS_DIR}/{remote_config_filename}"
@@ -1789,33 +1822,33 @@ def download_user_configs_component(timestamp_str, config_share_client, dry_run=
     if not _client_exists(config_file_client):
         warn_msg = f"{dry_run_prefix}{component_name} backup file '{azure_config_path}' not found on share '{config_share_client.share_name}'. Skipping."
         logger.warning(warn_msg)
-        _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, azure_config_path)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, detail=azure_config_path, level='WARNING')
         if dry_run: actions.append(warn_msg)
         return True, warn_msg, actions, None
 
     if dry_run:
         action_msg = f"DRY RUN: Would download {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'."
         actions.append(action_msg)
-        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg, level='INFO')
         logger.info(action_msg)
         downloaded_config_path = "DRY_RUN_USER_CONFIGS_PATH_PLACEHOLDER" # Placeholder
         success_msg = f"DRY RUN: {component_name} component finished (simulated download)."
-        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg, level='INFO')
         logger.info(success_msg)
         return True, success_msg, actions, downloaded_config_path
     else:
-        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Downloading {component_name}...', f'{azure_config_path} to {local_config_target_path}')
+        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Downloading {component_name}...', detail=f'{azure_config_path} to {local_config_target_path}', level='INFO')
         logger.info(f"Downloading {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'.")
         if download_file(config_share_client, azure_config_path, local_config_target_path):
             success_msg = f"{component_name} JSON downloaded successfully."
             logger.info(success_msg)
-            _emit_progress(socketio_instance, task_id, 'restore_progress', f'{component_name} download complete.')
+            _emit_progress(socketio_instance, task_id, 'restore_progress', f'{component_name} download complete.', detail=local_config_target_path, level='SUCCESS')
             downloaded_config_path = local_config_target_path
             return True, success_msg, actions, downloaded_config_path
         else:
             warn_msg = f"{component_name} JSON download failed from '{azure_config_path}'."
             logger.warning(warn_msg)
-            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, "WARNING")
+            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, detail=azure_config_path, level='WARNING')
             return True, warn_msg, actions, None
 
 
@@ -1840,7 +1873,7 @@ def restore_media_component(timestamp_str, media_type_name, local_target_dir, re
     actions = []
     dry_run_prefix = "DRY RUN: " if dry_run else ""
 
-    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {media_type_name} restore component...', f'Timestamp: {timestamp_str}')
+    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {media_type_name} restore component...', detail=f'Timestamp: {timestamp_str}', level='INFO')
 
     remote_media_dir_path = f"{MEDIA_BACKUPS_DIR_BASE}/{remote_media_subdir_base}_{timestamp_str}"
     azure_media_dir_client = media_share_client.get_directory_client(remote_media_dir_path)
@@ -1848,14 +1881,14 @@ def restore_media_component(timestamp_str, media_type_name, local_target_dir, re
     if not _client_exists(azure_media_dir_client):
         warn_msg = f"{dry_run_prefix}{media_type_name} backup directory '{remote_media_dir_path}' not found on share '{media_share_client.share_name}'. Skipping."
         logger.warning(warn_msg)
-        _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, remote_media_dir_path)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, detail=remote_media_dir_path, level='WARNING')
         if dry_run: actions.append(warn_msg)
         return True, warn_msg, actions # Not a critical failure
 
     if dry_run:
         action_msg = f"DRY RUN: Would clear local directory: {local_target_dir}"
         actions.append(action_msg)
-        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg, level='INFO')
         logger.info(action_msg)
 
         # Simulate listing and downloading files
@@ -1870,7 +1903,7 @@ def restore_media_component(timestamp_str, media_type_name, local_target_dir, re
                     local_file_path = os.path.join(local_target_dir, filename)
                     action_msg_file = f"DRY RUN: Would download media file '{filename}' from '{azure_file_path}' to '{local_file_path}'."
                     actions.append(action_msg_file)
-                    _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg_file)
+                    _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg_file, level='INFO')
                     logger.info(action_msg_file)
             if item_count == 0:
                  actions.append(f"DRY RUN: No files found in remote directory {remote_media_dir_path} to download.")
@@ -1879,15 +1912,15 @@ def restore_media_component(timestamp_str, media_type_name, local_target_dir, re
             err_msg = f"DRY RUN: Error listing files in {remote_media_dir_path}: {e}"
             logger.error(err_msg)
             actions.append(err_msg)
-            _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg, "ERROR")
+            _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg, detail=str(e), level='ERROR')
             # Continue, as this is a dry run, but report the issue.
 
         success_msg = f"DRY RUN: {media_type_name} component finished (simulated operations)."
-        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg, level='INFO')
         logger.info(success_msg)
         return True, success_msg, actions
     else:
-        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Clearing local directory: {local_target_dir}')
+        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Clearing local directory: {local_target_dir}', level='INFO')
         if os.path.exists(local_target_dir):
             for filename in os.listdir(local_target_dir):
                 file_to_delete = os.path.join(local_target_dir, filename)
@@ -1896,7 +1929,7 @@ def restore_media_component(timestamp_str, media_type_name, local_target_dir, re
                         os.remove(file_to_delete)
                     except Exception as e:
                         logger.error(f"Failed to delete local file {file_to_delete}: {e}")
-                        _emit_progress(socketio_instance, task_id, 'restore_progress', f"Error deleting local file {file_to_delete}", str(e))
+                        _emit_progress(socketio_instance, task_id, 'restore_progress', f"Error deleting local file {file_to_delete}", detail=str(e), level='ERROR')
                         # Decide if this is critical enough to stop this component
         else:
             os.makedirs(local_target_dir, exist_ok=True)
@@ -1908,18 +1941,18 @@ def restore_media_component(timestamp_str, media_type_name, local_target_dir, re
                 filename = item['name']
                 azure_file_path = f"{remote_media_dir_path}/{filename}"
                 local_file_path = os.path.join(local_target_dir, filename)
-                _emit_progress(socketio_instance, task_id, 'restore_progress', f'Restoring {media_type_name} file: {filename}', local_file_path)
+                _emit_progress(socketio_instance, task_id, 'restore_progress', f'Restoring {media_type_name} file: {filename}', detail=local_file_path, level='INFO')
                 if download_file(media_share_client, azure_file_path, local_file_path):
                     logger.info(f"Restored {media_type_name} file '{filename}' successfully.")
                     files_downloaded +=1
                 else:
                     logger.warning(f"Failed to restore {media_type_name} file '{filename}' from '{azure_file_path}'.")
-                    _emit_progress(socketio_instance, task_id, 'restore_progress', f'Failed to restore {media_type_name} file: {filename}', "WARNING")
+                    _emit_progress(socketio_instance, task_id, 'restore_progress', f'Failed to restore {media_type_name} file: {filename}', detail=azure_file_path, level='WARNING')
                     files_failed +=1
 
         final_msg = f"{media_type_name.capitalize()} restoration: {files_downloaded} files downloaded, {files_failed} failed."
         logger.info(final_msg)
-        _emit_progress(socketio_instance, task_id, 'restore_progress', final_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', final_msg, level='SUCCESS' if files_failed == 0 else 'WARNING')
         return files_failed == 0, final_msg, actions # Success if no files failed
 
 
@@ -1996,7 +2029,7 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
     final_downloaded_user_configs_path = None
 
     logger.info(f"{dry_run_prefix}Starting full restore for timestamp: {timestamp_str}")
-    _emit_progress(socketio_instance, task_id, 'restore_progress', f"{dry_run_prefix}Starting full restore processing...", f'Timestamp: {timestamp_str}')
+    _emit_progress(socketio_instance, task_id, 'restore_progress', f"{dry_run_prefix}Starting full restore processing...", detail=f'Timestamp: {timestamp_str}', level='INFO')
 
     try:
         service_client = _get_service_client()
@@ -2008,9 +2041,9 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
         if not _client_exists(db_share_client):
             err_msg = f"{dry_run_prefix}Database backup share '{db_share_name}' does not exist. Cannot proceed with any restore operations."
             logger.error(err_msg)
-            _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg, "ERROR")
+            _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg, detail=f"Share {db_share_name} missing.", level='ERROR')
             if dry_run: overall_actions_list.append(err_msg)
-            return None, None, overall_actions_list
+            return None, None, None, None, overall_actions_list # Adjusted return to include all 4 paths
 
         db_success, db_message, db_actions, db_output_path = restore_database_component(
             timestamp_str, db_share_client, dry_run, socketio_instance, task_id
@@ -2020,7 +2053,7 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
 
         if not db_success: # Critical failure if DB component fails
             logger.error(f"{dry_run_prefix}Database restore component failed: {db_message}. Aborting full restore.")
-            _emit_progress(socketio_instance, task_id, 'restore_progress', f"{dry_run_prefix}Database restore failed. Full restore aborted.", "ERROR")
+            _emit_progress(socketio_instance, task_id, 'restore_progress', f"{dry_run_prefix}Database restore failed. Full restore aborted.", detail=db_message, level='ERROR')
             return None, None, None, None, overall_actions_list # Return None for paths, include actions gathered so far
 
         # --- Map Configuration Download Component ---
@@ -2038,7 +2071,7 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
         else:
             warn_msg = f"{dry_run_prefix}Config backup share '{config_share_name}' does not exist. Skipping map configuration download."
             logger.warning(warn_msg)
-            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, detail=f"Share {config_share_name} missing.", level='WARNING')
             if dry_run: overall_actions_list.append(warn_msg)
 
         # --- Resource Configurations Download Component ---
@@ -2084,17 +2117,17 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
         else:
             warn_msg = f"{dry_run_prefix}Media backup share '{media_share_name}' does not exist. Skipping all media restore."
             logger.warning(warn_msg)
-            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, detail=f"Share {media_share_name} missing.", level='WARNING')
             if dry_run: overall_actions_list.append(warn_msg)
 
         logger.info(f"{dry_run_prefix}Full restore process completed for timestamp: {timestamp_str}")
-        _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Full restore operations finished.')
+        _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Full restore operations finished.', level='INFO')
         return final_restored_db_path, final_downloaded_map_config_path, final_downloaded_resource_configs_path, final_downloaded_user_configs_path, overall_actions_list
 
     except Exception as e:
         err_msg_final = f"{dry_run_prefix}Critical error during full restore orchestration for timestamp {timestamp_str}: {e}"
         logger.error(err_msg_final, exc_info=True)
-        _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg_final, "ERROR")
+        _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg_final, detail=str(e), level='ERROR')
         if dry_run: overall_actions_list.append(err_msg_final)
         return None, None, None, None, overall_actions_list
 
@@ -2116,7 +2149,7 @@ def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
     event_name = 'backup_delete_progress'
     log_prefix = f"[Task {task_id if task_id else 'N/A'}] "
     logger.info(f"{log_prefix}Attempting to delete backup set for timestamp: {timestamp_str}")
-    _emit_progress(socketio_instance, task_id, event_name, f"Starting deletion for backup set: {timestamp_str}")
+    _emit_progress(socketio_instance, task_id, event_name, f"Starting deletion for backup set: {timestamp_str}", level='INFO')
 
     overall_success = True
     critical_component_processed = False # Tracks if critical components (DB, Manifest) were processed (deleted or confirmed not found)
@@ -2127,30 +2160,30 @@ def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
         # --- Helper: Delete File ---
         def _delete_file_if_exists(share_client, file_path, component_name, share_name_for_log, is_critical=False):
             nonlocal overall_success, critical_component_processed
-            _emit_progress(socketio_instance, task_id, event_name, f"Checking for {component_name}...", file_path)
+            _emit_progress(socketio_instance, task_id, event_name, f"Checking for {component_name}...", detail=file_path, level='INFO')
             file_client = share_client.get_file_client(file_path)
             if _client_exists(file_client):
                 try:
                     file_client.delete_file()
                     logger.info(f"{log_prefix}Successfully deleted {component_name} '{file_path}' from share '{share_name_for_log}'.")
-                    _emit_progress(socketio_instance, task_id, event_name, f"{component_name} deleted.", "SUCCESS")
+                    _emit_progress(socketio_instance, task_id, event_name, f"{component_name} deleted.", detail=file_path, level='SUCCESS')
                     if is_critical: critical_component_processed = True
                     return True
                 except Exception as e:
                     logger.error(f"{log_prefix}Failed to delete {component_name} '{file_path}' from share '{share_name_for_log}'. Exception: {type(e).__name__}, Details: {str(e)}", exc_info=True)
-                    _emit_progress(socketio_instance, task_id, event_name, f"Failed to delete {component_name} ({type(e).__name__})", f"ERROR: {str(e)}")
+                    _emit_progress(socketio_instance, task_id, event_name, f"Failed to delete {component_name} ({type(e).__name__})", detail=str(e), level='ERROR')
                     if is_critical: overall_success = False # Failure to delete an existing critical file is a failure
                     return False
             else:
                 logger.info(f"{log_prefix}{component_name} file '{file_path}' not found on share '{share_name_for_log}'. Skipping deletion.")
-                _emit_progress(socketio_instance, task_id, event_name, f"{component_name} not found, skipping.", "INFO")
+                _emit_progress(socketio_instance, task_id, event_name, f"{component_name} not found, skipping.", detail=file_path, level='INFO')
                 if is_critical: critical_component_processed = True
                 return True # Not finding an optional or even critical file isn't a failure of the delete *operation*
 
         # --- Helper: Delete Directory ---
         def _delete_directory_if_exists(share_client, dir_path, component_name, share_name_for_log, is_critical=False):
             nonlocal overall_success # `critical_component_processed` not used here as directories are media, not critical for this flag
-            _emit_progress(socketio_instance, task_id, event_name, f"Checking for {component_name} directory...", dir_path)
+            _emit_progress(socketio_instance, task_id, event_name, f"Checking for {component_name} directory...", detail=dir_path, level='INFO')
             dir_client = share_client.get_directory_client(dir_path)
             dir_path_for_emit = dir_path # Used for emit messages, as dir_path might be modified by loop
 
@@ -2159,7 +2192,7 @@ def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
                     # List and delete files within the directory first
                     items_in_dir = list(dir_client.list_directories_and_files())
                     logger.info(f"{log_prefix}Found {len(items_in_dir)} items in directory '{dir_path}'.")
-                    _emit_progress(socketio_instance, task_id, event_name, f"Found {len(items_in_dir)} items in {component_name} directory '{dir_path_for_emit}'. Attempting to delete contents.")
+                    _emit_progress(socketio_instance, task_id, event_name, f"Found {len(items_in_dir)} items in {component_name} directory '{dir_path_for_emit}'. Attempting to delete contents.", level='INFO')
 
                     for item in items_in_dir:
                         item_name_for_log = item['name']
@@ -2168,20 +2201,20 @@ def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
                             # If it did, recursive deletion would be needed here.
                             # For now, log a warning if a sub-directory is unexpectedly found.
                             logger.warning(f"{log_prefix}Unexpected sub-directory '{item_name_for_log}' found in '{dir_path}'. This structure is not standard. Skipping this sub-directory.")
-                            _emit_progress(socketio_instance, task_id, event_name, f"Skipping unexpected sub-directory '{item_name_for_log}' in '{dir_path_for_emit}'.", "WARNING")
+                            _emit_progress(socketio_instance, task_id, event_name, f"Skipping unexpected sub-directory '{item_name_for_log}' in '{dir_path_for_emit}'.", detail="Sub-directory found.", level='WARNING')
                             continue # Skip to next item
 
                         # It's a file, attempt to delete it
                         file_in_dir_client = dir_client.get_file_client(item_name_for_log)
                         try:
                             logger.info(f"{log_prefix}Attempting to delete file '{item_name_for_log}' in directory '{dir_path}'.")
-                            _emit_progress(socketio_instance, task_id, event_name, f"Deleting file {item_name_for_log} in {dir_path_for_emit} for {component_name}")
+                            _emit_progress(socketio_instance, task_id, event_name, f"Deleting file {item_name_for_log} in {dir_path_for_emit} for {component_name}", level='INFO')
                             file_in_dir_client.delete_file()
                             logger.info(f"{log_prefix}Successfully deleted file '{item_name_for_log}' in directory '{dir_path}'.")
-                            _emit_progress(socketio_instance, task_id, event_name, f"Deleted file {item_name_for_log} in {dir_path_for_emit}", "SUCCESS")
+                            _emit_progress(socketio_instance, task_id, event_name, f"Deleted file {item_name_for_log} in {dir_path_for_emit}", detail=f"{dir_path_for_emit}/{item_name_for_log}", level='SUCCESS')
                         except Exception as e_file:
                             logger.error(f"{log_prefix}Failed to delete file '{item_name_for_log}' in directory '{dir_path}'. Exception: {type(e_file).__name__}, Details: {str(e_file)}", exc_info=True)
-                            _emit_progress(socketio_instance, task_id, event_name, f"Error deleting file {item_name_for_log} in {dir_path_for_emit}", f"ERROR: {str(e_file)}")
+                            _emit_progress(socketio_instance, task_id, event_name, f"Error deleting file {item_name_for_log} in {dir_path_for_emit}", detail=str(e_file), level='ERROR')
                             overall_success = False # Failure to delete a file within directory means directory delete will fail
                             return False # Critical failure for this helper's operation
 
@@ -2189,16 +2222,16 @@ def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
                     logger.info(f"{log_prefix}Attempting to delete main directory '{dir_path}' for {component_name}.")
                     dir_client.delete_directory()
                     logger.info(f"{log_prefix}Successfully deleted {component_name} directory '{dir_path}' from share '{share_name_for_log}'.")
-                    _emit_progress(socketio_instance, task_id, event_name, f"{component_name} directory and its contents deleted.", "SUCCESS")
+                    _emit_progress(socketio_instance, task_id, event_name, f"{component_name} directory and its contents deleted.", detail=dir_path_for_emit, level='SUCCESS')
                     return True
                 except Exception as e: # Catch error during list_directories_and_files or final delete_directory
                     logger.error(f"{log_prefix}Failed to delete {component_name} directory '{dir_path}' or its contents from share '{share_name_for_log}'. Exception: {type(e).__name__}, Details: {str(e)}", exc_info=True)
-                    _emit_progress(socketio_instance, task_id, event_name, f"Failed to delete {component_name} directory ({type(e).__name__})", f"ERROR: {str(e)}")
+                    _emit_progress(socketio_instance, task_id, event_name, f"Failed to delete {component_name} directory ({type(e).__name__})", detail=str(e), level='ERROR')
                     overall_success = False
                     return False
             else:
                 logger.info(f"{log_prefix}{component_name} directory '{dir_path}' not found on share '{share_name_for_log}'. Skipping deletion.")
-                _emit_progress(socketio_instance, task_id, event_name, f"{component_name} directory not found, skipping.", "INFO")
+                _emit_progress(socketio_instance, task_id, event_name, f"{component_name} directory not found, skipping.", detail=dir_path, level='INFO')
                 return True # Not finding directory is not a failure of delete operation
 
         # --- Main Deletion Logic ---
@@ -2216,7 +2249,7 @@ def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
                 overall_success = False
         else:
             logger.warning(f"{log_prefix}Database backup share '{db_share_name}' not found. Skipping DB and Manifest backup deletion for set {timestamp_str}.")
-            _emit_progress(socketio_instance, task_id, event_name, f"Database share '{db_share_name}' not found. Skipping DB & Manifest.", "WARNING")
+            _emit_progress(socketio_instance, task_id, event_name, f"Database share '{db_share_name}' not found. Skipping DB & Manifest.", detail=f"Share: {db_share_name}", level='WARNING')
             overall_success = False # If DB share is missing, it's a significant issue
             critical_component_processed = False # Explicitly mark critical components as not processed
 
@@ -2231,7 +2264,7 @@ def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
                 pass
         else:
             logger.info(f"{log_prefix}Config backup share '{config_share_name}' not found. Skipping config backup deletion for set {timestamp_str}.")
-            _emit_progress(socketio_instance, task_id, event_name, f"Config share '{config_share_name}' not found. Skipping map config.", "INFO")
+            _emit_progress(socketio_instance, task_id, event_name, f"Config share '{config_share_name}' not found. Skipping map config.", detail=f"Share: {config_share_name}", level='INFO')
 
         # Delete Media Backups
         media_share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media')
@@ -2246,28 +2279,28 @@ def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
                 overall_success = False # If directory existed and failed to delete, consider it a failure for overall
         else:
             logger.info(f"{log_prefix}Media backup share '{media_share_name}' not found. Skipping media backup deletion for set {timestamp_str}.")
-            _emit_progress(socketio_instance, task_id, event_name, f"Media share '{media_share_name}' not found. Skipping media.", "INFO")
+            _emit_progress(socketio_instance, task_id, event_name, f"Media share '{media_share_name}' not found. Skipping media.", detail=f"Share: {media_share_name}", level='INFO')
 
         # Final check on critical component processing
         if not critical_component_processed and not _client_exists(db_share_client):
             # This condition confirms if DB share was missing AND thus critical components were never attempted.
             # overall_success is already False from the DB share check, this is an additional log.
             logger.error(f"{log_prefix}Critical backup components (DB or Manifest on DB Share) could not be processed because the share '{db_share_name}' was missing.")
-            _emit_progress(socketio_instance, task_id, event_name, "Critical components could not be processed due to missing DB share.", "ERROR")
+            _emit_progress(socketio_instance, task_id, event_name, "Critical components could not be processed due to missing DB share.", detail=f"Share {db_share_name} missing.", level='ERROR')
         elif not critical_component_processed and _client_exists(db_share_client):
             # This case implies DB share existed, but both DB and Manifest files were not found.
             # This is not necessarily an error for the delete operation itself.
             logger.info(f"{log_prefix}Critical components (DB and Manifest) were not found on share '{db_share_name}', but share exists. Assuming already deleted or not part of this backup.")
 
 
-        final_status_detail = "SUCCESS" if overall_success else "FAILURE" # FAILURE if any part of deletion of existing items failed OR critical share missing
+        final_status_level = "SUCCESS" if overall_success else "ERROR" # FAILURE if any part of deletion of existing items failed OR critical share missing
         logger.info(f"{log_prefix}Deletion process for backup set {timestamp_str} completed. Overall success: {overall_success}")
-        _emit_progress(socketio_instance, task_id, event_name, "Backup set deletion process finished.", final_status_detail)
+        _emit_progress(socketio_instance, task_id, event_name, "Backup set deletion process finished.", detail=f"Overall success: {overall_success}", level=final_status_level)
         return overall_success
 
     except Exception as e:
         logger.error(f"{log_prefix}Critical error during deletion of backup set for timestamp {timestamp_str}: {e}", exc_info=True)
-        _emit_progress(socketio_instance, task_id, event_name, f"Critical error during backup set deletion: {str(e)}", "CRITICAL_ERROR")
+        _emit_progress(socketio_instance, task_id, event_name, f"Critical error during backup set deletion: {timestamp_str}", detail=str(e), level='CRITICAL_ERROR')
         return False
 
 

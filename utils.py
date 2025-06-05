@@ -844,3 +844,215 @@ def _save_schedule_to_json(data_to_save):
     except IOError as e:
         logger.error(f"Error saving schedule to JSON '{schedule_config_file}': {e}")
         return False, f"Error saving schedule to JSON: {e}"
+
+
+def check_booking_permission(user: User, resource: Resource, logger_instance) -> tuple[bool, str | None]:
+    """
+    Checks if a user has permission to book a given resource.
+
+    Args:
+        user: The User object attempting the booking.
+        resource: The Resource object being booked.
+        logger_instance: The logger instance (e.g., current_app.logger) for logging.
+
+    Returns:
+        A tuple (can_book_bool, error_message_str).
+        can_book_bool is True if permission is granted, False otherwise.
+        error_message_str contains a user-friendly error message if permission is denied,
+        or None if granted.
+    """
+    can_book_overall = False
+    error_message = "You are not authorized to book this resource."  # Default error
+
+    logger_instance.info(f"Checking booking permissions for user '{user.username}' (ID: {user.id}, IsAdmin: {user.is_admin}) on resource ID {resource.id} ('{resource.name}').")
+    logger_instance.debug(f"Resource details: booking_restriction='{resource.booking_restriction}', allowed_user_ids='{resource.allowed_user_ids}', resource_roles={[role.name for role in resource.roles]}, map_coordinates='{resource.map_coordinates}'")
+
+    if user.is_admin:
+        can_book_overall = True
+        logger_instance.info(f"Permission granted for resource {resource.id}: User '{user.username}' is admin.")
+    elif resource.booking_restriction == 'admin_only':
+        error_message = "This resource can only be booked by administrators."
+        logger_instance.warning(f"Booking denied for resource {resource.id}: Non-admin user '{user.username}' attempted to book admin-only resource.")
+        # can_book_overall remains False
+    else:
+        # Check for area-specific roles defined in map_coordinates
+        area_roles_defined = False
+        area_allowed_role_ids = []
+        parsed_resource_allowed_ids = set()
+        if resource.allowed_user_ids and resource.allowed_user_ids.strip():
+            parsed_resource_allowed_ids = {int(uid.strip()) for uid in resource.allowed_user_ids.split(',') if uid.strip()}
+
+        if resource.map_coordinates:
+            try:
+                map_coords_data = json.loads(resource.map_coordinates)
+                if isinstance(map_coords_data.get('allowed_role_ids'), list) and map_coords_data['allowed_role_ids']:
+                    area_allowed_role_ids = [int(r_id) for r_id in map_coords_data['allowed_role_ids'] if isinstance(r_id, int)] # Ensure list of ints
+                    if area_allowed_role_ids: # Only set defined to true if list is not empty after validation
+                        area_roles_defined = True
+                        logger_instance.info(f"Resource {resource.id} has area-specific roles defined in map_coordinates: {area_allowed_role_ids}")
+            except json.JSONDecodeError:
+                logger_instance.warning(f"Could not parse map_coordinates JSON for resource {resource.id}: '{resource.map_coordinates}'. Skipping area role check.")
+            except (TypeError, ValueError):
+                logger_instance.warning(f"Invalid data type for role IDs in map_coordinates for resource {resource.id}. Expected list of integers. Skipping area role check.")
+
+        if area_roles_defined:
+            logger_instance.info(f"Evaluating permissions against area roles for resource {resource.id}.")
+            user_is_specifically_allowed_on_resource = user.id in parsed_resource_allowed_ids
+
+            if user_is_specifically_allowed_on_resource:
+                can_book_overall = True
+                logger_instance.info(f"Permission granted for resource {resource.id}: User '{user.username}' (ID: {user.id}) is in resource.allowed_user_ids, bypassing area role check.")
+            else:
+                user_role_ids = {role.id for role in user.roles}
+                if not user_role_ids.isdisjoint(set(area_allowed_role_ids)):
+                    can_book_overall = True
+                    logger_instance.info(f"Permission granted for resource {resource.id}: User '{user.username}' has a matching role for area-specific roles. User roles: {user_role_ids}, Area roles: {area_allowed_role_ids}.")
+                else:
+                    error_message = f"You do not have the required role to book this resource via its map area (Resource: {resource.name})."
+                    logger_instance.warning(f"Booking denied for resource {resource.id}: User '{user.username}' lacks required area-specific role. User roles: {user_role_ids}, Area roles: {area_allowed_role_ids}.")
+                    # can_book_overall remains False
+        else:
+            # No area-specific roles defined, or they were empty/invalid. Fall back to general resource permissions.
+            logger_instance.info(f"No valid area-specific roles for resource {resource.id}. Evaluating general resource permissions.")
+            if user.id in parsed_resource_allowed_ids:
+                can_book_overall = True
+                logger_instance.info(f"Permission granted for resource {resource.id}: User '{user.username}' (ID: {user.id}) is in resource.allowed_user_ids.")
+
+            if not can_book_overall and resource.roles:
+                user_role_ids = {role.id for role in user.roles}
+                resource_allowed_role_ids = {role.id for role in resource.roles}
+                if not user_role_ids.isdisjoint(resource_allowed_role_ids):
+                    can_book_overall = True
+                    logger_instance.info(f"Permission granted for resource {resource.id}: User '{user.username}' has a matching general role for the resource. User roles: {user_role_ids}, Resource roles: {resource_allowed_role_ids}.")
+
+            if not can_book_overall and not parsed_resource_allowed_ids and not resource.roles:
+                # This means the resource itself has no specific user ID restrictions and no role restrictions.
+                # booking_restriction != 'admin_only' is already handled.
+                can_book_overall = True
+                logger_instance.info(f"Permission granted for resource {resource.id}: Resource is open to all authenticated users (no specific user/role restrictions).")
+
+    # Final authorization log
+    # Note: Some local variables from the original context (like 'parsed_resource_allowed_ids' specific to non-admin path)
+    # might not be defined if the admin path was taken. Using .get() or checking existence for robust logging.
+    log_details_permission_check = (
+        f"Booking permission check for user '{user.username}' on resource ID {resource.id} ('{resource.name}'): "
+        f"UserIsAdmin: {user.is_admin}, "
+        f"ResourceAdminOnly: {resource.booking_restriction == 'admin_only'}, "
+        f"AreaRolesDefined: {locals().get('area_roles_defined', 'N/A (admin path)')}, "
+        f"AreaAllowedRoleIDs: {locals().get('area_allowed_role_ids', 'N/A (admin path)') if locals().get('area_roles_defined', False) else 'N/A (area roles not defined or admin path)'}, "
+        f"UserInParsedResourceAllowedIDs: {(user.id in locals().get('parsed_resource_allowed_ids', set())) if 'parsed_resource_allowed_ids' in locals() else 'N/A (admin path)'}, "
+        f"UserRoleIDs: {[role.id for role in user.roles]}, "
+        f"GeneralResourceRoleIDs: {[role.id for role in resource.roles] if resource.roles else 'N/A'}, "
+        f"CanBookOverall: {can_book_overall}"
+    )
+    logger_instance.info(log_details_permission_check)
+
+    if not can_book_overall:
+        logger_instance.warning(f"Final booking permission check DENIED for user '{user.username}' on resource {resource.id} ('{resource.name}'). Reason: {error_message}")
+        return False, error_message
+
+    return True, None
+
+
+def check_resources_availability_for_user(resources_list: list[Resource], target_date: date, user: User, primary_slots: list[tuple[time, time]], logger_instance) -> bool:
+    """
+    Checks if any resource in the given list has at least one bookable slot
+    for the specified user on the target_date within the primary_slots.
+
+    Args:
+        resources_list: A list of Resource model instances to check.
+        target_date: A date object for the day to check availability.
+        user: The User object (current_user) for whom to check availability.
+        primary_slots: A list of (start_time_obj, end_time_obj) tuples defining slots.
+        logger_instance: The logger instance for logging.
+
+    Returns:
+        True if at least one resource has a bookable slot for the user, False otherwise.
+    """
+    if not resources_list:
+        return False
+
+    # Get current user's other bookings for the target_date once for efficiency
+    try:
+        user_other_bookings = Booking.query.filter(
+            Booking.user_name == user.username,
+            func.date(Booking.start_time) == target_date
+            # We will filter out bookings for the *current* resource inside the loop
+        ).all()
+    except Exception as e:
+        logger_instance.error(f"Error fetching user's other bookings for {user.username} on {target_date}: {e}", exc_info=True)
+        return False # Cannot reliably check availability if this query fails
+
+    for resource in resources_list:
+        if resource.status != 'published':
+            continue
+
+        # Simplified initial maintenance check for the whole day for this resource.
+        # A more granular slot-specific check is also done later.
+        if resource.is_under_maintenance and resource.maintenance_until and resource.maintenance_until.date() >= target_date:
+            if resource.maintenance_until.date() > target_date or resource.maintenance_until.time() == time.max: # Covers full day or past end of day
+                logger_instance.debug(f"Resource {resource.id} under maintenance for the whole of {target_date}.")
+                continue
+
+        user_other_bookings_for_this_resource_check = [
+            b for b in user_other_bookings if b.resource_id != resource.id
+        ]
+
+        for slot_start_time_obj, slot_end_time_obj in primary_slots:
+            slot_start_dt = datetime.combine(target_date, slot_start_time_obj)
+            slot_end_dt = datetime.combine(target_date, slot_end_time_obj)
+
+            # Ensure datetimes are offset-aware (UTC) for comparisons if necessary,
+            # though SQLAlchemy usually handles this if DB stores them correctly.
+            # For this function, we assume inputs and DB times are compatible (e.g., naive UTC).
+            # If not, make them UTC aware:
+            # slot_start_dt = slot_start_dt.replace(tzinfo=timezone.utc)
+            # slot_end_dt = slot_end_dt.replace(tzinfo=timezone.utc)
+
+
+            # a. Check general bookings for the slot on this resource
+            general_bookings_overlap = Booking.query.filter(
+                Booking.resource_id == resource.id,
+                Booking.start_time < slot_end_dt,
+                Booking.end_time > slot_start_dt,
+                Booking.status.notin_(['cancelled', 'rejected'])
+            ).all()
+
+            is_generally_booked = bool(general_bookings_overlap)
+            is_booked_by_current_user_here = any(
+                b.user_name == user.username for b in general_bookings_overlap
+            )
+
+            if is_booked_by_current_user_here:
+                logger_instance.debug(f"User {user.username} has already booked resource {resource.id} in slot {slot_start_dt}-{slot_end_dt}. Considering available for user.")
+                return True # User already has this specific slot booked
+
+            # b. Check slot-specific maintenance
+            slot_is_under_maintenance = False
+            if resource.is_under_maintenance and resource.maintenance_until:
+                # A slot is considered under maintenance if the slot_start_dt is before resource.maintenance_until.
+                # This implies that if maintenance_until is, e.g., 10:00, a slot starting at 09:30 is affected,
+                # but a slot starting at 10:00 is not.
+                if slot_start_dt < resource.maintenance_until:
+                    slot_is_under_maintenance = True
+                    logger_instance.debug(f"Resource {resource.id} slot {slot_start_dt}-{slot_end_dt} is under maintenance (maintenance active until {resource.maintenance_until}).")
+
+            # c. Check for conflicts with user's other bookings (on *other* resources)
+            is_conflicting_with_user_other_bookings = False
+            if not is_booked_by_current_user_here: # No need to check if user already booked this slot
+                for other_booking in user_other_bookings_for_this_resource_check:
+                    # Ensure other_booking times are comparable (e.g. naive UTC)
+                    other_booking_start = other_booking.start_time
+                    other_booking_end = other_booking.end_time
+
+                    if max(slot_start_dt, other_booking_start) < min(slot_end_dt, other_booking_end):
+                        is_conflicting_with_user_other_bookings = True
+                        logger_instance.debug(f"Slot {slot_start_dt}-{slot_end_dt} for resource {resource.id} conflicts with user {user.username}'s other booking {other_booking.id} on resource {other_booking.resource_id}.")
+                        break
+
+            # Slot is bookable if not generally booked, not under maintenance, and no conflict with user's other bookings
+            if not is_generally_booked and not slot_is_under_maintenance and not is_conflicting_with_user_other_bookings:
+                logger_instance.info(f"Found available slot for user {user.username} on resource {resource.id}: {slot_start_dt}-{slot_end_dt}.")
+                return True # Found a bookable slot for this resource
+
+    return False # No resource in the list has any bookable slot for the user
