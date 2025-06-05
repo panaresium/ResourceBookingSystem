@@ -12,7 +12,7 @@ from extensions import db
 from models import FloorMap, Resource, Booking # Role removed if no longer needed
 from auth import permission_required
 # Assuming these utils will be moved to utils.py or are already there
-from utils import add_audit_log, allowed_file, _get_map_configuration_data, _import_map_configuration_data
+from utils import add_audit_log, allowed_file, _get_map_configuration_data, _import_map_configuration_data, check_resources_availability_for_user
 
 # Conditional import for Azure
 try:
@@ -66,87 +66,15 @@ def get_locations_availability():
 
                 resources_on_map = Resource.query.filter(
                     Resource.floor_map_id == floor_map.id,
-                    Resource.status == 'published' # Only published resources
-                    # Resource.deleted_at.is_(None) # This line is removed as per instruction interpretation
+                    Resource.status == 'published'
                 ).all()
 
-                for resource in resources_on_map:
-                    if location_available: # Already found an available resource
-                        break
-
-                    resource_has_bookable_slot_for_user = False
-
-                    # 1. Check maintenance for the entire day
-                    if resource.is_under_maintenance and resource.maintenance_until and resource.maintenance_until.date() >= target_date:
-                        # If maintenance covers the whole day or extends beyond, check times
-                        # For simplicity, if maintenance_until is on target_date, assume it could affect slots.
-                        # A more granular check would compare maintenance start/end times with slots.
-                        # For now, if maintenance_until is on or after target_date, assume not available for simplicity.
-                        # This part might need refinement based on how maintenance start/end times are stored.
-                        if resource.maintenance_until.date() > target_date: # Maintenance for the whole day
-                            continue # Skip to next resource
-                        # If maintenance ends on target_date, we'd need to check times.
-                        # Assuming for now, if maintenance_until is set for target_date, it affects the whole day.
-
-
-                    # Get current user's other bookings for the day to check for conflicts
-                    user_other_bookings = Booking.query.filter(
-                        Booking.user_name == current_user.username,
-                        Booking.resource_id != resource.id, # Bookings on OTHER resources
-                        func.date(Booking.start_time) == target_date
-                    ).all()
-
-                    for slot_start, slot_end in primary_slots:
-                        slot_start_dt = datetime.combine(target_date, slot_start)
-                        slot_end_dt = datetime.combine(target_date, slot_end)
-
-                        # a. Check general bookings for the slot
-                        general_bookings_overlap = Booking.query.filter(
-                            Booking.resource_id == resource.id,
-                            Booking.start_time < slot_end_dt,
-                            Booking.end_time > slot_start_dt
-                        ).all()
-
-                        is_generally_booked = bool(general_bookings_overlap)
-                        is_booked_by_current_user_on_this_resource = any(
-                            b.user_name == current_user.username for b in general_bookings_overlap
-                        )
-
-                        # b. Check if slot is under maintenance (more granular than full day)
-                        # This requires maintenance start/end times. Assuming maintenance_until means "unavailable until this time".
-                        # If resource.maintenance_from and resource.maintenance_until are datetime objects:
-                        slot_is_under_maintenance = False
-                        if resource.is_under_maintenance and resource.maintenance_until:
-                             # Assuming maintenance_from is also available if this logic is to be precise
-                             # For now, using a simplified check: if maintenance ends after slot starts
-                             if resource.maintenance_until > slot_start_dt: # Simplified check
-                                 slot_is_under_maintenance = True
-
-
-                        # c. Check for conflicts with user's other bookings
-                        is_conflicting_with_user_other_bookings = False
-                        for other_booking in user_other_bookings:
-                            if max(slot_start_dt, other_booking.start_time) < min(slot_end_dt, other_booking.end_time):
-                                is_conflicting_with_user_other_bookings = True
-                                break
-
-                        # Determine if the slot is bookable by the current user
-                        # A slot is bookable if it's not generally booked (unless by the user themselves, which means it's 'yellow' but still 'theirs'),
-                        # not under maintenance, and not conflicting with the user's other bookings.
-                        # For "locations-availability", we care if *any* slot is bookable or already booked by the user (green or yellow state).
-
-                        if is_booked_by_current_user_on_this_resource: # User already has this slot
-                            resource_has_bookable_slot_for_user = True
-                            break # Move to next resource, this one is "available" to the user
-
-                        if not is_generally_booked and not slot_is_under_maintenance and not is_conflicting_with_user_other_bookings:
-                            resource_has_bookable_slot_for_user = True
-                            break # Found a bookable slot for this resource
-
-                    if resource_has_bookable_slot_for_user:
+                # Use the new helper function for the list of resources on this map
+                if resources_on_map:
+                    if check_resources_availability_for_user(resources_on_map, target_date, current_user, primary_slots, current_app.logger):
                         location_available = True
-                        # No need to break here, loop needs to finish for current floor_map
-                        # then outer loop will break if location_available is true.
+                        # Found an available resource in this location, no need to check other maps in this location
+                        break
 
             results.append({"location_name": loc_name, "is_available": location_available})
 
@@ -187,59 +115,15 @@ def get_maps_availability():
                 Resource.status == 'published'
             ).all()
 
-            for resource in resources_on_map:
-                if map_is_available_for_user: # Already found an available resource on this map
-                    break
-
-                resource_has_bookable_slot_for_user = False
-
-                # Check maintenance for the entire day
-                if resource.is_under_maintenance and resource.maintenance_until and resource.maintenance_until.date() >= target_date:
-                    if resource.maintenance_until.date() > target_date:
-                        continue
-
-                user_other_bookings = Booking.query.filter(
-                    Booking.user_name == current_user.username,
-                    Booking.resource_id != resource.id,
-                    func.date(Booking.start_time) == target_date
-                ).all()
-
-                for slot_start, slot_end in primary_slots:
-                    slot_start_dt = datetime.combine(target_date, slot_start)
-                    slot_end_dt = datetime.combine(target_date, slot_end)
-
-                    general_bookings_overlap = Booking.query.filter(
-                        Booking.resource_id == resource.id,
-                        Booking.start_time < slot_end_dt,
-                        Booking.end_time > slot_start_dt
-                    ).all()
-
-                    is_generally_booked = bool(general_bookings_overlap)
-                    is_booked_by_current_user_on_this_resource = any(
-                        b.user_name == current_user.username for b in general_bookings_overlap
-                    )
-
-                    slot_is_under_maintenance = False
-                    if resource.is_under_maintenance and resource.maintenance_until:
-                         if resource.maintenance_until > slot_start_dt:
-                             slot_is_under_maintenance = True
-
-                    is_conflicting_with_user_other_bookings = False
-                    for other_booking in user_other_bookings:
-                        if max(slot_start_dt, other_booking.start_time) < min(slot_end_dt, other_booking.end_time):
-                            is_conflicting_with_user_other_bookings = True
-                            break
-
-                    if is_booked_by_current_user_on_this_resource:
-                        resource_has_bookable_slot_for_user = True
-                        break
-
-                    if not is_generally_booked and not slot_is_under_maintenance and not is_conflicting_with_user_other_bookings:
-                        resource_has_bookable_slot_for_user = True
-                        break
-
-                if resource_has_bookable_slot_for_user:
-                    map_is_available_for_user = True
+            if resources_on_map:
+                map_is_available_for_user = check_resources_availability_for_user(
+                    resources_on_map,
+                    target_date,
+                    current_user,
+                    primary_slots,
+                    current_app.logger
+                )
+            # If no resources on map, map_is_available_for_user remains False
 
             results.append({
                 "map_id": floor_map_item.id,

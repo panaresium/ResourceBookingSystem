@@ -21,6 +21,7 @@ from routes.api_maps import init_api_maps_routes
 from routes.api_roles import init_api_roles_routes
 from routes.api_waitlist import init_api_waitlist_routes
 from routes.api_system import init_api_system_routes
+from routes.admin_api_bookings import init_admin_api_bookings_routes # New import
 
 # For scheduler
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -256,6 +257,7 @@ def create_app(config_object=config):
     init_api_roles_routes(app)
     init_api_waitlist_routes(app)
     init_api_system_routes(app)
+    init_admin_api_bookings_routes(app) # Register new blueprint
 
     # 8. Register Error Handlers
     @app.errorhandler(CSRFError)
