@@ -572,6 +572,16 @@ input[type="button"]:focus {
     background-color: #78db78;
 }
 
+.location-button-partially-available {
+    background-color: #ffc107; /* Yellow */
+    color: #212529; /* Darker text for yellow background */
+    /* Other styles copied from .location-button for consistency if not inherited */
+    /* padding, margin, border, border-radius, cursor, font-size etc. are inherited from .location-button */
+}
+.location-button-partially-available:hover {
+    background-color: #e0a800; /* Darker yellow for hover */
+}
+
 .location-button-unavailable {
     background-color: lightcoral;
     color: #721c24;

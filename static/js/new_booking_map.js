@@ -128,21 +128,34 @@ document.addEventListener('DOMContentLoaded', function () {
                 button.classList.add('location-button', 'button'); // Re-use 'location-button' or new 'map-button'
                 button.dataset.mapId = mapInfo.id;
 
-                button.classList.remove('location-button-available', 'location-button-unavailable');
-                // No need to clear inline style as it's not set for these classes
+                // Remove all potential old/new classes first
+                button.classList.remove('location-button-available', 'location-button-unavailable', 'location-button-partially-available');
 
                 const availabilityInfo = mapsAvailabilityData.find(availMap => availMap.map_id === mapInfo.id);
 
-                if (availabilityInfo) {
-                    if (availabilityInfo.is_available_for_user) {
-                        button.classList.add('location-button-available');
-                    } else {
-                        button.classList.add('location-button-unavailable');
+                if (availabilityInfo && availabilityInfo.availability_status) {
+                    switch (availabilityInfo.availability_status) {
+                        case 'high':
+                            button.classList.add('location-button-available');
+                            button.title = `${mapInfo.name} (${mapInfo.location} - Floor ${mapInfo.floor}) - High Availability`;
+                            break;
+                        case 'medium':
+                            button.classList.add('location-button-partially-available');
+                            button.title = `${mapInfo.name} (${mapInfo.location} - Floor ${mapInfo.floor}) - Medium Availability`;
+                            break;
+                        case 'low':
+                            button.classList.add('location-button-unavailable');
+                            button.title = `${mapInfo.name} (${mapInfo.location} - Floor ${mapInfo.floor}) - Low Availability`;
+                            break;
+                        default:
+                            button.classList.add('location-button-unavailable'); // Default to unavailable visually
+                            button.title = `${mapInfo.name} (${mapInfo.location} - Floor ${mapInfo.floor}) - Availability Status Unknown`;
+                            break;
                     }
-                    button.title = `${mapInfo.name} (${mapInfo.location} - Floor ${mapInfo.floor}) - ${availabilityInfo.is_available_for_user ? 'Available' : 'No Availability'}`;
                 } else {
-                    // If map not in availability data, treat as unknown or default
-                    button.title = `${mapInfo.name} (${mapInfo.location} - Floor ${mapInfo.floor}) - Availability unknown`;
+                    // If map not in availability data or availability_status is missing.
+                    button.classList.add('location-button-unavailable'); // Default to unavailable visually
+                    button.title = `${mapInfo.name} (${mapInfo.location} - Floor ${mapInfo.floor}) - Availability Data Missing`;
                 }
 
                 if (mapInfo.id === selectedMapId) {

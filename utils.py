@@ -1056,3 +1056,130 @@ def check_resources_availability_for_user(resources_list: list[Resource], target
                 return True # Found a bookable slot for this resource
 
     return False # No resource in the list has any bookable slot for the user
+
+
+def get_detailed_map_availability_for_user(resources_list: list[Resource], target_date: date, user: User, primary_slots: list[tuple[time, time]], logger_instance) -> dict:
+    """
+    Calculates detailed availability for a list of resources for a specific user,
+    considering primary time slots and the user's other bookings.
+
+    Args:
+        resources_list: A list of Resource model instances to check.
+        target_date: A date object for the day to check availability.
+        user: The User object for whom to check availability.
+        primary_slots: A list of (start_time_obj, end_time_obj) tuples defining primary slots.
+        logger_instance: The logger instance for logging.
+
+    Returns:
+        A dictionary with 'total_primary_slots' and 'available_primary_slots_for_user'.
+    """
+    total_primary_slots = 0
+    available_primary_slots_for_user = 0
+
+    if not resources_list:
+        return {'total_primary_slots': 0, 'available_primary_slots_for_user': 0}
+
+    # Fetch all bookings for the user on the target_date across all resources
+    # This is to check for conflicts with bookings on *other* resources.
+    try:
+        user_all_bookings_on_date = Booking.query.filter(
+            Booking.user_name == user.username, # Changed from user_id to user_name
+            # Using func.date might be slightly cleaner if Booking.start_time is datetime
+            # from sqlalchemy import func
+            # func.date(Booking.start_time) == target_date
+            # For now, let's assume direct comparison works or adjust if needed
+            Booking.start_time >= datetime.combine(target_date, time.min),
+            Booking.start_time <= datetime.combine(target_date, time.max),
+            Booking.status.notin_(['cancelled', 'rejected'])
+        ).all()
+    except Exception as e:
+        logger_instance.error(f"Error fetching user's bookings for {user.username} on {target_date}: {e}", exc_info=True)
+        # Depending on policy, might return 0 available or raise error
+        return {'total_primary_slots': 0, 'available_primary_slots_for_user': 0}
+
+
+    for resource in resources_list:
+        if resource.status != 'published':
+            logger_instance.debug(f"Resource {resource.id} ('{resource.name}') is not published. Skipping.")
+            continue
+
+        total_primary_slots += len(primary_slots)
+
+        # Initial maintenance check for the resource for the whole target_date.
+        # If maintained for the whole day, these slots are not possible.
+        if resource.is_under_maintenance and resource.maintenance_until:
+            maintenance_end_date = resource.maintenance_until.date()
+            maintenance_end_time = resource.maintenance_until.time()
+            if maintenance_end_date > target_date or \
+               (maintenance_end_date == target_date and maintenance_end_time == time.max):
+                logger_instance.debug(f"Resource {resource.id} ('{resource.name}') is under maintenance for the whole of {target_date}. Skipping its primary slots.")
+                continue # Skip this resource, its slots are not available
+
+        # Filter user's bookings that are NOT on the current resource being checked.
+        # These are the "other" bookings that could cause a conflict.
+        user_other_bookings_for_this_resource_check = [
+            b for b in user_all_bookings_on_date if b.resource_id != resource.id
+        ]
+
+        for slot_start_time_obj, slot_end_time_obj in primary_slots:
+            slot_start_dt = datetime.combine(target_date, slot_start_time_obj)
+            slot_end_dt = datetime.combine(target_date, slot_end_time_obj)
+
+            # Ensure datetimes are offset-aware (UTC) if necessary for comparisons
+            # Assuming naive UTC for now, consistent with other parts of the codebase.
+            # If timezone issues arise, they would need to be handled here and in booking data.
+            # slot_start_dt = slot_start_dt.replace(tzinfo=timezone.utc)
+            # slot_end_dt = slot_end_dt.replace(tzinfo=timezone.utc)
+
+            # i. Check for general bookings on *this* resource for *this* slot (excluding cancelled/rejected)
+            general_bookings_on_slot = Booking.query.filter(
+                Booking.resource_id == resource.id,
+                Booking.start_time < slot_end_dt,
+                Booking.end_time > slot_start_dt,
+                Booking.status.notin_(['cancelled', 'rejected'])
+            ).all()
+
+            is_generally_booked_by_anyone = bool(general_bookings_on_slot)
+
+            # ii. Check if the current user has a booking on *this* resource for *this* slot
+            # This is implicitly covered: if is_booked_by_current_user_here, then is_generally_booked_by_anyone is true.
+            # Such slots will NOT be counted as *newly* available.
+            # If a user *already* has it, it's "theirs", but not "available" for a *new* booking by them.
+
+            # iii. Check for slot-specific maintenance for *this* resource and *slot*
+            slot_is_under_maintenance = False
+            if resource.is_under_maintenance and resource.maintenance_until:
+                # A slot is considered under maintenance if the slot overlaps with the maintenance period.
+                # Maintenance period is from "now" until resource.maintenance_until.
+                # We are interested if our specific slot_start_dt is before maintenance_until.
+                if slot_start_dt < resource.maintenance_until: # Naive comparison assumes same timezone (e.g. UTC)
+                    slot_is_under_maintenance = True
+                    logger_instance.debug(f"Resource {resource.id} slot {slot_start_dt}-{slot_end_dt} is effectively under maintenance (maintenance active until {resource.maintenance_until}).")
+
+            # iv. Check if *this* slot on *this* resource conflicts with user_other_bookings_for_this_resource_check
+            slot_conflicts_with_user_other_bookings = False
+            for other_booking in user_other_bookings_for_this_resource_check:
+                # Ensure other_booking times are comparable (e.g. naive UTC)
+                other_booking_start = other_booking.start_time # Assuming naive UTC from DB
+                other_booking_end = other_booking.end_time   # Assuming naive UTC from DB
+
+                # Check for overlap: max(start1, start2) < min(end1, end2)
+                if max(slot_start_dt, other_booking_start) < min(slot_end_dt, other_booking_end):
+                    slot_conflicts_with_user_other_bookings = True
+                    logger_instance.debug(f"Slot {slot_start_dt}-{slot_end_dt} for resource {resource.id} conflicts with user {user.username}'s other booking {other_booking.id} on resource {other_booking.resource_id} ({other_booking_start}-{other_booking_end}).")
+                    break
+
+            # A slot is counted towards available_primary_slots_for_user if:
+            # - It is NOT generally booked by anyone (which also covers not booked by current user here).
+            # - It is NOT under slot-specific maintenance.
+            # - It does NOT conflict with the user's other bookings.
+            if not is_generally_booked_by_anyone and \
+               not slot_is_under_maintenance and \
+               not slot_conflicts_with_user_other_bookings:
+                available_primary_slots_for_user += 1
+                logger_instance.debug(f"Slot {slot_start_dt}-{slot_end_dt} on resource {resource.id} counted as available for user {user.username}.")
+            else:
+                logger_instance.debug(f"Slot {slot_start_dt}-{slot_end_dt} on resource {resource.id} NOT available for user {user.username}. Reasons: generally_booked={is_generally_booked_by_anyone}, maintenance={slot_is_under_maintenance}, conflict_other={slot_conflicts_with_user_other_bookings}.")
+
+    logger_instance.info(f"Detailed availability for user {user.username} on {target_date}: Total Primary Slots={total_primary_slots}, Available for User={available_primary_slots_for_user} across {len(resources_list)} resources.")
+    return {'total_primary_slots': total_primary_slots, 'available_primary_slots_for_user': available_primary_slots_for_user}
