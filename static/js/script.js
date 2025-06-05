@@ -1980,37 +1980,40 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Function to fetch and display maps (original simple list, might need adaptation for new table)
         async function fetchAndDisplayMaps() {
-            // console.log("Legacy fetchAndDisplayMaps in script.js called. Content commented out to resolve potential syntax error.");
-            // const mapsListUl = document.getElementById('maps-list');
-            // const adminMapsListStatusDiv = document.getElementById('admin-maps-list-status');
-            // if (!mapsListUl || !adminMapsListStatusDiv) {
-            //     return;
-            // }
-            // try {
-            //     const maps = await apiCall('/api/admin/maps', {}, adminMapsListStatusDiv);
-            //     mapsListUl.innerHTML = '';
-            //     if (!maps || maps.length === 0) {
-            //         mapsListUl.innerHTML = '<li>No maps uploaded yet.</li>';
-            //         showSuccess(adminMapsListStatusDiv, 'No maps uploaded. Use the form to add one.');
-            //         return;
-            //     }
-            //     maps.forEach(map => {
-            //         const listItem = document.createElement('li');
-            //         listItem.innerHTML = `
-            //             <strong>${map.name}</strong> (ID: ${map.id})<br>
-            //             ${map.location ? 'Location: ' + map.location + '<br>' : ''}
-            //             ${map.floor ? 'Floor: ' + map.floor + '<br>' : ''}
-            //             Filename: ${map.image_filename}<br>
-            //             <img src="${map.image_url}" alt="${map.name}" style="max-width: 200px; max-height: 150px; border: 1px solid #eee;">
-            //             <br>
-            //             <button class="select-map-for-areas-btn button" data-map-id="${map.id}" data-map-name="${map.name}" data-map-image-url="${map.image_url}">Define Areas</button>
-            //             <button class="delete-map-btn button btn-danger btn-sm" data-map-id="${map.id}" data-map-name="${map.name}" style="margin-left: 5px;">Delete Map</button>
-            //         `;
-            //         mapsListUl.appendChild(listItem);
-            //     });
-            // } catch (error) {
-            //     mapsListUl.innerHTML = '<li>Error loading maps.</li>';
-            // }
+            // This function is now largely superseded by the inline script in admin_maps.html
+            // which populates a table. Keeping it here for now, but it might be removed
+            // or adapted if parts of its logic are still needed by other functions in this file.
+            // For now, the new table rendering in admin_maps.html handles the display.
+            console.log("Legacy fetchAndDisplayMaps in script.js called. Consider removing if new table in admin_maps.html is sufficient.");
+            if (!mapsListUl || !adminMapsListStatusDiv) { // mapsListUl is the old <ul>
+                // If mapsListUl doesn't exist (because it's a table now), this function might not be needed.
+                return;
+            }
+            try {
+                const maps = await apiCall('/api/admin/maps', {}, adminMapsListStatusDiv);
+                mapsListUl.innerHTML = ''; 
+                if (!maps || maps.length === 0) {
+                    mapsListUl.innerHTML = '<li>No maps uploaded yet.</li>';
+                    showSuccess(adminMapsListStatusDiv, 'No maps uploaded. Use the form to add one.');
+                    return;
+                }
+                maps.forEach(map => {
+                    const listItem = document.createElement('li');
+                    listItem.innerHTML = `
+                        <strong>${map.name}</strong> (ID: ${map.id})<br>
+                        ${map.location ? 'Location: ' + map.location + '<br>' : ''}
+                        ${map.floor ? 'Floor: ' + map.floor + '<br>' : ''}
+                        Filename: ${map.image_filename}<br>
+                        <img src="${map.image_url}" alt="${map.name}" style="max-width: 200px; max-height: 150px; border: 1px solid #eee;">
+                        <br>
+                        <button class="select-map-for-areas-btn button" data-map-id="${map.id}" data-map-name="${map.name}" data-map-image-url="${map.image_url}">Define Areas</button>
+                        <button class="delete-map-btn button btn-danger btn-sm" data-map-id="${map.id}" data-map-name="${map.name}" style="margin-left: 5px;">Delete Map</button>
+                    `; // Added "button" class and Delete Map button
+                    mapsListUl.appendChild(listItem);
+                });
+            } catch (error) {
+                mapsListUl.innerHTML = '<li>Error loading maps.</li>';
+            }
         }
 
         if (uploadMapForm && uploadStatusDiv) {
