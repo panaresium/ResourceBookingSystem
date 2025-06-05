@@ -18,10 +18,13 @@ from models import Booking
 from utils import export_bookings_to_csv_string, import_bookings_from_csv_file
 
 try:
-    from azure.storage.fileshare import ShareServiceClient
+    from azure.storage.fileshare import ShareServiceClient, ShareClient, ShareDirectoryClient, ShareFileClient
     # ResourceNotFoundError and HttpResponseError are already imported above if SDK is present
 except ImportError:  # pragma: no cover - azure sdk optional
     ShareServiceClient = None
+    ShareClient = None # Add placeholders if SDK not present
+    ShareDirectoryClient = None # Add placeholders
+    ShareFileClient = None # Add placeholders
     # Define ResourceNotFoundError and HttpResponseError as base Exception if SDK not present,
     # so try-except blocks later don't cause NameError.
     if 'ResourceNotFoundError' not in globals(): # Ensure it's not already defined
@@ -63,19 +66,36 @@ def _get_service_client():
 def _client_exists(client):
     """
     Return True if the given Share/File/Directory client exists.
-    Relies on the `exists()` method being available on the client object
-    (ShareClient, ShareDirectoryClient, ShareFileClient from azure-storage-file-share).
+    Uses the appropriate get_properties method and catches ResourceNotFoundError
+    for ShareClient, ShareDirectoryClient, and ShareFileClient from azure-storage-file-share.
     """
-    # Assuming current Azure SDK version provides a consistent .exists() method
-    # for ShareClient, ShareDirectoryClient, and ShareFileClient.
-    # If issues arise, this might need to revert to a try-except properties check.
     try:
-        return client.exists()
-    except ResourceNotFoundError: # Should be caught by .exists() ideally, but as a fallback.
+        if isinstance(client, ShareClient):
+            client.get_share_properties()
+        elif isinstance(client, ShareDirectoryClient):
+            client.get_directory_properties()
+        elif isinstance(client, ShareFileClient):
+            client.get_file_properties()
+        else:
+            # Fallback or error for unknown client types, though the code typically passes specific clients.
+            # Depending on strictness, could raise an error or log a warning.
+            # For now, assume it's one of the known types based on usage elsewhere.
+            # If client type is unknown and has no 'exists' or 'get_properties', this will likely error out.
+            # However, the original code also assumed client.exists() would be present.
+            logger.warning(f"Unknown client type passed to _client_exists: {type(client)}. Attempting generic check if possible or expecting error.")
+            # As a very basic fallback, if we absolutely had to try something generic:
+            # return hasattr(client, 'get_properties') # This is too generic and not reliable.
+            # Better to rely on the specific types above.
+            # If it's not one of the above, and doesn't have a method that would indicate existence,
+            # it's safer to assume it doesn't exist or let an error propagate if type is truly unexpected.
+            # Given the function's use, it's always one of the three Azure clients.
+            return False # Or raise TypeError if strictness is required.
+        return True
+    except ResourceNotFoundError:
         return False
     except Exception as e:
         # Log unexpected errors during the exists() check for diagnostics
-        logger.warning(f"Unexpected error when checking client existence for '{getattr(client, 'name', 'Unknown Client')}': {e}", exc_info=True)
+        logger.warning(f"Unexpected error when checking client existence for '{getattr(client, 'name', 'Unknown Client')}' (type: {type(client).__name__}): {e}", exc_info=True)
         return False # Safely assume not exists on unexpected error
 
 def _get_hash_conn():
