@@ -315,8 +315,7 @@ async function updateAuthLink() {
         }
     } catch (error) {
         // Also hide userActionsArea on error (already handled by setStateLoggedOut)
-        console.error("Error in updateAuthLink, preventing immediate logout:", error);
-        // setStateLoggedOut();
+        setStateLoggedOut();
     }
 }
 
