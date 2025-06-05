@@ -391,7 +391,7 @@ def verify_booking_csv_backup_route(timestamp_str):
     return redirect(url_for('admin_ui.serve_backup_restore_page'))
 
 
-@admin_ui_bp.route('/admin/verify_full_backup/<timestamp_str>', methods=['POST'])
+@admin_ui_bp.route('/verify_full_backup/<timestamp_str>', methods=['POST'])
 @login_required
 @permission_required('manage_system')
 def verify_full_backup_route(timestamp_str):
