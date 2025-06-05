@@ -756,88 +756,36 @@
         }
 
         // Modify window.populateAreaForm to handle `allowed_role_ids` (Moved into DOMContentLoaded)
-        // const originalPopulateAreaForm = window.populateAreaForm; // Keep original if needed for other logic, or remove if fully replacing
-
-        window.populateAreaForm = function() { // Intentionally no arguments accepted now
-            console.log('populateAreaForm CALLED (now self-reliant). Attempting to use window.selectedAreaForEditing.');
-
-            const areaData = window.selectedAreaForEditing; // Primary data source
-
-            if (!areaData || !areaData.id || !areaData.map_coordinates) {
-                console.error('populateAreaForm: window.selectedAreaForEditing is missing, null, or lacks id/map_coordinates. Data:', areaData);
-                alert("Cannot populate form: Selected area data is not available or incomplete. Please re-select the area on the map.");
-                // Optionally clear form fields
-                if (document.getElementById('define-area-form')) document.getElementById('define-area-form').reset();
-                populateDefineAreaRolesCheckboxes([]); // Clear role checkboxes
-                // Clear other fields too
-                const resourceSelectField = document.getElementById('resource-to-map');
-                if (resourceSelectField) resourceSelectField.value = '';
-                const bookingPermissionField = document.getElementById('booking-permission');
-                if (bookingPermissionField) bookingPermissionField.value = '';
-                if (typeof updateCoordinateInputs === 'function') updateCoordinateInputs({x:'',y:'',width:'',height:''});
-
-                return; // Exit if no valid data
-            }
-
-            console.log('populateAreaForm: Using data from window.selectedAreaForEditing:', JSON.parse(JSON.stringify(areaData)));
-
-            // Populate coordinate inputs
-            // Ensure map_coordinates is an object before accessing its properties
-            const currentMapCoords = (areaData.map_coordinates && typeof areaData.map_coordinates === 'object')
-                                   ? areaData.map_coordinates
-                                   : (typeof areaData.map_coordinates === 'string' ? JSON.parse(areaData.map_coordinates || '{}') : {});
-
-            console.log('populateAreaForm: Effective Area Data to use:', areaData);
-            console.log('populateAreaForm: Current Map Coords for form:', currentMapCoords);
-            console.log('populateAreaForm: Target resourceId for form:', areaData.id); // Assuming areaData.id is the resourceId
-
-            // Populate coordinate inputs (assuming updateCoordinateInputs is global or defined)
-            if (typeof updateCoordinateInputs === 'function' && currentMapCoords.type === 'rect') {
-                updateCoordinateInputs(currentMapCoords);
-            } else {
-                console.warn('populateAreaForm: updateCoordinateInputs function not found or coordinates not rect. Manually setting coords.');
-                document.getElementById('coord-x').value = currentMapCoords.x || '';
-                document.getElementById('coord-y').value = currentMapCoords.y || '';
-                document.getElementById('coord-width').value = currentMapCoords.width || '';
-                document.getElementById('coord-height').value = currentMapCoords.height || '';
-            }
-
-            // Populate resource select dropdown
-            const resourceSelect = document.getElementById('resource-to-map');
-            if (resourceSelect) {
-                // areaData.id is the resource ID from selectedAreaForEditing
-                resourceSelect.value = areaData.id;
-                console.log('populateAreaForm: Set resource-to-map to:', areaData.id);
-            }
-
-            // Populate booking permission dropdown
-            const bookingPermissionSelect = document.getElementById('booking-permission');
-            if (bookingPermissionSelect) {
-                // Use booking_restriction from areaData (which might be empty if not fixed in script.js)
-                bookingPermissionSelect.value = areaData.booking_restriction || "";
-                console.log('populateAreaForm: Set booking-permission to:', areaData.booking_restriction || "");
-            }
-
-            // Populate role checkboxes using allowed_role_ids from map_coordinates
-            const selectedRoleIds = currentMapCoords.allowed_role_ids || [];
-            console.log('populateAreaForm: Passing to populateDefineAreaRolesCheckboxes - selectedRoleIds:', selectedRoleIds);
-            populateDefineAreaRolesCheckboxes(selectedRoleIds); // This is the existing function for checkboxes
-
-            // Ensure the form submit button text is 'Update Area Mapping'
-            const defineAreaFormElement = document.getElementById('define-area-form');
-            if (defineAreaFormElement) {
-                const submitButton = defineAreaFormElement.querySelector('button[type="submit"]');
-                if (submitButton) {
-                    submitButton.textContent = 'Update Area Mapping';
+        const originalPopulateAreaForm = window.populateAreaForm;
+        window.populateAreaForm = function(area, resourceId) {
+            console.log('populateAreaForm CALLED. resourceId:', resourceId, 'Raw area data received:', area);
+            if (area && typeof area === 'object') {
+                console.log('populateAreaForm: area.allowed_role_ids IS:', area.allowed_role_ids);
+            } else if (area) {
+                console.log('populateAreaForm: area is NOT an object. Raw area:', area, 'Attempting to parse if string...');
+                try {
+                    const parsedArea = JSON.parse(area);
+                    console.log('populateAreaForm: Parsed area from string:', parsedArea);
+                    if (parsedArea && typeof parsedArea === 'object') {
+                        console.log('populateAreaForm: Parsed area.allowed_role_ids IS:', parsedArea.allowed_role_ids);
+                    }
+                } catch (e) {
+                    console.error('populateAreaForm: Error parsing area string:', e);
                 }
-                // Optional: scroll into view
-                // defineAreaFormElement.scrollIntoView({ behavior: 'smooth' });
+            } else {
+                console.log('populateAreaForm: area is null or undefined.');
             }
-
-            // Trigger change on resource select to update dependent UI (like publish button if it exists)
-            if (resourceSelect) {
-                resourceSelect.dispatchEvent(new Event('change'));
+            if (originalPopulateAreaForm) {
+                originalPopulateAreaForm(area, resourceId);
+            } else {
+                document.getElementById('coord-x').value = area.x || '';
+                document.getElementById('coord-y').value = area.y || '';
+                document.getElementById('coord-width').value = area.width || '';
+                document.getElementById('coord-height').value = area.height || '';
+                document.getElementById('resource-to-map').value = resourceId || '';
             }
+            const selectedRoleIds = area.allowed_role_ids || [];
+            populateDefineAreaRolesCheckboxes(selectedRoleIds); // Call the renamed function
         };
 
     }); // End of DOMContentLoaded
