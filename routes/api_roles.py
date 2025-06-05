@@ -5,7 +5,7 @@ from sqlalchemy import func, exc as sqlalchemy_exc # Added sqlalchemy_exc for da
 # Assuming these paths are correct relative to how the app is structured.
 from auth import permission_required
 from extensions import db
-from models import Role, User # User might be needed for audit logging or future role assignments
+from models import Role, User, user_roles_table # User might be needed for audit logging or future role assignments
 from utils import add_audit_log
 
 api_roles_bp = Blueprint('api_roles', __name__, url_prefix='/api/admin/roles')
@@ -19,9 +19,9 @@ def get_roles():
         # Query to count users per role
         # Subquery to count users for each role
         users_count_subquery = db.session.query(
-            User.roles.property.secondary.c.role_id, # Accessing role_id from the association table
-            func.count(User.id).label('user_count')
-        ).group_by(User.roles.property.secondary.c.role_id).subquery()
+            user_roles_table.c.role_id,
+            func.count(user_roles_table.c.user_id).label('user_count')
+        ).group_by(user_roles_table.c.role_id).subquery()
 
         # Main query to get roles and join with user counts
         roles_with_counts = db.session.query(
