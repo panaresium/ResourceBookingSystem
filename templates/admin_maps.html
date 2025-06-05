@@ -670,7 +670,7 @@
 
             if (!canvas || !selectedMapImageForCanvas) {
                 console.error('Canvas or map image element not found for initialization.');
-                showStatus(defineAreasStatus, '{{ _("Error initializing area definition tool: Canvas or image missing.") }}', true);
+                showStatus(defineAreasStatus, {{ _("Error initializing area definition tool: Canvas or image missing.")|tojson }}, true);
                 return;
             }
             ctx = canvas.getContext('2d');
@@ -736,12 +736,12 @@
                 // Don't add to drawnAreas yet, let selection populate the form
                 // This new rect is implicitly the "selected" one for the form
                 populateAreaFormWithCoords(newArea);
-                showStatus(defineAreasStatus, '{{ _("New area drawn. Fill details and save.") }}', false);
+                showStatus(defineAreasStatus, {{ _("New area drawn. Fill details and save.")|tojson }}, false);
                 // Do not show edit/delete for a brand new, unsaved area
                 document.getElementById('edit-delete-buttons').style.display = 'none';
                 selectedArea = newArea; // Treat new drawing as selected for redraw purposes
             } else {
-                showStatus(defineAreasStatus, '{{ _("Area too small to define.") }}', true);
+                showStatus(defineAreasStatus, {{ _("Area too small to define.")|tojson }}, true);
             }
             redrawCanvas(); // Redraw to show the final new area (or clear if too small)
         }
@@ -768,13 +768,13 @@
                 console.log("Selected existing area:", selectedArea);
                 populateAreaFormWithCoords(selectedArea.coordinates, selectedArea.resource_id, selectedArea.booking_restriction, selectedArea.allowed_role_ids);
                 document.getElementById('edit-delete-buttons').style.display = 'block';
-                showStatus(defineAreasStatus, `{{ _("Selected area for resource ID: ${selectedArea.resource_id || 'Unassigned'}.") }}`, false);
+                showStatus(defineAreasStatus, `Selected area for resource ID: ${selectedArea.resource_id || 'Unassigned'}.`, false);
             } else {
                 // Clicked outside any area, deselect if one was selected
                 if (selectedArea) {
                     selectedArea = null;
                     resetAreaSelectionAndForm();
-                    showStatus(defineAreasStatus, '{{ _("Canvas clicked, no area selected. Draw a new area or click an existing one.") }}', false);
+                    showStatus(defineAreasStatus, {{ _("Canvas clicked, no area selected. Draw a new area or click an existing one.")|tojson }}, false);
                 }
             }
             redrawCanvas();
@@ -824,7 +824,7 @@
                 redrawCanvas();
                 return;
             }
-            showStatus(defineAreasStatus, `{{ _("Fetching areas for map ID: ${mapId}...") }}`, false);
+            showStatus(defineAreasStatus, {{ _("Fetching areas for map ID: %s")|format(mapId)|tojson }}, false);
             try {
                 // This API endpoint needs to return resources that have map_coordinates for this mapId
                 const response = await fetch(`/api/admin/resources?map_id=${mapId}`);
@@ -841,10 +841,10 @@
                                      }));
 
                 console.log("Fetched and processed areas: ", drawnAreas);
-                showStatus(defineAreasStatus, `{{ _("Found ${drawnAreas.length} areas.") }}`, false);
+                showStatus(defineAreasStatus, {{ _("Found %s areas.")|format(drawnAreas.length)|tojson }}, false);
             } catch (error) {
                 console.error('Error fetching or processing map areas:', error);
-                showStatus(defineAreasStatus, `{{ _("Error fetching areas: ${error.message}") }}`, true);
+                showStatus(defineAreasStatus, {{ _("Error fetching areas: %s")|format(error.message)|tojson }}, true);
                 drawnAreas = [];
             }
             redrawCanvas();
@@ -919,13 +919,13 @@
         if (editAreaBtn) {
             editAreaBtn.addEventListener('click', function() {
                 if (!selectedArea || !selectedArea.resource_id) { // Can only edit saved areas
-                    showStatus(defineAreasStatus, '{{ _("No saved area selected to edit.") }}', true);
+                    showStatus(defineAreasStatus, {{ _("No saved area selected to edit.")|tojson }}, true);
                     return;
                 }
                 // For "edit", we can simply allow the user to re-draw.
                 // Clear the selected area, keep form populated, user can draw new rect.
                 // The current selectedArea's data (resource_id etc.) will be used on save.
-                showStatus(defineAreasStatus, '{{ _("Edit mode: Draw a new rectangle for the selected resource. The existing area will be replaced upon saving.") }}', false);
+                showStatus(defineAreasStatus, {{ _("Edit mode: Draw a new rectangle for the selected resource. The existing area will be replaced upon saving.")|tojson }}, false);
                 // Effectively, we are just keeping the form data and allowing a new shape to be drawn.
                 // The save operation will then update the coordinates for selectedArea.resource_id.
                 // No specific drawing state change, user just draws again. The form holds the context.
@@ -933,21 +933,21 @@
                 // redrawCanvas();
                 // Better UX: Keep it selected, but indicate that drawing again will modify it.
                 // For now, let's just rely on the message and the next save action.
-                 alert("{{ _('To edit, adjust values in the form or re-draw the rectangle on the canvas. Then click Save Area.') }}");
+                 alert({{ _('To edit, adjust values in the form or re-draw the rectangle on the canvas. Then click Save Area.')|tojson }});
             });
         }
 
         if (deleteAreaBtn) {
             deleteAreaBtn.addEventListener('click', async function() {
                 if (!selectedArea || !selectedArea.resource_id) {
-                    showStatus(defineAreasStatus, '{{ _("No saved area selected to delete.") }}', true);
+                    showStatus(defineAreasStatus, {{ _("No saved area selected to delete.")|tojson }}, true);
                     return;
                 }
-                if (!confirm(`{{ _("Are you sure you want to remove the area mapping for resource '${selectedArea.name || selectedArea.resource_id}'? The resource itself will not be deleted.") }}`)) {
+                if (!confirm({{ _("Are you sure you want to remove the area mapping for resource '%s'? The resource itself will not be deleted.")|format(selectedArea.name || selectedArea.resource_id)|tojson }})) {
                     return;
                 }
 
-                showStatus(defineAreasStatus, `{{ _("Deleting area for resource ${selectedArea.resource_id}...") }}`, false);
+                showStatus(defineAreasStatus, {{ _("Deleting area for resource %s...")|format(selectedArea.resource_id)|tojson }}, false);
                 const csrfToken = csrfTokenMeta ? csrfTokenMeta.getAttribute('content') : document.querySelector('input[name="csrf_token"]')?.value;
                 try {
                     // To delete an area, we update the resource to have null map_coordinates
@@ -967,7 +967,7 @@
                     if (!response.ok) {
                         throw new Error(result.error || `HTTP error! status: ${response.status}`);
                     }
-                    showStatus(defineAreasStatus, result.message || '{{ _("Area mapping deleted successfully.") }}', false);
+                    showStatus(defineAreasStatus, result.message || {{ _("Area mapping deleted successfully.")|tojson }}, false);
 
                     // Refresh areas from backend
                     if (window.currentMapContext) {
@@ -977,7 +977,7 @@
 
                 } catch (error) {
                     console.error('Error deleting area mapping:', error);
-                    showStatus(defineAreasStatus, `{{ _("Error deleting area: ${error.message}") }}`, true);
+                    showStatus(defineAreasStatus, {{ _("Error deleting area: %s")|format(error.message)|tojson }}, true);
                 }
             });
         }
@@ -1021,17 +1021,17 @@
 
                 let targetResourceId = resourceId;
                 if (resourceId === '--CREATE_NEW--') {
-                    showStatus(areaStatusDiv, '{{ _("Resource creation from this form is complex. Please map to existing resources for now.") }}', true);
+                    showStatus(areaStatusDiv, {{ _("Resource creation from this form is complex. Please map to existing resources for now.")|tojson }}, true);
                     console.error("Resource creation from define-area-form is not fully implemented in this example script block.");
                     return;
                 }
 
                 if (!targetResourceId || targetResourceId === '--CREATE_NEW--') {
-                     showStatus(areaStatusDiv, '{{ _("Please select a valid resource to map.") }}', true);
+                     showStatus(areaStatusDiv, {{ _("Please select a valid resource to map.")|tojson }}, true);
                      return;
                 }
 
-                showStatus(areaStatusDiv, '{{ _("Saving area definition...") }}', false);
+                showStatus(areaStatusDiv, {{ _("Saving area definition...")|tojson }}, false);
                 // csrfTokenMeta is now in scope as this block is inside DOMContentLoaded
                 const csrfToken = csrfTokenMeta ? csrfTokenMeta.getAttribute('content') : document.querySelector('input[name="csrf_token"]')?.value;
 
@@ -1054,7 +1054,7 @@
                     if (!response.ok) {
                         throw new Error(result.error || `HTTP error! status: ${response.status}`);
                     }
-                    showStatus(areaStatusDiv, result.message || '{{ _("Area definition saved successfully!") }}', false);
+                    showStatus(areaStatusDiv, result.message || {{ _("Area definition saved successfully!")|tojson }}, false);
 
                     if (typeof window.fetchAndDrawExistingMapAreas === 'function') {
                         window.fetchAndDrawExistingMapAreas(floorMapId);
@@ -1063,7 +1063,7 @@
                     populateDefineAreaRolesCheckboxes(); // Call the renamed function
                 } catch (error) {
                     console.error('Error saving area definition:', error);
-                    showStatus(areaStatusDiv, `{{ _("Error saving area definition: ${error.message}") }}`, true);
+                    showStatus(areaStatusDiv, {{ _("Error saving area definition: %s")|format(error.message)|tojson }}, true);
                 }
             });
         }
