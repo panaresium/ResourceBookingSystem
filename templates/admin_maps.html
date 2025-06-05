@@ -824,7 +824,9 @@
                 redrawCanvas();
                 return;
             }
-            showStatus(defineAreasStatus, {{ _("Fetching areas for map ID: %s")|format(mapId)|tojson }}, false);
+            const fetchMsgBase = {{ _("Fetching areas for map ID: %s")|tojson }};
+            const fetchMsg = fetchMsgBase.replace('%s', mapId);
+            showStatus(defineAreasStatus, fetchMsg, false);
             try {
                 // This API endpoint needs to return resources that have map_coordinates for this mapId
                 const response = await fetch(`/api/admin/resources?map_id=${mapId}`);
@@ -841,10 +843,14 @@
                                      }));
 
                 console.log("Fetched and processed areas: ", drawnAreas);
-                showStatus(defineAreasStatus, {{ _("Found %s areas.")|format(drawnAreas.length)|tojson }}, false);
+                const foundAreasMsgBase = {{ _("Found %s areas.")|tojson }};
+                const foundAreasMsg = foundAreasMsgBase.replace('%s', drawnAreas.length);
+                showStatus(defineAreasStatus, foundAreasMsg, false);
             } catch (error) {
                 console.error('Error fetching or processing map areas:', error);
-                showStatus(defineAreasStatus, {{ _("Error fetching areas: %s")|format(error.message)|tojson }}, true);
+                const errorMsgBase = {{ _("Error fetching areas: %s")|tojson }};
+                const errorMsg = errorMsgBase.replace('%s', error.message);
+                showStatus(defineAreasStatus, errorMsg, true);
                 drawnAreas = [];
             }
             redrawCanvas();
@@ -950,7 +956,9 @@
                     return;
                 }
 
-                showStatus(defineAreasStatus, {{ _("Deleting area for resource %s...")|format(selectedArea.resource_id)|tojson }}, false);
+                const deleteProgressMsgBase = {{ _("Deleting area for resource %s...")|tojson }};
+                const deleteProgressMsg = deleteProgressMsgBase.replace('%s', selectedArea.resource_id);
+                showStatus(defineAreasStatus, deleteProgressMsg, false);
                 const csrfToken = csrfTokenMeta ? csrfTokenMeta.getAttribute('content') : document.querySelector('input[name="csrf_token"]')?.value;
                 try {
                     // To delete an area, we update the resource to have null map_coordinates
@@ -980,7 +988,9 @@
 
                 } catch (error) {
                     console.error('Error deleting area mapping:', error);
-                    showStatus(defineAreasStatus, {{ _("Error deleting area: %s")|format(error.message)|tojson }}, true);
+                    const deleteErrorMsgBase = {{ _("Error deleting area: %s")|tojson }};
+                    const deleteErrorMsg = deleteErrorMsgBase.replace('%s', error.message);
+                    showStatus(defineAreasStatus, deleteErrorMsg, true);
                 }
             });
         }
@@ -1066,7 +1076,9 @@
                     populateDefineAreaRolesCheckboxes(); // Call the renamed function
                 } catch (error) {
                     console.error('Error saving area definition:', error);
-                    showStatus(areaStatusDiv, {{ _("Error saving area definition: %s")|format(error.message)|tojson }}, true);
+                    const saveErrorMsgBase = {{ _("Error saving area definition: %s")|tojson }};
+                    const saveErrorMsg = saveErrorMsgBase.replace('%s', error.message);
+                    showStatus(areaStatusDiv, saveErrorMsg, true);
                 }
             });
         }
