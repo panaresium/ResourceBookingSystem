@@ -2110,19 +2110,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 const data = await apiCall(`/api/map_details/${mapId}`, {}, defineAreasStatusDiv);
                 if (data.mapped_resources && data.mapped_resources.length > 0) {
                     data.mapped_resources.forEach(resource => {
-                        // --- LOGGING ADDED for API response resource ---
+                        // --- LOGGING ADDED ---
                         console.log('script.js - fetchAndDrawExistingMapAreas - API response resource:', resource.id, 'Name:', resource.name);
                         console.log('script.js - fetchAndDrawExistingMapAreas - API response resource.map_coordinates:', resource.map_coordinates);
-                        if (resource.map_coordinates && typeof resource.map_coordinates === 'object') {
-                            console.log('script.js - fetchAndDrawExistingMapAreas - API response resource.map_coordinates.allowed_role_ids:', resource.map_coordinates.allowed_role_ids);
-                        }
-                        console.log('script.js - fetchAndDrawExistingMapAreas - API response resource.booking_restriction:', resource.booking_restriction);
-                        console.log('script.js - fetchAndDrawExistingMapAreas - API response resource.allowed_user_ids:', resource.allowed_user_ids);
-                        console.log('script.js - fetchAndDrawExistingMapAreas - API response resource.roles (general resource roles):', resource.roles);
-                        // --- END LOGGING ---
-                        // Original line follows:
-                        if (resource.map_coordinates && typeof resource.map_coordinates === 'object') { // This line was part of the original code, adjusted for context
-                            console.log('script.js - fetchAndDrawExistingMapAreas - API response resource.map_coordinates.allowed_role_ids:', resource.map_coordinates.allowed_role_ids);
                         if (resource.map_coordinates && typeof resource.map_coordinates === 'object') {
                             console.log('script.js - fetchAndDrawExistingMapAreas - API response resource.map_coordinates.allowed_role_ids:', resource.map_coordinates.allowed_role_ids);
                         }
@@ -2393,53 +2383,36 @@ document.addEventListener('DOMContentLoaded', function() {
                         const coords = area.map_coordinates;
                         // Check click within the logical area (using adjusted clickX/Y)
                         if (clickX >= coords.x && clickX <= coords.x + coords.width && clickY >= coords.y && clickY <= coords.y + coords.height) {
-                            selectedAreaForEditing = area; // `area` here is from `existingMapAreas`
+                            selectedAreaForEditing = area;
+                            console.log('script.js - Canvas Click - Retrieved from existingMapAreas:', selectedAreaForEditing); // Changed from area to selectedAreaForEditing for consistency
+                            console.log('Area selected:', JSON.parse(JSON.stringify(selectedAreaForEditing))); // Existing log
 
-                            // Log what's retrieved from existingMapAreas
-                            console.log('script.js - Canvas Click - Retrieved from existingMapAreas:', selectedAreaForEditing);
-
-                            // Detailed log for the data that will be used for the form
-                            // This object (selectedAreaForEditing) should now contain all necessary fields if Part A was successful.
-                            console.log('script.js - Canvas Click - Data to be used by populateAreaForm (selectedAreaForEditing):', selectedAreaForEditing);
-                            if (selectedAreaForEditing && typeof selectedAreaForEditing === 'object') {
-                                console.log('script.js - Canvas Click - selectedAreaForEditing.map_coordinates:', selectedAreaForEditing.map_coordinates);
-                                if (selectedAreaForEditing.map_coordinates && typeof selectedAreaForEditing.map_coordinates === 'object') {
-                                    console.log('script.js - Canvas Click - selectedAreaForEditing.map_coordinates.allowed_role_ids:', selectedAreaForEditing.map_coordinates.allowed_role_ids);
+                            // --- DETAILED LOGGING ADDED ---
+                            const area_data_for_form = selectedAreaForEditing; // Alias for clarity
+                            console.log('script.js - Canvas Click - Data to be used by populateAreaForm (selectedAreaForEditing):', area_data_for_form);
+                            if (area_data_for_form && typeof area_data_for_form === 'object') {
+                                console.log('script.js - Canvas Click - area_data_for_form.map_coordinates:', area_data_for_form.map_coordinates);
+                                if (area_data_for_form.map_coordinates && typeof area_data_for_form.map_coordinates === 'object') {
+                                    console.log('script.js - Canvas Click - area_data_for_form.map_coordinates.allowed_role_ids:', area_data_for_form.map_coordinates.allowed_role_ids);
                                 }
-                                console.log('script.js - Canvas Click - selectedAreaForEditing.booking_restriction:', selectedAreaForEditing.booking_restriction);
-                                console.log('script.js - Canvas Click - selectedAreaForEditing.allowed_user_ids:', selectedAreaForEditing.allowed_user_ids);
-                                console.log('script.js - Canvas Click - selectedAreaForEditing.roles (general roles):', selectedAreaForEditing.roles);
+                                console.log('script.js - Canvas Click - area_data_for_form.booking_restriction:', area_data_for_form.booking_restriction);
+                                console.log('script.js - Canvas Click - area_data_for_form.allowed_user_ids:', area_data_for_form.allowed_user_ids);
+                                console.log('script.js - Canvas Click - area_data_for_form.roles:', area_data_for_form.roles);
                             }
+                            // --- END DETAILED LOGGING ---
 
                             isDrawing = false; currentDrawnRect = null; clickedOnExistingArea = true;
                             if (editDeleteButtonsDiv) editDeleteButtonsDiv.style.display = 'block';
-
-                            // Populate form fields directly using selectedAreaForEditing
-                            updateCoordinateInputs(selectedAreaForEditing.map_coordinates);
-                            if (resourceToMapSelect) {
-                                // `selectedAreaForEditing.id` or `selectedAreaForEditing.resource_id` should be the resource's actual ID.
-                                // The objects in existingMapAreas have `id` and `resource_id` as same.
-                                resourceToMapSelect.value = selectedAreaForEditing.id;
+                            updateCoordinateInputs(coords);
+                            if (resourceToMapSelect) resourceToMapSelect.value = area.resource_id;
+                            if (bookingPermissionDropdown) bookingPermissionDropdown.value = area.booking_restriction || "";
+                            if (authorizedRolesCheckboxContainer) {
+                                const selectedRoleIds = (area.roles || []).map(r => String(r.id));
+                                authorizedRolesCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                                    cb.checked = selectedRoleIds.includes(cb.value);
+                                });
                             }
-                            if (bookingPermissionDropdown) {
-                                bookingPermissionDropdown.value = selectedAreaForEditing.booking_restriction || "";
-                            }
-
-                            // Call window.populateAreaForm from admin_maps.html to handle complex parts like role checkboxes
-                            // It expects map_coordinates object and resourceId
-                            console.log('script.js - Canvas Click - About to call window.populateAreaForm with:', selectedAreaForEditing.map_coordinates, 'and ID:', selectedAreaForEditing.id);
-                            if (typeof window.populateAreaForm === 'function') {
-                                window.populateAreaForm(selectedAreaForEditing.map_coordinates, selectedAreaForEditing.id);
-                            } else {
-                                console.warn('window.populateAreaForm is not defined. Role checkboxes might not be populated correctly.');
-                                // Fallback or manual population of roles if needed, though populateAreaForm is preferred.
-                                // For instance, if populateDefineAreaRolesCheckboxes is global (which it is in admin_maps.html's inline script):
-                                // if (typeof populateDefineAreaRolesCheckboxes === 'function' && selectedAreaForEditing.map_coordinates) {
-                                //    populateDefineAreaRolesCheckboxes(selectedAreaForEditing.map_coordinates.allowed_role_ids || []);
-                                // }
-                            }
-
-                            resourceToMapSelect.dispatchEvent(new Event('change')); // Trigger change to update other UI if needed
+                            resourceToMapSelect.dispatchEvent(new Event('change'));
                             break;
                         }
                     }
