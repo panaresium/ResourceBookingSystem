@@ -655,6 +655,335 @@
         loadMaps();
         // Roles for area definition will be loaded when "Define Areas" is shown or area selected.
 
+        // --- START: Canvas Drawing and Area Selection Logic ---
+        let canvas, ctx, selectedMapImageForCanvas;
+        let isDrawing = false;
+        let startX, startY, currentX, currentY;
+        let drawnAreas = []; // To store areas fetched from backend and newly drawn ones
+        let selectedArea = null; // To store the currently selected area object
+        const defineAreasStatus = document.getElementById('define-areas-status'); // For messages
+
+        window.initializeDefineAreasCanvasLogic = function() {
+            canvas = document.getElementById('drawing-canvas');
+            selectedMapImageForCanvas = document.getElementById('selected-map-image');
+            const editDeleteButtons = document.getElementById('edit-delete-buttons');
+
+            if (!canvas || !selectedMapImageForCanvas) {
+                console.error('Canvas or map image element not found for initialization.');
+                showStatus(defineAreasStatus, '{{ _("Error initializing area definition tool: Canvas or image missing.") }}', true);
+                return;
+            }
+            ctx = canvas.getContext('2d');
+
+            // Set canvas dimensions to match the image
+            canvas.width = selectedMapImageForCanvas.clientWidth;
+            canvas.height = selectedMapImageForCanvas.clientHeight;
+            console.log(`Canvas initialized with dimensions: ${canvas.width}x${canvas.height}`);
+
+            // Event Listeners for drawing
+            canvas.addEventListener('mousedown', handleMouseDown);
+            canvas.addEventListener('mousemove', handleMouseMove);
+            canvas.addEventListener('mouseup', handleMouseUpOrLeave);
+            canvas.addEventListener('mouseleave', handleMouseUpOrLeave); // Stop drawing if mouse leaves canvas
+            canvas.addEventListener('click', handleCanvasClick);
+
+            // Clear form and hide edit/delete buttons initially
+            resetAreaSelectionAndForm();
+        }
+
+        function handleMouseDown(event) {
+            if (!window.currentMapContext) return; // No map selected
+            // Clear previous selection and reset form before drawing a new area
+            if (selectedArea) {
+                selectedArea = null; // Deselect
+                resetAreaSelectionAndForm(); // Clear form and hide buttons
+            }
+
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            startX = event.clientX - rect.left;
+            startY = event.clientY - rect.top;
+            currentX = startX;
+            currentY = startY;
+            console.log(`Mouse down at (${startX}, ${startY})`);
+        }
+
+        function handleMouseMove(event) {
+            if (!isDrawing || !window.currentMapContext) return;
+            const rect = canvas.getBoundingClientRect();
+            currentX = event.clientX - rect.left;
+            currentY = event.clientY - rect.top;
+            redrawCanvas(); // Redraw all areas and the current drawing rectangle
+        }
+
+        function handleMouseUpOrLeave(event) {
+            if (!isDrawing || !window.currentMapContext) return;
+            isDrawing = false;
+            const width = currentX - startX;
+            const height = currentY - startY;
+
+            console.log(`Mouse up/leave. Drawn rect: x=${startX}, y=${startY}, w=${width}, h=${height}`);
+
+            if (Math.abs(width) > 5 && Math.abs(height) > 5) { // Minimum size for a new area
+                const newArea = {
+                    x: Math.min(startX, currentX),
+                    y: Math.min(startY, currentY),
+                    width: Math.abs(width),
+                    height: Math.abs(height),
+                    resource_id: null, // New area, not yet associated
+                    allowed_role_ids: [] // Default empty
+                };
+                // Don't add to drawnAreas yet, let selection populate the form
+                // This new rect is implicitly the "selected" one for the form
+                populateAreaFormWithCoords(newArea);
+                showStatus(defineAreasStatus, '{{ _("New area drawn. Fill details and save.") }}', false);
+                // Do not show edit/delete for a brand new, unsaved area
+                document.getElementById('edit-delete-buttons').style.display = 'none';
+                selectedArea = newArea; // Treat new drawing as selected for redraw purposes
+            } else {
+                showStatus(defineAreasStatus, '{{ _("Area too small to define.") }}', true);
+            }
+            redrawCanvas(); // Redraw to show the final new area (or clear if too small)
+        }
+
+        function handleCanvasClick(event) {
+            if (isDrawing || !window.currentMapContext) return; // Don't select if currently drawing
+            const rect = canvas.getBoundingClientRect();
+            const clickX = event.clientX - rect.left;
+            const clickY = event.clientY - rect.top;
+
+            let clickedOnArea = null;
+            // Check from top-most (last drawn) to bottom
+            for (let i = drawnAreas.length - 1; i >= 0; i--) {
+                const area = drawnAreas[i];
+                if (clickX >= area.x && clickX <= area.x + area.width &&
+                    clickY >= area.y && clickY <= area.y + area.height) {
+                    clickedOnArea = area;
+                    break;
+                }
+            }
+
+            if (clickedOnArea) {
+                selectedArea = clickedOnArea;
+                console.log("Selected existing area:", selectedArea);
+                populateAreaFormWithCoords(selectedArea.coordinates, selectedArea.resource_id, selectedArea.booking_restriction, selectedArea.allowed_role_ids);
+                document.getElementById('edit-delete-buttons').style.display = 'block';
+                showStatus(defineAreasStatus, `{{ _("Selected area for resource ID: ${selectedArea.resource_id || 'Unassigned'}.") }}`, false);
+            } else {
+                // Clicked outside any area, deselect if one was selected
+                if (selectedArea) {
+                    selectedArea = null;
+                    resetAreaSelectionAndForm();
+                    showStatus(defineAreasStatus, '{{ _("Canvas clicked, no area selected. Draw a new area or click an existing one.") }}', false);
+                }
+            }
+            redrawCanvas();
+        }
+
+        function populateAreaFormWithCoords(coordinates, resourceId = null, bookingRestriction = '', allowedRoleIds = []) {
+            document.getElementById('coord-x').value = coordinates.x || 0;
+            document.getElementById('coord-y').value = coordinates.y || 0;
+            document.getElementById('coord-width').value = coordinates.width || 0;
+            document.getElementById('coord-height').value = coordinates.height || 0;
+
+            const resourceSelect = document.getElementById('resource-to-map');
+            if (resourceId) {
+                resourceSelect.value = resourceId;
+            } else {
+                // For a new drawing, or if area is not tied to a specific resource yet in data
+                resourceSelect.value = '--CREATE_NEW--'; // Or keep it blank, depending on desired UX
+            }
+            // Trigger change to update dependent UI if any (e.g. resource actions)
+            resourceSelect.dispatchEvent(new Event('change'));
+
+
+            document.getElementById('booking-permission').value = bookingRestriction || '';
+            populateDefineAreaRolesCheckboxes(allowedRoleIds || []);
+
+            // If global populateAreaForm exists and does more, call it
+            // This is now the primary populator for coords and roles.
+            // window.populateAreaForm might be designed to expect a full area object.
+        }
+
+        function resetAreaSelectionAndForm() {
+            document.getElementById('define-area-form').reset();
+            populateDefineAreaRolesCheckboxes([]); // Clear role checkboxes
+            selectedArea = null;
+            document.getElementById('edit-delete-buttons').style.display = 'none';
+            const resourceSelect = document.getElementById('resource-to-map');
+            resourceSelect.value = '--CREATE_NEW--';
+            resourceSelect.dispatchEvent(new Event('change')); // Update dependent UI
+            // redrawCanvas(); // Call if needed, but usually after an action
+        }
+
+
+        window.fetchAndDrawExistingMapAreas = async function(mapId) {
+            if (!mapId) {
+                console.warn("fetchAndDrawExistingMapAreas called with no mapId");
+                drawnAreas = [];
+                redrawCanvas();
+                return;
+            }
+            showStatus(defineAreasStatus, `{{ _("Fetching areas for map ID: ${mapId}...") }}`, false);
+            try {
+                // This API endpoint needs to return resources that have map_coordinates for this mapId
+                const response = await fetch(`/api/admin/resources?map_id=${mapId}`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const resources = await response.json();
+
+                drawnAreas = resources.filter(r => r.map_coordinates && r.floor_map_id == mapId)
+                                     .map(r => ({ // Adapt to the expected structure for drawing
+                                         resource_id: r.id,
+                                         name: r.name, // For potential display on canvas later
+                                         coordinates: r.map_coordinates, // Assumes map_coordinates is {x, y, width, height, type}
+                                         booking_restriction: r.booking_restriction,
+                                         allowed_role_ids: r.map_coordinates.allowed_role_ids || []
+                                     }));
+
+                console.log("Fetched and processed areas: ", drawnAreas);
+                showStatus(defineAreasStatus, `{{ _("Found ${drawnAreas.length} areas.") }}`, false);
+            } catch (error) {
+                console.error('Error fetching or processing map areas:', error);
+                showStatus(defineAreasStatus, `{{ _("Error fetching areas: ${error.message}") }}`, true);
+                drawnAreas = [];
+            }
+            redrawCanvas();
+        }
+
+        function redrawCanvas() {
+            if (!ctx || !canvas) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw all existing/saved areas
+            drawnAreas.forEach(area => {
+                if (area.coordinates) { // Ensure coordinates exist
+                    drawRectangle(area.coordinates, selectedArea === area, false);
+                }
+            });
+
+            // If currently drawing a new rectangle, draw it too
+            if (isDrawing) {
+                const tempRect = {
+                    x: Math.min(startX, currentX),
+                    y: Math.min(startY, currentY),
+                    width: Math.abs(currentX - startX),
+                    height: Math.abs(currentY - startY)
+                };
+                drawRectangle(tempRect, true, true); // Highlight as "selected" and "new"
+            } else if (selectedArea && !drawnAreas.includes(selectedArea) && selectedArea.width && selectedArea.height) {
+                // This handles showing a newly drawn (but not yet saved) rectangle as selected
+                 drawRectangle(selectedArea, true, false);
+            }
+        }
+
+        function drawRectangle(rectCoords, isCurrentlySelected = false, isNewDrawing = false) {
+            if (!rectCoords) return;
+
+            let x = rectCoords.x;
+            let y = rectCoords.y;
+            let width = rectCoords.width;
+            let height = rectCoords.height;
+
+            // Adjust for map offsets if they are part of window.currentMapContext
+            // The canvas coordinates should be absolute to the image, so offsets are usually applied when calculating
+            // the coordinates to store, not during drawing. However, if coordinates are stored *without* offset
+            // and offset is applied at display time, this is where it would happen.
+            // Assuming coordinates are already offset-adjusted as per current setup.
+
+            ctx.beginPath();
+            ctx.rect(x, y, width, height);
+
+            if (isCurrentlySelected) {
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.3)'; // Light green for selected
+                ctx.strokeStyle = 'rgba(0, 255, 0, 0.8)';
+                ctx.lineWidth = 2;
+            } else if (isNewDrawing) {
+                ctx.fillStyle = 'rgba(0, 0, 255, 0.2)'; // Light blue for new drawing
+                ctx.strokeStyle = 'rgba(0, 0, 255, 0.7)';
+                ctx.lineWidth = 1;
+            }
+            else {
+                ctx.fillStyle = 'rgba(255, 165, 0, 0.3)'; // Light orange for existing
+                ctx.strokeStyle = 'rgba(255, 165, 0, 0.8)';
+                ctx.lineWidth = 1;
+            }
+            ctx.fill();
+            ctx.stroke();
+            ctx.closePath();
+        }
+
+        // Edit and Delete button listeners
+        const editAreaBtn = document.getElementById('edit-selected-area-btn');
+        const deleteAreaBtn = document.getElementById('delete-selected-area-btn');
+
+        if (editAreaBtn) {
+            editAreaBtn.addEventListener('click', function() {
+                if (!selectedArea || !selectedArea.resource_id) { // Can only edit saved areas
+                    showStatus(defineAreasStatus, '{{ _("No saved area selected to edit.") }}', true);
+                    return;
+                }
+                // For "edit", we can simply allow the user to re-draw.
+                // Clear the selected area, keep form populated, user can draw new rect.
+                // The current selectedArea's data (resource_id etc.) will be used on save.
+                showStatus(defineAreasStatus, '{{ _("Edit mode: Draw a new rectangle for the selected resource. The existing area will be replaced upon saving.") }}', false);
+                // Effectively, we are just keeping the form data and allowing a new shape to be drawn.
+                // The save operation will then update the coordinates for selectedArea.resource_id.
+                // No specific drawing state change, user just draws again. The form holds the context.
+                // selectedArea = null; // Deselect to remove highlight, but form keeps data
+                // redrawCanvas();
+                // Better UX: Keep it selected, but indicate that drawing again will modify it.
+                // For now, let's just rely on the message and the next save action.
+                 alert("{{ _('To edit, adjust values in the form or re-draw the rectangle on the canvas. Then click Save Area.') }}");
+            });
+        }
+
+        if (deleteAreaBtn) {
+            deleteAreaBtn.addEventListener('click', async function() {
+                if (!selectedArea || !selectedArea.resource_id) {
+                    showStatus(defineAreasStatus, '{{ _("No saved area selected to delete.") }}', true);
+                    return;
+                }
+                if (!confirm(`{{ _("Are you sure you want to remove the area mapping for resource '${selectedArea.name || selectedArea.resource_id}'? The resource itself will not be deleted.") }}`)) {
+                    return;
+                }
+
+                showStatus(defineAreasStatus, `{{ _("Deleting area for resource ${selectedArea.resource_id}...") }}`, false);
+                const csrfToken = csrfTokenMeta ? csrfTokenMeta.getAttribute('content') : document.querySelector('input[name="csrf_token"]')?.value;
+                try {
+                    // To delete an area, we update the resource to have null map_coordinates
+                    const response = await fetch(`/api/admin/resources/${selectedArea.resource_id}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': csrfToken
+                        },
+                        body: JSON.stringify({
+                            floor_map_id: null, // Or currentMapContext.mapId with null coordinates
+                            map_coordinates: null,
+                            // Retain other properties of the resource by not sending them or sending original values
+                        })
+                    });
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.error || `HTTP error! status: ${response.status}`);
+                    }
+                    showStatus(defineAreasStatus, result.message || '{{ _("Area mapping deleted successfully.") }}', false);
+
+                    // Refresh areas from backend
+                    if (window.currentMapContext) {
+                        fetchAndDrawExistingMapAreas(window.currentMapContext.mapId);
+                    }
+                    resetAreaSelectionAndForm();
+
+                } catch (error) {
+                    console.error('Error deleting area mapping:', error);
+                    showStatus(defineAreasStatus, `{{ _("Error deleting area: ${error.message}") }}`, true);
+                }
+            });
+        }
+
+        // --- END: Canvas Drawing and Area Selection Logic ---
+
         // --- Define Area Form Logic (Moved into DOMContentLoaded) ---
         const defineAreaForm = document.getElementById('define-area-form');
         if (defineAreaForm) {
