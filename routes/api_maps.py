@@ -12,7 +12,7 @@ from extensions import db
 from models import FloorMap, Resource, Booking # Role removed if no longer needed
 from auth import permission_required
 # Assuming these utils will be moved to utils.py or are already there
-from utils import add_audit_log, allowed_file, _get_map_configuration_data, _import_map_configuration_data, check_resources_availability_for_user
+from utils import add_audit_log, allowed_file, _get_map_configuration_data, _import_map_configuration_data, check_resources_availability_for_user, get_detailed_map_availability_for_user
 
 # Conditional import for Azure
 try:
@@ -108,41 +108,43 @@ def get_maps_availability():
         ]
 
         for floor_map_item in all_floor_maps:
-            map_is_available_for_user = False
+            availability_status = "low" # Default status
 
-            # Check if the current_user has any active bookings on any resource on the floor_map_item for the target_date
-            user_has_booking_on_this_map = db.session.query(Booking).join(Resource).filter(
+            resources_on_map = Resource.query.filter(
                 Resource.floor_map_id == floor_map_item.id,
-                Booking.user_name == current_user.username,
-                func.date(Booking.start_time) <= target_date,
-                func.date(Booking.end_time) >= target_date,
-                Booking.status.notin_(['cancelled', 'rejected'])
-            ).first() is not None
+                Resource.status == 'published'
+            ).all()
 
-            if user_has_booking_on_this_map:
-                map_is_available_for_user = True
+            if not resources_on_map:
+                availability_status = "low"
             else:
-                resources_on_map = Resource.query.filter(
-                    Resource.floor_map_id == floor_map_item.id,
-                    Resource.status == 'published'
-                ).all()
+                details = get_detailed_map_availability_for_user(
+                    resources_on_map,
+                    target_date,
+                    current_user,
+                    primary_slots,
+                    current_app.logger
+                )
+                total_slots = details.get('total_primary_slots', 0)
+                available_slots = details.get('available_primary_slots_for_user', 0)
 
-                if resources_on_map:
-                    map_is_available_for_user = check_resources_availability_for_user(
-                        resources_on_map,
-                        target_date,
-                        current_user,
-                        primary_slots,
-                        current_app.logger
-                    )
-                # If no resources on map and no existing booking, map_is_available_for_user remains False
+                if total_slots == 0:
+                    availability_status = "low"
+                else:
+                    percentage = (available_slots / total_slots) * 100
+                    if percentage >= 50:
+                        availability_status = "high"
+                    elif percentage > 0:
+                        availability_status = "medium"
+                    else: # percentage == 0
+                        availability_status = "low"
 
             results.append({
                 "map_id": floor_map_item.id,
                 "map_name": floor_map_item.name,
                 "location": floor_map_item.location,
                 "floor": floor_map_item.floor,
-                "is_available_for_user": map_is_available_for_user
+                "availability_status": availability_status
             })
 
         return jsonify(results), 200
