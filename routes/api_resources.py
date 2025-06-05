@@ -200,7 +200,15 @@ def update_resource_details_admin(resource_id):
     for field in allowed_fields:
         if field in data:
             if field == 'map_coordinates' and data[field] is not None:
-                setattr(resource, field, json.dumps(data[field]))
+                map_coords_data = data[field]
+                current_app.logger.debug(f"Before json.dumps, map_coordinates data: {map_coords_data}")
+                current_app.logger.debug(f"Type of map_coordinates data: {type(map_coords_data)}")
+                if isinstance(map_coords_data, dict):
+                    current_app.logger.debug(f"Type of allowed_role_ids before dumps: {type(map_coords_data.get('allowed_role_ids'))}")
+
+                json_string_coords = json.dumps(map_coords_data)
+                current_app.logger.debug(f"After json.dumps, map_coordinates string: {json_string_coords}")
+                setattr(resource, field, json_string_coords)
             else:
                 setattr(resource, field, data[field])
 
