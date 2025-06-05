@@ -111,14 +111,15 @@ def get_maps_availability():
             map_is_available_for_user = False
 
             # Check if the current_user has any active bookings on any resource on the floor_map_item for the target_date
-            existing_booking = db.session.query(Booking).join(Resource).filter(
+            user_has_booking_on_this_map = db.session.query(Booking).join(Resource).filter(
                 Resource.floor_map_id == floor_map_item.id,
-                Booking.user_id == current_user.id,
+                Booking.user_name == current_user.username,
                 func.date(Booking.start_time) <= target_date,
-                func.date(Booking.end_time) >= target_date
-            ).first()
+                func.date(Booking.end_time) >= target_date,
+                Booking.status.notin_(['cancelled', 'rejected'])
+            ).first() is not None
 
-            if existing_booking:
+            if user_has_booking_on_this_map:
                 map_is_available_for_user = True
             else:
                 resources_on_map = Resource.query.filter(
