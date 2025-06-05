@@ -383,19 +383,6 @@
             populateDefineAreaRolesCheckboxes(); // Populate/update messages after fetch attempt
         }
 
-        function populateDefineAreaRolesSelect(selectedRoleIds) {
-            console.warn('Deprecated call to populateDefineAreaRolesSelect, redirecting to populateDefineAreaRolesCheckboxes. Caller should be updated.');
-            // Ensure populateDefineAreaRolesCheckboxes is accessible in this scope.
-            // If it's defined on window, use window.populateDefineAreaRolesCheckboxes
-            if (typeof populateDefineAreaRolesCheckboxes === 'function') {
-                populateDefineAreaRolesCheckboxes(selectedRoleIds);
-            } else if (typeof window.populateDefineAreaRolesCheckboxes === 'function') {
-                window.populateDefineAreaRolesCheckboxes(selectedRoleIds);
-            } else {
-                console.error('populateDefineAreaRolesCheckboxes function not found for shim redirection.');
-            }
-        }
-
         function populateDefineAreaRolesCheckboxes(selectedRoleIds = []) {
             const checkboxContainer = document.getElementById('define-area-roles-checkbox-container');
             const rolesLoadingMsg = document.getElementById('define-area-roles-loading-message');
