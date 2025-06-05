@@ -132,7 +132,18 @@ def get_resource_available_slots(resource_id):
 def get_all_resources_admin():
     logger = current_app.logger
     try:
-        resources = Resource.query.all()
+        map_id_str = request.args.get('map_id')
+        query = Resource.query
+
+        if map_id_str:
+            try:
+                map_id = int(map_id_str)
+                query = query.filter(Resource.floor_map_id == map_id)
+            except ValueError:
+                logger.warning(f"Invalid map_id format: {map_id_str}. Must be an integer.")
+                return jsonify({'error': f"Invalid map_id format: '{map_id_str}'. Must be an integer."}), 400
+
+        resources = query.all()
         resources_list = [resource_to_dict(r) for r in resources]
         return jsonify(resources_list), 200
     except Exception as e:
