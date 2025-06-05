@@ -2110,15 +2110,30 @@ document.addEventListener('DOMContentLoaded', function() {
                 const data = await apiCall(`/api/map_details/${mapId}`, {}, defineAreasStatusDiv);
                 if (data.mapped_resources && data.mapped_resources.length > 0) {
                     data.mapped_resources.forEach(resource => {
+                        // --- LOGGING ADDED ---
+                        console.log('script.js - fetchAndDrawExistingMapAreas - API response resource:', resource.id, 'Name:', resource.name);
+                        console.log('script.js - fetchAndDrawExistingMapAreas - API response resource.map_coordinates:', resource.map_coordinates);
+                        if (resource.map_coordinates && typeof resource.map_coordinates === 'object') {
+                            console.log('script.js - fetchAndDrawExistingMapAreas - API response resource.map_coordinates.allowed_role_ids:', resource.map_coordinates.allowed_role_ids);
+                        }
+                        console.log('script.js - fetchAndDrawExistingMapAreas - API response resource.booking_restriction:', resource.booking_restriction);
+                        console.log('script.js - fetchAndDrawExistingMapAreas - API response resource.allowed_user_ids:', resource.allowed_user_ids);
+                        console.log('script.js - fetchAndDrawExistingMapAreas - API response resource.roles (general resource roles):', resource.roles);
+                        // --- END LOGGING ---
+
                         if (resource.map_coordinates && resource.map_coordinates.type === 'rect') {
-                            existingMapAreas.push({
+                            const area_object_to_store = {
                                 id: resource.id, resource_id: resource.id, name: resource.name,
-                                map_coordinates: resource.map_coordinates,
+                                map_coordinates: resource.map_coordinates, // This should include allowed_role_ids if present in resource.map_coordinates
                                 booking_restriction: resource.booking_restriction,
                                 allowed_user_ids: resource.allowed_user_ids,
-                                roles: resource.roles, // Assuming roles is an array of objects [{id, name}, ...]
+                                roles: resource.roles,
                                 status: resource.status, floor_map_id: resource.floor_map_id
-                            });
+                            };
+                            // --- LOGGING ADDED ---
+                            console.log('script.js - fetchAndDrawExistingMapAreas - Storing in existingMapAreas:', area_object_to_store);
+                            // --- END LOGGING ---
+                            existingMapAreas.push(area_object_to_store);
                         }
                     });
                     if (defineAreasStatusDiv) {
@@ -2369,7 +2384,23 @@ document.addEventListener('DOMContentLoaded', function() {
                         // Check click within the logical area (using adjusted clickX/Y)
                         if (clickX >= coords.x && clickX <= coords.x + coords.width && clickY >= coords.y && clickY <= coords.y + coords.height) {
                             selectedAreaForEditing = area;
-                            console.log('Area selected:', JSON.parse(JSON.stringify(selectedAreaForEditing)));
+                            console.log('script.js - Canvas Click - Retrieved from existingMapAreas:', selectedAreaForEditing); // Changed from area to selectedAreaForEditing for consistency
+                            console.log('Area selected:', JSON.parse(JSON.stringify(selectedAreaForEditing))); // Existing log
+
+                            // --- DETAILED LOGGING ADDED ---
+                            const area_data_for_form = selectedAreaForEditing; // Alias for clarity
+                            console.log('script.js - Canvas Click - Data to be used by populateAreaForm (selectedAreaForEditing):', area_data_for_form);
+                            if (area_data_for_form && typeof area_data_for_form === 'object') {
+                                console.log('script.js - Canvas Click - area_data_for_form.map_coordinates:', area_data_for_form.map_coordinates);
+                                if (area_data_for_form.map_coordinates && typeof area_data_for_form.map_coordinates === 'object') {
+                                    console.log('script.js - Canvas Click - area_data_for_form.map_coordinates.allowed_role_ids:', area_data_for_form.map_coordinates.allowed_role_ids);
+                                }
+                                console.log('script.js - Canvas Click - area_data_for_form.booking_restriction:', area_data_for_form.booking_restriction);
+                                console.log('script.js - Canvas Click - area_data_for_form.allowed_user_ids:', area_data_for_form.allowed_user_ids);
+                                console.log('script.js - Canvas Click - area_data_for_form.roles:', area_data_for_form.roles);
+                            }
+                            // --- END DETAILED LOGGING ---
+
                             isDrawing = false; currentDrawnRect = null; clickedOnExistingArea = true;
                             if (editDeleteButtonsDiv) editDeleteButtonsDiv.style.display = 'block';
                             updateCoordinateInputs(coords);
