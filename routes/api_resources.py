@@ -189,10 +189,7 @@ def update_resource_details_admin(resource_id):
     for field in allowed_fields:
         if field in data:
             if field == 'map_coordinates' and data[field] is not None:
-                current_app.logger.info(f"Received map_coordinates data from frontend: {data[field]}")
-                json_string_to_save = json.dumps(data[field])
-                current_app.logger.info(f"JSON string being saved to resource.map_coordinates: {json_string_to_save}")
-                setattr(resource, field, json_string_to_save)
+                setattr(resource, field, json.dumps(data[field]))
             else:
                 setattr(resource, field, data[field])
 
