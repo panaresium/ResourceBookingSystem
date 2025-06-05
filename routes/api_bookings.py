@@ -139,6 +139,17 @@ def create_booking():
                 current_app.logger.info(f"Permission granted for resource {resource.id}: Resource is open to all authenticated users (no specific user/role restrictions).")
 
     # Final authorization check (error_message is set based on which check failed)
+    current_app.logger.info(
+        f"Booking permission pre-check for user '{current_user.username}' on resource ID {resource.id} ('{resource.name}'): "
+        f"UserIsAdmin: {current_user.is_admin}, "
+        f"ResourceAdminOnly: {resource.booking_restriction == 'admin_only'}, "
+        f"AreaRolesDefined: {area_roles_defined}, "
+        f"AreaAllowedRoleIDs: {area_allowed_role_ids if area_roles_defined else 'N/A'}, "
+        f"UserInParsedResourceAllowedIDs: {current_user.id in parsed_resource_allowed_ids if 'parsed_resource_allowed_ids' in locals() else 'N/A'}, "
+        f"UserRoleIDs: {[role.id for role in current_user.roles]}, "
+        f"GeneralResourceRoleIDs: {[role.id for role in resource.roles] if resource.roles else 'N/A'}, "
+        f"CanBookOverall: {can_book_overall}"
+    )
     if not can_book_overall:
         current_app.logger.warning(f"Final booking permission check DENIED for user '{current_user.username}' on resource {resource.id} ('{resource.name}'). Reason: {error_message}")
         return jsonify({'error': error_message}), 403

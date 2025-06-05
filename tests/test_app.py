@@ -4622,6 +4622,241 @@ class TestBookingSettingsEnforcement(AppTests):
         db.session.commit()
         self.logout()
 
+# --- Test Class for Booking Permission Logic ---
+class TestBookingPermissions(AppTests):
+    def setUp(self):
+        super().setUp()
+        # Common roles - create them once here if they don't exist
+        # Ensure roles are fetched or created and committed within the app context
+
+        # Role creation/retrieval logic
+        role_admin = Role.query.filter_by(name="Administrator").first()
+        if not role_admin:
+            role_admin = Role(name="Administrator", permissions="all_permissions")
+            db.session.add(role_admin)
+        self.role_admin = role_admin
+
+        role_area_a = Role.query.filter_by(name="RoleAreaA").first()
+        if not role_area_a:
+            role_area_a = Role(name="RoleAreaA", description="Role for Area A")
+            db.session.add(role_area_a)
+        self.role_area_a = role_area_a
+
+        role_general_b = Role.query.filter_by(name="RoleGeneralB").first()
+        if not role_general_b:
+            role_general_b = Role(name="RoleGeneralB", description="General Role for Resource B")
+            db.session.add(role_general_b)
+        self.role_general_b = role_general_b
+
+        role_general_d = Role.query.filter_by(name="RoleGeneralD").first()
+        if not role_general_d:
+            role_general_d = Role(name="RoleGeneralD", description="General Role for Resource D (fallback test)")
+            db.session.add(role_general_d)
+        self.role_general_d = role_general_d
+
+        db.session.commit() # Commit all roles at once after checks
+
+
+    def _create_user_for_perm_test(self, username, password="password", role_names=None, is_admin=False):
+        """Helper to create a user for permission tests, ensuring roles exist."""
+        user = User.query.filter_by(username=username).first()
+        if user: # Delete if exists to ensure clean state for roles
+            db.session.delete(user)
+            db.session.commit()
+
+        user = User(username=username, email=f"{username}@example.com", is_admin=is_admin)
+        user.set_password(password)
+
+        assigned_roles = []
+        if role_names:
+            for role_name in role_names:
+                role = Role.query.filter_by(name=role_name).first()
+                # Roles should ideally be created in setUp to ensure their IDs are stable before user creation.
+                # If a role_name is passed that wasn't in setUp, this will create it.
+                if not role:
+                    role = Role(name=role_name, description=f"Dynamic role for {role_name}")
+                    db.session.add(role)
+                    # Need to commit here if role is new and to be used immediately by user.roles.append
+                    db.session.commit()
+                assigned_roles.append(role)
+        user.roles = assigned_roles
+
+        db.session.add(user)
+        db.session.commit()
+        return user
+
+    def _create_resource_for_perm_test(self, name, map_coordinates_json_str=None, allowed_user_ids_str=None, booking_restriction_str=None, general_role_names=None, floor_map_id=None):
+        """Helper to create a resource for permission tests."""
+        resource = Resource(
+            name=name,
+            capacity=10, # Default capacity
+            status='published',
+            map_coordinates=map_coordinates_json_str,
+            allowed_user_ids=allowed_user_ids_str,
+            booking_restriction=booking_restriction_str,
+            floor_map_id=floor_map_id if floor_map_id else self.floor_map.id # Use default map if none given
+        )
+        if general_role_names:
+            roles_to_assign = []
+            for role_name in general_role_names:
+                role = Role.query.filter_by(name=role_name).first()
+                if role: # Roles should be created in setUp
+                    roles_to_assign.append(role)
+            resource.roles = roles_to_assign
+
+        db.session.add(resource)
+        db.session.commit()
+        return resource
+
+    def _make_booking_request(self, user_making_request, resource_id, date_str=None, start_time_str='09:00', end_time_str='10:00', title='Test Booking'):
+        """Helper to log in a user and make a booking request."""
+        if not date_str:
+            # Default to a date far enough in the future to avoid past booking restrictions
+            date_str = (datetime.utcnow() + timedelta(days=35)).strftime('%Y-%m-%d')
+
+        self.login(user_making_request.username, "password") # Assuming common password "password"
+
+        payload = {
+            'resource_id': resource_id,
+            'date_str': date_str,
+            'start_time_str': start_time_str,
+            'end_time_str': end_time_str,
+            'title': title,
+            'user_name': user_making_request.username # Booking for oneself
+        }
+        response = self.client.post('/api/bookings', json=payload)
+        # self.logout() # Consider if logout is needed after each action or if session can persist
+        return response
+
+    # --- Test Scenarios ---
+
+    def test_admin_can_book_restrictive_area_role_resource(self):
+        """1. Admin Booking: Admin user can book a resource even if it has restrictive area roles."""
+        admin_user = self._create_user_for_perm_test("perm_admin_user", is_admin=True, role_names=[self.role_admin.name])
+
+        # Resource with restrictive area role (RoleAreaA)
+        map_coords = json.dumps({'allowed_role_ids': [self.role_area_a.id]})
+        resource = self._create_resource_for_perm_test("AdminAreaTestRes", map_coordinates_json_str=map_coords)
+
+        response = self._make_booking_request(admin_user, resource.id)
+        self.assertEqual(response.status_code, 201, f"Admin booking failed. Response: {response.get_json()}")
+
+    def test_resource_admin_only_restriction(self):
+        """2. Resource admin_only Restriction."""
+        admin_user = self._create_user_for_perm_test("perm_admin_user_2", is_admin=True, role_names=[self.role_admin.name])
+        non_admin_user = self._create_user_for_perm_test("perm_non_admin_user_2")
+
+        resource = self._create_resource_for_perm_test("AdminOnlyRes", booking_restriction_str='admin_only')
+
+        # Non-admin attempts to book
+        response_non_admin = self._make_booking_request(non_admin_user, resource.id)
+        self.assertEqual(response_non_admin.status_code, 403, f"Non-admin booking admin_only resource should be denied. Response: {response_non_admin.get_json()}")
+        if response_non_admin.status_code == 403: # Check error message only if denied
+            self.assertIn("This resource can only be booked by administrators", response_non_admin.get_json().get('error', ''))
+
+        # Admin attempts to book
+        response_admin = self._make_booking_request(admin_user, resource.id)
+        self.assertEqual(response_admin.status_code, 201, f"Admin booking admin_only resource failed. Response: {response_admin.get_json()}")
+
+    def test_area_specific_role_enforcement(self):
+        """3. Area-Specific Role Enforcement."""
+        user1_has_area_role = self._create_user_for_perm_test("user1_area_role", role_names=[self.role_area_a.name])
+        user2_no_area_role = self._create_user_for_perm_test("user2_no_area_role")
+        user3_in_allowed_list = self._create_user_for_perm_test("user3_allowed_list")
+
+        map_coords_area_a = json.dumps({'allowed_role_ids': [self.role_area_a.id]})
+        # Ensure user3_in_allowed_list.id is a string when concatenating for allowed_user_ids_str
+        resource_a = self._create_resource_for_perm_test(
+            "AreaRoleResourceA",
+            map_coordinates_json_str=map_coords_area_a,
+            allowed_user_ids_str=str(user3_in_allowed_list.id)
+        )
+
+        # User 1 (has Role_Area_A): Can book Resource A
+        response_user1 = self._make_booking_request(user1_has_area_role, resource_a.id)
+        self.assertEqual(response_user1.status_code, 201, f"User1 with area role failed to book. Response: {response_user1.get_json()}")
+        # Clean up booking to allow next step if it books same default slot
+        if response_user1.status_code == 201:
+            Booking.query.filter_by(id=response_user1.get_json()['bookings'][0]['id']).delete()
+            db.session.commit()
+
+        # User 2 (does NOT have Role_Area_A, not in allowed_user_ids): Denied booking Resource A
+        response_user2 = self._make_booking_request(user2_no_area_role, resource_a.id)
+        self.assertEqual(response_user2.status_code, 403, f"User2 without area role should be denied. Response: {response_user2.get_json()}")
+        if response_user2.status_code == 403:
+            self.assertIn("You do not have the required role to book this resource via its map area", response_user2.get_json().get('error', ''))
+
+        # User 3 (in allowed_user_ids for Resource A, does NOT have Role_Area_A): Can book Resource A
+        response_user3 = self._make_booking_request(user3_in_allowed_list, resource_a.id)
+        self.assertEqual(response_user3.status_code, 201, f"User3 in allowed_user_ids failed to book. Response: {response_user3.get_json()}")
+
+    def test_fallback_to_general_resource_roles(self):
+        """4. Fallback to General Resource Roles when area roles are empty."""
+        user4_has_general_role_b = self._create_user_for_perm_test("user4_general_role_b", role_names=[self.role_general_b.name])
+        user5_no_general_role_b = self._create_user_for_perm_test("user5_no_general_role_b")
+
+        # Resource B with empty area roles, but has general resource roles
+        map_coords_empty_area_roles = json.dumps({'allowed_role_ids': []}) # Empty list
+        resource_b = self._create_resource_for_perm_test(
+            "GeneralRoleResourceB",
+            map_coordinates_json_str=map_coords_empty_area_roles,
+            general_role_names=[self.role_general_b.name]
+        )
+
+        # User 4 (has Role_General_B): Can book Resource B
+        response_user4 = self._make_booking_request(user4_has_general_role_b, resource_b.id)
+        self.assertEqual(response_user4.status_code, 201, f"User4 with general role B failed to book. Response: {response_user4.get_json()}")
+        if response_user4.status_code == 201: Booking.query.filter_by(id=response_user4.get_json()['bookings'][0]['id']).delete(); db.session.commit()
+
+        # User 5 (does NOT have Role_General_B, not in allowed_user_ids): Denied booking Resource B
+        response_user5 = self._make_booking_request(user5_no_general_role_b, resource_b.id)
+        self.assertEqual(response_user5.status_code, 403, f"User5 without general role B should be denied. Response: {response_user5.get_json()}")
+        # The error message might be generic "not authorized" as it fails the general resource role check
+        if response_user5.status_code == 403:
+            self.assertIn("You are not authorized to book this resource based on its permission settings", response_user5.get_json().get('error', ''))
+
+    def test_fallback_to_open_resource(self):
+        """5. Fallback to Open Resource (No Area Roles, No General Roles, No specific user IDs)."""
+        user6_any_authenticated = self._create_user_for_perm_test("user6_any_auth")
+
+        # Resource C with no area roles, no general resource roles, no specific user IDs
+        map_coords_no_area_roles = json.dumps({}) # No allowed_role_ids key or empty
+        resource_c = self._create_resource_for_perm_test(
+            "OpenResourceC",
+            map_coordinates_json_str=map_coords_no_area_roles,
+            allowed_user_ids_str=None, # Or ""
+            general_role_names=[] # Or None
+        )
+
+        # User 6 (any authenticated non-admin): Can book Resource C
+        response_user6 = self._make_booking_request(user6_any_authenticated, resource_c.id)
+        self.assertEqual(response_user6.status_code, 201, f"User6 (any auth) failed to book open resource C. Response: {response_user6.get_json()}")
+
+    def test_malformed_map_coordinates_fallback(self):
+        """6. Malformed map_coordinates (Fallback to general resource roles)."""
+        user7_has_general_role_d = self._create_user_for_perm_test("user7_general_role_d", role_names=[self.role_general_d.name])
+        user8_no_general_role_d = self._create_user_for_perm_test("user8_no_general_role_d")
+
+
+        # Resource D with invalid JSON in map_coordinates, but has general resource roles
+        resource_d = self._create_resource_for_perm_test(
+            "MalformedMapResourceD",
+            map_coordinates_json_str="invalid_json_string",
+            general_role_names=[self.role_general_d.name]
+        )
+
+        # User 7 (has Role_General_D): Can book Resource D (system falls back gracefully)
+        response_user7 = self._make_booking_request(user7_has_general_role_d, resource_d.id)
+        self.assertEqual(response_user7.status_code, 201, f"User7 with general role D failed to book malformed map resource. Response: {response_user7.get_json()}")
+        if response_user7.status_code == 201: Booking.query.filter_by(id=response_user7.get_json()['bookings'][0]['id']).delete(); db.session.commit()
+
+        # User 8 (no Role_General_D): Denied booking Resource D
+        response_user8 = self._make_booking_request(user8_no_general_role_d, resource_d.id)
+        self.assertEqual(response_user8.status_code, 403, f"User8 without general role D should be denied for malformed map resource. Response: {response_user8.get_json()}")
+        if response_user8.status_code == 403:
+             self.assertIn("You are not authorized to book this resource based on its permission settings", response_user8.get_json().get('error', ''))
+
+
 # Define a helper method for creating an admin with manage_system, or ensure it's part of AppTests/TestAdminFunctionality
 # For now, we'll assume self._create_admin_user_with_manage_system() exists or is adapted.
 
