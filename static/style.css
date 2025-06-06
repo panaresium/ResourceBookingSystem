@@ -45,15 +45,13 @@ body {
     line-height: 1.6;
     font-size: 1rem; /* Ensure body font size is relative */
     overflow: hidden;
-    /* display: flex; REMOVED for new layout */
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
 }
 
 /* Header Styling */
 .app-header {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
     height: var(--header-height);
     background-color: var(--background-color-dark);
     box-sizing: border-box;
@@ -62,8 +60,8 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    z-index: 1030;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    flex-shrink: 0;
 }
 
 /* Reset list-like styles for all elements within the header */
@@ -316,15 +314,12 @@ body {
 
 /* Main Content Styling */
 #main-content {
-    margin-top: var(--header-height);
     margin-left: var(--sidebar-width);
-    margin-bottom: var(--footer-height);
     padding: 30px 20px;
-    height: calc(100vh - var(--header-height) - var(--footer-height));
     overflow-y: auto;
     background-color: var(--background-color-light);
     box-sizing: border-box; /* Added this line */
-    /* flex-grow: 1; REMOVED */
+    flex-grow: 1;
 }
 
 /* Adjust margin-left when sidebar is collapsed */
@@ -351,10 +346,6 @@ main { /* The <main> tag inside #main-content */
 
 /* Footer Styling */
 footer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
     height: var(--footer-height);
     background-color: var(--background-color-dark);
     box-sizing: border-box;
@@ -363,8 +354,8 @@ footer {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    z-index: 1030;
     box-shadow: 0 -2px 4px rgba(0,0,0,0.1);
+    flex-shrink: 0;
     /* text-align: center; REMOVED, using flex now */
     /* margin-top: 30px; REMOVED, fixed position */
 }
