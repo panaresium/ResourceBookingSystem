@@ -510,6 +510,27 @@ def update_booking_settings():
         # If 'past_booking_time_adjustment_hours' is not in request.form (e.g., field was disabled),
         # do nothing, thereby preserving the existing value in settings.
 
+        # New Global PIN Settings
+        settings.pin_auto_generation_enabled = request.form.get('pin_auto_generation_enabled') == 'on'
+
+        pin_length_str = request.form.get('pin_length', '6') # Default to '6' if not provided
+        try:
+            pin_length_val = int(pin_length_str) if pin_length_str.strip() else 6 # Default if empty string
+            if not (4 <= pin_length_val <= 32):
+                # This error will be caught by the broader ValueError below if not specific enough,
+                # but better to raise it to be caught by specific logic if added.
+                # For now, relying on the general ValueError flash message.
+                raise ValueError("PIN length must be between 4 and 32.")
+            settings.pin_length = pin_length_val
+        except ValueError as ve: # Catch specific error for pin_length
+            db.session.rollback()
+            # Using f-string for error message as _() might not be appropriate for dynamic parts like str(ve)
+            flash(f'{_("Invalid PIN length")}: {str(ve)}', 'danger')
+            return redirect(url_for('admin_ui.serve_booking_settings_page'))
+
+        settings.pin_allow_manual_override = request.form.get('pin_allow_manual_override') == 'on'
+        settings.resource_checkin_url_requires_login = request.form.get('resource_checkin_url_requires_login') == 'on'
+
         db.session.commit()
         flash(_('Booking settings updated successfully.'), 'success')
     except ValueError:

@@ -84,6 +84,47 @@
                         <option value="archived">{{ _('Archived') }}</option>
                     </select>
                 </div>
+
+                <!-- Resource PINs Management Area -->
+                <div id="resource-pins-management-area" style="margin-top: 20px; border-top: 1px solid #ccc; padding-top: 15px; display: none;">
+                    <h4>{{ _('Manage Resource PINs') }}</h4>
+
+                    <div id="resource-current-pin-display" style="margin-bottom: 10px;">
+                        <strong>{{ _('Current Active PIN:') }}</strong> <span id="current-pin-value">{{ _('N/A') }}</span>
+                    </div>
+
+                    <table id="resource-pins-table" class="styled-table" style="margin-bottom: 15px;">
+                        <thead>
+                            <tr>
+                                <th>{{ _('PIN Value') }}</th>
+                                <th>{{ _('Active') }}</th>
+                                <th>{{ _('Notes') }}</th>
+                                <th>{{ _('Created At') }}</th>
+                                <th>{{ _('Actions') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- PIN rows will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+
+                    <h5>{{ _('Add New PIN') }}</h5>
+                    <div id="add-pin-form-area">
+                        <div class="form-group">
+                            <label for="manual_pin_value">{{ _('Manual PIN (leave blank to auto-generate if enabled):') }}</label>
+                            <input type="text" id="manual_pin_value" class="form-control" style="width: auto; display: inline-block; margin-right: 10px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="pin_notes">{{ _('Notes:') }}</label>
+                            <input type="text" id="pin_notes" class="form-control" style="width: auto; display: inline-block; margin-right: 10px;">
+                        </div>
+                        <button type="button" id="btn-add-manual-pin" class="button">{{ _('Add/Set Manual PIN') }}</button>
+                        <button type="button" id="btn-auto-generate-pin" class="button">{{ _('Auto-generate New PIN') }}</button>
+                    </div>
+                     <div id="resource-pin-form-status" class="status-message" style="margin-top: 10px;"></div>
+                </div>
+                <!-- End Resource PINs Management Area -->
+
                 <button type="submit" class="button" style="margin-top: 10px;">{{ _('Save Resource') }}</button>
                 <div id="resource-form-modal-status" class="status-message" style="margin-top: 10px;"></div>
             </form>
