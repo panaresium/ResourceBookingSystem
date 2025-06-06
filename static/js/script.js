@@ -2049,50 +2049,62 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Populate Roles for Checkbox List in Define Area Form
         async function initializeRolesForAreaDefinitionUI() {
-            const authorizedRolesCheckboxContainer = document.getElementById('define-area-roles-checkbox-container');
+            const checkboxContainer = document.getElementById('define-area-roles-checkbox-container');
+            const rolesLoadingMsg = document.getElementById('define-area-roles-loading-message');
 
-            if (!authorizedRolesCheckboxContainer) {
-                console.error("#define-area-roles-checkbox-container not found in DOM.");
+            if (!checkboxContainer) {
+                console.error("initializeRolesForAreaDefinitionUI: #define-area-roles-checkbox-container not found in DOM.");
                 return;
             }
 
-            // apiCall will now handle initial "Loading..." message and subsequent error/success messages.
+            // Clear only previous role checkboxes (elements with class 'checkbox-item')
+            const existingCheckboxItems = checkboxContainer.querySelectorAll('div.checkbox-item');
+            existingCheckboxItems.forEach(item => item.remove());
+
+            // apiCall will use rolesLoadingMsg (or checkboxContainer as fallback) for its messages
             try {
-                const roles = await apiCall('/api/admin/roles', {}, authorizedRolesCheckboxContainer);
+                const roles = await apiCall('/api/admin/roles', {}, rolesLoadingMsg || checkboxContainer);
 
-                // If apiCall was successful, it might have shown a generic success message or hidden the loading one.
-                // We must clear the container before adding checkboxes.
-                authorizedRolesCheckboxContainer.innerHTML = '';
-
-                if (roles && roles.length > 0) {
+                // After successful API call (which might have hidden rolesLoadingMsg or shown success):
+                if (!roles || roles.length === 0) {
+                    if (rolesLoadingMsg) {
+                        rolesLoadingMsg.textContent = 'No roles found. You can create roles in User Management.'; // Flask's _() won't work here directly
+                        rolesLoadingMsg.style.display = 'block';
+                    } else {
+                        // Fallback if rolesLoadingMsg doesn't exist, though less ideal
+                        checkboxContainer.innerHTML = '<small>No roles found. You can create roles in User Management.</small>';
+                    }
+                } else {
+                    // Roles found and populated
+                    if (rolesLoadingMsg && !(rolesLoadingMsg.classList.contains('error') || rolesLoadingMsg.classList.contains('success'))) {
+                        // Hide loading message if it's not showing a specific status from apiCall
+                         rolesLoadingMsg.style.display = 'none';
+                    }
                     roles.forEach(role => {
                         const div = document.createElement('div');
+                        div.className = 'checkbox-item'; // Ensure new items have this class
                         const checkbox = document.createElement('input');
                         checkbox.type = 'checkbox';
                         checkbox.id = `define-area-role-${role.id}`;
                         checkbox.value = role.id;
-                        checkbox.name = 'define_area_authorized_role_ids';
+                        checkbox.name = 'define_area_authorized_role_ids'; // Matches original logic
                         const label = document.createElement('label');
                         label.htmlFor = `define-area-role-${role.id}`;
                         label.textContent = role.name + (role.description ? ` (${role.description})` : '');
                         div.appendChild(checkbox);
                         div.appendChild(label);
-                        authorizedRolesCheckboxContainer.appendChild(div);
+                        checkboxContainer.appendChild(div);
                     });
-                } else {
-                    // If roles array is empty or undefined after a successful API call (no error thrown by apiCall)
-                    showSuccess(authorizedRolesCheckboxContainer, 'No roles found. You can create roles in User Management.');
                 }
             } catch (error) {
-                // This catch block is for errors not handled by apiCall (e.g., if apiCall itself fails or network issues not caught by it)
-                // or if an error occurs in the processing logic above (after apiCall returns successfully but before this catch).
-                // apiCall should have already displayed an error in authorizedRolesCheckboxContainer if the API call failed.
-                console.error("Error in initializeRolesForAreaDefinitionUI after apiCall:", error);
-                // Check if an error message is already displayed by apiCall
-                const hasExistingErrorMessage = authorizedRolesCheckboxContainer.classList.contains('error') && authorizedRolesCheckboxContainer.textContent.trim() !== '';
-                if (!hasExistingErrorMessage) {
-                     // Show a generic error only if apiCall hasn't already set one.
-                     showError(authorizedRolesCheckboxContainer, 'Could not display roles due to an unexpected error.');
+                // apiCall should have already displayed an error message in rolesLoadingMsg or checkboxContainer.
+                // No need for additional showError here unless apiCall's error handling is insufficient.
+                console.error("Error in initializeRolesForAreaDefinitionUI during/after apiCall:", error);
+                // If rolesLoadingMsg exists and is not already showing an error, ensure it does.
+                if (rolesLoadingMsg && !rolesLoadingMsg.classList.contains('error')) {
+                    showError(rolesLoadingMsg, 'Could not load roles due to an error.');
+                } else if (!rolesLoadingMsg && !checkboxContainer.classList.contains('error')) {
+                    showError(checkboxContainer, 'Could not load roles due to an error.');
                 }
             }
         }
