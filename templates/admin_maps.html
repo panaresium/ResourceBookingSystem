@@ -768,6 +768,7 @@
             if (clickedOnArea) {
                 selectedArea = clickedOnArea;
                 console.log("Selected existing area:", selectedArea);
+                console.log("In handleCanvasClick (admin_maps.html), selectedArea.allowed_role_ids:", selectedArea.allowed_role_ids);
                 populateAreaFormWithCoords(selectedArea.coordinates, selectedArea.resource_id, selectedArea.booking_restriction, selectedArea.allowed_role_ids);
                 document.getElementById('edit-delete-buttons').style.display = 'block';
                 showStatus(defineAreasStatus, `Selected area for resource ID: ${selectedArea.resource_id || 'Unassigned'}.`, false);
@@ -854,7 +855,7 @@
                                          };
                                      });
 
-                console.log("Fetched and processed areas: ", drawnAreas);
+                console.log("Fetched and processed areas (admin_maps.html): ", drawnAreas);
                 const foundAreasMsgBase = {{ _("Found %s areas.")|tojson }};
                 const foundAreasMsg = foundAreasMsgBase.replace('%s', drawnAreas.length);
                 showStatus(defineAreasStatus, foundAreasMsg, false);
