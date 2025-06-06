@@ -9,7 +9,7 @@ from sqlalchemy import func # For func.date in get_map_details
 
 # Local imports
 from extensions import db
-from models import FloorMap, Resource, Booking # Role removed if no longer needed
+from models import FloorMap, Resource, Booking, Role # Role removed if no longer needed
 from auth import permission_required
 # Assuming these utils will be moved to utils.py or are already there
 from utils import add_audit_log, allowed_file, _get_map_configuration_data, _import_map_configuration_data, check_resources_availability_for_user, get_detailed_map_availability_for_user
@@ -432,11 +432,25 @@ def get_map_details(map_id):
                 'booking_restriction': resource.booking_restriction, 'status': resource.status,
                 'published_at': resource.published_at.isoformat() if resource.published_at else None,
                 'allowed_user_ids': resource.allowed_user_ids,
-                'roles': [{'id': role.id, 'name': role.name} for role in resource.roles],
+                # 'roles': [{'id': role.id, 'name': role.name} for role in resource.roles], # Old implementation
                 'is_under_maintenance': resource.is_under_maintenance,
                 'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
                 'bookings_on_date': bookings_info
             }
+            # New implementation for roles using map_allowed_role_ids
+            allowed_roles_info = []
+            if resource.map_allowed_role_ids: # Check if not None or empty string
+                try:
+                    role_ids = json.loads(resource.map_allowed_role_ids)
+                    if isinstance(role_ids, list) and all(isinstance(rid, int) for rid in role_ids):
+                        # Query roles based on the parsed IDs
+                        roles = Role.query.filter(Role.id.in_(role_ids)).all()
+                        allowed_roles_info = [{'id': role.id, 'name': role.name} for role in roles]
+                    else:
+                        current_app.logger.warning(f"Parsed map_allowed_role_ids for resource {resource.id} is not a list of integers: {role_ids}")
+                except json.JSONDecodeError:
+                    current_app.logger.warning(f"Failed to decode map_allowed_role_ids for resource {resource.id}: '{resource.map_allowed_role_ids}'")
+            resource_info['roles'] = allowed_roles_info
             mapped_resources_list.append(resource_info)
 
         current_app.logger.info(f"Fetched map details for map ID {map_id} for date {target_date_obj}.")
