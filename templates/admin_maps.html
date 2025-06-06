@@ -227,6 +227,11 @@
     <script src="{{ url_for('static', filename='js/admin_resource_edit.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/admin_resource_roles.js') }}" defer></script>
     <script>
+    // This flag signals to static/js/script.js (specifically window.redrawCanvas)
+    // that the current context is the admin page for defining map areas.
+    // In this context, canvas drawing for areas should use raw coordinates (no visual offsets applied),
+    // as the map image itself is displayed without offsets.
+    var IS_ADMIN_MAP_DEFINE_AREAS_PAGE = true;
     document.addEventListener('DOMContentLoaded', function() {
         const mapsTableBody = document.getElementById('maps-table-body');
         const adminMapsListStatus = document.getElementById('admin-maps-list-status');
