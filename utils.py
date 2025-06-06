@@ -101,7 +101,8 @@ def resource_to_dict(resource: Resource) -> dict:
         'maintenance_until': resource.maintenance_until.replace(tzinfo=timezone.utc).isoformat() if resource.maintenance_until else None,
         'max_recurrence_count': resource.max_recurrence_count,
         'scheduled_status': resource.scheduled_status,
-        'scheduled_status_at': resource.scheduled_status_at.replace(tzinfo=timezone.utc).isoformat() if resource.scheduled_status_at else None
+        'scheduled_status_at': resource.scheduled_status_at.replace(tzinfo=timezone.utc).isoformat() if resource.scheduled_status_at else None,
+        'current_pin': resource.current_pin  # Add current_pin to the dictionary
     }
 
     # Handle map_coordinates and map_allowed_role_ids

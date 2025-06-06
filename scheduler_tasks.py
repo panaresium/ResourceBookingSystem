@@ -5,9 +5,9 @@ from flask import current_app
 # Assuming db is initialized in extensions.py
 from extensions import db
 # Assuming models are defined in models.py
-from models import Booking, Resource
+from models import Booking, Resource, User # Added User
 # Assuming utility functions are in utils.py
-from utils import _load_schedule_from_json, _get_map_configuration_data, add_audit_log
+from utils import _load_schedule_from_json, _get_map_configuration_data, add_audit_log, send_email, send_teams_notification # Added send_email, send_teams_notification
 
 # Conditional import for azure_backup
 try:
@@ -28,25 +28,82 @@ def cancel_unchecked_bookings(app):
         stale_bookings = Booking.query.filter(
             Booking.checked_in_at.is_(None),
             Booking.start_time < cutoff_time,
-            Booking.status != 'cancelled' # Avoid trying to cancel already cancelled bookings
+            Booking.status == 'approved'  # Only target 'approved' bookings
         ).all()
 
         if stale_bookings:
+            cancelled_booking_details = []  # Store details for notification
             for booking in stale_bookings:
                 original_status = booking.status
-                booking.status = 'cancelled' # Set status to cancelled
-                logger.info(f"Auto-cancelling booking ID {booking.id} for resource {booking.resource_id} due to no check-in. Original status: {original_status}.")
+                # Store necessary info for notification *before* booking object might become invalid or status changes
+                # Ensure resource_booked is accessed while session is active and booking object is valid
+                resource_name = "Unknown Resource"
+                if booking.resource_booked:
+                    resource_name = booking.resource_booked.name
+
+                cancelled_booking_details.append({
+                    'user_name': booking.user_name,
+                    'resource_name': resource_name,
+                    'start_time_str': booking.start_time.strftime('%Y-%m-%d %H:%M UTC'),
+                    'booking_id': booking.id,
+                    'resource_id': booking.resource_id,
+                    'original_status': original_status # Keep original status for audit log
+                })
+                booking.status = 'cancelled'  # Set status to cancelled
+                # Audit log will be added after successful commit to reflect actual change
+                # However, if audit log needs to be per-booking before commit, it can be here,
+                # but the provided snippet structure defers it. For this change, let's assume
+                # a single audit log post-commit or individual logs per notification.
+                # The original code logged per booking before commit, let's keep that for the audit part.
                 add_audit_log(
-                    action="AUTO_CANCEL_NO_CHECK_IN",
-                    details=f"Booking ID {booking.id} for resource {booking.resource_id} (User: {booking.user_name}) auto-cancelled. Original status: {original_status}.",
+                    action="AUTO_CANCEL_NO_CHECK_IN_ATTEMPT", # Indicate attempt before commit
+                    details=f"Attempting to auto-cancel Booking ID {booking.id} for resource {resource_name} (User: {booking.user_name}). Original status: {original_status}.",
                     username="System"
                 )
+
             try:
                 db.session.commit()
-                logger.info(f"Successfully auto-cancelled {len(stale_bookings)} unchecked bookings.")
+                logger.info(f"Successfully auto-cancelled {len(stale_bookings)} unchecked bookings in DB.")
+
+                # Now, send notifications and add final audit logs
+                for details in cancelled_booking_details:
+                    add_audit_log( # Log successful cancellation after commit
+                        action="AUTO_CANCEL_NO_CHECK_IN_SUCCESS",
+                        details=f"Booking ID {details['booking_id']} for resource {details['resource_name']} (User: {details['user_name']}) auto-cancelled. Original status: {details['original_status']}.",
+                        username="System"
+                    )
+
+                    user = User.query.filter_by(username=details['user_name']).first()
+                    if user and user.email:
+                        subject = f"Booking Auto-Cancelled: {details['resource_name']}"
+                        body_text = (
+                            f"Your booking for the resource '{details['resource_name']}' "
+                            f"scheduled to start at {details['start_time_str']} "
+                            f"has been automatically cancelled due to no check-in within the grace period."
+                        )
+
+                        # Check if mail is configured before trying to send
+                        if current_app.extensions.get('mail') and hasattr(current_app.extensions['mail'], 'send'):
+                            try:
+                                send_email(user.email, subject, body_text)
+                                logger.info(f"Sent auto-cancellation email to {user.email} for booking ID {details['booking_id']}")
+                            except Exception as mail_e:
+                                logger.error(f"Failed to send auto-cancellation email to {user.email} for booking {details['booking_id']}: {mail_e}")
+
+                        # Check if Teams webhook is configured
+                        if current_app.config.get('TEAMS_WEBHOOK_URL'):
+                            try:
+                                send_teams_notification(user.email, subject, body_text) # user.email might be used as a lookup
+                                logger.info(f"Sent auto-cancellation Teams notification for {user.email} for booking ID {details['booking_id']}")
+                            except Exception as teams_e:
+                                logger.error(f"Failed to send auto-cancellation Teams notification for {user.email} for booking {details['booking_id']}: {teams_e}")
+                    else:
+                        logger.warning(f"Could not find user or email for {details['user_name']} to notify about auto-cancelled booking ID {details['booking_id']}.")
             except Exception as e:
                 db.session.rollback()
-                logger.error(f"Error committing auto-cancellation of bookings: {e}", exc_info=True)
+                logger.error(f"Error committing auto-cancellation of bookings or sending notifications: {e}", exc_info=True)
+                # Add a general audit log for the failure of the batch
+                add_audit_log(action="AUTO_CANCEL_BATCH_FAILED", details=f"Failed to commit auto-cancellations or send notifications. Error: {str(e)}", username="System")
         else:
             logger.info("No stale bookings to auto-cancel at this time.")
 

@@ -117,6 +117,7 @@ class Resource(db.Model):
     floor_map_id = db.Column(db.Integer, db.ForeignKey('floor_map.id'), nullable=True)
     map_coordinates = db.Column(db.Text, nullable=True)
     map_allowed_role_ids = db.Column(db.Text, nullable=True) # Stores JSON list of role IDs
+    current_pin = db.Column(db.String(10), nullable=True, default=None)
 
     bookings = db.relationship('Booking', backref='resource_booked', lazy=True, cascade="all, delete-orphan")
     floor_map = db.relationship('FloorMap', backref=db.backref('resources', lazy='dynamic'))
