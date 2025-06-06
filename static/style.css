@@ -138,7 +138,7 @@ body {
 .app-header #user-dropdown-button { /* Copied from existing #user-dropdown-button and adapted */
     display: flex;
     align-items: center;
-    background: none;
+    background-color: transparent; /* Changed from background: none; */
     border: none;
     color: #000000 !important; /* Ensure color from header */
     font-weight: bold !important;
