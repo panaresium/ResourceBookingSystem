@@ -76,12 +76,26 @@ def add_audit_log(action: str, details: str, user_id: int = None, username: str 
         db.session.rollback()
 
 def resource_to_dict(resource: Resource) -> dict:
-    # url_for needs an app context. If called outside a request, this will fail.
-    # Consider passing url_for or generating URLs differently if used in background tasks.
     try:
+        # Assuming url_for is available in the context this function is called
         image_url = url_for('static', filename=f'resource_uploads/{resource.image_filename}') if resource.image_filename else None
-    except RuntimeError: # Outside of application context
-        image_url = None # Or some placeholder
+    except RuntimeError:
+        image_url = None # Fallback if outside of application context
+
+    published_at_iso = None
+    if resource.published_at is not None:
+        # Assuming resource.published_at is a datetime.datetime object
+        published_at_iso = resource.published_at.replace(tzinfo=timezone.utc).isoformat()
+
+    maintenance_until_iso = None
+    if resource.maintenance_until is not None:
+        # Assuming resource.maintenance_until is a datetime.datetime object
+        maintenance_until_iso = resource.maintenance_until.replace(tzinfo=timezone.utc).isoformat()
+
+    scheduled_status_at_iso = None
+    if resource.scheduled_status_at is not None:
+        # Assuming resource.scheduled_status_at is a datetime.datetime object
+        scheduled_status_at_iso = resource.scheduled_status_at.replace(tzinfo=timezone.utc).isoformat()
 
     resource_dict = {
         'id': resource.id,
@@ -91,37 +105,47 @@ def resource_to_dict(resource: Resource) -> dict:
         'status': resource.status,
         'tags': resource.tags,
         'booking_restriction': resource.booking_restriction,
-        'image_url': image_url,
-        'published_at': resource.published_at.replace(tzinfo=timezone.utc).isoformat() if resource.published_at else None,
+        'image_url': image_url, # Use the variable defined above
+        'published_at': published_at_iso,
         'allowed_user_ids': resource.allowed_user_ids,
         'roles': [{'id': r.id, 'name': r.name} for r in resource.roles],
         'floor_map_id': resource.floor_map_id,
-        # map_coordinates will be added below after processing
+        # map_coordinates specific handling will be adjusted in the next plan step
         'is_under_maintenance': resource.is_under_maintenance,
-        'maintenance_until': resource.maintenance_until.replace(tzinfo=timezone.utc).isoformat() if resource.maintenance_until else None,
+        'maintenance_until': maintenance_until_iso,
         'max_recurrence_count': resource.max_recurrence_count,
         'scheduled_status': resource.scheduled_status,
-        'scheduled_status_at': resource.scheduled_status_at.replace(tzinfo=timezone.utc).isoformat() if resource.scheduled_status_at else None,
-        'current_pin': resource.current_pin  # Add current_pin to the dictionary
+        'scheduled_status_at': scheduled_status_at_iso,
+        'current_pin': resource.current_pin
     }
 
     # Handle map_coordinates and map_allowed_role_ids
-    parsed_coords = json.loads(resource.map_coordinates) if resource.map_coordinates else None
-    parsed_map_roles = [] # Default to empty list
+    parsed_coords = None # Initialize to None
+    if resource.map_coordinates:
+        try:
+            parsed_coords = json.loads(resource.map_coordinates)
+        except json.JSONDecodeError:
+            # Optional: current_app.logger.warning(f"Invalid JSON in map_coordinates for resource {resource.id}: {resource.map_coordinates}")
+            pass # parsed_coords remains None if JSON is invalid
+
+    parsed_map_roles = []
 
     if resource.map_allowed_role_ids:
         try:
             loaded_roles = json.loads(resource.map_allowed_role_ids)
-            if isinstance(loaded_roles, list):
+            if isinstance(loaded_roles, list): # Make sure it's a list
+                # Further validation could be added here to ensure it's a list of integers if necessary
                 parsed_map_roles = loaded_roles
         except json.JSONDecodeError:
-            # Optional: current_app.logger.warning(f"Invalid JSON in map_allowed_role_ids for resource {resource.id}: {resource.map_allowed_role_ids}")
+            # Optional: Log this warning if appropriate for your application
+            # current_app.logger.warning(f"Invalid JSON in map_allowed_role_ids for resource {resource.id}: {resource.map_allowed_role_ids}")
             pass # Defaults to empty list if JSON is invalid or field is empty
 
-    if parsed_coords is not None: # If there are base coordinates (it's a dict)
+    if parsed_coords is not None and isinstance(parsed_coords, dict): # Ensure parsed_coords is a dict before adding keys
         parsed_coords['allowed_role_ids'] = parsed_map_roles
-    # If parsed_coords was None (no map_coordinates defined for the resource),
-    # it remains None, correctly indicating no coordinate data.
+    elif parsed_coords is not None:
+        # current_app.logger.warning(f"Resource {resource.id} map_coordinates was not a dict after parsing: {type(parsed_coords)}")
+        pass
 
     resource_dict['map_coordinates'] = parsed_coords
 
