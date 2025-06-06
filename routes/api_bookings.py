@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone, time
 # Assuming extensions.py contains db, socketio, mail
 from extensions import db, socketio, mail
 # Assuming models.py contains these model definitions
-from models import Booking, Resource, User, WaitlistEntry, BookingSettings # FloorMap import removed
+from models import Booking, Resource, User, WaitlistEntry, BookingSettings, ResourcePIN # Added ResourcePIN
 # Assuming utils.py contains these helper functions
 from utils import add_audit_log, parse_simple_rrule, send_email, send_teams_notification, check_booking_permission
 # Assuming auth.py contains permission_required decorator
@@ -765,7 +765,11 @@ def delete_booking_by_user(booking_id):
 def check_in_booking(booking_id):
     """
     Allows an authenticated user to check into their booking.
+    Optionally accepts a 'pin' in the JSON body for PIN-based check-in.
     """
+    data = request.get_json(silent=True) # Use silent=True to not fail if no JSON body
+    provided_pin = data.get('pin') if data else None
+
     try:
         booking = Booking.query.get(booking_id)
         if not booking:
@@ -801,13 +805,39 @@ def check_in_booking(booking_id):
             current_app.logger.warning(f"User {current_user.username} check-in attempt for booking {booking_id} outside of allowed window. Booking starts at {booking_start_time_aware.isoformat()}, current time {now.isoformat()}")
             return jsonify({'error': f'Check-in is only allowed from {check_in_minutes_before} minutes before to {check_in_minutes_after} minutes after the booking start time.'}), 403
 
+        # PIN Validation if provided
+        if provided_pin:
+            resource = booking.resource_booked # Assuming backref is 'resource_booked'
+            if not resource:
+                current_app.logger.error(f"Resource not found for booking {booking_id} during PIN check-in attempt by {current_user.username}.")
+                return jsonify({'error': 'Associated resource not found for this booking.'}), 500
+
+            active_pin = ResourcePIN.query.filter_by(
+                resource_id=resource.id,
+                pin_value=provided_pin,
+                is_active=True
+            ).first()
+
+            if not active_pin:
+                current_app.logger.warning(f"User {current_user.username} failed PIN check-in for booking {booking_id}. Invalid PIN: {provided_pin} for resource {resource.id}")
+                add_audit_log(action="CHECK_IN_FAILED_INVALID_PIN", user_id=current_user.id, username=current_user.username, details=f"Booking ID {booking_id}, Resource ID {resource.id}, Attempted PIN: {provided_pin}")
+                return jsonify({'error': 'Invalid or inactive PIN provided.'}), 403
+
+            current_app.logger.info(f"User {current_user.username} provided valid PIN {provided_pin} for check-in to booking {booking_id} for resource {resource.id}.")
+            # PIN is valid, proceed with check-in
+
         booking.checked_in_at = now.replace(tzinfo=None) # Store as naive UTC
         db.session.commit()
 
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
-        add_audit_log(action="CHECK_IN_SUCCESS", details=f"User '{current_user.username}' checked into booking ID {booking.id} for resource '{resource_name}'.")
+        audit_details = f"User '{current_user.username}' checked into booking ID {booking.id} for resource '{resource_name}'."
+        if provided_pin:
+            audit_details += f" Using PIN." # PIN value itself should not be in general audit log for security.
+                                         # Specific PIN attempt logs could be separate if needed.
+        add_audit_log(action="CHECK_IN_SUCCESS", details=audit_details)
+
         socketio.emit('booking_updated', {'action': 'checked_in', 'booking_id': booking.id, 'checked_in_at': now.isoformat(), 'resource_id': booking.resource_id})
-        current_app.logger.info(f"User '{current_user.username}' successfully checked into booking ID: {booking_id} at {now.isoformat()}")
+        current_app.logger.info(f"User '{current_user.username}' successfully checked into booking ID: {booking_id} at {now.isoformat()}{' using PIN' if provided_pin else ''}.")
 
         if current_user.email:
             send_teams_notification(
@@ -990,3 +1020,103 @@ def qr_check_in(token):
             details=f"Failed QR check-in for booking {booking.id} (User: {booking.user_name}). Error: {str(e)}"
         )
         return jsonify({'error': 'Check-in failed due to a server error.'}), 500
+
+@api_bookings_bp.route('/r/<int:resource_id>/checkin', methods=['GET'])
+def resource_pin_check_in(resource_id):
+    logger = current_app.logger
+    pin_value = request.args.get('pin')
+
+    resource = Resource.query.get_or_404(resource_id)
+
+    if not pin_value:
+        logger.warning(f"PIN check-in attempt for resource {resource_id} without PIN.")
+        # For an actual user-facing scenario, redirecting to an error page might be better.
+        # Example: return render_template('pin_checkin_status.html', error='PIN is required.'), 400
+        return jsonify({'error': 'PIN is required.'}), 400
+
+    # Validate PIN - Ensure ResourcePIN model is imported
+    # ResourcePIN is now imported at the top of the file.
+    verified_pin = ResourcePIN.query.filter_by(resource_id=resource_id, pin_value=pin_value, is_active=True).first()
+    if not verified_pin:
+        logger.warning(f"Invalid or inactive PIN '{pin_value}' used for resource {resource_id}.")
+        # Example: return render_template('pin_checkin_status.html', error='Invalid or inactive PIN.'), 403
+        return jsonify({'error': 'Invalid or inactive PIN.'}), 403
+
+    # Fetch BookingSettings
+    booking_settings = BookingSettings.query.first()
+    if not booking_settings:
+        logger.error("BookingSettings not found in DB! Using default values for PIN check-in.")
+        requires_login = True
+        check_in_minutes_before = 15
+        check_in_minutes_after = 15
+    else:
+        requires_login = booking_settings.resource_checkin_url_requires_login
+        check_in_minutes_before = booking_settings.check_in_minutes_before
+        check_in_minutes_after = booking_settings.check_in_minutes_after
+
+    if requires_login and not current_user.is_authenticated:
+        logger.info(f"PIN check-in for resource {resource_id} requires login. Redirecting.")
+        # Example: return redirect(url_for('auth.serve_login_page', next=request.url)) # Ensure 'auth.serve_login_page' is correct
+        return jsonify({'error': 'Login required for PIN check-in.', 'login_url': url_for('auth.serve_login_page', next=request.url)}), 401 # Adjusted to auth.serve_login_page
+
+    # Find the booking to check in
+    target_booking = None
+    now_utc = datetime.now(timezone.utc) # Use a single 'now' for all comparisons in this block
+
+    potential_bookings_query = Booking.query.filter(
+        Booking.resource_id == resource_id,
+        Booking.status == 'approved',
+        Booking.checked_in_at.is_(None)
+    )
+
+    if current_user.is_authenticated: # If login is required or user is simply logged in
+        potential_bookings_query = potential_bookings_query.filter_by(user_name=current_user.username)
+
+    # Iterate to find a booking within the check-in window
+    # Order by start_time to get the most relevant (e.g., soonest) booking.
+    potential_bookings = potential_bookings_query.order_by(Booking.start_time.asc()).all()
+
+    for b in potential_bookings:
+        start_time_aware = b.start_time.replace(tzinfo=timezone.utc) if b.start_time.tzinfo is None else b.start_time
+
+        check_in_window_start = start_time_aware - timedelta(minutes=check_in_minutes_before)
+        check_in_window_end = start_time_aware + timedelta(minutes=check_in_minutes_after)
+
+        if check_in_window_start <= now_utc <= check_in_window_end:
+            target_booking = b
+            break
+
+    if not target_booking:
+        user_identifier_for_log = current_user.username if current_user.is_authenticated else "anonymous/public"
+        logger.warning(f"PIN check-in for resource {resource_id} (PIN: {pin_value}): No active booking found within check-in window for user '{user_identifier_for_log}'.")
+        # Example: return render_template('pin_checkin_status.html', error='No active booking found within the check-in window.'), 404
+        return jsonify({'error': 'No active booking found for this resource within the check-in window.'}), 404
+
+    # Perform Check-in
+    try:
+        target_booking.checked_in_at = datetime.utcnow() # Stored as naive UTC
+        # Optional: Deactivate PIN if single-use (current model ResourcePIN.is_active)
+        # verified_pin.is_active = False # If PINs are single-use
+        db.session.commit()
+
+        user_identifier_for_audit = current_user.username if current_user.is_authenticated else f"PIN_USER_({verified_pin.id})"
+        add_audit_log(action="RESOURCE_PIN_CHECK_IN",
+                      details=f"User '{user_identifier_for_audit}' checked into booking ID {target_booking.id} for resource '{resource.name}' using PIN.",
+                      user_id=current_user.id if current_user.is_authenticated else None)
+
+        logger.info(f"Successfully checked in booking ID {target_booking.id} for resource {resource.id} using PIN {pin_value}.")
+        # Example: return render_template('pin_checkin_status.html', success=True, booking=target_booking, resource=resource)
+        return jsonify({
+            'success': True,
+            'message': 'Check-in successful!',
+            'booking_title': target_booking.title,
+            'resource_name': resource.name,
+            'user_name': target_booking.user_name, # User who owns the booking
+            'checked_in_at': target_booking.checked_in_at.isoformat()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Error during PIN check-in for booking {target_booking.id} (Resource {resource_id}, PIN {pin_value}):")
+        # Example: return render_template('pin_checkin_status.html', error=f'Server error: {str(e)}'), 500
+        return jsonify({'error': 'Failed to process PIN check-in due to a server error.'}), 500

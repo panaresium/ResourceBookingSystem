@@ -31,7 +31,11 @@
                 </p>
                 <button class="btn btn-sm btn-primary update-booking-btn" data-booking-id="">{{ _('Update Booking') }}</button>
                 <button class="btn btn-sm btn-danger cancel-booking-btn" data-booking-id="">{{ _('Cancel Booking') }}</button>
-                <button class="btn btn-sm btn-success check-in-btn" data-booking-id="" style="display:none;">{{ _('Check In') }}</button>
+
+                <span class="check-in-controls" style="display:none;"> <!-- Wrapper for PIN input and Check In button -->
+                    <input type="text" class="form-control form-control-sm d-inline-block booking-pin-input" style="width: 100px; margin-right: 5px; vertical-align: middle;" placeholder="{{ _('PIN') }}" data-booking-id="">
+                    <button class="btn btn-sm btn-success check-in-btn" data-booking-id="">{{ _('Check In') }}</button>
+                </span>
                 <button class="btn btn-sm btn-secondary check-out-btn" data-booking-id="" style="display:none;">{{ _('Check Out') }}</button>
             </div>
         </div>

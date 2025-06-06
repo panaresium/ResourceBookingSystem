@@ -5,11 +5,13 @@ from flask import Blueprint, jsonify, request, url_for, current_app
 from flask_login import login_required, current_user
 from sqlalchemy import func
 from werkzeug.utils import secure_filename
+import secrets # For PIN generation
+import string # For PIN generation
 
 # Assuming db is initialized in extensions.py
 from extensions import db
 # Assuming models are defined in models.py
-from models import Resource, Booking, FloorMap, Role # Added Role
+from models import Resource, Booking, FloorMap, Role, ResourcePIN, BookingSettings # Added Role, ResourcePIN, BookingSettings
 # Assuming utility functions are in utils.py
 from utils import add_audit_log, resource_to_dict, allowed_file, _import_resource_configurations_data
 # Assuming permission_required is in auth.py
@@ -198,9 +200,20 @@ def create_resource():
 @login_required
 @permission_required('manage_resources')
 def get_resource_details_admin(resource_id):
-    resource = Resource.query.get(resource_id)
-    if not resource: return jsonify({'error': 'Resource not found.'}), 404
-    return jsonify(resource_to_dict(resource)), 200
+    resource = Resource.query.get_or_404(resource_id) # Use get_or_404 for convenience
+    resource_data = resource_to_dict(resource) # Assuming this helper serializes main resource fields
+
+    # Fetch and serialize associated PINs
+    pins_data = [{
+        'id': pin.id,
+        'pin_value': pin.pin_value,
+        'is_active': pin.is_active,
+        'created_at': pin.created_at.isoformat() if pin.created_at else None,
+        'notes': pin.notes
+    } for pin in resource.pins.order_by(ResourcePIN.created_at.desc()).all()]
+
+    resource_data['pins'] = pins_data
+    return jsonify(resource_data), 200
 
 @api_resources_bp.route('/admin/resources/<int:resource_id>', methods=['PUT'])
 @login_required
@@ -813,6 +826,165 @@ def delete_resource_map_info_admin(resource_id):
         db.session.rollback(); logger.exception(f"Error deleting map info for resource {resource_id}:")
         return jsonify({'error': 'Failed to delete map info.'}), 500
 
+# --- Resource PIN Management Endpoints ---
+
+def generate_unique_pin(resource_id, length):
+    """Helper function to generate a unique PIN for a given resource."""
+    while True:
+        new_pin = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(length))
+        if not ResourcePIN.query.filter_by(resource_id=resource_id, pin_value=new_pin).first():
+            return new_pin
+
+@api_resources_bp.route('/resources/<int:resource_id>/pins', methods=['POST'])
+@login_required
+@permission_required('manage_resources')
+def add_resource_pin(resource_id):
+    logger = current_app.logger
+    resource = Resource.query.get_or_404(resource_id)
+    data = request.get_json() or {} # Ensure data is a dict even if no JSON body
+
+    manual_pin_value = data.get('pin_value', '').strip()
+    notes = data.get('notes', '').strip()
+
+    booking_settings = BookingSettings.query.first()
+    pin_auto_generation_enabled = booking_settings.pin_auto_generation_enabled if booking_settings else True
+    pin_length = booking_settings.pin_length if booking_settings else 6
+    pin_allow_manual = booking_settings.pin_allow_manual_override if booking_settings else True
+
+    final_pin_value = None
+
+    if manual_pin_value:
+        if not pin_allow_manual:
+            logger.warning(f"User {current_user.username} attempted to set manual PIN for resource {resource_id} when not allowed.")
+            return jsonify({'error': 'Manual PIN setting is disabled by global settings.'}), 403
+        # Validate manual PIN (e.g., length, characters, uniqueness for this resource)
+        if len(manual_pin_value) < 4 or len(manual_pin_value) > 32 : # Example validation
+             return jsonify({'error': 'Manual PIN length must be between 4 and 32 characters.'}), 400
+        if not all(c in string.ascii_uppercase + string.digits for c in manual_pin_value): # Basic alphanumeric check
+             return jsonify({'error': 'Manual PIN must be alphanumeric (A-Z, 0-9).'}), 400
+        if ResourcePIN.query.filter_by(resource_id=resource_id, pin_value=manual_pin_value).first():
+            return jsonify({'error': 'This PIN value already exists for this resource.'}), 409
+        final_pin_value = manual_pin_value
+    elif pin_auto_generation_enabled:
+        final_pin_value = generate_unique_pin(resource_id, pin_length)
+    else:
+        logger.warning(f"User {current_user.username} tried to add PIN for resource {resource_id}, but auto-generation is off and no manual PIN provided.")
+        return jsonify({'error': 'Auto-generation of PINs is disabled and no manual PIN was provided.'}), 400
+
+    if not final_pin_value: # Should not happen if logic above is correct
+        logger.error(f"Failed to determine PIN value for resource {resource_id} under user {current_user.username}.")
+        return jsonify({'error': 'Could not determine PIN value.'}), 500
+
+    try:
+        new_pin = ResourcePIN(
+            resource_id=resource_id,
+            pin_value=final_pin_value,
+            is_active=True, # New PINs are active by default
+            notes=notes if notes else None,
+            created_at=datetime.utcnow()
+        )
+        db.session.add(new_pin)
+        db.session.commit()
+
+        # Update the resource's current_pin if this is the only active PIN or if it's preferred
+        # For simplicity, let's set it if no other active PIN exists or if this is the first one.
+        active_pins_count = ResourcePIN.query.filter_by(resource_id=resource_id, is_active=True).count()
+        if active_pins_count == 1: # This new PIN is the only active one
+            resource.current_pin = final_pin_value
+            db.session.commit()
+
+        add_audit_log(action="ADD_RESOURCE_PIN", details=f"PIN created for resource ID {resource_id} ('{resource.name}') by {current_user.username}. PIN: {new_pin.pin_value[:3]}...") # Log truncated PIN
+        logger.info(f"PIN created for resource {resource_id} by user {current_user.username}.")
+        return jsonify({
+            'id': new_pin.id,
+            'pin_value': new_pin.pin_value,
+            'is_active': new_pin.is_active,
+            'created_at': new_pin.created_at.isoformat(),
+            'notes': new_pin.notes,
+            'resource_current_pin': resource.current_pin # Reflect if resource.current_pin was updated
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Error adding PIN for resource {resource_id} by user {current_user.username}: {e}")
+        return jsonify({'error': 'Failed to add PIN due to a server error.'}), 500
+
+@api_resources_bp.route('/resources/<int:resource_id>/pins/<int:pin_id>', methods=['PUT'])
+@login_required
+@permission_required('manage_resources')
+def update_resource_pin(resource_id, pin_id):
+    logger = current_app.logger
+    pin = ResourcePIN.query.filter_by(id=pin_id, resource_id=resource_id).first_or_404()
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+    updated_fields = []
+    if 'is_active' in data:
+        new_is_active = data['is_active']
+        if not isinstance(new_is_active, bool):
+            return jsonify({'error': 'Invalid type for is_active, boolean expected.'}), 400
+        if pin.is_active != new_is_active:
+            pin.is_active = new_is_active
+            updated_fields.append('is_active')
+
+    if 'notes' in data:
+        new_notes = data.get('notes', '').strip()
+        if pin.notes != (new_notes if new_notes else None): # Compare with None if new_notes is empty
+            pin.notes = new_notes if new_notes else None
+            updated_fields.append('notes')
+
+    if not updated_fields:
+        return jsonify({'message': 'No changes detected or applied.'}), 200 # Or 304 Not Modified
+
+    try:
+        db.session.commit()
+
+        # Logic to update resource.current_pin based on is_active changes
+        resource = Resource.query.get(resource_id) # Fetch the parent resource
+        if 'is_active' in updated_fields:
+            if pin.is_active:
+                # If this PIN was activated, and it's the only active one, or if no current_pin is set on resource, make it current.
+                # More complex logic might be needed if multiple active PINs are allowed and one needs to be "primary".
+                # For now, if resource has no current_pin or the deactivated PIN was the current one, set this one.
+                # Or, always set the most recently activated PIN as current if no other active PIN is already current.
+                other_active_pins = ResourcePIN.query.filter(
+                    ResourcePIN.resource_id == resource_id,
+                    ResourcePIN.is_active == True,
+                    ResourcePIN.id != pin.id # Exclude the current pin being processed
+                ).count()
+
+                # If this is the only active PIN, or if the resource's current_pin is now inactive or empty, set this one.
+                current_pin_is_this_newly_active_one = (resource.current_pin == pin.pin_value)
+
+                if other_active_pins == 0: # This is now the only active PIN
+                     resource.current_pin = pin.pin_value
+                elif not resource.current_pin: # Resource had no current PIN set
+                     resource.current_pin = pin.pin_value
+                # If the pin that was just activated was already the current_pin, no change needed for resource.current_pin.
+                # If another pin is active and is resource.current_pin, this logic doesn't change it.
+                # This logic can be refined based on desired behavior for multiple active PINs.
+
+            elif not pin.is_active and resource.current_pin == pin.pin_value: # This PIN was deactivated and was the current one
+                # Find another active PIN to set as current, if any
+                next_active_pin = ResourcePIN.query.filter_by(resource_id=resource_id, is_active=True).order_by(ResourcePIN.created_at.desc()).first()
+                resource.current_pin = next_active_pin.pin_value if next_active_pin else None
+            db.session.commit() # Commit changes to resource.current_pin
+
+        add_audit_log(action="UPDATE_RESOURCE_PIN", details=f"PIN ID {pin_id} for resource ID {resource_id} updated by {current_user.username}. Changes: {', '.join(updated_fields)}.")
+        logger.info(f"PIN {pin_id} for resource {resource_id} updated by user {current_user.username}. Fields: {', '.join(updated_fields)}")
+        return jsonify({
+            'id': pin.id,
+            'pin_value': pin.pin_value,
+            'is_active': pin.is_active,
+            'created_at': pin.created_at.isoformat() if pin.created_at else None,
+            'notes': pin.notes,
+            'resource_current_pin': resource.current_pin
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Error updating PIN {pin_id} for resource {resource_id} by user {current_user.username}: {e}")
+        return jsonify({'error': 'Failed to update PIN due to a server error.'}), 500
 
 def init_api_resources_routes(app):
     app.register_blueprint(api_resources_bp)

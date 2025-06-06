@@ -169,22 +169,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     const checkInBtn = bookingItemClone.querySelector('.check-in-btn');
                     const checkOutBtn = bookingItemClone.querySelector('.check-out-btn');
+                    const checkInControls = bookingItemClone.querySelector('.check-in-controls'); // Get the wrapper
+                    const pinInput = bookingItemClone.querySelector('.booking-pin-input');
+
                     checkInBtn.dataset.bookingId = booking.id;
                     checkOutBtn.dataset.bookingId = booking.id;
+                    if (pinInput) pinInput.dataset.bookingId = booking.id;
 
-                    // Ensure buttons are hidden by default (if not already by CSS/template)
-                    checkInBtn.style.display = 'none';
+
+                    // Ensure buttons/controls are hidden by default
+                    if (checkInControls) checkInControls.style.display = 'none';
                     checkOutBtn.style.display = 'none';
 
                     if (checkInOutEnabled) {
                         if (booking.can_check_in) {
-                            checkInBtn.style.display = 'inline-block';
+                            if (checkInControls) checkInControls.style.display = 'inline-block'; // Show wrapper
                         }
                         if (booking.checked_in_at && !booking.checked_out_at) {
                             checkOutBtn.style.display = 'inline-block';
                         }
                     }
-                    // If checkInOutEnabled is false, buttons remain hidden.
+                    // If checkInOutEnabled is false, controls remain hidden.
 
                     bookingsListDiv.appendChild(bookingItemClone);
                 }
@@ -264,14 +269,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (target.classList.contains('check-in-btn')) {
             const bookingId = target.dataset.bookingId;
+            const pinInput = document.querySelector(`.booking-pin-input[data-booking-id='${bookingId}']`);
+            const pinValue = pinInput ? pinInput.value.trim() : null;
+
+            let payload = {};
+            if (pinValue && pinValue !== "") {
+                payload.pin = pinValue;
+            }
+
             showLoading(statusDiv, 'Checking in...');
             try {
-                await apiCall(`/api/bookings/${bookingId}/check_in`, { method: 'POST' });
-                target.style.display = 'none';
+                // Pass CSRF token if your apiCall helper doesn't handle it globally for POST/PUT etc.
+                // For now, assuming apiCall or a global fetch wrapper handles CSRF if needed.
+                await apiCall(`/api/bookings/${bookingId}/check_in`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }, // Ensure correct header
+                    body: JSON.stringify(payload) // Send payload
+                });
+                // Hide the entire check-in controls (input + button)
+                const checkInControls = target.closest('.check-in-controls');
+                if (checkInControls) checkInControls.style.display = 'none';
+
                 const bookingItemDiv = target.closest('.booking-item');
                 const checkOutBtn = bookingItemDiv.querySelector('.check-out-btn');
                 if (checkOutBtn) checkOutBtn.style.display = 'inline-block';
                 showSuccess(statusDiv, 'Checked in successfully.');
+                if (pinInput) pinInput.value = ''; // Clear PIN input
             } catch (error) {
                 console.error('Check in failed:', error);
                 showError(statusDiv, error.message || 'Check in failed.');

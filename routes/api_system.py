@@ -11,7 +11,7 @@ from sqlalchemy import func # For count query
 # Relative imports from project structure
 from auth import permission_required
 from extensions import db, socketio # socketio might be None if not available
-from models import AuditLog, User, Resource, FloorMap, Booking, Role # Added User, Resource, FloorMap for utils that might need them in this context
+from models import AuditLog, User, Resource, FloorMap, Booking, Role, BookingSettings # Added BookingSettings
 from utils import (
     add_audit_log,
     _get_map_configuration_data,

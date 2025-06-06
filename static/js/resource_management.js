@@ -25,6 +25,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const clearFiltersBtn = document.getElementById('resource-clear-filters-btn');
     let currentFilters = {};
 
+    let currentResourceIdForPins = null; // For PIN Management
+
     const bulkModal = document.getElementById('bulk-resource-modal');
     const bulkForm = document.getElementById('bulk-resource-form');
     const bulkFormStatus = document.getElementById('bulk-resource-form-status');
@@ -309,6 +311,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 resourceStatusModalInput.value = data.status || 'draft'; // Populate status for editing
                 resourceFormModalTitle.textContent = 'Edit Resource';
                 hideMessage(resourceFormStatus);
+
+                // --- PIN Management UI ---
+                const pinsManagementArea = document.getElementById('resource-pins-management-area');
+                if (pinsManagementArea) {
+                    pinsManagementArea.style.display = 'block'; // Show the PINs area
+                    loadResourcePins(id, data.pins); // Pass existing pins if available in 'data'
+                }
+                // --- End PIN Management UI ---
+
                 resourceFormModal.style.display = 'block';
             } catch (error) {
                 showError(statusDiv, `Failed to load resource: ${error.message}`);
@@ -439,4 +450,236 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     fetchAndDisplayResources();
+
+    // --- PIN Management Functions ---
+    async function loadResourcePins(resourceId, existingPins = null) {
+        currentResourceIdForPins = resourceId;
+        const pinsTableBody = document.querySelector('#resource-pins-table tbody');
+        const currentPinValueSpan = document.getElementById('current-pin-value');
+        if (!pinsTableBody || !currentPinValueSpan) return;
+
+        showLoading(document.getElementById('resource-pin-form-status'), 'Loading PINs...');
+
+        try {
+            // Fetch full resource details again OR rely on existingPins if comprehensive enough
+            // For this implementation, we assume `existingPins` (passed from the main resource load) is sufficient for initial display.
+            // If not, an additional fetch for pins specifically might be needed or ensure the main resource fetch is always up-to-date.
+            // Let's assume `existingPins` is the `data.pins` from the resource details call.
+
+            let pinsToRender = existingPins;
+            let resourceCurrentPin = 'N/A';
+
+            if (!pinsToRender) { // If pins were not passed, fetch them (e.g., after an update)
+                const resourceData = await apiCall(`/api/admin/resources/${resourceId}`);
+                pinsToRender = resourceData.pins || [];
+                resourceCurrentPin = resourceData.current_pin || 'N/A';
+            } else {
+                // If existingPins were passed, we need the resource's current_pin value.
+                // This implies the main resource data should also pass `current_pin`.
+                // For simplicity, let's assume the main `data` object in `edit-resource-btn` handler has `current_pin`.
+                // This needs adjustment if `resource_to_dict` doesn't include `current_pin`.
+                // Let's do a targeted fetch for current_pin for now if not in existingPins structure
+                const resDataForPin = await apiCall(`/api/admin/resources/${resourceId}`);
+                resourceCurrentPin = resDataForPin.current_pin || 'N/A';
+            }
+
+            currentPinValueSpan.textContent = resourceCurrentPin;
+            renderPinsTable(pinsToRender, resourceId);
+
+            // Fetch global BookingSettings to control UI visibility
+            const bookingSettings = await apiCall('/api/system/booking_settings');
+            updateAddPinFormVisibility(bookingSettings);
+            hideMessage(document.getElementById('resource-pin-form-status'));
+
+        } catch (error) {
+            showError(document.getElementById('resource-pin-form-status'), `Error loading PINs: ${error.message}`);
+        }
+    }
+
+    function renderPinsTable(pins, resourceId) {
+        const pinsTableBody = document.querySelector('#resource-pins-table tbody');
+        pinsTableBody.innerHTML = ''; // Clear existing rows
+
+        if (!pins || pins.length === 0) {
+            pinsTableBody.innerHTML = '<tr><td colspan="5">No PINs found for this resource.</td></tr>';
+            return;
+        }
+
+        pins.forEach(pin => {
+            const row = pinsTableBody.insertRow();
+            row.insertCell().textContent = pin.pin_value;
+
+            const activeCell = row.insertCell();
+            const activeCheckbox = document.createElement('input');
+            activeCheckbox.type = 'checkbox';
+            activeCheckbox.checked = pin.is_active;
+            activeCheckbox.classList.add('pin-active-toggle');
+            activeCheckbox.dataset.pinId = pin.id;
+            activeCheckbox.dataset.resourceId = resourceId;
+            activeCell.appendChild(activeCheckbox);
+
+            row.insertCell().textContent = pin.notes || '';
+            row.insertCell().textContent = pin.created_at ? new Date(pin.created_at).toLocaleString() : 'N/A';
+
+            const actionsCell = row.insertCell();
+            const copyUrlBtn = document.createElement('button');
+            copyUrlBtn.textContent = 'Copy Check-in URL';
+            copyUrlBtn.classList.add('button', 'button-small', 'copy-pin-url-btn');
+            copyUrlBtn.dataset.pinValue = pin.pin_value;
+            copyUrlBtn.dataset.resourceId = resourceId;
+            actionsCell.appendChild(copyUrlBtn);
+        });
+    }
+
+    function updateAddPinFormVisibility(bookingSettings) {
+        const manualPinInput = document.getElementById('manual_pin_value');
+        const addManualPinBtn = document.getElementById('btn-add-manual-pin');
+        const autoGeneratePinBtn = document.getElementById('btn-auto-generate-pin');
+
+        if (!bookingSettings) { // Default to restrictive if settings not loaded
+            if (manualPinInput) manualPinInput.style.display = 'none';
+            if (addManualPinBtn) addManualPinBtn.style.display = 'none';
+            if (autoGeneratePinBtn) autoGeneratePinBtn.style.display = 'none';
+            return;
+        }
+
+        if (manualPinInput && addManualPinBtn) {
+            const showManual = bookingSettings.pin_allow_manual_override;
+            manualPinInput.style.display = showManual ? 'inline-block' : 'none';
+            addManualPinBtn.style.display = showManual ? 'inline-block' : 'none';
+            if (manualPinInput.previousElementSibling && manualPinInput.previousElementSibling.tagName === 'LABEL') {
+                 manualPinInput.previousElementSibling.style.display = showManual ? 'inline-block' : 'none';
+            }
+        }
+        if (autoGeneratePinBtn) {
+            autoGeneratePinBtn.style.display = bookingSettings.pin_auto_generation_enabled ? 'inline-block' : 'none';
+        }
+    }
+
+    // Placeholder for event handlers to be added in the next chunk
+    // Event handler for "Add Manual PIN"
+    const addManualPinBtn = document.getElementById('btn-add-manual-pin');
+    if (addManualPinBtn) {
+        addManualPinBtn.addEventListener('click', async function() {
+            const manualPinValue = document.getElementById('manual_pin_value').value.trim();
+            const notes = document.getElementById('pin_notes').value.trim();
+            const statusEl = document.getElementById('resource-pin-form-status');
+
+            if (!currentResourceIdForPins) {
+                showError(statusEl, 'No resource selected for PIN management.');
+                return;
+            }
+            // Manual PIN value is optional if auto-generation is fallback, but this button implies manual intent.
+            // Backend will validate if manual PIN is allowed and if value is provided when required.
+
+            showLoading(statusEl, 'Adding manual PIN...');
+            try {
+                const payload = { notes: notes };
+                if (manualPinValue) { // Only include pin_value if user actually entered one
+                    payload.pin_value = manualPinValue;
+                } else if (document.getElementById('btn-auto-generate-pin').style.display === 'none') {
+                    // If auto-generate is hidden (disabled) and manual is empty, it's an error for "Add Manual"
+                    showError(statusEl, 'Manual PIN value is required when auto-generation is disabled.');
+                    return;
+                }
+                // If manualPinValue is empty, and auto-generation is enabled, the backend will auto-generate.
+                // This button's click implies user wants to use the value in manual_pin_value field or trigger auto if empty & allowed.
+                // The backend POST /pins handles empty pin_value by trying auto-generation if enabled.
+
+                await apiCall(`/api/resources/${currentResourceIdForPins}/pins`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }, statusEl);
+                document.getElementById('manual_pin_value').value = ''; // Clear input
+                document.getElementById('pin_notes').value = ''; // Clear input
+                loadResourcePins(currentResourceIdForPins); // Refresh PINs list
+            } catch (error) {
+                // showError is called by apiCall, but we can add specifics if needed
+                // showError(statusEl, `Error adding manual PIN: ${error.message}`);
+            }
+        });
+    }
+
+    // Event handler for "Auto-generate PIN"
+    const autoGeneratePinBtn = document.getElementById('btn-auto-generate-pin');
+    if (autoGeneratePinBtn) {
+        autoGeneratePinBtn.addEventListener('click', async function() {
+            const notes = document.getElementById('pin_notes').value.trim();
+            const statusEl = document.getElementById('resource-pin-form-status');
+
+            if (!currentResourceIdForPins) {
+                showError(statusEl, 'No resource selected for PIN management.');
+                return;
+            }
+            showLoading(statusEl, 'Auto-generating PIN...');
+            try {
+                // Explicitly send empty pin_value to signify auto-generation preference if backend distinguishes.
+                // Or rely on backend to auto-generate if pin_value is missing/empty and auto-gen is enabled.
+                await apiCall(`/api/resources/${currentResourceIdForPins}/pins`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ notes: notes, pin_value: '' }) // Sending empty pin_value
+                }, statusEl);
+                document.getElementById('manual_pin_value').value = ''; // Clear input
+                document.getElementById('pin_notes').value = ''; // Clear input
+                loadResourcePins(currentResourceIdForPins); // Refresh PINs list
+            } catch (error) {
+                // showError(statusEl, `Error auto-generating PIN: ${error.message}`);
+            }
+        });
+    }
+
+    // Event delegation for "Toggle Active" and "Copy Check-in URL" on pins table
+    const pinsTable = document.getElementById('resource-pins-table');
+    if (pinsTable) {
+        pinsTable.addEventListener('click', async function(event) {
+            const target = event.target;
+            const statusEl = document.getElementById('resource-pin-form-status');
+
+            if (target.classList.contains('pin-active-toggle')) {
+                const pinId = target.dataset.pinId;
+                const resourceId = target.dataset.resourceId; // Should be currentResourceIdForPins
+                const newStatus = target.checked;
+
+                showLoading(statusEl, `Updating PIN ${pinId} status...`);
+                try {
+                    const updatedPinData = await apiCall(`/api/resources/${resourceId}/pins/${pinId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ is_active: newStatus })
+                    }, statusEl);
+
+                    // Update the current PIN display if it changed
+                    const currentPinValueSpan = document.getElementById('current-pin-value');
+                    if (currentPinValueSpan && updatedPinData.resource_current_pin) {
+                        currentPinValueSpan.textContent = updatedPinData.resource_current_pin;
+                    } else if (currentPinValueSpan) {
+                         currentPinValueSpan.textContent = 'N/A';
+                    }
+                    showSuccess(statusEl, `PIN ${pinId} status updated.`);
+                    // Optionally, just update the specific row visually instead of full reload
+                    // For now, a full reload ensures consistency:
+                    // loadResourcePins(resourceId);
+                    // Or, even better, update just the one pin in the table from response
+                    target.checked = updatedPinData.is_active; // Reflect actual server state
+
+                } catch (error) {
+                    target.checked = !newStatus; // Revert checkbox on error
+                    // showError is handled by apiCall
+                }
+            } else if (target.classList.contains('copy-pin-url-btn')) {
+                const pinValue = target.dataset.pinValue;
+                const resourceId = target.dataset.resourceId; // Should be currentResourceIdForPins
+                const checkinUrl = `${window.location.origin}/r/${resourceId}/checkin?pin=${pinValue}`;
+                try {
+                    await navigator.clipboard.writeText(checkinUrl);
+                    showSuccess(statusEl, 'Check-in URL copied to clipboard!');
+                } catch (err) {
+                    showError(statusEl, 'Failed to copy URL. Please copy manually.');
+                    console.error('Failed to copy URL: ', err);
+                }
+            }
+        });
+    }
 });

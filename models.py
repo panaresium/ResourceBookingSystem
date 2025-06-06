@@ -89,8 +89,12 @@ class BookingSettings(db.Model):
     max_bookings_per_user = db.Column(db.Integer, nullable=True, default=None)
     enable_check_in_out = db.Column(db.Boolean, default=False)
     past_booking_time_adjustment_hours = db.Column(db.Integer, default=0)
-    check_in_minutes_before = db.Column(db.Integer, nullable=False, default=15)  # New field
-    check_in_minutes_after = db.Column(db.Integer, nullable=False, default=15)   # New field
+    check_in_minutes_before = db.Column(db.Integer, nullable=False, default=15)
+    check_in_minutes_after = db.Column(db.Integer, nullable=False, default=15)
+    pin_auto_generation_enabled = db.Column(db.Boolean, default=True, nullable=False)
+    pin_length = db.Column(db.Integer, default=6, nullable=False)
+    pin_allow_manual_override = db.Column(db.Boolean, default=True, nullable=False)
+    resource_checkin_url_requires_login = db.Column(db.Boolean, default=True, nullable=False)
 
     def __repr__(self):
         return f"<BookingSettings {self.id}>"
@@ -126,9 +130,25 @@ class Resource(db.Model):
     floor_map = db.relationship('FloorMap', backref=db.backref('resources', lazy='dynamic'))
     roles = db.relationship('Role', secondary=resource_roles_table,
                             backref=db.backref('allowed_resources', lazy='dynamic'))
+    pins = db.relationship('ResourcePIN', backref='resource', lazy='dynamic', cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Resource {self.name}>"
+
+class ResourcePIN(db.Model):
+    __tablename__ = 'resource_pin' # Explicit table name
+    id = db.Column(db.Integer, primary_key=True)
+    resource_id = db.Column(db.Integer, db.ForeignKey('resource.id'), nullable=False)
+    pin_value = db.Column(db.String(255), nullable=False) # Adjust length as needed
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    notes = db.Column(db.String(500), nullable=True)
+
+    # Add a unique constraint for pin_value per resource_id
+    __table_args__ = (db.UniqueConstraint('resource_id', 'pin_value', name='uq_resource_pin_value'),)
+
+    def __repr__(self):
+        return f'<ResourcePIN {self.pin_value} for Resource {self.resource_id}>'
 
 class Booking(db.Model):
     id = db.Column(db.Integer, primary_key=True)
