@@ -26,6 +26,7 @@
 
 html {
     overflow: hidden;
+    height: 100%;
 }
 
 /* Dark theme color variables */
@@ -47,7 +48,7 @@ body {
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    min-height: 100vh;
 }
 
 /* Header Styling */
