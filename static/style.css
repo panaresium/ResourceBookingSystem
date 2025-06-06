@@ -93,7 +93,7 @@ body {
 }
 
 .header-content > a:hover,
-.header-content > div:hover:not(#user-dropdown-container):not(#welcome-message-container) { /* Avoid hover on non-interactive divs unless they contain an <a> that handles it */
+.header-content > div:hover:not(#user-dropdown-container):not(#welcome-message-container):not(#user-actions-area) { /* Avoid hover on non-interactive divs unless they contain an <a> that handles it */
     background-color: var(--secondary-color);
     /* color is already set to black and important, hover shouldn't change it unless specified */
     text-decoration: none;
