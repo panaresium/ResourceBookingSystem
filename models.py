@@ -40,6 +40,7 @@ class User(db.Model, UserMixin):
     position = db.Column(db.String(100), nullable=True)
     facebook_id = db.Column(db.String(200), nullable=True, unique=True)
     instagram_id = db.Column(db.String(200), nullable=True, unique=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False) # Added for Flask-Login
 
     roles = db.relationship('Role', secondary=user_roles_table,
                             backref=db.backref('users', lazy='dynamic'))
@@ -88,6 +89,8 @@ class BookingSettings(db.Model):
     max_bookings_per_user = db.Column(db.Integer, nullable=True, default=None)
     enable_check_in_out = db.Column(db.Boolean, default=False)
     past_booking_time_adjustment_hours = db.Column(db.Integer, default=0)
+    check_in_minutes_before = db.Column(db.Integer, nullable=False, default=15)  # New field
+    check_in_minutes_after = db.Column(db.Integer, nullable=False, default=15)   # New field
 
     def __repr__(self):
         return f"<BookingSettings {self.id}>"

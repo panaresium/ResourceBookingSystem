@@ -258,6 +258,14 @@ def get_my_bookings():
     try:
         booking_settings = BookingSettings.query.first()
         enable_check_in_out = booking_settings.enable_check_in_out if booking_settings else False
+        # Fetch dynamic check-in window settings
+        if booking_settings:
+            check_in_minutes_before = booking_settings.check_in_minutes_before
+            check_in_minutes_after = booking_settings.check_in_minutes_after
+        else:
+            current_app.logger.warning("BookingSettings not found in DB, using default check-in window (15/15 mins) for get_my_bookings.")
+            check_in_minutes_before = 15
+            check_in_minutes_after = 15
 
         user_bookings = Booking.query.filter_by(user_name=current_user.username)\
                                      .order_by(Booking.start_time.desc())\
@@ -267,7 +275,7 @@ def get_my_bookings():
         for booking in user_bookings:
             resource = Resource.query.get(booking.resource_id)
             resource_name = resource.name if resource else "Unknown Resource"
-            grace = current_app.config.get('CHECK_IN_GRACE_MINUTES', 15)
+            # grace = current_app.config.get('CHECK_IN_GRACE_MINUTES', 15) # Replaced
             now = datetime.now(timezone.utc)
 
             # Ensure booking.start_time is offset-aware (UTC) before comparison
@@ -277,7 +285,8 @@ def get_my_bookings():
 
             can_check_in = (
                 booking.checked_in_at is None and
-                booking_start_time_aware - timedelta(minutes=grace) <= now <= booking_start_time_aware + timedelta(minutes=grace)
+                # Use new dynamic settings for check-in window
+                booking_start_time_aware - timedelta(minutes=check_in_minutes_before) <= now <= booking_start_time_aware + timedelta(minutes=check_in_minutes_after)
             )
 
             # Determine if the check_in_token should be exposed
@@ -772,7 +781,15 @@ def check_in_booking(booking_id):
             current_app.logger.info(f"User {current_user.username} attempt to check-in to already checked-in booking {booking_id} at {booking.checked_in_at.isoformat()}")
             return jsonify({'message': 'Already checked in.', 'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat()}), 200 # Or 409 Conflict
 
-        grace_period_minutes = current_app.config.get('CHECK_IN_GRACE_MINUTES', 15)
+        booking_settings = BookingSettings.query.first()
+        if booking_settings:
+            check_in_minutes_before = booking_settings.check_in_minutes_before
+            check_in_minutes_after = booking_settings.check_in_minutes_after
+        else:
+            current_app.logger.warning(f"BookingSettings not found for check_in_booking {booking_id}, using default window (15/15 mins).")
+            check_in_minutes_before = 15
+            check_in_minutes_after = 15
+
         now = datetime.now(timezone.utc)
 
         # Ensure booking.start_time is offset-aware for comparison
@@ -780,11 +797,11 @@ def check_in_booking(booking_id):
         if booking_start_time_aware.tzinfo is None: # Should be UTC from DB
             booking_start_time_aware = booking_start_time_aware.replace(tzinfo=timezone.utc)
 
-        if not (booking_start_time_aware - timedelta(minutes=grace_period_minutes) <= now <= booking_start_time_aware + timedelta(minutes=grace_period_minutes)):
+        if not (booking_start_time_aware - timedelta(minutes=check_in_minutes_before) <= now <= booking_start_time_aware + timedelta(minutes=check_in_minutes_after)):
             current_app.logger.warning(f"User {current_user.username} check-in attempt for booking {booking_id} outside of allowed window. Booking starts at {booking_start_time_aware.isoformat()}, current time {now.isoformat()}")
-            return jsonify({'error': f'Check-in is only allowed within {grace_period_minutes} minutes of the booking start time.'}), 403
+            return jsonify({'error': f'Check-in is only allowed from {check_in_minutes_before} minutes before to {check_in_minutes_after} minutes after the booking start time.'}), 403
 
-        booking.checked_in_at = now
+        booking.checked_in_at = now.replace(tzinfo=None) # Store as naive UTC
         db.session.commit()
 
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
@@ -905,18 +922,25 @@ def qr_check_in(token):
         current_app.logger.warning(f"QR Check-in attempt for booking {booking.id} with status '{booking.status}' using token {token}")
         return jsonify({'error': f'Booking is not active (status: {booking.status}). Cannot check in.'}), 403
 
-    grace_period_minutes = current_app.config.get('CHECK_IN_GRACE_MINUTES', 15)
+    booking_settings = BookingSettings.query.first()
+    if booking_settings:
+        check_in_minutes_before = booking_settings.check_in_minutes_before
+        check_in_minutes_after = booking_settings.check_in_minutes_after
+    else:
+        current_app.logger.warning(f"BookingSettings not found for qr_check_in booking {booking.id}, using default window (15/15 mins).")
+        check_in_minutes_before = 15
+        check_in_minutes_after = 15
 
     booking_start_time_utc = booking.start_time
     if booking_start_time_utc.tzinfo is None: # DB stores naive UTC
         booking_start_time_utc = booking_start_time_utc.replace(tzinfo=timezone.utc)
 
-    check_in_window_start = booking_start_time_utc - timedelta(minutes=grace_period_minutes)
-    check_in_window_end = booking_start_time_utc + timedelta(minutes=grace_period_minutes)
+    check_in_window_start = booking_start_time_utc - timedelta(minutes=check_in_minutes_before)
+    check_in_window_end = booking_start_time_utc + timedelta(minutes=check_in_minutes_after)
 
     if not (check_in_window_start <= now_utc <= check_in_window_end):
         current_app.logger.warning(f"QR Check-in for booking {booking.id} (token {token}) outside allowed window. Booking Start: {booking_start_time_utc.isoformat()}, Window: {check_in_window_start.isoformat()} to {check_in_window_end.isoformat()}, Now: {now_utc.isoformat()}")
-        return jsonify({'error': f'Check-in is only allowed from {check_in_window_start.strftime("%H:%M")} to {check_in_window_end.strftime("%H:%M")} on the booking day ({booking_start_time_utc.strftime("%Y-%m-%d")}).'}), 403
+        return jsonify({'error': f'Check-in is only allowed from {check_in_minutes_before} minutes before to {check_in_minutes_after} minutes after the booking start time. (Current time: {now_utc.strftime("%H:%M:%S %Z")}, Booking start: {booking_start_time_utc.strftime("%H:%M:%S %Z")})'}), 403
 
     try:
         booking.checked_in_at = now_utc.replace(tzinfo=None) # Store as naive UTC

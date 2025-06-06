@@ -44,6 +44,16 @@
             <label for="enable_check_in_out" style="display: inline-block; margin-left: 5px;">{{ _('Enable Check-in / Check-out feature for bookings') }}</label>
         </div>
 
+        <div class="form-group" style="margin-left: 20px;">
+            <label for="check_in_minutes_before">{{ _('Check-in Window: Minutes Before Start Time') }}</label>
+            <input type="number" class="form-control" id="check_in_minutes_before" name="check_in_minutes_before" value="{{ settings.check_in_minutes_before if settings else 15 }}" min="0">
+        </div>
+
+        <div class="form-group" style="margin-left: 20px;">
+            <label for="check_in_minutes_after">{{ _('Check-in Window: Minutes After Start Time') }}</label>
+            <input type="number" class="form-control" id="check_in_minutes_after" name="check_in_minutes_after" value="{{ settings.check_in_minutes_after if settings else 15 }}" min="0">
+        </div>
+
         <div style="margin-top: 20px;">
             <button type="submit" class="button primary-button">{{ _('Save Settings') }}</button>
         </div>

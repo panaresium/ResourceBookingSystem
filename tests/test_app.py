@@ -6,8 +6,10 @@ from sqlalchemy import text
 
 from datetime import datetime, time, date, timedelta
 
-from app import app, db, User, Resource, Booking, WaitlistEntry, FloorMap, AuditLog, email_log, teams_log, slack_log
-from models import BookingSettings # Import the new model
+from app import app # app object
+from extensions import db # db object
+from models import User, Resource, Booking, WaitlistEntry, FloorMap, AuditLog, BookingSettings # Models
+from utils import email_log, teams_log, slack_log # Test log lists
 
 # from flask_login import current_user # Not directly used for assertions here
 
@@ -488,6 +490,128 @@ class TestBookingUserActions(AppTests):
         }
         response_time_shift = self.client.put(f'/api/bookings/{booking.id}', json=payload_time_shift)
         self.assertEqual(response_time_shift.status_code, 403) # Expecting 403 as time changed.
+
+    def test_get_my_bookings_with_check_in_token(self):
+        # 1. Create user
+        user = User(username='testuser_token', email='testuser_token@example.com', is_admin=False)
+        user.set_password('password')
+        # user.is_active = True # Add if AttributeError: 'User' object has no attribute 'is_active' occurs
+        db.session.add(user)
+        db.session.commit()
+
+        # 2. Create resource
+        resource = Resource(name='Test Resource Token', capacity=10, status='published') # Ensure status is published
+        db.session.add(resource)
+        db.session.commit()
+
+        # 3. Login
+        # Use self.login helper which uses /api/auth/login
+        login_resp = self.login('testuser_token', 'password')
+        self.assertEqual(login_resp.status_code, 200, f"Login failed: {login_resp.get_data(as_text=True)}")
+        self.assertTrue(login_resp.get_json().get('success'), "Login API call was not successful")
+
+
+        # 4. Create a booking (ensure it's in the future)
+        # Ensure datetime and timedelta are imported: from datetime import datetime, timedelta
+        future_start_dt = datetime.utcnow() + timedelta(days=1, hours=2) # Booking tomorrow 2 hours from now UTC
+        future_end_dt = future_start_dt + timedelta(hours=1)
+
+        booking_payload = {
+            'resource_id': resource.id,
+            # Using direct datetime objects for payload to /api/bookings might not be standard.
+            # The API route /api/bookings expects 'date_str', 'start_time_str', 'end_time_str'.
+            'date_str': future_start_dt.strftime('%Y-%m-%d'),
+            'start_time_str': future_start_dt.strftime('%H:%M'),
+            'end_time_str': future_end_dt.strftime('%H:%M'),
+            'title': 'Booking with Token Test',
+            'user_name': 'testuser_token' # Pass username, route will get current_user if not admin
+        }
+        response_create = self.client.post('/api/bookings', json=booking_payload)
+        self.assertEqual(response_create.status_code, 201, f"Booking creation failed: {response_create.get_data(as_text=True)}")
+
+        created_booking_data_list = response_create.get_json().get('bookings')
+        self.assertIsNotNone(created_booking_data_list, "No 'bookings' list in creation response")
+        self.assertTrue(len(created_booking_data_list) > 0, "Booking list is empty in creation response")
+        created_booking_data = created_booking_data_list[0]
+        booking_id = created_booking_data['id']
+
+        # 5. Call /api/bookings/my_bookings
+        response_my_bookings = self.client.get('/api/bookings/my_bookings')
+
+        # 6. Assert status code
+        self.assertEqual(response_my_bookings.status_code, 200, f"Fetching my_bookings failed: {response_my_bookings.get_data(as_text=True)}")
+
+        # 7. Assert booking is present
+        my_bookings_data = response_my_bookings.get_json()
+        self.assertIn('bookings', my_bookings_data)
+
+        found_booking_json = None # Renamed to avoid conflict with model name 'Booking'
+        for b_json in my_bookings_data['bookings']:
+            if b_json['id'] == booking_id:
+                found_booking_json = b_json
+                break
+
+        self.assertIsNotNone(found_booking_json, "Created booking not found in my_bookings response")
+
+        # 8. Assert check_in_token is present and not empty
+        self.assertIn('check_in_token', found_booking_json)
+
+        # Verify booking conditions for token presence based on logic in routes/api_bookings.py get_my_bookings
+        # The token should be present if:
+        # - settings.enable_check_in_out is True (let's assume it is for this test, or set it)
+        # - booking.status == 'approved'
+        # - not booking.checked_in_at
+        # - booking.start_time > datetime.utcnow() (it's a future booking)
+        # - OR (booking.start_time <= datetime.utcnow() < booking.end_time) (it's current)
+        # For this test, it's a future, approved, not-checked-in booking.
+
+        # Ensure enable_check_in_out is True for this test
+        current_settings = BookingSettings.query.first()
+        original_check_in_out_setting = None
+        if current_settings:
+            original_check_in_out_setting = current_settings.enable_check_in_out
+            current_settings.enable_check_in_out = True
+        else:
+            current_settings = BookingSettings(enable_check_in_out=True)
+            db.session.add(current_settings)
+        db.session.commit()
+
+        # Re-fetch my_bookings if the setting change affects token generation logic server-side for the response
+        response_my_bookings_after_setting = self.client.get('/api/bookings/my_bookings')
+        self.assertEqual(response_my_bookings_after_setting.status_code, 200)
+        my_bookings_data_after_setting = response_my_bookings_after_setting.get_json()
+        found_booking_json_after_setting = None
+        for b_json in my_bookings_data_after_setting['bookings']:
+            if b_json['id'] == booking_id:
+                found_booking_json_after_setting = b_json
+                break
+        self.assertIsNotNone(found_booking_json_after_setting, "Booking not found after ensuring check-in setting.")
+        self.assertIn('check_in_token', found_booking_json_after_setting)
+
+
+        # The token can be None if conditions are not met.
+        # For a new, future, approved, non-checked-in booking, it should be a string.
+        is_future_booking = datetime.fromisoformat(found_booking_json_after_setting['start_time'].replace('Z', '+00:00')) > datetime.utcnow()
+        is_approved = found_booking_json_after_setting['status'] == 'approved'
+        is_not_checked_in = not found_booking_json_after_setting['checked_in_at']
+
+        if is_future_booking and is_approved and is_not_checked_in:
+            self.assertIsInstance(found_booking_json_after_setting['check_in_token'], str, "check_in_token should be a string for future, approved, non-checked-in bookings")
+            self.assertTrue(len(found_booking_json_after_setting['check_in_token']) > 0, "check_in_token should be a non-empty string")
+        else:
+            # This else branch indicates a potential issue with test setup or understanding of token generation logic
+            self.fail(f"Booking did not meet conditions for check_in_token generation: is_future={is_future_booking}, is_approved={is_approved}, is_not_checked_in={is_not_checked_in}")
+
+        # Clean up: logout
+        self.logout() # Use helper for API logout
+
+        # Restore original BookingSettings if changed
+        if original_check_in_out_setting is not None:
+            current_settings.enable_check_in_out = original_check_in_out_setting
+            db.session.commit()
+        elif current_settings: # if it was created new
+            db.session.delete(current_settings)
+            db.session.commit()
 
 
 class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusion

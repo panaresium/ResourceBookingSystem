@@ -483,6 +483,18 @@ def update_booking_settings():
 
         settings.enable_check_in_out = request.form.get('enable_check_in_out') == 'on'
 
+        # New settings for check-in window
+        check_in_minutes_before_str = request.form.get('check_in_minutes_before', '15')
+        settings.check_in_minutes_before = int(check_in_minutes_before_str) if check_in_minutes_before_str.strip() else 15
+
+        check_in_minutes_after_str = request.form.get('check_in_minutes_after', '15')
+        settings.check_in_minutes_after = int(check_in_minutes_after_str) if check_in_minutes_after_str.strip() else 15
+
+        if settings.check_in_minutes_before < 0 or settings.check_in_minutes_after < 0:
+            db.session.rollback()
+            flash(_('Check-in window minutes cannot be negative.'), 'danger')
+            return redirect(url_for('admin_ui.serve_booking_settings_page'))
+
         # Handle past_booking_time_adjustment_hours
         if 'past_booking_time_adjustment_hours' in request.form:
             past_booking_adjustment_str = request.form['past_booking_time_adjustment_hours']
