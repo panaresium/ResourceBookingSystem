@@ -24,6 +24,10 @@
     font-size: 16px;
 }
 
+html {
+    overflow: hidden;
+}
+
 /* Dark theme color variables */
 body.dark-theme {
     --background-color-light: #1e1e1e; /* Page background in dark mode */
@@ -40,6 +44,7 @@ body {
     color: var(--text-color-dark);
     line-height: 1.6;
     font-size: 1rem; /* Ensure body font size is relative */
+    overflow: hidden;
     /* display: flex; REMOVED for new layout */
 }
 
@@ -315,7 +320,7 @@ body {
     margin-left: var(--sidebar-width);
     margin-bottom: var(--footer-height);
     padding: 20px;
-    min-height: calc(100vh - var(--header-height) - var(--footer-height));
+    height: calc(100vh - var(--header-height) - var(--footer-height));
     overflow-y: auto;
     background-color: var(--background-color-light);
     box-sizing: border-box; /* Added this line */
