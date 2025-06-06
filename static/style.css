@@ -315,11 +315,11 @@ body {
 /* Main Content Styling */
 #main-content {
     margin-left: var(--sidebar-width);
-    padding: 30px 20px calc(30px + var(--footer-height)) 20px;
+    padding: 30px 20px;
     overflow-y: auto;
     background-color: var(--background-color-light);
     box-sizing: border-box; /* Added this line */
-    height: calc(100vh - var(--header-height));
+    height: calc(100vh - var(--header-height) - var(--footer-height));
     flex-grow: 0;
 }
 
