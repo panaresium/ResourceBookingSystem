@@ -319,7 +319,7 @@ body {
     margin-top: var(--header-height);
     margin-left: var(--sidebar-width);
     margin-bottom: var(--footer-height);
-    padding: 20px;
+    padding: 30px 20px;
     height: calc(100vh - var(--header-height) - var(--footer-height));
     overflow-y: auto;
     background-color: var(--background-color-light);
