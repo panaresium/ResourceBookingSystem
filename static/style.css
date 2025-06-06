@@ -146,6 +146,10 @@ body {
     cursor: pointer;
     padding: 10px; /* Adjust as needed */
 }
+.app-header #user-dropdown-button:hover {
+    background-color: var(--secondary-color);
+    border-radius: 4px;
+}
 .app-header .user-icon { /* Copied from existing .user-icon */
     font-size: 1.2em;
     margin-right: 2px;
