@@ -381,7 +381,9 @@
         }
 
         function populateDefineAreaRolesCheckboxes(selectedRoleIds = []) {
+            console.log("selectedRoleIds:", selectedRoleIds);
             const numericSelectedRoleIds = (selectedRoleIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+            console.log("numericSelectedRoleIds:", numericSelectedRoleIds);
             const checkboxContainer = document.getElementById('define-area-roles-checkbox-container');
             const rolesLoadingMsg = document.getElementById('define-area-roles-loading-message');
             if (!checkboxContainer) return;
@@ -413,6 +415,7 @@
             }
 
             allRolesForAreaAssignment.forEach(role => {
+                console.log("role.id:", role.id);
                 const div = document.createElement('div');
                 div.className = 'checkbox-item'; // For styling if needed
 
@@ -422,7 +425,8 @@
                 checkbox.value = role.id;
                 checkbox.name = 'area_roles'; // Consistent name for grouping
 
-                if (numericSelectedRoleIds.includes(role.id)) {
+                checkbox.checked = false; // Explicitly set to false before checking
+                if (numericSelectedRoleIds.includes(Number(role.id))) {
                     checkbox.checked = true;
                 }
 
