@@ -311,6 +311,40 @@ class TestAuthAPI(AppTests): # Inherit from AppTests for setup/teardown
 
 class TestBookingUserActions(AppTests):
 
+    def helper_set_checkin_window(self, minutes_before, minutes_after):
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings()
+            db.session.add(settings)
+        settings.check_in_minutes_before = minutes_before
+        settings.check_in_minutes_after = minutes_after
+        # Ensure enable_check_in_out is True for these tests to be meaningful
+        settings.enable_check_in_out = True
+        db.session.commit()
+        return settings
+
+    def helper_create_user_and_login(self, username="testuser_checkin_logic", password="password"):
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            user = User(username=username, email=f'{username}@example.com', is_admin=False)
+            user.set_password(password)
+            db.session.add(user)
+            db.session.commit()
+
+        # Use the class's login method that posts to /api/auth/login
+        login_resp = self.login(user.username, password)
+        self.assertEqual(login_resp.status_code, 200, f"Login failed in test setup for {username}: {login_resp.get_data(as_text=True)}")
+        self.assertTrue(login_resp.get_json().get('success'), f"Login API call was not successful for {username}")
+        return user
+
+    def helper_create_resource(self, name="Test Resource Checkin Logic"):
+        resource = Resource.query.filter_by(name=name).first()
+        if not resource:
+            resource = Resource(name=name, capacity=1, status='published') # Ensure status is published
+            db.session.add(resource)
+            db.session.commit()
+        return resource
+
     def test_update_booking_success_all_fields(self):
         """Test successfully updating title, start_time, and end_time of a booking."""
         self.login('testuser', 'password')
@@ -612,6 +646,106 @@ class TestBookingUserActions(AppTests):
         elif current_settings: # if it was created new
             db.session.delete(current_settings)
             db.session.commit()
+
+    def test_check_in_with_custom_window_success(self):
+        self.helper_set_checkin_window(minutes_before=10, minutes_after=5)
+        user = self.helper_create_user_and_login(username="user_checkin_success")
+        resource = self.helper_create_resource(name="Resource Checkin Success")
+
+        # Booking start_time is 3 minutes ago, current time is within 10min before / 5min after window.
+        # We simulate this by creating a booking as if its start_time was 3 minutes ago from "now".
+        # The check_in_booking API uses datetime.now(timezone.utc) internally.
+        # So, the booking's start_time must be relative to that internal 'now'.
+        # To make it deterministic, we'd ideally mock 'now' in the route, but that's more complex.
+        # Alternative: create booking that *will be* in window when check_in is called.
+        # For this test, let's make the booking start slightly in the past relative to the call.
+
+        # Simulate current time is 3 minutes after booking start.
+        # So, booking_start_dt should be now - 3 minutes.
+        # This means when the API call is made, 'now' will be roughly booking_start_dt + 3 minutes.
+        # This falls within the -10 to +5 minute window.
+
+        # To simplify and make it less dependent on exact execution speed of test lines:
+        # Let's set a booking that starts *now* (or a few seconds in the past due to execution)
+        # and check in immediately. This should be within the 10 min before window.
+        booking_start_dt = datetime.utcnow() - timedelta(minutes=2) # Start 2 mins ago
+        booking_end_dt = booking_start_dt + timedelta(hours=1)
+
+        booking_payload = {
+            'resource_id': resource.id,
+            'date_str': booking_start_dt.strftime('%Y-%m-%d'),
+            'start_time_str': booking_start_dt.strftime('%H:%M'),
+            'end_time_str': booking_end_dt.strftime('%H:%M'),
+            'title': 'Test Check-in Success Custom Window',
+            'user_name': user.username
+        }
+        create_resp = self.client.post('/api/bookings', json=booking_payload)
+        self.assertEqual(create_resp.status_code, 201, f"Booking creation failed: {create_resp.get_data(as_text=True)}")
+        booking_id = create_resp.get_json()['bookings'][0]['id']
+
+        check_in_resp = self.client.post(f'/api/bookings/{booking_id}/check_in')
+        self.assertEqual(check_in_resp.status_code, 200, f"Check-in failed: {check_in_resp.get_data(as_text=True)}")
+        self.assertIn('Check-in successful', check_in_resp.get_data(as_text=True))
+
+        booking = Booking.query.get(booking_id)
+        self.assertIsNotNone(booking.checked_in_at)
+        self.logout() # Use the class's logout method
+
+    def test_check_in_too_early_custom_window(self):
+        settings = self.helper_set_checkin_window(minutes_before=10, minutes_after=5)
+        user = self.helper_create_user_and_login(username="user_checkin_early")
+        resource = self.helper_create_resource(name="Resource Checkin Early")
+
+        # Booking starts 15 minutes from now. Check-in allowed 10 mins before. So, this is too early.
+        # To make test robust, we ensure booking_start_dt is relative to mocked 'now' if we mock it,
+        # or sufficiently in future if using real 'now'.
+        booking_start_dt = datetime.utcnow() + timedelta(minutes=15)
+        booking_end_dt = booking_start_dt + timedelta(hours=1)
+
+        booking_payload = {
+            'resource_id': resource.id,
+            'date_str': booking_start_dt.strftime('%Y-%m-%d'),
+            'start_time_str': booking_start_dt.strftime('%H:%M'),
+            'end_time_str': booking_end_dt.strftime('%H:%M'),
+            'title': 'Test Check-in Too Early Custom',
+            'user_name': user.username
+        }
+        create_resp = self.client.post('/api/bookings', json=booking_payload)
+        self.assertEqual(create_resp.status_code, 201, f"Booking creation failed: {create_resp.get_data(as_text=True)}")
+        booking_id = create_resp.get_json()['bookings'][0]['id']
+
+        check_in_resp = self.client.post(f'/api/bookings/{booking_id}/check_in')
+        self.assertEqual(check_in_resp.status_code, 403, f"Check-in should have failed (too early): {check_in_resp.get_data(as_text=True)}")
+        expected_error_msg_part = f"Check-in is only allowed from {settings.check_in_minutes_before} minutes before to {settings.check_in_minutes_after} minutes after"
+        self.assertIn(expected_error_msg_part, check_in_resp.get_json().get('error', ''))
+        self.logout()
+
+    def test_check_in_too_late_custom_window(self):
+        settings = self.helper_set_checkin_window(minutes_before=10, minutes_after=5)
+        user = self.helper_create_user_and_login(username="user_checkin_late")
+        resource = self.helper_create_resource(name="Resource Checkin Late")
+
+        # Booking started 10 minutes ago. Check-in allowed up to 5 mins after. So, this is too late.
+        booking_start_dt = datetime.utcnow() - timedelta(minutes=10)
+        booking_end_dt = booking_start_dt + timedelta(hours=1)
+
+        booking_payload = {
+            'resource_id': resource.id,
+            'date_str': booking_start_dt.strftime('%Y-%m-%d'),
+            'start_time_str': booking_start_dt.strftime('%H:%M'),
+            'end_time_str': booking_end_dt.strftime('%H:%M'),
+            'title': 'Test Check-in Too Late Custom',
+            'user_name': user.username
+        }
+        create_resp = self.client.post('/api/bookings', json=booking_payload)
+        self.assertEqual(create_resp.status_code, 201, f"Booking creation failed: {create_resp.get_data(as_text=True)}")
+        booking_id = create_resp.get_json()['bookings'][0]['id']
+
+        check_in_resp = self.client.post(f'/api/bookings/{booking_id}/check_in')
+        self.assertEqual(check_in_resp.status_code, 403, f"Check-in should have failed (too late): {check_in_resp.get_data(as_text=True)}")
+        expected_error_msg_part = f"Check-in is only allowed from {settings.check_in_minutes_before} minutes before to {settings.check_in_minutes_after} minutes after"
+        self.assertIn(expected_error_msg_part, check_in_resp.get_json().get('error', ''))
+        self.logout()
 
 
 class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusion
