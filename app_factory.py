@@ -143,14 +143,48 @@ def create_app(config_object=config):
 
     # Load Booking CSV Schedule Settings after DATA_DIR is ensured
     app.config['BOOKING_CSV_SCHEDULE_SETTINGS'] = load_booking_csv_schedule_settings(app)
+    # app.logger.info(f"Loaded Booking CSV Schedule Settings: {app.config['BOOKING_CSV_SCHEDULE_SETTINGS']}") # Moved after logging setup
+
+    # 2. Initialize Logging
+
+    # New: Configure root logger based on environment variable
+    default_log_level_str = 'INFO' # Default if env var is not set or invalid
+    log_level_str = os.environ.get('APP_GLOBAL_LOG_LEVEL', default_log_level_str).upper()
+    log_level_map = {
+        'DEBUG': logging.DEBUG,
+        'INFO': logging.INFO,
+        'WARNING': logging.WARNING,
+        'ERROR': logging.ERROR,
+        'CRITICAL': logging.CRITICAL
+    }
+    effective_log_level = log_level_map.get(log_level_str, logging.INFO) # Default to INFO if invalid string
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(effective_log_level)
+
+    if not root_logger.hasHandlers():
+        # Add a basic stream handler if no handlers are configured on the root logger
+        # This ensures logs go somewhere (stderr by default)
+        stream_handler = logging.StreamHandler()
+        # You can add a formatter for better log readability, e.g.:
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        stream_handler.setFormatter(formatter)
+        root_logger.addHandler(stream_handler)
+        logging.info(f"Root logger configured with level {log_level_str} and a default StreamHandler because no handlers were present.")
+    else:
+        logging.info(f"Root logger level set to {log_level_str}. Existing handlers detected.")
+
+    # Existing Flask app logger level setting (can complement the root logger)
+    # It's fine to keep this, as it sets the level for Flask's specific logger instance.
+    # The root logger setting above will affect all loggers unless they have specific more restrictive levels/handlers.
+    app_log_level_config = app.config.get('LOG_LEVEL', default_log_level_str).upper() # Use same default
+    app_effective_log_level = log_level_map.get(app_log_level_config, logging.INFO)
+    app.logger.setLevel(app_effective_log_level)
+    logging.info(f"Flask app.logger level set to {app_log_level_config} based on app.config['LOG_LEVEL'].")
+
+    # Now that logging is configured, log the Booking CSV settings
     app.logger.info(f"Loaded Booking CSV Schedule Settings: {app.config['BOOKING_CSV_SCHEDULE_SETTINGS']}")
 
-    # 2. Initialize Logging (Basic, can be expanded)
-    # Using Flask's built-in logger. Configuration can be enhanced.
-    # BasicConfig is often called by app.py's old top-level code.
-    # If that's removed, ensure logging is configured here or by WSGI server.
-    # For now, relying on Flask's default logger setup + any config in config_object
-    app.logger.setLevel(app.config.get('LOG_LEVEL', 'INFO').upper())
 
     # New logic for startup restore
     # db.init_app(app) has been moved before this block
