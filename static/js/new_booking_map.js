@@ -233,6 +233,8 @@ document.addEventListener('DOMContentLoaded', function () {
             const apiUrl = `/api/map_details/${mapId}?date=${dateString}`;
             const data = await apiCall(apiUrl, {}, mapLoadingStatusDiv);
             const mapDetails = data.map_details;
+            // These offsets are specific to the "Resource Availability" page (new_booking_map.js)
+            // and are intentionally applied here to adjust resource positions on this particular display.
             const offsetX = parseInt(mapDetails.offset_x) || 0;
             const offsetY = parseInt(mapDetails.offset_y) || 0;
 

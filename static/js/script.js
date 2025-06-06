@@ -2826,6 +2826,10 @@ document.addEventListener('DOMContentLoaded', function() {
                             const coords = resource.map_coordinates;
                             const areaDiv = document.createElement('div');
                             areaDiv.className = 'resource-area';
+                            // For this general map view (map_view.html), map_details.offset_x and map_details.offset_y
+                            // (available from the API) are intentionally NOT applied.
+                            // This page displays the map with raw coordinates as stored.
+                            // Offsets are applied selectively on other pages like new_booking_map.js.
                             areaDiv.style.left = `${coords.x}px`; areaDiv.style.top = `${coords.y}px`;
                             areaDiv.style.width = `${coords.width}px`; areaDiv.style.height = `${coords.height}px`;
                             areaDiv.textContent = resource.name;
