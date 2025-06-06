@@ -1,7 +1,8 @@
 import logging
+import os
 from functools import wraps
 from flask import (
-    Blueprint, request, session, redirect, url_for, jsonify, current_app, abort
+    Blueprint, request, session, redirect, url_for, jsonify, current_app, abort, flash
 )
 from flask_login import current_user, login_user, logout_user, login_required
 
@@ -142,6 +143,7 @@ def login_google_callback():
 # --- Google Account Linking/Unlinking ---
 
 def get_google_link_flow():
+    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
     scopes = current_app.config.get('SCOPES', ['openid', 'email', 'profile'])
     # IMPORTANT: This redirect_uri MUST match exactly what's configured in Google Cloud Console
     # for the OAuth client, under "Authorized redirect URIs".
