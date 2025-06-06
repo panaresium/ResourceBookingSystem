@@ -159,18 +159,35 @@ def create_resource():
     if not data: return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
     name = data.get('name')
     if not name or not name.strip(): return jsonify({'error': 'Name is required.'}), 400
-    if Resource.query.filter(func.lower(Resource.name) == func.lower(name.strip())).first():
+    name = name.strip() # Use stripped name from now on
+    if Resource.query.filter(func.lower(Resource.name) == func.lower(name)).first():
         return jsonify({'error': f"Resource with name '{name}' already exists."}), 409
+
     capacity = data.get('capacity')
     try:
-        if capacity is not None: capacity = int(capacity)
+        if capacity is not None and str(capacity).strip() != "":
+            capacity = int(capacity)
+        else:
+            capacity = None # Explicitly set to None if empty or only whitespace
     except (ValueError, TypeError): return jsonify({'error': 'Capacity must be an integer or null.'}), 400
 
-    new_resource = Resource(name=name.strip(), capacity=capacity, equipment=data.get('equipment'), tags=data.get('tags'))
+    pin = data.get('current_pin', '').strip()
+    current_pin_to_set = pin if pin else None
+
+    new_resource = Resource(
+        name=name,
+        capacity=capacity,
+        equipment=data.get('equipment'),
+        tags=data.get('tags'),
+        current_pin=current_pin_to_set
+    )
     try:
         db.session.add(new_resource)
         db.session.commit()
-        add_audit_log(action="CREATE_RESOURCE", details=f"Resource '{new_resource.name}' created by {current_user.username}")
+        audit_details = f"Resource '{new_resource.name}' (ID: {new_resource.id}) created by {current_user.username}."
+        if new_resource.current_pin:
+            audit_details += " PIN set."
+        add_audit_log(action="CREATE_RESOURCE", details=audit_details)
         return jsonify(resource_to_dict(new_resource)), 201
     except Exception as e:
         db.session.rollback()
@@ -195,11 +212,34 @@ def update_resource_details_admin(resource_id):
     data = request.get_json()
     if not data: return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
 
+    old_pin = resource.current_pin
+    pin_changed = False
+
+    # Handle current_pin separately to manage audit logging for it specifically
+    if 'current_pin' in data:
+        new_pin_from_data = data.get('current_pin', '')
+        # Ensure new_pin_from_data is treated as a string before stripping
+        new_pin_stripped = str(new_pin_from_data).strip() if new_pin_from_data is not None else ''
+
+        resource.current_pin = new_pin_stripped if new_pin_stripped else None
+        if old_pin != resource.current_pin:
+            pin_changed = True
+
     # Simplified field updates, add more validation as needed
+    # Exclude 'current_pin' from this loop as it's handled above
     allowed_fields = ['name', 'capacity', 'equipment', 'status', 'tags', 'booking_restriction', 'allowed_user_ids', 'is_under_maintenance', 'maintenance_until', 'max_recurrence_count', 'scheduled_status', 'scheduled_status_at', 'floor_map_id', 'map_coordinates']
     for field in allowed_fields:
         if field in data:
-            if field == 'map_coordinates':
+            if field == 'capacity': # Special handling for capacity to allow null
+                capacity_val = data.get('capacity')
+                if capacity_val is not None and str(capacity_val).strip() != "":
+                    try:
+                        setattr(resource, field, int(capacity_val))
+                    except (ValueError, TypeError):
+                        return jsonify({'error': f"Capacity must be an integer or null. Invalid value: {capacity_val}"}), 400
+                else:
+                    setattr(resource, field, None) # Set to None if empty string or null
+            elif field == 'map_coordinates':
                 map_coords_payload = data[field] # data[field] is safe due to 'if field in data'
                 if map_coords_payload is not None and isinstance(map_coords_payload, dict):
                     # Extract allowed_role_ids and remove it from the payload for map_coordinates
@@ -223,7 +263,16 @@ def update_resource_details_admin(resource_id):
 
     try:
         db.session.commit()
-        add_audit_log(action="UPDATE_RESOURCE", details=f"Resource ID {resource.id} ('{resource.name}') updated by {current_user.username}. Data: {data}")
+        # Basic audit log for general update
+        # More detailed logging for specific fields like 'status' or 'name' change could be added if needed
+        add_audit_log(action="UPDATE_RESOURCE", details=f"Resource ID {resource.id} ('{resource.name}') general details updated by {current_user.username}.")
+
+        if pin_changed:
+            if resource.current_pin:
+                add_audit_log(action="UPDATE_RESOURCE_PIN", details=f"Resource ID {resource.id} ('{resource.name}') PIN updated by {current_user.username}.")
+            else:
+                add_audit_log(action="CLEAR_RESOURCE_PIN", details=f"Resource ID {resource.id} ('{resource.name}') PIN cleared by {current_user.username}.")
+
         return jsonify(resource_to_dict(resource)), 200
     except Exception as e:
         db.session.rollback()

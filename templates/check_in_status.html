@@ -1,0 +1,62 @@
+{% extends "base.html" %} {# Or your actual base template #}
+
+{% block title %}Check-in Status for {{ resource_name }}{% endblock %}
+
+{% block content %} {# Or your actual content block #}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Check-in Status for {{ resource_name }}</h3>
+                </div>
+                <div class="card-body">
+                    {# Flashed messages first, as they often contain primary feedback from redirects #}
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message_text in messages %}
+                                <div class="alert alert-{{ category if category != 'message' else 'info' }} alert-dismissible fade show" role="alert">
+                                    {{ message_text }}
+                                    <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                                        <span aria-hidden="true">&times;</span>
+                                    </button>
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
+
+                    {# Specific success/failure block based on 'success' variable from render_template #}
+                    {% if success is defined %} {# Check if 'success' variable was passed #}
+                        {% if success %}
+                            <div class="alert alert-success" role="alert">
+                                <h4 class="alert-heading">Successfully Checked In!</h4>
+                                {% if booking_title %}<p>Booking: <strong>{{ booking_title }}</strong></p>{% endif %}
+                                {% if start_time %}<p>Original Start Time: <strong>{{ start_time.strftime('%Y-%m-%d %H:%M') }} UTC</strong></p>{% endif %}
+                            </div>
+                        {% else %}
+                            <div class="alert alert-danger" role="alert">
+                                <h4 class="alert-heading">Check-in Failed.</h4>
+                            </div>
+                        {% endif %}
+                    {% endif %}
+
+                    {# General message passed from the route, if any #}
+                    {% if message %}
+                        <p class="mt-3">{{ message }}</p>
+                    {% endif %}
+
+                    <hr>
+                    <a href="{{ url_for('ui.index') }}" class="btn btn-secondary mr-2">Go to Homepage</a>
+                    {# 'resource_id' might not be passed if it's a generic failure before resource context is known #}
+                    {# 'resource_name' is usually passed, so we check its existence too #}
+                    {% if not success and resource_id is defined and resource_id and resource_name is defined and resource_name %}
+                        <a href="{{ url_for('ui.check_in_at_resource', resource_id=resource_id) }}" class="btn btn-info">Try Again for {{ resource_name }}</a>
+                    {% else %}
+                        <a href="{{ url_for('ui.serve_resources') }}" class="btn btn-info">View Resources</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

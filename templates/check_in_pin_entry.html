@@ -1,0 +1,58 @@
+{% extends "base.html" %} {# Or your actual base template #}
+
+{% block title %}Check-in for {{ resource.name }}{% endblock %}
+
+{% block content %} {# Or your actual content block #}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Check-in for {{ resource.name }}</h2>
+                </div>
+                <div class="card-body">
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                        {% if messages %}
+                            {% for category, message in messages %}
+                                <div class="alert alert-{{ category if category != 'message' else 'info' }} alert-dismissible fade show" role="alert">
+                                    {{ message }}
+                                    <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                                        <span aria-hidden="true">&times;</span>
+                                    </button>
+                                </div>
+                            {% endfor %}
+                        {% endif %}
+                    {% endwith %}
+
+                    {% if error %} {# Direct error passed from render_template, if any #}
+                        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                            {{ error }}
+                            <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                                <span aria-hidden="true">&times;</span>
+                            </button>
+                        </div>
+                    {% endif %}
+
+                    <form method="POST" action="{{ url_for('ui.check_in_at_resource', resource_id=resource.id) }}">
+                        {# Conditional CSRF token based on availability in context #}
+                        {% if csrf_token %}
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        {% endif %}
+
+                        <div class="form-group">
+                            <label for="pin">Enter Resource PIN:</label>
+                            <input type="text" class="form-control" id="pin" name="pin" required maxlength="10" autofocus pattern="\d*" inputmode="numeric" title="PIN should be numeric and up to 10 digits.">
+                            <small class="form-text text-muted">Enter the PIN displayed at the resource.</small>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary btn-block">Submit PIN & Check-in</button>
+                    </form>
+                </div>
+                <div class="card-footer text-center">
+                    <a href="{{ url_for('ui.index') }}">Cancel and Go to Homepage</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

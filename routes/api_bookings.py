@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request, current_app, abort
 from flask_login import login_required, current_user
 import json # Added json import
 from sqlalchemy import func
-
+import secrets
 from datetime import datetime, timedelta, timezone, time
 
 # Local imports
@@ -210,8 +210,23 @@ def create_booking():
             # Defer commit until all bookings in a recurring series are validated and added, or handle rollback for series
         db.session.commit() # Commit all bookings in the series at once
 
+        # Generate check-in tokens and set expiry
+        for new_booking in created_bookings:
+            new_booking.check_in_token = secrets.token_urlsafe(32)
+            token_validity_hours = current_app.config.get('CHECK_IN_TOKEN_VALIDITY_HOURS', 48)
+            # Ensure end_time is timezone-aware before adding timedelta.
+            # Assuming new_booking.end_time is naive UTC as stored in DB.
+            # If it were already aware, this replace might not be necessary or could be harmful.
+            # However, datetime.combine results in naive datetime.
+            aware_end_time = new_booking.end_time.replace(tzinfo=timezone.utc)
+            new_booking.check_in_token_expires_at = aware_end_time + timedelta(hours=token_validity_hours)
+            # Convert back to naive UTC if DB stores naive times
+            new_booking.check_in_token_expires_at = new_booking.check_in_token_expires_at.replace(tzinfo=None)
+
+        db.session.commit() # Commit updates for tokens and expiry times
+
         for new_booking in created_bookings: # Log after successful commit of the series
-            add_audit_log(action="CREATE_BOOKING", details=f"Booking ID {new_booking.id} for resource ID {resource_id} ('{resource.name}') created by user '{user_name_for_record}'. Title: '{title}'.")
+            add_audit_log(action="CREATE_BOOKING", details=f"Booking ID {new_booking.id} for resource ID {resource_id} ('{resource.name}') created by user '{user_name_for_record}'. Title: '{title}'. Token generated.")
             socketio.emit('booking_updated', {'action': 'created', 'booking_id': new_booking.id, 'resource_id': resource_id})
 
         created_data = [{
@@ -264,6 +279,23 @@ def get_my_bookings():
                 booking.checked_in_at is None and
                 booking_start_time_aware - timedelta(minutes=grace) <= now <= booking_start_time_aware + timedelta(minutes=grace)
             )
+
+            # Determine if the check_in_token should be exposed
+            display_check_in_token = None
+            if booking.check_in_token and booking.checked_in_at is None and booking.status == 'approved':
+                # Ensure booking.check_in_token_expires_at is offset-aware (UTC) for comparison
+                token_expires_at_aware = booking.check_in_token_expires_at
+                if token_expires_at_aware and token_expires_at_aware.tzinfo is None:
+                    token_expires_at_aware = token_expires_at_aware.replace(tzinfo=timezone.utc)
+
+                # Ensure booking.end_time is offset-aware (UTC) for comparison
+                booking_end_time_aware = booking.end_time
+                if booking_end_time_aware.tzinfo is None:
+                    booking_end_time_aware = booking_end_time_aware.replace(tzinfo=timezone.utc)
+
+                if token_expires_at_aware and token_expires_at_aware > now and booking_end_time_aware > now:
+                    display_check_in_token = booking.check_in_token
+
             bookings_list.append({
                 'id': booking.id,
                 'resource_id': booking.resource_id,
@@ -277,7 +309,8 @@ def get_my_bookings():
                 'admin_deleted_message': booking.admin_deleted_message,
                 'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else None,
                 'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else None,
-                'can_check_in': can_check_in
+                'can_check_in': can_check_in,
+                'check_in_token': display_check_in_token
             })
 
         current_app.logger.info(f"User '{current_user.username}' fetched their bookings. Count: {len(bookings_list)}. Check-in/out enabled: {enable_check_in_out}")
@@ -832,3 +865,104 @@ def check_out_booking(booking_id):
         current_app.logger.exception(f"Error during check-out for booking ID {booking_id} by user {current_user.username}:")
         add_audit_log(action="CHECK_OUT_FAILED", details=f"User '{current_user.username}' failed to check out of booking ID {booking_id}. Error: {str(e)}")
         return jsonify({'error': 'Failed to check out due to a server error.'}), 500
+
+
+@api_bookings_bp.route('/bookings/check-in-qr/<string:token>', methods=['GET'])
+def qr_check_in(token):
+    """
+    Allows check-in to a booking using a time-limited token (e.g., from a QR code).
+    This endpoint does not require user login.
+    """
+    booking = Booking.query.filter_by(check_in_token=token).first()
+    if not booking:
+        current_app.logger.warning(f"QR Check-in attempt with invalid token: {token}")
+        return jsonify({'error': 'Invalid or expired check-in token.'}), 404
+
+    now_utc = datetime.now(timezone.utc)
+
+    # Ensure booking.check_in_token_expires_at is treated as UTC if naive
+    token_expires_at_utc = booking.check_in_token_expires_at
+    if token_expires_at_utc and token_expires_at_utc.tzinfo is None: # Check if not None before accessing tzinfo
+        token_expires_at_utc = token_expires_at_utc.replace(tzinfo=timezone.utc)
+
+    if booking.check_in_token_expires_at is None or token_expires_at_utc < now_utc:
+        current_app.logger.warning(f"QR Check-in attempt with expired token ID {token} for booking {booking.id}. Token expiry: {booking.check_in_token_expires_at}, Now: {now_utc}")
+        # Invalidate the token to prevent reuse if it's just expired
+        booking.check_in_token = None
+        booking.check_in_token_expires_at = None
+        db.session.commit()
+        return jsonify({'error': 'Invalid or expired check-in token.'}), 400 # 400 for expired, 404 for invalid
+
+    if booking.checked_in_at:
+        current_app.logger.info(f"QR Check-in attempt for already checked-in booking {booking.id} with token {token}")
+        return jsonify({
+            'message': 'Already checked in.',
+            'resource_name': booking.resource_booked.name if booking.resource_booked else "Unknown Resource",
+            'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat()
+        }), 200 # Successfully identified already checked-in state
+
+    if booking.status != 'approved':
+        current_app.logger.warning(f"QR Check-in attempt for booking {booking.id} with status '{booking.status}' using token {token}")
+        return jsonify({'error': f'Booking is not active (status: {booking.status}). Cannot check in.'}), 403
+
+    grace_period_minutes = current_app.config.get('CHECK_IN_GRACE_MINUTES', 15)
+
+    booking_start_time_utc = booking.start_time
+    if booking_start_time_utc.tzinfo is None: # DB stores naive UTC
+        booking_start_time_utc = booking_start_time_utc.replace(tzinfo=timezone.utc)
+
+    check_in_window_start = booking_start_time_utc - timedelta(minutes=grace_period_minutes)
+    check_in_window_end = booking_start_time_utc + timedelta(minutes=grace_period_minutes)
+
+    if not (check_in_window_start <= now_utc <= check_in_window_end):
+        current_app.logger.warning(f"QR Check-in for booking {booking.id} (token {token}) outside allowed window. Booking Start: {booking_start_time_utc.isoformat()}, Window: {check_in_window_start.isoformat()} to {check_in_window_end.isoformat()}, Now: {now_utc.isoformat()}")
+        return jsonify({'error': f'Check-in is only allowed from {check_in_window_start.strftime("%H:%M")} to {check_in_window_end.strftime("%H:%M")} on the booking day ({booking_start_time_utc.strftime("%Y-%m-%d")}).'}), 403
+
+    try:
+        booking.checked_in_at = now_utc.replace(tzinfo=None) # Store as naive UTC
+        booking.check_in_token = None # Invalidate token after use
+        booking.check_in_token_expires_at = None # Clear expiry too
+        db.session.commit()
+
+        resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
+
+        # For audit log, use a placeholder for username since no user is logged in
+        audit_username = f"QR_TOKEN_{token[:8]}..." # Truncated token for some anonymity
+
+        add_audit_log(
+            user_id=None,
+            username=audit_username,
+            action="QR_CHECK_IN_SUCCESS",
+            details=f"Booking ID {booking.id} for resource '{resource_name}' (User: {booking.user_name}) checked in via QR code."
+        )
+
+        if hasattr(socketio, 'emit'): # Check if socketio is available and configured
+            socketio.emit('booking_updated', {
+                'action': 'checked_in',
+                'booking_id': booking.id,
+                'checked_in_at': now_utc.isoformat(), # Send aware UTC time
+                'resource_id': booking.resource_id
+            })
+        current_app.logger.info(f"Booking {booking.id} successfully checked in via QR token {token} by user {booking.user_name}")
+
+        return jsonify({
+            'message': 'Check-in successful!',
+            'resource_name': resource_name,
+            'booking_title': booking.title,
+            'user_name': booking.user_name, # Include the original user_name for context
+            'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
+            'checked_in_at': now_utc.isoformat() # Send aware UTC time
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception(f"Error during QR check-in for booking {booking.id} (token {token}): {e}")
+        # For audit log, use a placeholder for username
+        audit_username = f"QR_TOKEN_{token[:8]}..."
+        add_audit_log(
+            user_id=None,
+            username=audit_username,
+            action="QR_CHECK_IN_FAILED",
+            details=f"Failed QR check-in for booking {booking.id} (User: {booking.user_name}). Error: {str(e)}"
+        )
+        return jsonify({'error': 'Check-in failed due to a server error.'}), 500
