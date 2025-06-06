@@ -2143,9 +2143,16 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             canvasCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
 
-            // Apply global map offsets before drawing each area
-            const globalOffsetX = window.currentMapContext ? (window.currentMapContext.offsetX || 0) : 0;
-            const globalOffsetY = window.currentMapContext ? (window.currentMapContext.offsetY || 0) : 0;
+            // The IS_ADMIN_MAP_DEFINE_AREAS_PAGE flag differentiates the admin "Define Areas" context
+            // from other potential canvas drawing contexts. In the admin view, areas are drawn
+            // using raw coordinates (offsets are zeroed out).
+            // Other contexts might apply offsets (though new_booking_map.js handles its own offset logic).
+            const isAdminPage = typeof IS_ADMIN_MAP_DEFINE_AREAS_PAGE !== 'undefined' && IS_ADMIN_MAP_DEFINE_AREAS_PAGE;
+
+            // effectiveOffsetX and effectiveOffsetY ensure that drawing uses raw coordinates (0,0 offset)
+            // on the admin "Define Areas" page, and map-defined offsets otherwise.
+            const effectiveOffsetX = (window.currentMapContext && !isAdminPage) ? (window.currentMapContext.offsetX || 0) : 0;
+            const effectiveOffsetY = (window.currentMapContext && !isAdminPage) ? (window.currentMapContext.offsetY || 0) : 0;
 
             canvasCtx.font = "10px Arial";
             existingMapAreas.forEach(area => {
@@ -2154,8 +2161,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 if (area.map_coordinates && area.map_coordinates.type === 'rect') {
                     const coords = area.map_coordinates;
-                    const drawX = coords.x + globalOffsetX;
-                    const drawY = coords.y + globalOffsetY;
+                    const drawX = coords.x + effectiveOffsetX;
+                    const drawY = coords.y + effectiveOffsetY;
 
                     canvasCtx.fillStyle = 'rgba(255, 0, 0, 0.1)';
                     canvasCtx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
@@ -2175,8 +2182,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (selectedAreaForEditing && selectedAreaForEditing.map_coordinates && selectedAreaForEditing.map_coordinates.type === 'rect') {
                 const coords = selectedAreaForEditing.map_coordinates;
-                const drawX = coords.x + globalOffsetX;
-                const drawY = coords.y + globalOffsetY;
+                const drawX = coords.x + effectiveOffsetX;
+                const drawY = coords.y + effectiveOffsetY;
 
                 canvasCtx.fillStyle = 'rgba(0, 0, 255, 0.2)';
                 canvasCtx.strokeStyle = SELECTED_BORDER_COLOR;
