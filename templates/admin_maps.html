@@ -836,13 +836,23 @@
                 const resources = await response.json();
 
                 drawnAreas = resources.filter(r => r.map_coordinates && r.floor_map_id == mapId)
-                                     .map(r => ({ // Adapt to the expected structure for drawing
-                                         resource_id: r.id,
-                                         name: r.name, // For potential display on canvas later
-                                         coordinates: r.map_coordinates, // Assumes map_coordinates is {x, y, width, height, type}
-                                         booking_restriction: r.booking_restriction,
-                                         allowed_role_ids: r.map_coordinates.allowed_role_ids || []
-                                     }));
+                                     .map(r => {
+                                         let roleIds = [];
+                                         if (Array.isArray(r.roles)) {
+                                             roleIds = r.roles.map(role => role.id);
+                                         } else if (r.map_coordinates && Array.isArray(r.map_coordinates.allowed_role_ids)) {
+                                             roleIds = r.map_coordinates.allowed_role_ids;
+                                         } else {
+                                             roleIds = []; // Default to empty array
+                                         }
+                                         return { // Adapt to the expected structure for drawing
+                                             resource_id: r.id,
+                                             name: r.name, // For potential display on canvas later
+                                             coordinates: r.map_coordinates, // Assumes map_coordinates is {x, y, width, height, type}
+                                             booking_restriction: r.booking_restriction,
+                                             allowed_role_ids: roleIds
+                                         };
+                                     });
 
                 console.log("Fetched and processed areas: ", drawnAreas);
                 const foundAreasMsgBase = {{ _("Found %s areas.")|tojson }};
