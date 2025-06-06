@@ -1348,12 +1348,25 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             manifest_json_bytes = json.dumps(manifest_data, indent=2).encode('utf-8')
             # db_share_client is already defined and initialized
             manifest_file_client = db_share_client.get_file_client(remote_manifest_path)
-            logger.info(f"Attempting manifest upload: Share='{db_share_client.share_name}', Path='{remote_manifest_path}'")
+            logger.info(f"Attempting to upload manifest data of size: {len(manifest_json_bytes)} bytes to {remote_manifest_path} on share '{db_share_client.share_name}'")
             manifest_file_client.upload_file(data=manifest_json_bytes, overwrite=True)
             logger.info(f"Successfully uploaded backup manifest to '{db_share_name}/{remote_manifest_path}'.")
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backup manifest uploaded successfully.', level='SUCCESS')
+            # (This is after existing successful upload logs and emits)
+            try:
+                props = manifest_file_client.get_file_properties()
+                logger.info(f"POST-UPLOAD CHECK: Manifest '{remote_manifest_path}' on share '{db_share_client.share_name}' found. Size: {props.size}, ETag: {props.etag}")
+                _emit_progress(socketio_instance, task_id, 'backup_progress', f'Post-upload check: Manifest {timestamp_str} found.', detail=f"Size: {props.size}", level='INFO')
+            except ResourceNotFoundError:
+                logger.error(f"POST-UPLOAD CHECK FAILED: Manifest '{remote_manifest_path}' on share '{db_share_client.share_name}' NOT FOUND immediately after upload. This will likely cause verification issues.", exc_info=True)
+                _emit_progress(socketio_instance, task_id, 'backup_progress', f'Post-upload check: Manifest {timestamp_str} NOT found after upload.', level='ERROR')
+                overall_success = False # Ensure this failure is critical
+            except Exception as verify_e:
+                logger.error(f"POST-UPLOAD CHECK FAILED: Error getting properties for manifest '{remote_manifest_path}' on share '{db_share_client.share_name}' after upload: {verify_e}", exc_info=True)
+                _emit_progress(socketio_instance, task_id, 'backup_progress', f'Post-upload check: Error verifying manifest {timestamp_str} after upload.', detail=str(verify_e), level='ERROR')
+                overall_success = False # Ensure this failure is critical
         except Exception as e:
-            logger.error(f"Error during backup manifest creation or upload to '{db_share_name}/{remote_manifest_path}': {e}", exc_info=True)
+            logger.error(f"CRITICAL: Manifest creation/upload FAILED for '{db_share_name}/{remote_manifest_path}'. Setting overall_success to False due to this manifest operation failure. Error: {e}", exc_info=True)
             _emit_progress(socketio_instance, task_id, 'backup_progress', 'Backup manifest creation/upload FAILED.', detail=str(e), level='ERROR')
             overall_success = False # Crucial change
 
@@ -1518,10 +1531,13 @@ def verify_backup_set(timestamp_str, socketio_instance=None, task_id=None):
         remote_manifest_path = f"{DB_BACKUPS_DIR}/{manifest_filename}"
         manifest_file_client = db_share_client.get_file_client(remote_manifest_path)
 
+        logger.info(f"VERIFY_BACKUP_SET: Attempting to check existence of manifest via _client_exists for: '{manifest_file_client.share_name}/{manifest_file_client.file_path}'")
         if not _client_exists(manifest_file_client):
             msg = f"Manifest file '{remote_manifest_path}' not found on share '{db_share_name}'."
             verification_results['errors'].append(msg)
             verification_results['status'] = 'manifest_missing'
+            # ADD THIS:
+            logger.warning(f"VERIFY_BACKUP_SET: _client_exists returned False for manifest: '{manifest_file_client.share_name}/{manifest_file_client.file_path}'. Detailed message: {msg}")
             _emit_verify_progress(msg, level="ERROR")
             return verification_results
 
