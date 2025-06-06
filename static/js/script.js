@@ -2382,11 +2382,17 @@ document.addEventListener('DOMContentLoaded', function() {
                             updateCoordinateInputs(coords);
                             if (resourceToMapSelect) resourceToMapSelect.value = area.resource_id;
                             if (bookingPermissionDropdown) bookingPermissionDropdown.value = area.booking_restriction || "";
-                            if (authorizedRolesCheckboxContainer) {
-                                const selectedRoleIds = (area.roles || []).map(r => String(r.id));
-                                authorizedRolesCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-                                    cb.checked = selectedRoleIds.includes(cb.value);
-                                });
+                            // Replace existing role checkbox logic with a call to populateDefineAreaRolesCheckboxes
+                            if (typeof populateDefineAreaRolesCheckboxes === 'function') {
+                                const selectedRoleIds = (area.roles || []).map(r => r.id); // Ensure IDs are passed as expected
+                                populateDefineAreaRolesCheckboxes(selectedRoleIds);
+                            } else {
+                                console.error('populateDefineAreaRolesCheckboxes function is not defined globally. Check admin_maps.html inline script.');
+                                // Fallback or error handling if the global function isn't available
+                                // For example, clear existing checkboxes or show an error to the user in the UI
+                                if (authorizedRolesCheckboxContainer) {
+                                    authorizedRolesCheckboxContainer.innerHTML = '<p class="error">Error: Role selection unavailable.</p>';
+                                }
                             }
                             resourceToMapSelect.dispatchEvent(new Event('change'));
                             break;
