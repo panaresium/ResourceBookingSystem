@@ -1531,13 +1531,13 @@ def verify_backup_set(timestamp_str, socketio_instance=None, task_id=None):
         remote_manifest_path = f"{DB_BACKUPS_DIR}/{manifest_filename}"
         manifest_file_client = db_share_client.get_file_client(remote_manifest_path)
 
-        logger.info(f"VERIFY_BACKUP_SET: Attempting to check existence of manifest via _client_exists for: '{manifest_file_client.share_name}/{manifest_file_client.file_path}'")
+        logger.info(f"VERIFY_BACKUP_SET: Attempting to check existence of manifest via _client_exists for: '{db_share_name}/{remote_manifest_path}'")
         if not _client_exists(manifest_file_client):
             msg = f"Manifest file '{remote_manifest_path}' not found on share '{db_share_name}'."
             verification_results['errors'].append(msg)
             verification_results['status'] = 'manifest_missing'
-            # ADD THIS:
-            logger.warning(f"VERIFY_BACKUP_SET: _client_exists returned False for manifest: '{manifest_file_client.share_name}/{manifest_file_client.file_path}'. Detailed message: {msg}")
+            # Corrected log:
+            logger.warning(f"VERIFY_BACKUP_SET: _client_exists returned False for manifest: '{db_share_name}/{remote_manifest_path}'. Detailed message: {msg}")
             _emit_verify_progress(msg, level="ERROR")
             return verification_results
 
