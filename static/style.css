@@ -45,7 +45,6 @@ body {
     color: var(--text-color-dark);
     line-height: 1.6;
     font-size: 1rem; /* Ensure body font size is relative */
-    overflow: hidden;
     display: flex;
     flex-direction: column;
     min-height: 100vh;
@@ -316,7 +315,7 @@ body {
 /* Main Content Styling */
 #main-content {
     margin-left: var(--sidebar-width);
-    padding: 30px 20px;
+    padding: 30px 20px calc(30px + var(--footer-height)) 20px;
     overflow-y: auto;
     background-color: var(--background-color-light);
     box-sizing: border-box; /* Added this line */
@@ -356,9 +355,13 @@ footer {
     justify-content: space-between;
     align-items: center;
     box-shadow: 0 -2px 4px rgba(0,0,0,0.1);
-    flex-shrink: 0;
     /* text-align: center; REMOVED, using flex now */
     /* margin-top: 30px; REMOVED, fixed position */
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1030;
 }
 
 .footer-accessibility-controls {
@@ -1105,7 +1108,7 @@ body.high-contrast footer {
         align-items: center;
         padding-top: 10px;
         padding-bottom: 10px;
-        height: auto;
+        /* height: auto; Removed for fixed footer consistency */
     }
     footer > * {
         margin-bottom: 5px;
