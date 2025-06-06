@@ -139,6 +139,8 @@ class Booking(db.Model):
     status = db.Column(db.String(20), nullable=False, default='approved')
     recurrence_rule = db.Column(db.String(200), nullable=True)
     admin_deleted_message = db.Column(db.String(255), nullable=True)
+    check_in_token = db.Column(db.String(255), nullable=True) # New field
+    check_in_token_expires_at = db.Column(db.DateTime, nullable=True) # New field
 
     def __repr__(self):
         return f"<Booking {self.title or self.id} for Resource {self.resource_id} from {self.start_time.strftime('%Y-%m-%d %H:%M')} to {self.end_time.strftime('%Y-%m-%d %H:%M')}>"
