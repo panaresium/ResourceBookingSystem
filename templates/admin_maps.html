@@ -25,14 +25,6 @@
                 <label for="map-image">{{ _('Map Image File:') }}</label>
                 <input type="file" id="map-image" name="map_image" accept="image/png, image/jpeg" required>
             </div>
-            <div>
-                <label for="map_offset_x">{{ _('Offset X (px):') }}</label>
-                <input type="number" id="map_offset_x" name="offset_x" value="0" style="width: 80px;">
-            </div>
-            <div>
-                <label for="map_offset_y">{{ _('Offset Y (px):') }}</label>
-                <input type="number" id="map_offset_y" name="offset_y" value="0" style="width: 80px;">
-            </div>
             <button type="submit">{{ _('Upload Map') }}</button>
         </form>
         <div id="upload-status"></div>
