@@ -2087,7 +2087,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // This catch block is for errors not handled by apiCall (e.g., if apiCall itself fails or network issues not caught by it)
                 // or if an error occurs in the processing logic above (after apiCall returns successfully but before this catch).
                 // apiCall should have already displayed an error in authorizedRolesCheckboxContainer if the API call failed.
-                console.error("Error in populateDefineAreaRolesCheckboxes after apiCall:", error);
+                console.error("Error in initializeRolesForAreaDefinitionUI after apiCall:", error);
                 // Check if an error message is already displayed by apiCall
                 const hasExistingErrorMessage = authorizedRolesCheckboxContainer.classList.contains('error') && authorizedRolesCheckboxContainer.textContent.trim() !== '';
                 if (!hasExistingErrorMessage) {
@@ -2096,6 +2096,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         }
+        window.initializeRolesForAreaDefinitionUI = initializeRolesForAreaDefinitionUI;
         // populateDefineAreaRolesCheckboxes(); // This is likely called on DOMContentLoaded or when Define Areas is shown.
 
         // Expose fetchAndDrawExistingMapAreas
