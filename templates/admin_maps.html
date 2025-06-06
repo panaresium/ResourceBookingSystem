@@ -380,65 +380,66 @@
             initializeRolesForAreaDefinitionUI(); // Populate/update messages after fetch attempt
         }
 
-        function populateDefineAreaRolesCheckboxes(selectedRoleIds = []) {
-            console.log("selectedRoleIds:", selectedRoleIds);
-            const numericSelectedRoleIds = (selectedRoleIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
-            console.log("numericSelectedRoleIds:", numericSelectedRoleIds);
-            const checkboxContainer = document.getElementById('define-area-roles-checkbox-container');
-            const rolesLoadingMsg = document.getElementById('define-area-roles-loading-message');
-            if (!checkboxContainer) return;
+    function populateDefineAreaRolesCheckboxes(selectedRoleIds = []) {
+        console.log("Populating roles with selected:", selectedRoleIds);
+        const numericSelectedRoleIds = (selectedRoleIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+        const checkboxContainer = document.getElementById('define-area-roles-checkbox-container');
+        const rolesLoadingMsg = document.getElementById('define-area-roles-loading-message'); // Get reference
 
-            // Clear previous content except the loading message itself
-            checkboxContainer.innerHTML = '';
-            checkboxContainer.appendChild(rolesLoadingMsg); // Re-append loading message so it's not lost
-
-            if (rolesLoadingMsg) {
-                rolesLoadingMsg.style.display = 'none'; // Hide by default, show if needed
-            }
-
-            if (!allRolesForAreaAssignment || allRolesForAreaAssignment.length === 0) {
-                if (rolesLoadingMsg) {
-                    const currentText = rolesLoadingMsg.textContent || "";
-                    if (currentText.includes("{{ _("Error loading roles") }}")) {
-                         rolesLoadingMsg.style.display = 'block';
-                    } else {
-                        rolesLoadingMsg.textContent = '{{ _("No roles available to assign. Please create roles in user management first.") }}';
-                        rolesLoadingMsg.style.display = 'block';
-                    }
-                }
-                return;
-            }
-
-            // If we have roles, ensure the loading/error message is hidden
-            if (rolesLoadingMsg) {
-                 rolesLoadingMsg.style.display = 'none';
-            }
-
-            allRolesForAreaAssignment.forEach(role => {
-                console.log("role.id:", role.id);
-                const div = document.createElement('div');
-                div.className = 'checkbox-item'; // For styling if needed
-
-                const checkbox = document.createElement('input');
-                checkbox.type = 'checkbox';
-                checkbox.id = `area-role-checkbox-${role.id}`;
-                checkbox.value = role.id;
-                checkbox.name = 'area_roles'; // Consistent name for grouping
-
-                checkbox.checked = false; // Explicitly set to false before checking
-                if (numericSelectedRoleIds.includes(Number(role.id))) {
-                    checkbox.checked = true;
-                }
-
-                const label = document.createElement('label');
-                label.htmlFor = checkbox.id;
-                label.textContent = role.name + (role.description ? ` (${role.description})` : '');
-
-                div.appendChild(checkbox);
-                div.appendChild(label);
-                checkboxContainer.appendChild(div);
-            });
+        if (!checkboxContainer) {
+            console.error("Checkbox container 'define-area-roles-checkbox-container' not found!");
+            return;
         }
+
+        // Clear only previous role checkboxes (elements with class 'checkbox-item')
+        const existingCheckboxItems = checkboxContainer.querySelectorAll('div.checkbox-item');
+        existingCheckboxItems.forEach(item => item.remove());
+
+        if (rolesLoadingMsg) {
+            rolesLoadingMsg.style.display = 'none'; // Hide by default, show if errors or no roles
+        }
+
+        if (!allRolesForAreaAssignment || allRolesForAreaAssignment.length === 0) {
+            if (rolesLoadingMsg) {
+                const currentText = rolesLoadingMsg.textContent || "";
+                // Only update if not already showing a more specific error from initial load (set by loadAllRolesForAreaDefinition)
+                if (!currentText.toLowerCase().includes("{{ _("error loading roles")|lower }}")) {
+                     rolesLoadingMsg.textContent = '{{ _("No roles available to assign. Please create roles in User Management.") }}';
+                }
+                rolesLoadingMsg.style.display = 'block';
+            }
+            return;
+        }
+
+        // If we have roles, ensure the loading/error message is hidden
+        // (unless it's specifically an error message from the initial load)
+        if (rolesLoadingMsg && !(rolesLoadingMsg.textContent || "").toLowerCase().includes("{{ _("error loading roles")|lower }}")) {
+             rolesLoadingMsg.style.display = 'none';
+        }
+
+        allRolesForAreaAssignment.forEach(role => {
+            const div = document.createElement('div');
+            div.className = 'checkbox-item'; // Ensure new items have this class
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `area-role-checkbox-${role.id}`;
+            checkbox.value = role.id;
+            // Ensure the name attribute is consistent with how form data is expected to be processed.
+            // 'area_roles' seems to be used in the current HTML for the checkboxes.
+            checkbox.name = 'area_roles';
+
+            checkbox.checked = numericSelectedRoleIds.includes(Number(role.id));
+
+            const label = document.createElement('label');
+            label.htmlFor = checkbox.id;
+            label.textContent = role.name + (role.description ? ` (${role.description})` : '');
+
+            div.appendChild(checkbox);
+            div.appendChild(label);
+            checkboxContainer.appendChild(div);
+        });
+    }
         window.populateDefineAreaRolesCheckboxes = populateDefineAreaRolesCheckboxes;
 
         // Event listener for map actions (using event delegation on mapsTableBody)
