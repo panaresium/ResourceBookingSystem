@@ -389,6 +389,7 @@
         }
 
         function populateDefineAreaRolesCheckboxes(selectedRoleIds = []) {
+            const numericSelectedRoleIds = (selectedRoleIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
             const checkboxContainer = document.getElementById('define-area-roles-checkbox-container');
             const rolesLoadingMsg = document.getElementById('define-area-roles-loading-message');
             if (!checkboxContainer) return;
@@ -429,7 +430,7 @@
                 checkbox.value = role.id;
                 checkbox.name = 'area_roles'; // Consistent name for grouping
 
-                if (selectedRoleIds.includes(role.id)) {
+                if (numericSelectedRoleIds.includes(role.id)) {
                     checkbox.checked = true;
                 }
 
