@@ -2048,11 +2048,11 @@ document.addEventListener('DOMContentLoaded', function() {
         fetchAndDisplayMaps();
         
         // Populate Roles for Checkbox List in Define Area Form
-        async function populateDefineAreaRolesCheckboxes() {
-            const authorizedRolesCheckboxContainer = document.getElementById('define-area-authorized-roles-checkbox-container');
+        async function initializeRolesForAreaDefinitionUI() {
+            const authorizedRolesCheckboxContainer = document.getElementById('define-area-roles-checkbox-container');
 
             if (!authorizedRolesCheckboxContainer) {
-                console.error("#define-area-authorized-roles-checkbox-container not found in DOM.");
+                console.error("#define-area-roles-checkbox-container not found in DOM.");
                 return;
             }
 
