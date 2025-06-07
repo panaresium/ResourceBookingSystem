@@ -102,61 +102,26 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             bookings.forEach(booking => {
-                // Bookings with status 'cancelled_by_admin' will have an admin_deleted_message.
-                // This existing block should correctly handle them by displaying the message
-                // and not proceeding to the 'else' block which renders action buttons.
-                if (booking.admin_deleted_message) {
-                    // Create a specific display for admin-deleted bookings
-                    const deletedBookingDiv = document.createElement('div');
-                    deletedBookingDiv.classList.add('booking-item', 'admin-deleted-item', 'alert', 'alert-warning'); // Added 'admin-deleted-item' for potential specific styling
-                    deletedBookingDiv.setAttribute('role', 'alert');
+                // Unified logic for rendering all bookings
+                const bookingItemClone = bookingItemTemplate.content.cloneNode(true);
+                const bookingItemDiv = bookingItemClone.querySelector('.booking-item');
 
-                    const messageHeader = document.createElement('h5');
-                    messageHeader.classList.add('alert-heading');
-                    messageHeader.textContent = 'Booking Notice'; // Or "Booking Deleted by Admin"
+                // Apply conditional classes for status
+                bookingItemDiv.classList.remove('booking-completed', 'booking-cancelled', 'booking-rejected', 'booking-cancelled-by-admin', 'booking-cancelled-admin-acknowledged'); // Clear previous status classes
+                if (booking.status === 'completed') {
+                    bookingItemDiv.classList.add('booking-completed');
+                } else if (booking.status === 'cancelled') {
+                    bookingItemDiv.classList.add('booking-cancelled');
+                } else if (booking.status === 'rejected') {
+                    bookingItemDiv.classList.add('booking-rejected');
+                } else if (booking.status === 'cancelled_by_admin') {
+                    bookingItemDiv.classList.add('booking-cancelled-by-admin');
+                } else if (booking.status === 'cancelled_admin_acknowledged') {
+                    bookingItemDiv.classList.add('booking-cancelled-admin-acknowledged');
+                }
+                // Add other status classes as needed
 
-                    const messageParagraph = document.createElement('p');
-                    messageParagraph.textContent = booking.admin_deleted_message;
-
-                    deletedBookingDiv.appendChild(messageHeader);
-                    deletedBookingDiv.appendChild(messageParagraph);
-
-                    // Optionally, add original booking ID if useful for user reference
-                    const bookingIdInfo = document.createElement('p');
-                    bookingIdInfo.classList.add('text-muted', 'small');
-                    bookingIdInfo.textContent = `(Regarding Booking ID: ${booking.id})`; // Assuming booking.id is still available
-                    deletedBookingDiv.appendChild(bookingIdInfo);
-
-                    // Add the new button
-                    const clearMessageBtn = document.createElement('button');
-                    clearMessageBtn.classList.add('btn', 'btn-sm', 'btn-outline-secondary', 'clear-admin-message-btn', 'mt-2');
-                    clearMessageBtn.textContent = 'Dismiss Message';
-                    clearMessageBtn.dataset.bookingId = booking.id;
-                    deletedBookingDiv.appendChild(clearMessageBtn);
-
-                    bookingsListDiv.appendChild(deletedBookingDiv);
-
-                } else {
-                    // Existing logic for rendering active bookings
-                    const bookingItemClone = bookingItemTemplate.content.cloneNode(true);
-                    const bookingItemDiv = bookingItemClone.querySelector('.booking-item');
-
-                    // Apply conditional classes for status
-                    bookingItemDiv.classList.remove('booking-completed', 'booking-cancelled', 'booking-rejected', 'booking-cancelled-by-admin'); // Clear previous status classes
-                    if (booking.status === 'completed') {
-                        bookingItemDiv.classList.add('booking-completed');
-                    } else if (booking.status === 'cancelled') {
-                        bookingItemDiv.classList.add('booking-cancelled');
-                    } else if (booking.status === 'rejected') {
-                        bookingItemDiv.classList.add('booking-rejected');
-                    } else if (booking.status === 'cancelled_by_admin') {
-                        // This case is handled by the admin_deleted_message block,
-                        // but if it were to reach here, this class could be added.
-                        // bookingItemDiv.classList.add('booking-cancelled-by-admin');
-                    }
-
-
-                    bookingItemDiv.dataset.bookingId = booking.id; // Store booking ID on the item div
+                bookingItemDiv.dataset.bookingId = booking.id; // Store booking ID on the item div
                     bookingItemDiv.dataset.resourceId = booking.resource_id; // Store resource ID
                     bookingItemDiv.dataset.startTime = booking.start_time; // Store full start time
                     bookingItemDiv.dataset.endTime = booking.end_time; // Store full end time
@@ -190,21 +155,29 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Populate Status text
                     const bookingStatusSpan = bookingItemClone.querySelector('.booking-status');
                     if (bookingStatusSpan) {
-                        bookingStatusSpan.textContent = booking.status ? booking.status.charAt(0).toUpperCase() + booking.status.slice(1).replace(/_/g, ' ') : 'Unknown';
+                        if (booking.status === 'cancelled_by_admin' || booking.status === 'cancelled_admin_acknowledged') {
+                            bookingStatusSpan.textContent = 'Cancelled by Administrator';
+                        } else {
+                            bookingStatusSpan.textContent = booking.status ? booking.status.charAt(0).toUpperCase() + booking.status.slice(1).replace(/_/g, ' ') : 'Unknown';
+                        }
                     }
 
+                    // Ensure admin_deleted_message is NOT displayed
+                    // (No specific element for it in the template for active bookings, so no action needed here to remove it)
 
                     // Ensure buttons/controls are hidden by default before applying logic
                     if (checkInControls) checkInControls.style.display = 'none';
                     if (checkOutBtn) checkOutBtn.style.display = 'none';
                     if (cancelBtn) cancelBtn.style.display = 'inline-block'; // Default for active bookings
+                    if (updateBtn) updateBtn.style.display = 'inline-block'; // Default for active bookings
 
-                    const terminalStatuses = ['completed', 'cancelled', 'rejected', 'cancelled_by_admin'];
+
+                    const terminalStatuses = ['completed', 'cancelled', 'rejected', 'cancelled_by_admin', 'cancelled_admin_acknowledged'];
                     if (terminalStatuses.includes(booking.status)) {
                         if (checkInControls) checkInControls.style.display = 'none';
                         if (checkOutBtn) checkOutBtn.style.display = 'none';
                         if (cancelBtn) cancelBtn.style.display = 'none';
-                        if (updateBtn) updateBtn.style.display = 'none'; // Also hide update for terminal states
+                        if (updateBtn) updateBtn.style.display = 'none';
                     } else if (checkInOutEnabled) { // Active bookings, apply check-in/out logic
                         if (booking.can_check_in && !booking.checked_in_at) { // Ensure not already checked in
                             if (checkInControls) checkInControls.style.display = 'inline-block';
@@ -213,21 +186,21 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (checkOutBtn) checkOutBtn.style.display = 'inline-block';
                             if (checkInControls) checkInControls.style.display = 'none'; // Hide check-in once checked-in
                         }
-                        // Cancel button remains visible for active, non-terminal bookings
-                        // Update button also remains visible
+                        // Cancel and Update buttons remain visible for non-terminal, active bookings
                     } else {
-                        // If checkInOut is NOT enabled, all related buttons should be hidden
+                        // If checkInOut is NOT enabled, all related check-in/out buttons should be hidden
                         if (checkInControls) checkInControls.style.display = 'none';
                         if (checkOutBtn) checkOutBtn.style.display = 'none';
                     }
 
+                    // Ensure "Dismiss Message" button is NOT added for the user
+                    // (This is implicitly handled by removing the `if (booking.admin_deleted_message)` block)
+
                     // Assign dataset attributes after elements are confirmed
                     if (checkInBtn) checkInBtn.dataset.bookingId = booking.id;
                     if (checkOutBtn) checkOutBtn.dataset.bookingId = booking.id;
-                    // pinInput is inside checkInControls, its dataset can be assigned when checkInControls is shown if needed
 
                     bookingsListDiv.appendChild(bookingItemClone);
-                }
             });
             hideStatusMessage(statusDiv);
         } catch (error) {
@@ -350,39 +323,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (target.classList.contains('clear-admin-message-btn')) {
-            const bookingId = target.dataset.bookingId;
-            if (!bookingId) {
-                console.error('Booking ID not found on dismiss button.');
-                showError(statusDiv, 'Could not identify booking to clear message.');
-                return;
-            }
-
-            // Optional: Add a confirmation dialog
-            // if (!confirm(`Are you sure you want to dismiss this message for booking ID ${bookingId}?`)) {
-            //     return;
-            // }
-
-            showLoading(statusDiv, `Dismissing message for booking ${bookingId}...`);
-            try {
-                await apiCall(`/api/bookings/${bookingId}/clear_admin_message`, { method: 'POST' });
-                showSuccess(statusDiv, `Message for booking ${bookingId} dismissed.`);
-
-                // Remove the entire admin-deleted-item div
-                const messageItemDiv = target.closest('.admin-deleted-item');
-                if (messageItemDiv) {
-                    messageItemDiv.remove();
-                } else {
-                    // Fallback if the structure is unexpected, try to remove the button's parent at least
-                    target.parentElement.remove();
-                }
-
-                if (bookingsListDiv.children.length === 0) {
-                    showStatusMessage(statusDiv, 'You have no active bookings or messages.', 'info');
-                }
-            } catch (error) {
-                console.error('Error dismissing admin message:', error);
-                showError(statusDiv, error.message || `Failed to dismiss message for booking ${bookingId}.`);
-            }
+            // This button should no longer be generated for the user view.
+            // If it were, this is where its client-side logic would be.
+            // For robustness, we can leave the handler, but it shouldn't be triggered from user UI.
+            console.warn("'clear-admin-message-btn' was clicked, but this button should not be available to users on my_bookings page.");
         }
     });
 
