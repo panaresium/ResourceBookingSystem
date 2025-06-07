@@ -1,4 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
+    const upcomingBookingsContainer = document.getElementById('upcoming-bookings-container');
+    const pastBookingsContainer = document.getElementById('past-bookings-container');
     const bookingItemTemplate = document.getElementById('booking-item-template');
     const statusDiv = document.getElementById('my-bookings-status'); // Used by multiple functions in this scope
 
@@ -191,8 +193,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function fetchAndDisplayBookings() {
-        const upcomingBookingsContainer = document.getElementById('upcoming-bookings-container');
-        const pastBookingsContainer = document.getElementById('past-bookings-container');
+        // const upcomingBookingsContainer = document.getElementById('upcoming-bookings-container'); // Now global
+        // const pastBookingsContainer = document.getElementById('past-bookings-container'); // Now global
         const myBookingsStatusDiv = document.getElementById('my-bookings-status'); // Uses the global statusDiv
 
         if (!upcomingBookingsContainer || !pastBookingsContainer) {
