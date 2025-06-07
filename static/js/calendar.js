@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     const calendarEl = document.getElementById('calendar');
-    const calendarResourceSelect = document.getElementById('calendar-resource-select');
+    const calendarStatusFilterSelect = document.getElementById('calendar-status-filter'); // Changed ID
 
     // Modal elements
     const calendarEditBookingModal = document.getElementById('calendar-edit-booking-modal');
@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const cebmStatusMessage = document.getElementById('cebm-status-message');
     const cebmDeleteBookingBtn = document.getElementById('cebm-delete-booking-btn'); // Added
 
-    if (!calendarEl || !calendarResourceSelect || !calendarEditBookingModal || !cebmDeleteBookingBtn) { // Added !cebmDeleteBookingBtn
+    if (!calendarEl || !calendarStatusFilterSelect || !calendarEditBookingModal || !cebmDeleteBookingBtn) { // Used new ID
         console.error("Required calendar elements or modal not found.");
         return;
     }
@@ -130,26 +130,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function populateResourceSelector() {
-        try {
-            const resources = await apiCall('/api/bookings/my_booked_resources');
-            const firstOption = calendarResourceSelect.options[0];
-            calendarResourceSelect.innerHTML = ''; // Clear existing options except the first one
-            calendarResourceSelect.add(firstOption); // Re-add "All My Booked Resources"
+    // Removed populateResourceSelector function
 
-            if (resources && resources.length > 0) {
-                resources.forEach(resource => {
-                    const option = new Option(`${resource.name} (Status: ${resource.status}, Capacity: ${resource.capacity || 'N/A'})`, resource.id);
-                    calendarResourceSelect.add(option);
-                });
-                calendarResourceSelect.disabled = false;
-            }
-        } catch (error) {
-            console.error('Error fetching resources for calendar selector:', error);
-            if (calendarResourceSelect.options.length > 0) {
-                 calendarResourceSelect.options[0].text = '-- Error loading resources --';
-            }
-        }
+    function populateStatusFilter(selectElement) {
+        selectElement.innerHTML = ''; // Clear existing options
+
+        const statuses = [
+            { value: 'active', text: 'Show All Relevant' }, // Default
+            { value: 'approved', text: 'Approved (Pending Check-in)' },
+            { value: 'pending', text: 'Pending Approval'},
+            { value: 'checked_in', text: 'Checked In' },
+            { value: 'completed', text: 'Completed' },
+            { value: 'cancelled_group', text: 'Cancelled/Rejected' }
+        ];
+
+        statuses.forEach(status => {
+            const option = document.createElement('option');
+            option.value = status.value;
+            option.textContent = status.text;
+            selectElement.appendChild(option);
+        });
+        selectElement.disabled = false;
     }
 
     // Function to handle saving changes from the modal
@@ -383,46 +384,38 @@ document.addEventListener('DOMContentLoaded', () => {
             {
                 id: 'actualBookings',
                 events: function(fetchInfo, successCallback, failureCallback) {
-                    if (allUserEvents.length > 0 ) { 
-                        const selectedResourceId = calendarResourceSelect.value;
-                        let eventsToDisplay = (selectedResourceId === 'all' || !selectedResourceId)
-                            ? allUserEvents
-                            : allUserEvents.filter(event => String(event.resource_id) === String(selectedResourceId));
-                        console.log('Using cached allUserEvents, filtered for:', selectedResourceId, eventsToDisplay.length);
-                        successCallback(eventsToDisplay);
-                        return;
+                    let selectedStatusValue = calendarStatusFilterSelect ? calendarStatusFilterSelect.value : 'active';
+
+                    if (selectedStatusValue === 'cancelled_group') {
+                        selectedStatusValue = 'cancelled,rejected,cancelled_by_admin,cancelled_admin_acknowledged';
                     }
 
-                    apiCall('/api/bookings/calendar') 
+                    let apiUrl = '/api/bookings/calendar';
+                    if (selectedStatusValue && selectedStatusValue !== 'active') {
+                        apiUrl += `?status_filter=${encodeURIComponent(selectedStatusValue)}`;
+                    }
+
+                    allUserEvents = []; // Clear cache before every fetch for simplicity with filter changes
+
+                    apiCall(apiUrl)
                         .then(bookings => {
-                            allUserEvents = bookings.map(b => {
+                            const mappedEvents = bookings.map(b => {
                                 const apiResourceId = b.resource_id; 
-                                console.log('Mapping booking to event. Raw booking data:', JSON.parse(JSON.stringify(b)));
                                 const extendedProps = b.extendedProps || {};
                                 extendedProps.isActualBooking = true; 
                                 extendedProps.resource_id = apiResourceId;
-                                extendedProps.resource_name = b.resource_name; // Populate resource_name
-                                extendedProps.original_title = b.title; // Preserve original booking title if needed
+                                extendedProps.resource_name = b.resource_name;
+                                extendedProps.original_title = b.title;
 
                                 const eventObject = {
-                                    // Spread booking properties. Ensure 'title', 'start', 'end' are correctly formatted for FullCalendar if not already.
-                                    // FullCalendar will use 'title', 'start', 'end' directly.
-                                    // Other properties like 'id' from 'b' should also be spread.
-                                    ...b, // This should include id, title, start, end, etc.
-                                    resource_id: apiResourceId, // Ensure this is not overwritten by spread if b also has it.
+                                    ...b,
+                                    resource_id: apiResourceId,
                                     extendedProps: extendedProps 
                                 };
-                                
-                                console.log('Created event object. Resource ID:', eventObject.resource_id, 'ExtendedProps Resource ID:', eventObject.extendedProps.resource_id, 'Resource Name:', eventObject.extendedProps.resource_name);
                                 return eventObject;
                             });
-                            console.log('Fetched and cached allUserEvents:', allUserEvents.length);
-                            const selectedResourceId = calendarResourceSelect.value;
-                             let eventsToDisplay = (selectedResourceId === 'all' || !selectedResourceId)
-                                ? allUserEvents
-                                : allUserEvents.filter(event => String(event.resource_id) === String(selectedResourceId));
-                            console.log('Displaying events for:', selectedResourceId, eventsToDisplay.length);
-                            successCallback(eventsToDisplay);
+                            allUserEvents = mappedEvents; // Re-populate cache (optional, but kept for now)
+                            successCallback(mappedEvents);
                         })
                         .catch(error => {
                             console.error('Error fetching user bookings for calendar:', error);
@@ -511,15 +504,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    if (calendarResourceSelect) {
-        calendarResourceSelect.addEventListener('change', () => {
-            const actualBookingsSource = calendar.getEventSourceById('actualBookings');
-            if (actualBookingsSource) {
-                allUserEvents = []; 
-                actualBookingsSource.refetch();
+    if (calendarStatusFilterSelect) {
+        calendarStatusFilterSelect.addEventListener('change', () => {
+            // The cache `allUserEvents` is cleared inside the `events` function now
+            // before fetching new data, so just refetching is enough.
+            if (calendar) { // Ensure calendar object is available
+                 calendar.refetchEvents();
             }
         });
     }
 
-    populateResourceSelector(); 
+    // Populate the new status filter dropdown
+    populateStatusFilter(calendarStatusFilterSelect);
 });
