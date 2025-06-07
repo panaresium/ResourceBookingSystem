@@ -3697,6 +3697,88 @@ class TestApiMapsAvailability(AppTests):
 
         self.assertEqual(map_data.get('availability_status'), expected_status, f"Expected status {expected_status} for {availability_percentage}% availability in completed test")
 
+    def test_get_my_bookings_for_date_filters_statuses(self):
+        """
+        Tests that /api/bookings/my_bookings_for_date correctly filters bookings by active statuses.
+        """
+        self.logout() # Log out admin
+        login_resp = self.login(self.test_booker.username, 'password') # Log in as test_booker
+        self.assertEqual(login_resp.status_code, 200)
+
+        target_date = date.today() + timedelta(days=12)
+        target_date_str = target_date.strftime("%Y-%m-%d")
+
+        # Bookings for self.test_booker
+        b_approved = self._create_booking_at_slot(
+            self.res1_on_map.id, self.test_booker, target_date, self.primary_slots[0],
+            'Approved MyBookingDate', status='approved'
+        )
+        b_cancelled = self._create_booking_at_slot(
+            self.res1_on_map.id, self.test_booker, target_date, self.primary_slots[1],
+            'Cancelled MyBookingDate', status='cancelled_by_admin'
+        )
+        # Use res2_on_map for other statuses to avoid exact slot overlaps if helper doesn't vary times enough
+        b_completed = self._create_booking_at_slot(
+            self.res2_on_map.id, self.test_booker, target_date, self.primary_slots[0],
+            'Completed MyBookingDate OtherRes', status='completed'
+        )
+        b_pending = self._create_booking_at_slot(
+            self.res2_on_map.id, self.test_booker, target_date, self.primary_slots[1],
+            'Pending MyBookingDate OtherRes', status='pending'
+        )
+        db.session.commit()
+
+        response = self.client.get(f'/api/bookings/my_bookings_for_date?date={target_date_str}')
+        self.assertEqual(response.status_code, 200, f"API call failed: {response.get_data(as_text=True)}")
+
+        bookings_list = response.get_json()
+        self.assertIsInstance(bookings_list, list, "Response should be a list of bookings.")
+
+        # Expected: 'approved' and 'pending'
+        self.assertEqual(len(bookings_list), 2, f"Expected 2 active bookings, got {len(bookings_list)}. Response: {bookings_list}")
+
+        returned_titles = {b['title'] for b in bookings_list}
+        self.assertIn(b_approved.title, returned_titles)
+        self.assertIn(b_pending.title, returned_titles)
+        self.assertNotIn(b_cancelled.title, returned_titles)
+        self.assertNotIn(b_completed.title, returned_titles)
+
+        self.logout() # Log out test_booker
+        self.login(self.admin_user.username, 'adminpass') # Log admin back in for subsequent tests
+
+    def test_get_resource_availability_filters_statuses(self):
+        """
+        Tests that /api/resources/<id>/availability correctly filters bookings by active statuses.
+        """
+        # Admin user is already logged in from setUp or previous test's logout/login sequence
+        target_date = date.today() + timedelta(days=14)
+        target_date_str = target_date.strftime("%Y-%m-%d")
+
+        target_resource_id = self.res1_on_map.id
+
+        # Create bookings with distinct times to ensure no overlap if helper doesn't guarantee it
+        b_approved = Booking(resource_id=target_resource_id, user_name=self.test_booker.username, title='Approved ResAvail', status='approved', start_time=datetime.combine(target_date, dt_time(9,0)), end_time=datetime.combine(target_date, dt_time(10,0)))
+        b_cancelled = Booking(resource_id=target_resource_id, user_name=self.test_booker.username, title='Cancelled ResAvail', status='cancelled_by_admin', start_time=datetime.combine(target_date, dt_time(10,0)), end_time=datetime.combine(target_date, dt_time(11,0)))
+        b_completed = Booking(resource_id=target_resource_id, user_name=self.test_booker.username, title='Completed ResAvail', status='completed', start_time=datetime.combine(target_date, dt_time(11,0)), end_time=datetime.combine(target_date, dt_time(12,0)))
+        b_pending = Booking(resource_id=target_resource_id, user_name=self.test_booker.username, title='Pending ResAvail', status='pending', start_time=datetime.combine(target_date, dt_time(13,0)), end_time=datetime.combine(target_date, dt_time(14,0)))
+        db.session.add_all([b_approved, b_cancelled, b_completed, b_pending])
+        db.session.commit()
+
+        response = self.client.get(f'/api/resources/{target_resource_id}/availability?date={target_date_str}')
+        self.assertEqual(response.status_code, 200, f"API call failed: {response.get_data(as_text=True)}")
+
+        bookings_data = response.get_json()
+        self.assertIsInstance(bookings_data, list, "Response should be a list of booking slots.")
+
+        # Expected: 'approved' and 'pending'
+        self.assertEqual(len(bookings_data), 2, f"Expected 2 active bookings, got {len(bookings_data)}. Response: {bookings_data}")
+
+        returned_titles = {b['title'] for b in bookings_data}
+        self.assertIn(b_approved.title, returned_titles)
+        self.assertIn(b_pending.title, returned_titles)
+        self.assertNotIn(b_cancelled.title, returned_titles)
+        self.assertNotIn(b_completed.title, returned_titles)
+
     def test_get_map_details_filters_statuses_correctly(self):
         """
         Tests that the /api/map_details/<map_id> endpoint correctly filters bookings
