@@ -843,7 +843,10 @@ document.addEventListener('DOMContentLoaded', function() {
                                 if (statusEl) hideMessage(statusEl); // Clear any previous messages
                             } catch (e) {
                                 console.error('[QR Code] Error creating QRCode instance:', e);
-                                qrCodeDisplay.textContent = 'Error generating QR code. See console for details.';
+                                qrCodeDisplay.innerHTML = '<p style="color: red; font-weight: bold;">Could not generate QR Code.</p>' +
+                                                          '<p>An unexpected error occurred during QR code creation.</p>' +
+                                                          '<p><small>Details: ' + e.message + '</small></p>';
+                                if (statusEl) showError(statusEl, 'Failed to generate QR Code.');
                             }
                             qrCodeModal.style.display = 'block';
                         } else {
