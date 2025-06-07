@@ -432,7 +432,7 @@ class TestBookingUserActions(AppTests):
         db.session.commit()
 
     def test_get_my_bookings_includes_check_in_out_setting(self):
-        """Test /api/bookings/my_bookings returns categorized and sorted bookings."""
+        """Test /api/bookings/my_bookings returns categorized, sorted, and filtered bookings."""
         self.login('testuser', 'password')
         user = User.query.filter_by(username='testuser').first()
 
@@ -442,95 +442,106 @@ class TestBookingUserActions(AppTests):
                 db.session.add(BookingSettings(enable_check_in_out=check_in_out_setting))
                 db.session.commit()
 
-                # Clean up previous bookings for this user to ensure a clean test state
                 Booking.query.filter_by(user_name=user.username).delete()
                 db.session.commit()
 
                 now = datetime.utcnow()
-                # Upcoming
-                booking_future_near = self._create_booking(user.username, self.resource1.id, start_offset_hours=2, title="Future Near")
-                booking_future_far = self._create_booking(user.username, self.resource1.id, start_offset_hours=24, title="Future Far")
-                # Past
-                booking_past_recent = self._create_booking(user.username, self.resource2.id, start_offset_hours=-2, title="Past Recent")
-                booking_past_older = self._create_booking(user.username, self.resource2.id, start_offset_hours=-24, title="Past Older")
-                # Admin Cancelled (Past)
-                booking_admin_cancelled_past = self._create_booking(user.username, self.resource1.id, start_offset_hours=-48, title="Admin Cancelled Past")
-                booking_admin_cancelled_past.status = 'cancelled_by_admin'
-                # Admin Cancelled (Future) - to test if it's returned by API (JS should handle display)
-                booking_admin_cancelled_future = self._create_booking(user.username, self.resource1.id, start_offset_hours=48, title="Admin Cancelled Future")
-                booking_admin_cancelled_future.status = 'cancelled_by_admin'
-                db.session.commit()
+                today_date = now.date()
+                tomorrow_date = today_date + timedelta(days=1)
+                yesterday_date = today_date - timedelta(days=1)
+                specific_future_date = today_date + timedelta(days=5)
 
-                all_test_bookings_ids = {
-                    booking_future_near.id, booking_future_far.id,
-                    booking_past_recent.id, booking_past_older.id,
-                    booking_admin_cancelled_past.id, booking_admin_cancelled_future.id
+                # Create bookings
+                bookings_setup = {
+                    "upcoming_approved_today": Booking(user_name=user.username, resource_id=self.resource1.id, title="Upcoming Approved Today", status="approved", start_time=now + timedelta(hours=2), end_time=now + timedelta(hours=3)),
+                    "upcoming_pending_tomorrow": Booking(user_name=user.username, resource_id=self.resource1.id, title="Tomorrow Pending", status="pending", start_time=datetime.combine(tomorrow_date, dt_time(10,0)), end_time=datetime.combine(tomorrow_date, dt_time(11,0))),
+                    "past_completed_yesterday": Booking(user_name=user.username, resource_id=self.resource2.id, title="Yesterday Completed", status="completed", start_time=datetime.combine(yesterday_date, dt_time(10,0)), end_time=datetime.combine(yesterday_date, dt_time(11,0))),
+                    "past_cancelled_today": Booking(user_name=user.username, resource_id=self.resource2.id, title="Past Cancelled Today", status="cancelled_by_admin", start_time=now - timedelta(hours=3), end_time=now - timedelta(hours=2)),
+                    "specific_date_approved": Booking(user_name=user.username, resource_id=self.resource1.id, title="Specific Date Approved", status="approved", start_time=datetime.combine(specific_future_date, dt_time(9,0)), end_time=datetime.combine(specific_future_date, dt_time(10,0))),
+                    "specific_date_pending": Booking(user_name=user.username, resource_id=self.resource1.id, title="Specific Date Pending", status="pending", start_time=datetime.combine(specific_future_date, dt_time(11,0)), end_time=datetime.combine(specific_future_date, dt_time(12,0))),
+                    "another_upcoming_approved": Booking(user_name=user.username, resource_id=self.resource2.id, title="Another Upcoming Approved", status="approved", start_time=now + timedelta(hours=5), end_time=now + timedelta(hours=6))
                 }
+                for b in bookings_setup.values(): db.session.add(b)
+                db.session.commit()
+                # Store IDs for assertions
+                b_ids = {name: b.id for name, b in bookings_setup.items()}
+
+                # --- Test Case 1: No Filters ---
+                response_no_filter = self.client.get('/api/bookings/my_bookings')
+                self.assertEqual(response_no_filter.status_code, 200)
+                data_no_filter = response_no_filter.get_json()
+                self.assertEqual(data_no_filter['check_in_out_enabled'], check_in_out_setting)
+
+                # Expected: 4 upcoming (approved_today, pending_tomorrow, specific_date_approved, specific_date_pending, another_upcoming_approved)
+                # Note: self._create_booking from parent class creates approved bookings.
+                # The exact number of upcoming/past depends on precise timing of "now" vs start_offset_hours.
+                # Let's verify based on the titles we expect.
+                upcoming_titles_no_filter = {b['title'] for b in data_no_filter['upcoming_bookings']}
+                past_titles_no_filter = {b['title'] for b in data_no_filter['past_bookings']}
+
+                self.assertIn("Upcoming Approved Today", upcoming_titles_no_filter)
+                self.assertIn("Tomorrow Pending", upcoming_titles_no_filter)
+                self.assertIn("Specific Date Approved", upcoming_titles_no_filter)
+                self.assertIn("Specific Date Pending", upcoming_titles_no_filter)
+                self.assertIn("Another Upcoming Approved", upcoming_titles_no_filter)
+                self.assertEqual(len(data_no_filter['upcoming_bookings']), 5)
 
 
-                response = self.client.get('/api/bookings/my_bookings')
-                self.assertEqual(response.status_code, 200)
-                data = response.get_json()
+                self.assertIn("Yesterday Completed", past_titles_no_filter)
+                self.assertIn("Past Cancelled Today", past_titles_no_filter)
+                self.assertEqual(len(data_no_filter['past_bookings']), 2)
 
-                self.assertIn('upcoming_bookings', data)
-                self.assertIsInstance(data['upcoming_bookings'], list)
-                self.assertIn('past_bookings', data)
-                self.assertIsInstance(data['past_bookings'], list)
-                self.assertEqual(data['check_in_out_enabled'], check_in_out_setting)
+                # Check sorting (example for upcoming)
+                if len(data_no_filter['upcoming_bookings']) > 1:
+                    upcoming_times = [b['start_time'] for b in data_no_filter['upcoming_bookings']]
+                    self.assertEqual(upcoming_times, sorted(upcoming_times))
 
-                upcoming_list = data['upcoming_bookings']
-                past_list = data['past_bookings']
+                # --- Test Case 2: Filter by Status ---
+                status_test_cases = {
+                    "approved": {"upcoming": [b_ids["upcoming_approved_today"], b_ids["specific_date_approved"], b_ids["another_upcoming_approved"]], "past": []},
+                    "pending": {"upcoming": [b_ids["upcoming_pending_tomorrow"], b_ids["specific_date_pending"]], "past": []},
+                    "completed": {"upcoming": [], "past": [b_ids["past_completed_yesterday"]]},
+                    "cancelled_by_admin": {"upcoming": [], "past": [b_ids["past_cancelled_today"]]}
+                }
+                for status, expected_ids in status_test_cases.items():
+                    with self.subTest(status_filter=status):
+                        resp_status = self.client.get(f'/api/bookings/my_bookings?status_filter={status}')
+                        self.assertEqual(resp_status.status_code, 200)
+                        data_status = resp_status.get_json()
 
-                upcoming_ids = {b['id'] for b in upcoming_list}
-                past_ids = {b['id'] for b in past_list}
+                        upcoming_ids_status = {b['id'] for b in data_status['upcoming_bookings']}
+                        past_ids_status = {b['id'] for b in data_status['past_bookings']}
 
-                # Expected categorization (API returns based on time; JS handles display of status)
-                # The API is expected to return all bookings, categorized by time.
-                # The create_booking helper creates bookings with 'approved' status by default.
-                self.assertIn(booking_future_near.id, upcoming_ids)
-                self.assertIn(booking_future_far.id, upcoming_ids)
-                self.assertIn(booking_admin_cancelled_future.id, upcoming_ids) # It's future, API should return it.
-
-                self.assertIn(booking_past_recent.id, past_ids)
-                self.assertIn(booking_past_older.id, past_ids)
-                self.assertIn(booking_admin_cancelled_past.id, past_ids) # It's past.
-
-                # Ensure no booking is in both lists
-                self.assertTrue(upcoming_ids.isdisjoint(past_ids))
-
-                # Count check: 3 upcoming, 3 past
-                self.assertEqual(len(upcoming_list), 3, f"Upcoming bookings: {upcoming_ids}")
-                self.assertEqual(len(past_list), 3, f"Past bookings: {past_ids}")
+                        self.assertSetEqual(upcoming_ids_status, set(expected_ids["upcoming"]))
+                        self.assertSetEqual(past_ids_status, set(expected_ids["past"]))
+                        if len(data_status['upcoming_bookings']) > 1:
+                             self.assertEqual([b['id'] for b in data_status['upcoming_bookings']], sorted([b_ids[name] for name, b_obj in bookings_setup.items() if b_obj.id in expected_ids["upcoming"]], key=lambda bid: bookings_setup[[n for n,oid in b_ids.items() if oid==bid][0]].start_time))
+                        if len(data_status['past_bookings']) > 1:
+                             self.assertEqual([b['id'] for b in data_status['past_bookings']], sorted([b_ids[name] for name, b_obj in bookings_setup.items() if b_obj.id in expected_ids["past"]], key=lambda bid: bookings_setup[[n for n,oid in b_ids.items() if oid==bid][0]].start_time, reverse=True))
 
 
-                # Assert Correct Sorting
-                if len(upcoming_list) > 1:
-                    upcoming_start_times = [b['start_time'] for b in upcoming_list]
-                    self.assertEqual(upcoming_start_times, sorted(upcoming_start_times), "Upcoming bookings not sorted correctly.")
-                    # Specific order for future bookings (nearest first)
-                    self.assertEqual(upcoming_list[0]['id'], booking_future_near.id)
-                    self.assertEqual(upcoming_list[1]['id'], booking_future_far.id)
-                    # The admin_cancelled_future would be last if sorted by time
-                    self.assertEqual(upcoming_list[2]['id'], booking_admin_cancelled_future.id)
+                # --- Test Case 3: Filter by Date ---
+                resp_date_specific = self.client.get(f'/api/bookings/my_bookings?date_filter_value={specific_future_date.strftime("%Y-%m-%d")}')
+                self.assertEqual(resp_date_specific.status_code, 200)
+                data_date_specific = resp_date_specific.get_json()
+                upcoming_ids_date = {b['id'] for b in data_date_specific['upcoming_bookings']}
+                self.assertSetEqual(upcoming_ids_date, {b_ids["specific_date_approved"], b_ids["specific_date_pending"]})
+                self.assertEqual(len(data_date_specific['past_bookings']), 0)
 
+                # --- Test Case 4: Filter by Status AND Date ---
+                resp_status_date = self.client.get(f'/api/bookings/my_bookings?status_filter=approved&date_filter_value={specific_future_date.strftime("%Y-%m-%d")}')
+                self.assertEqual(resp_status_date.status_code, 200)
+                data_status_date = resp_status_date.get_json()
+                upcoming_ids_status_date = {b['id'] for b in data_status_date['upcoming_bookings']}
+                self.assertSetEqual(upcoming_ids_status_date, {b_ids["specific_date_approved"]})
+                self.assertEqual(len(data_status_date['past_bookings']), 0)
 
-                if len(past_list) > 1:
-                    past_start_times = [b['start_time'] for b in past_list]
-                    self.assertEqual(past_start_times, sorted(past_start_times, reverse=True), "Past bookings not sorted correctly.")
-                    # Specific order for past bookings (most recent past first)
-                    self.assertEqual(past_list[0]['id'], booking_past_recent.id)
-                    self.assertEqual(past_list[1]['id'], booking_past_older.id)
-                    self.assertEqual(past_list[2]['id'], booking_admin_cancelled_past.id)
-
-
-                # Clean up created bookings for this sub-test iteration
-                Booking.query.filter(Booking.id.in_(all_test_bookings_ids)).delete()
+                # Clean up bookings for this sub-test iteration
+                Booking.query.filter(Booking.id.in_(b_ids.values())).delete()
                 db.session.commit()
 
-        # Clean up BookingSettings at the end of the main test method
         BookingSettings.query.delete()
         db.session.commit()
-
 
     def test_update_booking_invalid_time_range(self):
         """Test error when start_time is not before end_time during booking update."""

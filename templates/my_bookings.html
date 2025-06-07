@@ -13,8 +13,51 @@
 
     <div id="my-bookings-status" class="alert" style="display:none;"></div>
 
+    <div class="row mb-3 align-items-end" id="my-bookings-filters">
+        <!-- Status Filter Column -->
+        <div class="col-md-4">
+            <label for="my-bookings-status-filter" class="form-label">{{ _('Filter by Status:') }}</label>
+            <select id="my-bookings-status-filter" class="form-select">
+                <option value="all" selected>{{ _('All Statuses') }}</option>
+                <option value="approved">{{ _('Approved') }}</option>
+                <option value="pending">{{ _('Pending') }}</option>
+                <option value="completed">{{ _('Completed') }}</option>
+                <option value="cancelled_by_admin">{{ _('Cancelled by Admin') }}</option>
+                <option value="cancelled_admin_acknowledged">{{ _('Cancelled (Admin Acknowledged)') }}</option>
+                <option value="cancelled">{{ _('Cancelled (by User)') }}</option>
+                <option value="rejected">{{ _('Rejected') }}</option>
+                <!-- Add other relevant statuses like 'checked_in' if needed -->
+            </select>
+        </div>
+
+        <!-- Date Filter Type Column -->
+        <div class="col-md-3">
+            <label for="my-bookings-date-filter-type" class="form-label">{{ _('Filter by Date:') }}</label>
+            <select id="my-bookings-date-filter-type" class="form-select">
+                <option value="any" selected>{{ _('Any Date') }}</option>
+                <option value="specific">{{ _('Specific Date') }}</option>
+                <!-- Potentially add "date_range" in the future -->
+            </select>
+        </div>
+
+        <!-- Date Picker Column (initially hidden) -->
+        <div class="col-md-3" id="my-bookings-date-picker-container" style="display: none;">
+            <label for="my-bookings-date-picker" class="form-label">{{ _('Select Date:') }}</label>
+            <input type="text" id="my-bookings-date-picker" class="form-control">
+        </div>
+
+        <!-- Optional: Apply Filters Button Column -->
+        <!-- <div class="col-md-2 d-flex align-items-end">
+            <button id="apply-my-bookings-filters-btn" class="btn btn-primary w-100">{{ _('Apply') }}</button>
+        </div> -->
+    </div>
+
     <div id="my-bookings-list">
         <div id="upcoming-bookings-section">
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" role="switch" id="toggle-upcoming-bookings" checked>
+                <label class="form-check-label" for="toggle-upcoming-bookings">{{ _('Show Upcoming Bookings') }}</label>
+            </div>
             <h2>{{ _('Upcoming Bookings') }}</h2>
             <div id="upcoming-bookings-container">
                 <!-- Upcoming bookings will be loaded here by JavaScript -->
@@ -25,6 +68,10 @@
         <hr class="my-4"> <!-- Optional separator -->
 
         <div id="past-bookings-section" class="mt-4">
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" role="switch" id="toggle-past-bookings">
+                <label class="form-check-label" for="toggle-past-bookings">{{ _('Show Past Bookings') }}</label>
+            </div>
             <h2>{{ _('Past Bookings') }}</h2>
             <div id="past-bookings-container">
                 <!-- Past bookings will be loaded here by JavaScript -->
@@ -37,21 +84,33 @@
     <template id="booking-item-template">
         <div class="card mb-3 booking-item">
             <div class="card-body">
-                <h5 class="card-title resource-name"></h5>
-                <p class="card-text">
-                    <strong>{{ _('Title') }}:</strong> <span class="booking-title"></span><br>
-                    <strong>{{ _('Starts') }}:</strong> <span class="start-time"></span><br>
-                    <strong>{{ _('Ends') }}:</strong> <span class="end-time"></span><br>
-                    <strong>{{ _('Recurrence') }}:</strong> <span class="recurrence-rule"></span>
-                </p>
-                <button class="btn btn-sm btn-primary update-booking-btn" data-booking-id="">{{ _('Update Booking') }}</button>
-                <button class="btn btn-sm btn-danger cancel-booking-btn" data-booking-id="">{{ _('Cancel Booking') }}</button>
+                <div class="booking-line1">
+                    <span><strong>{{ _('Title') }}:</strong> <span class="booking-title-value"></span></span>
+                    <span class="mx-2">|</span>
+                    <span><span class="resource-name-value"></span></span>
+                </div>
+                <div class="booking-line2">
+                    <strong>{{ _('Time') }}:</strong>
+                    <span class="booking-date-value"></span>
+                    <span class="booking-start-time-value"></span> - <span class="booking-end-time-value"></span>
+                </div>
+                <div class="booking-line3">
+                    <strong>{{ _('Status') }}:</strong> <span class="booking-status-value"></span>
+                </div>
+                <div class="booking-line4">
+                    <strong>{{ _('Recurrence') }}:</strong> <span class="recurrence-rule-value"></span>
+                </div>
 
-                <span class="check-in-controls" style="display:none;"> <!-- Wrapper for PIN input and Check In button -->
-                    <input type="text" class="form-control form-control-sm d-inline-block booking-pin-input" style="width: 100px; margin-right: 5px; vertical-align: middle;" placeholder="{{ _('PIN') }}" data-booking-id="">
-                    <button class="btn btn-sm btn-success check-in-btn" data-booking-id="">{{ _('Check In') }}</button>
-                </span>
-                <button class="btn btn-sm btn-secondary check-out-btn" data-booking-id="" style="display:none;">{{ _('Check Out') }}</button>
+                <!-- Existing buttons and check-in controls -->
+                <div class="booking-actions mt-2">
+                    <button class="btn btn-sm btn-primary update-booking-btn" data-booking-id="">{{ _('Update Booking') }}</button>
+                    <button class="btn btn-sm btn-danger cancel-booking-btn" data-booking-id="">{{ _('Cancel Booking') }}</button>
+                    <span class="check-in-controls" style="display:none;">
+                        <input type="text" class="form-control form-control-sm d-inline-block booking-pin-input" style="width: 100px; margin-right: 5px; vertical-align: middle;" placeholder="{{ _('PIN') }}" data-booking-id="">
+                        <button class="btn btn-sm btn-success check-in-btn" data-booking-id="">{{ _('Check In') }}</button>
+                    </span>
+                    <button class="btn btn-sm btn-secondary check-out-btn" data-booking-id="" style="display:none;">{{ _('Check Out') }}</button>
+                </div>
             </div>
         </div>
     </template>
