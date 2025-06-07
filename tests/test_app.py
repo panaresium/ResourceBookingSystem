@@ -3769,6 +3769,201 @@ class TestResourceURLCheckin(AppTests):
         self.assertIn("Booking has already been checked in.", response_already_checked_in.get_json().get('error', ''))
 
 
+class TestAPIBulkResourcePINs(AppTests):
+    def _create_admin_user_and_login(self, username="bulk_pin_admin", password="adminpass"):
+        """Creates an admin user and logs them in."""
+        admin_user = User.query.filter_by(username=username).first()
+        if not admin_user:
+            admin_user = User(username=username, email=f"{username}@example.com", is_admin=True)
+            admin_user.set_password(password)
+            db.session.add(admin_user)
+            db.session.commit()
+
+        login_response = self.login(username, password)
+        self.assertEqual(login_response.status_code, 200, "Admin login failed in test setup.")
+        self.assertTrue(login_response.get_json().get('success'), "Admin login API call was not successful.")
+        return admin_user
+
+    def _create_test_resources(self, count=3, base_name="BulkPINTestRes"):
+        """Creates multiple test resources."""
+        resources = []
+        for i in range(count):
+            name = f"{base_name}_{i+1}"
+            resource = Resource.query.filter_by(name=name).first()
+            if not resource: # Only create if not existing from a previous failed test run for instance
+                resource = Resource(name=name, capacity=1, status='published')
+                db.session.add(resource)
+            else: # Clear pins if resource is being reused from a dirty state
+                ResourcePIN.query.filter_by(resource_id=resource.id).delete()
+                resource.current_pin = None
+
+            resources.append(resource)
+        db.session.commit()
+        return resources
+
+    def _set_booking_pin_settings(self, auto_enabled=True, length=6, manual_allowed=True):
+        """Configures BookingSettings for PINs."""
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings()
+            db.session.add(settings)
+
+        settings.pin_auto_generation_enabled = auto_enabled
+        settings.pin_length = length
+        settings.pin_allow_manual_override = manual_allowed
+        db.session.commit()
+        return settings
+
+    def _add_pin_directly_to_db(self, resource_id, pin_value, is_active=True, notes=None):
+        pin = ResourcePIN(resource_id=resource_id, pin_value=pin_value, is_active=is_active, notes=notes, created_at=datetime_original.utcnow())
+        db.session.add(pin)
+        # db.session.commit() # Deliberately not committing here; commit in test setup after all pins for a resource
+        return pin
+
+    def _update_resource_current_pin_in_db(self, resource_obj):
+        """Helper to mimic the backend's _update_resource_current_pin for verification."""
+        if not resource_obj: return
+        latest_active_pin = ResourcePIN.query.filter_by(
+            resource_id=resource_obj.id, is_active=True
+        ).order_by(ResourcePIN.created_at.desc()).first() # Match backend logic of picking latest
+        resource_obj.current_pin = latest_active_pin.pin_value if latest_active_pin else None
+        # db.session.commit() # Commit handled by caller if multiple resources updated
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self._create_admin_user_and_login()
+        # Create resources within setUp to ensure they have IDs for tests
+        self.resource1 = Resource(name="BPR_Res1", status='published'); db.session.add(self.resource1)
+        self.resource2 = Resource(name="BPR_Res2", status='published'); db.session.add(self.resource2)
+        self.resource3 = Resource(name="BPR_Res3", status='published'); db.session.add(self.resource3)
+        db.session.commit()
+        self.resources = [self.resource1, self.resource2, self.resource3]
+        self.settings = self._set_booking_pin_settings()
+
+    def test_bulk_action_auto_generate_new_pin(self):
+        pin_len = 7
+        self._set_booking_pin_settings(auto_enabled=True, length=pin_len)
+        resource_ids_to_action = [r.id for r in self.resources[:2]] # Action on first two
+
+        response = self.client.post(url_for('api_resources.bulk_resource_pin_action'),
+                                     json={'resource_ids': resource_ids_to_action, 'action': 'auto_generate_new_pin'})
+
+        self.assertEqual(response.status_code, 200, f"Bulk auto-generate failed: {response.get_json()}")
+        response_data = response.get_json()
+        self.assertEqual(response_data.get('processed_count', 0), len(resource_ids_to_action))
+        self.assertEqual(response_data.get('error_count', 0), 0)
+
+        for res_id in resource_ids_to_action:
+            resource = Resource.query.get(res_id)
+            db.session.refresh(resource) # Ensure we have the latest from DB
+            self.assertIsNotNone(resource.current_pin, f"Resource {res_id} current_pin should be set.")
+            self.assertEqual(len(resource.current_pin), pin_len, f"PIN length mismatch for resource {res_id}")
+            pin_obj = ResourcePIN.query.filter_by(resource_id=res_id, pin_value=resource.current_pin).first()
+            self.assertIsNotNone(pin_obj, f"Current PIN {resource.current_pin} not found in DB for resource {res_id}")
+            self.assertTrue(pin_obj.is_active)
+            self.assertIn("Auto-generated via bulk action", pin_obj.notes if pin_obj.notes else "")
+
+        audit_log = AuditLog.query.filter_by(action="BULK_PIN_ACTION").order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log)
+        self.assertIn("'action': 'auto_generate_new_pin'", audit_log.details)
+        self.assertIn(f"'processed_count': {len(resource_ids_to_action)}", audit_log.details)
+
+    def test_bulk_action_deactivate_all_pins(self):
+        resource_ids_to_action = []
+        for i in range(2): # Setup for first two resources
+            res = self.resources[i]
+            self._add_pin_directly_to_db(res.id, f"PIN{res.id}A", is_active=True)
+            self._add_pin_directly_to_db(res.id, f"PIN{res.id}B", is_active=True)
+            resource_ids_to_action.append(res.id)
+        db.session.commit() # Commit all setup pins
+        for res_id in resource_ids_to_action: # Set current_pin after all pins are created_at
+            self._update_resource_current_pin_in_db(Resource.query.get(res_id))
+
+
+        response = self.client.post(url_for('api_resources.bulk_resource_pin_action'),
+                                     json={'resource_ids': resource_ids_to_action, 'action': 'deactivate_all_pins'})
+        self.assertEqual(response.status_code, 200, f"Bulk deactivate failed: {response.get_json()}")
+
+        for res_id in resource_ids_to_action:
+            resource = Resource.query.get(res_id)
+            db.session.refresh(resource)
+            self.assertIsNone(resource.current_pin, f"Resource {res_id} current_pin should be None after deactivation.")
+            active_pins = ResourcePIN.query.filter_by(resource_id=res_id, is_active=True).count()
+            self.assertEqual(active_pins, 0, f"Resource {res_id} should have no active PINs.")
+
+        audit_log = AuditLog.query.filter_by(action="BULK_PIN_ACTION").order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log)
+        self.assertIn("'action': 'deactivate_all_pins'", audit_log.details)
+
+    def test_bulk_action_activate_all_pins(self):
+        resource_ids_to_action = []
+        expected_current_pins = {}
+        for i in range(2): # Setup for first two resources
+            res = self.resources[i]
+            # Add pins, ensuring created_at is distinct for deterministic current_pin selection
+            p1 = self._add_pin_directly_to_db(res.id, f"PIN{res.id}X", is_active=False, notes="Older")
+            db.session.flush() # Flush to get p1 committed for created_at before p2
+            import time as time_sleep; time_sleep.sleep(0.01) # Ensure time difference for created_at
+            p2 = self._add_pin_directly_to_db(res.id, f"PIN{res.id}Y", is_active=False, notes="Newer")
+            expected_current_pins[res.id] = p2.pin_value # p2 should be most recent
+            resource_ids_to_action.append(res.id)
+        db.session.commit()
+
+        response = self.client.post(url_for('api_resources.bulk_resource_pin_action'),
+                                     json={'resource_ids': resource_ids_to_action, 'action': 'activate_all_pins'})
+        self.assertEqual(response.status_code, 200, f"Bulk activate failed: {response.get_json()}")
+
+        for res_id in resource_ids_to_action:
+            resource = Resource.query.get(res_id)
+            db.session.refresh(resource)
+            self.assertIsNotNone(resource.current_pin, f"Resource {res_id} current_pin should be set.")
+            self.assertEqual(resource.current_pin, expected_current_pins[res_id], f"Resource {res_id} current_pin mismatch.")
+            inactive_pins = ResourcePIN.query.filter_by(resource_id=res_id, is_active=False).count()
+            self.assertEqual(inactive_pins, 0, f"Resource {res_id} should have no inactive PINs.")
+
+        audit_log = AuditLog.query.filter_by(action="BULK_PIN_ACTION").order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log)
+        self.assertIn("'action': 'activate_all_pins'", audit_log.details)
+
+    def test_bulk_action_invalid_action_name(self):
+        response = self.client.post(url_for('api_resources.bulk_resource_pin_action'),
+                                     json={'resource_ids': [self.resources[0].id], 'action': 'non_existent_action'})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid action.", response.get_json().get('error', ''))
+
+    def test_bulk_action_empty_resource_ids(self):
+        response = self.client.post(url_for('api_resources.bulk_resource_pin_action'),
+                                     json={'resource_ids': [], 'action': 'auto_generate_new_pin'})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Missing or invalid \"resource_ids\"", response.get_json().get('error', ''))
+
+    def test_bulk_action_with_some_non_existent_resource_ids(self):
+        self._set_booking_pin_settings(auto_enabled=True, length=5)
+        valid_res_id = self.resources[0].id
+        non_existent_id = 99999 # Assuming this ID does not exist
+        resource_ids_to_action = [valid_res_id, non_existent_id]
+
+        response = self.client.post(url_for('api_resources.bulk_resource_pin_action'),
+                                     json={'resource_ids': resource_ids_to_action, 'action': 'auto_generate_new_pin'})
+
+        # Backend filters for existing resources, so non_existent_id is silently ignored by the processing loop.
+        # The response reflects operations on found resources.
+        self.assertEqual(response.status_code, 200, f"Response: {response.get_json()}")
+        response_data = response.get_json()
+
+        self.assertIn("Processed: 1. Errors/Skipped: 0", response_data.get('message', ''))
+
+        details = response_data.get('details', [])
+        self.assertEqual(len(details), 1)
+        self.assertEqual(details[0]['resource_id'], valid_res_id)
+        self.assertEqual(details[0]['status'], 'success')
+
+        resource_valid = Resource.query.get(valid_res_id)
+        db.session.refresh(resource_valid)
+        self.assertIsNotNone(resource_valid.current_pin)
+        self.assertEqual(len(resource_valid.current_pin), 5)
+
+
 # --- Test Class for FloorMap Role Functionality ---
 class TestFloorMapRoles(AppTests):
     def setUp(self):
