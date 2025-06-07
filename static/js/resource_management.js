@@ -709,6 +709,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const qrCodeModal = document.getElementById('qr-code-modal');
                 const qrCodeDisplay = document.getElementById('qr-code-display');
                 const qrCodeUrlText = document.getElementById('qr-code-url-text');
+                console.log('[DEBUG QR MODAL ELEMENTS] qrCodeModal:', qrCodeModal, 'qrCodeDisplay:', qrCodeDisplay, 'qrCodeUrlText:', qrCodeUrlText);
 
                 if (qrCodeModal && qrCodeDisplay && qrCodeUrlText) {
                     qrCodeDisplay.innerHTML = ''; // Clear previous QR code
