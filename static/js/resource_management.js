@@ -805,6 +805,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.error('Failed to copy URL: ', err);
                 }
             } else if (target.classList.contains('show-qr-code-btn')) {
+                console.log('!!! QR ICON CLICK HANDLER ENTERED !!!'); // <-- NEW HIGH-VISIBILITY LOG
                 const pinValue = target.dataset.pinValue;
                 const resourceId = target.dataset.resourceId;
                 const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`; // Correct URL
