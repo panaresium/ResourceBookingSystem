@@ -1167,8 +1167,39 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
     if user_configs_backup_success:
         if user_configs_data:
             remote_user_configs_path = uc_path_or_msg
-    elif user_configs_data:
+    elif user_configs_data: # If data was present but backup failed
         overall_success = False
+
+    # Scheduler Settings Backup
+    scheduler_settings_data = None
+    scheduler_settings_file_path = os.path.join(DATA_DIR, 'scheduler_settings.json')
+    remote_scheduler_settings_path = None # Initialize for manifest
+    if os.path.exists(scheduler_settings_file_path):
+        try:
+            with open(scheduler_settings_file_path, 'r', encoding='utf-8') as f:
+                scheduler_settings_data = json.load(f)
+            logger.info(f"Successfully loaded scheduler_settings.json for backup.")
+            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Scheduler settings loaded for backup.', level='INFO')
+
+            scheduler_settings_backup_success, ss_path_or_msg = backup_json_config_component(
+                "Scheduler Settings", timestamp_str, scheduler_settings_data, config_share_client,
+                CONFIG_BACKUPS_DIR, "scheduler_settings_", socketio_instance, task_id
+            )
+            if scheduler_settings_backup_success:
+                if scheduler_settings_data: # Should always be true if loaded
+                    remote_scheduler_settings_path = ss_path_or_msg
+            else: # Backup component itself failed
+                overall_success = False
+                logger.error(f"Failed to backup scheduler_settings.json. Error: {ss_path_or_msg}")
+                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Scheduler settings backup failed.', detail=ss_path_or_msg, level='ERROR')
+        except (FileNotFoundError, json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Could not read scheduler_settings.json for backup: {e}. Skipping this component.", exc_info=True)
+            _emit_progress(socketio_instance, task_id, 'backup_progress', 'Scheduler settings file not found or corrupt, skipping.', detail=str(e), level='WARNING')
+            scheduler_settings_data = None # Ensure it's None if loading failed
+    else:
+        logger.info("scheduler_settings.json not found. Skipping its backup.")
+        _emit_progress(socketio_instance, task_id, 'backup_progress', 'scheduler_settings.json not found, skipping.', level='INFO')
+
 
     # Media Backup
     media_share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media')
@@ -1327,6 +1358,22 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             except Exception as e:
                 logger.error(f"Failed to hash user_configs for manifest: {e}")
                 _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing user_configs for manifest.', detail=str(e), level='ERROR')
+
+        # Scheduler Settings entry in manifest
+        if scheduler_settings_data and remote_scheduler_settings_path: # Check if data was loaded and backup path is valid
+            try:
+                ss_bytes_for_hash = json.dumps(scheduler_settings_data, indent=2).encode('utf-8')
+                ss_hash = hashlib.sha256(ss_bytes_for_hash).hexdigest()
+                manifest_data['files'].append({
+                    'path': remote_scheduler_settings_path,
+                    'type': 'scheduler_settings',
+                    'sha256': ss_hash,
+                    'share': config_share_name
+                })
+            except Exception as e:
+                logger.error(f"Failed to hash scheduler_settings for manifest: {e}")
+                _emit_progress(socketio_instance, task_id, 'backup_progress', 'Error hashing scheduler_settings for manifest.', detail=str(e), level='ERROR')
+
 
         # Media Directories entries in manifest
         # For media, we record the directory path and the expected number of files.
@@ -2072,6 +2119,7 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
     final_downloaded_map_config_path = None
     final_downloaded_resource_configs_path = None
     final_downloaded_user_configs_path = None
+    final_downloaded_scheduler_settings_path = None # Added
 
     logger.info(f"{dry_run_prefix}Starting full restore for timestamp: {timestamp_str}")
     _emit_progress(socketio_instance, task_id, 'restore_progress', f"{dry_run_prefix}Starting full restore processing...", detail=f'Timestamp: {timestamp_str}', level='INFO')
@@ -2139,6 +2187,16 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
             if not uc_success: logger.warning(f"{dry_run_prefix}User configs download component reported issues: {uc_message}")
         # No else here, as config_share_client existence is checked above for map_config already.
 
+        # --- Scheduler Settings Download Component ---
+        if _client_exists(config_share_client): # Check if config share itself exists
+            scheduler_success, scheduler_message, scheduler_actions, scheduler_output_path = download_scheduler_settings_component(
+                timestamp_str, config_share_client, dry_run, socketio_instance, task_id
+            )
+            if dry_run: overall_actions_list.extend(scheduler_actions)
+            final_downloaded_scheduler_settings_path = scheduler_output_path
+            if not scheduler_success: logger.warning(f"{dry_run_prefix}Scheduler settings download component reported issues: {scheduler_message}")
+        # No else for missing config_share_client, handled by map_config block.
+
         # --- Media Restore Components ---
         media_share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media')
         media_share_client = service_client.get_share_client(media_share_name)
@@ -2167,14 +2225,14 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
 
         logger.info(f"{dry_run_prefix}Full restore process completed for timestamp: {timestamp_str}")
         _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Full restore operations finished.', level='INFO')
-        return final_restored_db_path, final_downloaded_map_config_path, final_downloaded_resource_configs_path, final_downloaded_user_configs_path, overall_actions_list
+        return final_restored_db_path, final_downloaded_map_config_path, final_downloaded_resource_configs_path, final_downloaded_user_configs_path, final_downloaded_scheduler_settings_path, overall_actions_list
 
     except Exception as e:
         err_msg_final = f"{dry_run_prefix}Critical error during full restore orchestration for timestamp {timestamp_str}: {e}"
         logger.error(err_msg_final, exc_info=True)
         _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg_final, detail=str(e), level='ERROR')
         if dry_run: overall_actions_list.append(err_msg_final)
-        return None, None, None, None, overall_actions_list
+        return None, None, None, None, None, overall_actions_list # Adjusted return
 
 
 def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
@@ -2738,3 +2796,20 @@ def restore_incremental_bookings(app, socketio_instance=None, task_id=None) -> d
 
 
     return summary
+# The new function download_scheduler_settings_component should be placed before restore_full_backup
+# or at least before if __name__ == '__main__' if it exists.
+# For simplicity, appending here. If __main__ block is present, it should be manually moved before it.
+# Better: find a specific line or function to insert before/after.
+# Let's find the line `def list_available_backups():` and insert before it.
+# This is safer than appending blindly.
+# The previous read_files output confirms this function exists.
+
+# New function definition will be inserted before `def list_available_backups():`
+# This is managed by the calling logic (me, the LLM).
+
+# The content that was in `existing_content` is now the string above.
+# I will now define the new function string.
+# Then I will search for `def list_available_backups():` and insert the new function before it.
+# This is now done by the next tool call using replace_with_git_merge_diff.
+
+[end of azure_backup.py]
