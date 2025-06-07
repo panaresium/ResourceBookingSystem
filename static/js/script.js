@@ -473,7 +473,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const bookingForm = document.getElementById('booking-form');
     const bookingResultsDiv = document.getElementById('booking-results');
-    const loginForm = document.getElementById('login-form');
+    // loginForm will be fetched and checked before use
     const loginMessageDiv = document.getElementById('login-message');
     const manualBackupBtn = document.getElementById('manual-backup-btn');
 
@@ -677,7 +677,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // const loginForm = document.getElementById('login-form'); // REMOVE DUPLICATE
     // const loginMessageDiv = document.getElementById('login-message'); // REMOVE DUPLICATE
 
-    if (loginForm) { // This loginForm refers to the one declared earlier in the DOMContentLoaded scope
+    const loginForm = document.getElementById('login-form');
+    if (loginForm) {
         loginForm.addEventListener('submit', async function(event) {
             console.log('Login form submit event triggered.'); // LOG 1
             event.preventDefault();

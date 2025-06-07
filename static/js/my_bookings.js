@@ -1,7 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const bookingsListDiv = document.getElementById('my-bookings-list');
+    // const bookingsListDiv = document.getElementById('my-bookings-list'); // This was correctly commented out/removed before.
+    // upcomingBookingsContainer and pastBookingsContainer will be fetched inside fetchAndDisplayBookings.
     const bookingItemTemplate = document.getElementById('booking-item-template');
-    const statusDiv = document.getElementById('my-bookings-status');
+    const statusDiv = document.getElementById('my-bookings-status'); // Keep statusDiv global to DOMContentLoaded for now.
 
     const updateModalElement = document.getElementById('update-booking-modal');
     let updateModal;
@@ -165,10 +166,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function fetchAndDisplayBookings() {
-        showLoading(statusDiv, 'Loading your bookings...');
-        // Clear previous content from both containers
-        if (upcomingBookingsContainer) upcomingBookingsContainer.innerHTML = '';
-        if (pastBookingsContainer) pastBookingsContainer.innerHTML = '';
+        const upcomingBookingsContainer = document.getElementById('upcoming-bookings-container');
+        const pastBookingsContainer = document.getElementById('past-bookings-container');
+        const myBookingsStatusDiv = document.getElementById('my-bookings-status'); // Use a local var, could shadow global statusDiv or rename global one
+
+        if (!upcomingBookingsContainer || !pastBookingsContainer) {
+            console.error('My Bookings page structure is missing essential container elements (upcoming-bookings-container or past-bookings-container). Cannot display bookings.');
+            if (myBookingsStatusDiv) {
+                myBookingsStatusDiv.className = 'alert alert-danger';
+                myBookingsStatusDiv.textContent = 'Error: Could not load booking display components. Required page elements are missing.';
+                myBookingsStatusDiv.style.display = 'block';
+            }
+            return;
+        }
+
+        // Set loading messages for individual containers
+        upcomingBookingsContainer.innerHTML = '<p class="loading-message">Loading upcoming bookings...</p>';
+        pastBookingsContainer.innerHTML = '<p class="loading-message">Loading past bookings...</p>';
+        if (myBookingsStatusDiv) {
+            myBookingsStatusDiv.style.display = 'none'; // Hide general status as sections have their own
+        }
+        // Or, if a global loading message is still desired initially:
+        // if (myBookingsStatusDiv) showLoading(myBookingsStatusDiv, 'Loading your bookings...');
+
 
         try {
             const apiResponse = await apiCall('/api/bookings/my_bookings');
@@ -180,41 +200,47 @@ document.addEventListener('DOMContentLoaded', () => {
             // For now, createBookingCardElement only takes checkInOutEnabled. If it needs more, this is where they'd be passed.
 
             if ((!upcomingBookings || upcomingBookings.length === 0) && (!pastBookings || pastBookings.length === 0)) {
-                showStatusMessage(statusDiv, 'You have no bookings.', 'info');
-                if (upcomingBookingsContainer) upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings.</p>';
-                if (pastBookingsContainer) pastBookingsContainer.innerHTML = '<p>No past booking history.</p>';
+                if (myBookingsStatusDiv) showStatusMessage(myBookingsStatusDiv, 'You have no bookings.', 'info');
+                upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings.</p>';
+                pastBookingsContainer.innerHTML = '<p>No past booking history.</p>';
                 return;
             }
+
+            // Clear loading messages before appending actual cards or "no bookings" message
+            upcomingBookingsContainer.innerHTML = '';
+            pastBookingsContainer.innerHTML = '';
 
             if (upcomingBookings && upcomingBookings.length > 0) {
                 upcomingBookings.forEach(booking => {
                     const bookingCard = createBookingCardElement(booking, checkInOutEnabled);
-                    if (upcomingBookingsContainer) upcomingBookingsContainer.appendChild(bookingCard);
+                    upcomingBookingsContainer.appendChild(bookingCard);
                 });
             } else {
-                if (upcomingBookingsContainer) upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings.</p>';
+                upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings.</p>';
             }
 
             if (pastBookings && pastBookings.length > 0) {
                 pastBookings.forEach(booking => {
                     const bookingCard = createBookingCardElement(booking, checkInOutEnabled);
-                    if (pastBookingsContainer) pastBookingsContainer.appendChild(bookingCard);
+                    pastBookingsContainer.appendChild(bookingCard);
                 });
             } else {
-                if (pastBookingsContainer) pastBookingsContainer.innerHTML = '<p>No past booking history.</p>';
+                pastBookingsContainer.innerHTML = '<p>No past booking history.</p>';
             }
 
-            hideStatusMessage(statusDiv); // Hide overall loading/status if successful
+            if (myBookingsStatusDiv) hideStatusMessage(myBookingsStatusDiv); // Hide overall loading/status if successful
         } catch (error) {
             console.error('Error fetching bookings:', error);
-            if (error.message && error.message.includes('401')) {
-                showError(statusDiv, 'Please log in to view your bookings.');
-            } else {
-                showError(statusDiv, error.message || 'Failed to load bookings. Please try again.');
+            if (myBookingsStatusDiv) {
+                if (error.message && error.message.includes('401')) {
+                    showError(myBookingsStatusDiv, 'Please log in to view your bookings.');
+                } else {
+                    showError(myBookingsStatusDiv, error.message || 'Failed to load bookings. Please try again.');
+                }
             }
-            // Clear specific containers on error too, or show specific error messages within them
-            if (upcomingBookingsContainer) upcomingBookingsContainer.innerHTML = '<p>Could not load upcoming bookings.</p>';
-            if (pastBookingsContainer) pastBookingsContainer.innerHTML = '<p>Could not load past bookings.</p>';
+            // Set error messages in specific containers
+            upcomingBookingsContainer.innerHTML = '<p>Could not load upcoming bookings.</p>';
+            pastBookingsContainer.innerHTML = '<p>Could not load past bookings.</p>';
         }
     }
 
