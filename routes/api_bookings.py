@@ -154,7 +154,9 @@ def create_booking():
                 Booking.user_name == user_name_for_record,
                 Booking.start_time < first_occ_end,
                 Booking.end_time > first_occ_start,
-                Booking.status.notin_(['cancelled', 'rejected', 'completed', 'cancelled_by_admin', 'cancelled_admin_acknowledged'])
+                Booking.status != 'cancelled_by_admin',
+                Booking.status != 'cancelled_admin_acknowledged',
+                Booking.status.notin_(['cancelled', 'rejected', 'completed'])
             ).first()
 
             if first_slot_user_conflict:
@@ -167,7 +169,9 @@ def create_booking():
             Booking.resource_id == resource_id,
             Booking.start_time < occ_end,
             Booking.end_time > occ_start,
-            Booking.status.notin_(['cancelled', 'rejected', 'completed', 'cancelled_by_admin', 'cancelled_admin_acknowledged'])
+            Booking.status != 'cancelled_by_admin',
+            Booking.status != 'cancelled_admin_acknowledged',
+            Booking.status.notin_(['cancelled', 'rejected', 'completed'])
         ).first()
         if conflicting:
             current_app.logger.info(f"Booking conflict for resource {resource_id} on slot {occ_start}-{occ_end} with existing booking {conflicting.id}.")
@@ -187,7 +191,9 @@ def create_booking():
                 Booking.resource_id != resource_id, # Check on other resources
                 Booking.start_time < occ_end,
                 Booking.end_time > occ_start,
-                Booking.status.notin_(['cancelled', 'rejected', 'completed', 'cancelled_by_admin', 'cancelled_admin_acknowledged'])
+                Booking.status != 'cancelled_by_admin',
+                Booking.status != 'cancelled_admin_acknowledged',
+                Booking.status.notin_(['cancelled', 'rejected', 'completed'])
             ).first()
 
             if user_conflicting_recurring:

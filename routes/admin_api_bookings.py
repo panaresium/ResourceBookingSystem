@@ -143,17 +143,22 @@ def admin_cancel_booking(booking_id):
             return jsonify({'error': f"Booking is already in a state ('{booking.status}') that cannot be cancelled by admin."}), 400
 
         data = request.get_json() if request.data else {}
-        reason = data.get('reason', 'Cancelled by admin.')
+        provided_reason = data.get('reason')
 
         # Update booking status and admin message
         booking.status = 'cancelled_by_admin'
-        booking.admin_deleted_message = reason
+        if provided_reason and provided_reason.strip():
+            booking.admin_deleted_message = provided_reason.strip()
+        else:
+            booking.admin_deleted_message = None # Ensure it's None if no reason or empty reason is given
+
         db.session.commit()
 
         # Audit log
+        audit_log_reason = booking.admin_deleted_message if booking.admin_deleted_message else 'N/A'
         audit_details = (
             f"Admin '{current_user.username}' CANCELLED booking ID {booking.id}. "
-            f"Reason: '{reason}'. "
+            f"Reason: '{audit_log_reason}'. "
             f"Booked by: '{booking.user_name}'. "
             f"Resource: '{booking.resource_booked.name if booking.resource_booked else 'Unknown Resource'}' (ID: {booking.resource_id}). "
             f"Title: '{booking.title or 'N/A'}'."
@@ -166,32 +171,33 @@ def admin_cancel_booking(booking_id):
             'booking_id': booking.id,
             'resource_id': booking.resource_id,
             'new_status': booking.status,
-            'admin_message': reason,
-            'user_name': booking.user_name # Useful for UI updates on client side
+            'admin_message': booking.admin_deleted_message, # This will be None if no reason was provided
+            'user_name': booking.user_name
         })
 
         # Notify user
         user = User.query.filter_by(username=booking.user_name).first()
         if user and user.email:
             try:
+                email_reason_text = f"Reason: {booking.admin_deleted_message}" if booking.admin_deleted_message else "No specific reason was provided."
                 send_email(
                     user.email,
                     'Booking Cancelled by Admin',
                     f"Your booking for '{booking.resource_booked.name if booking.resource_booked else 'resource'}' "
                     f"(ID: {booking.id}, Title: {booking.title or 'N/A'}) "
                     f"from {booking.start_time.strftime('%Y-%m-%d %H:%M')} to {booking.end_time.strftime('%Y-%m-%d %H:%M')} "
-                    f"has been cancelled by an administrator. Reason: {reason}"
+                    f"has been cancelled by an administrator. {email_reason_text}"
                 )
                 current_app.logger.info(f"Cancellation email sent to {user.email} for booking ID {booking.id}.")
             except Exception as e_mail:
                 current_app.logger.error(f"Failed to send cancellation email for booking {booking.id} to {user.email}: {e_mail}")
 
 
-        current_app.logger.info(f"Admin user {current_user.username} successfully CANCELLED booking ID: {booking.id}.")
+        current_app.logger.info(f"Admin user {current_user.username} successfully CANCELLED booking ID: {booking.id}. Reason: {audit_log_reason}")
         return jsonify({
             'message': 'Booking cancelled successfully.',
             'new_status': booking.status,
-            'admin_message': reason
+            'admin_message': booking.admin_deleted_message # This will be None if no reason was provided
         }), 200
 
     except Exception as e:
