@@ -1,7 +1,8 @@
-from flask import Blueprint, jsonify, request, current_app, abort
+from flask import Blueprint, jsonify, request, current_app, abort, render_template, url_for
 from flask_login import login_required, current_user
 import json # Added json import
 from sqlalchemy import func
+from flask_babel import _ # For translations
 import secrets
 from datetime import datetime, timedelta, timezone, time
 
@@ -1026,21 +1027,26 @@ def resource_pin_check_in(resource_id):
     logger = current_app.logger
     pin_value = request.args.get('pin')
 
-    resource = Resource.query.get_or_404(resource_id)
+    resource = Resource.query.get(resource_id) # Changed to get for custom 404
+    if not resource:
+        logger.warning(f"PIN check-in attempt for non-existent resource ID: {resource_id}")
+        return render_template('check_in_status_public.html', message=_('Resource not found.'), status='error'), 404
 
     if not pin_value:
         logger.warning(f"PIN check-in attempt for resource {resource_id} without PIN.")
-        # For an actual user-facing scenario, redirecting to an error page might be better.
-        # Example: return render_template('pin_checkin_status.html', error='PIN is required.'), 400
-        return jsonify({'error': 'PIN is required.'}), 400
+        return render_template('check_in_status_public.html', message=_('PIN is required for check-in.'), status='error'), 400
 
-    # Validate PIN - Ensure ResourcePIN model is imported
-    # ResourcePIN is now imported at the top of the file.
+    # Validate PIN
     verified_pin = ResourcePIN.query.filter_by(resource_id=resource_id, pin_value=pin_value, is_active=True).first()
     if not verified_pin:
         logger.warning(f"Invalid or inactive PIN '{pin_value}' used for resource {resource_id}.")
-        # Example: return render_template('pin_checkin_status.html', error='Invalid or inactive PIN.'), 403
-        return jsonify({'error': 'Invalid or inactive PIN.'}), 403
+        # Check if the PIN exists but is inactive
+        inactive_pin_exists = ResourcePIN.query.filter_by(resource_id=resource_id, pin_value=pin_value, is_active=False).first()
+        if inactive_pin_exists:
+            msg = _('The PIN provided is currently inactive. Please use an active PIN.')
+        else:
+            msg = _('The PIN provided is invalid for this resource.')
+        return render_template('check_in_status_public.html', message=msg, status='error'), 403
 
     # Fetch BookingSettings
     booking_settings = BookingSettings.query.first()
@@ -1055,9 +1061,13 @@ def resource_pin_check_in(resource_id):
         check_in_minutes_after = booking_settings.check_in_minutes_after
 
     if requires_login and not current_user.is_authenticated:
-        logger.info(f"PIN check-in for resource {resource_id} requires login. Redirecting.")
-        # Example: return redirect(url_for('auth.serve_login_page', next=request.url)) # Ensure 'auth.serve_login_page' is correct
-        return jsonify({'error': 'Login required for PIN check-in.', 'login_url': url_for('auth.serve_login_page', next=request.url)}), 401 # Adjusted to auth.serve_login_page
+        logger.info(f"PIN check-in for resource {resource_id} requires login.")
+        login_url = url_for('auth.serve_login_page', next=request.url) # Assuming 'auth.serve_login_page' is your login route
+        return render_template('check_in_status_public.html',
+                               message=_('Login is required to perform this check-in. Please log in and try again.'),
+                               status='error',
+                               show_login_link=True,
+                               login_url=login_url), 401
 
     # Find the booking to check in
     target_booking = None
@@ -1089,34 +1099,47 @@ def resource_pin_check_in(resource_id):
     if not target_booking:
         user_identifier_for_log = current_user.username if current_user.is_authenticated else "anonymous/public"
         logger.warning(f"PIN check-in for resource {resource_id} (PIN: {pin_value}): No active booking found within check-in window for user '{user_identifier_for_log}'.")
-        # Example: return render_template('pin_checkin_status.html', error='No active booking found within the check-in window.'), 404
-        return jsonify({'error': 'No active booking found for this resource within the check-in window.'}), 404
+        return render_template('check_in_status_public.html', message=_('No active booking found for this resource within the check-in window for your session.'), status='error'), 404
+
+    if target_booking.checked_in_at:
+        logger.info(f"PIN check-in attempt for already checked-in booking {target_booking.id} (Resource {resource_id}, PIN {pin_value}).")
+        booking_details = {
+            'title': target_booking.title,
+            'resource_name': resource.name,
+            'user_name': target_booking.user_name,
+            'checked_in_at_formatted': target_booking.checked_in_at.strftime('%Y-%m-%d %H:%M:%S UTC')
+        }
+        return render_template('check_in_status_public.html',
+                               message=_('This booking has already been checked in.'),
+                               status='success', # Or 'info'
+                               booking_details=booking_details), 200 # 200 as it's a valid state
 
     # Perform Check-in
     try:
         target_booking.checked_in_at = datetime.utcnow() # Stored as naive UTC
-        # Optional: Deactivate PIN if single-use (current model ResourcePIN.is_active)
-        # verified_pin.is_active = False # If PINs are single-use
+        # Optional: Deactivate PIN if single-use
+        # verified_pin.is_active = False
         db.session.commit()
 
         user_identifier_for_audit = current_user.username if current_user.is_authenticated else f"PIN_USER_({verified_pin.id})"
-        add_audit_log(action="RESOURCE_PIN_CHECK_IN",
-                      details=f"User '{user_identifier_for_audit}' checked into booking ID {target_booking.id} for resource '{resource.name}' using PIN.",
+        add_audit_log(action="CHECK_IN_VIA_RESOURCE_URL", # Changed action name for clarity vs direct user check-in
+                      details=f"User '{user_identifier_for_audit}' checked into booking ID {target_booking.id} for resource '{resource.name}' using PIN {verified_pin.pin_value}.",
                       user_id=current_user.id if current_user.is_authenticated else None)
 
         logger.info(f"Successfully checked in booking ID {target_booking.id} for resource {resource.id} using PIN {pin_value}.")
-        # Example: return render_template('pin_checkin_status.html', success=True, booking=target_booking, resource=resource)
-        return jsonify({
-            'success': True,
-            'message': 'Check-in successful!',
-            'booking_title': target_booking.title,
+
+        booking_details_success = {
+            'title': target_booking.title,
             'resource_name': resource.name,
-            'user_name': target_booking.user_name, # User who owns the booking
-            'checked_in_at': target_booking.checked_in_at.isoformat()
-        }), 200
+            'user_name': target_booking.user_name,
+            'checked_in_at_formatted': target_booking.checked_in_at.strftime('%Y-%m-%d %H:%M:%S UTC')
+        }
+        return render_template('check_in_status_public.html',
+                               message=_('Check-in successful!'),
+                               status='success',
+                               booking_details=booking_details_success), 200
 
     except Exception as e:
         db.session.rollback()
         logger.exception(f"Error during PIN check-in for booking {target_booking.id} (Resource {resource_id}, PIN {pin_value}):")
-        # Example: return render_template('pin_checkin_status.html', error=f'Server error: {str(e)}'), 500
-        return jsonify({'error': 'Failed to process PIN check-in due to a server error.'}), 500
+        return render_template('check_in_status_public.html', message=_('Failed to process PIN check-in due to a server error.'), status='error'), 500
