@@ -91,15 +91,21 @@ def load_scheduler_settings() -> dict:
         # The file's values take precedence for existing keys within each sub-schedule.
         final_settings = DEFAULT_SCHEDULER_SETTINGS.copy() # Start with a fresh copy of defaults
 
-        for schedule_key, default_schedule_values in DEFAULT_SCHEDULER_SETTINGS.items():
+        for schedule_key, default_item_value in DEFAULT_SCHEDULER_SETTINGS.items():
             if schedule_key in loaded_settings:
-                # If the schedule_key (e.g., "full_backup") exists in the loaded file,
-                # merge its contents with the defaults for that specific schedule.
-                # This ensures that new keys within a sub-schedule are added if missing from the file.
-                merged_schedule = default_schedule_values.copy()
-                merged_schedule.update(loaded_settings[schedule_key])
-                final_settings[schedule_key] = merged_schedule
-            # If schedule_key is not in loaded_settings, the default from final_settings remains.
+                if isinstance(default_item_value, dict) and isinstance(loaded_settings[schedule_key], dict):
+                    # Both default and loaded are dicts, so merge
+                    merged_schedule = default_item_value.copy()
+                    merged_schedule.update(loaded_settings[schedule_key])
+                    final_settings[schedule_key] = merged_schedule
+                else:
+                    # Default is not a dict OR loaded value is not a dict.
+                    # In this case, the loaded value (if it exists and is of a compatible type, or even if not, json.load would have produced it)
+                    # takes precedence directly, without merging.
+                    # This handles the boolean case for "auto_restore_booking_records_on_startup"
+                    # and also cases where a structure might change from dict to non-dict or vice-versa.
+                    final_settings[schedule_key] = loaded_settings[schedule_key]
+            # If schedule_key is not in loaded_settings, the value from final_settings (which is a copy of DEFAULT_SCHEDULER_SETTINGS) remains.
 
         # Ensure no extraneous top-level keys from the file are carried over
         # (though current logic effectively does this by starting with DEFAULT_SCHEDULER_SETTINGS)
