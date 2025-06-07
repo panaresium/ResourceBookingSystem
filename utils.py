@@ -13,11 +13,16 @@ import io
 from extensions import db, mail
 # Assuming models are defined in models.py
 from models import AuditLog, User, Resource, FloorMap, Role, Booking # Added Booking
+from sqlalchemy import func # Ensure func is imported
+from sqlalchemy.sql import func as sqlfunc # Added for explicit use
 
 # Global lists for logging (if these are the sole modifiers)
 email_log = []
 slack_log = []
 teams_log = []
+
+# This list should match the one used in routes/api_bookings.py create_booking
+active_booking_statuses_for_conflict = ['approved', 'pending', 'checked_in', 'confirmed']
 
 # Configuration constants that will be imported from config.py later
 # For now, define them here if they are used by functions being moved.
@@ -1115,7 +1120,7 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
             # For now, let's assume direct comparison works or adjust if needed
             Booking.start_time >= datetime.combine(target_date, time.min),
             Booking.start_time <= datetime.combine(target_date, time.max),
-            Booking.status.notin_(['cancelled', 'rejected'])
+            sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_booking_statuses_for_conflict)
         ).all()
     except Exception as e:
         logger_instance.error(f"Error fetching user's bookings for {user.username} on {target_date}: {e}", exc_info=True)
@@ -1161,7 +1166,7 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
                 Booking.resource_id == resource.id,
                 Booking.start_time < slot_end_dt,
                 Booking.end_time > slot_start_dt,
-                Booking.status.notin_(['cancelled', 'rejected'])
+                sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_booking_statuses_for_conflict)
             ).all()
 
             is_generally_booked_by_anyone = bool(general_bookings_on_slot)

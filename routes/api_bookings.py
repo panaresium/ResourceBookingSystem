@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request, current_app, abort, render_templa
 from flask_login import login_required, current_user
 import json # Added json import
 from sqlalchemy import func
+from sqlalchemy.sql import func as sqlfunc # Explicit import for sqlalchemy.sql.func
 from translations import _ # For translations
 import secrets
 from datetime import datetime, timedelta, timezone, time
@@ -28,6 +29,11 @@ def init_api_bookings_routes(app):
 @api_bookings_bp.route('/bookings', methods=['POST'])
 @login_required
 def create_booking():
+    # Define lists of active statuses (lowercase)
+    # These statuses are considered "active" for conflict checks or quota counting.
+    active_conflict_statuses = ['approved', 'pending', 'checked_in', 'confirmed']
+    active_quota_statuses = ['approved', 'pending', 'checked_in', 'confirmed']
+
     data = request.get_json()
 
     if not data:
@@ -140,7 +146,7 @@ def create_booking():
         user_booking_count = Booking.query.filter(
             Booking.user_name == current_user.username, # Assuming current_user.username is the correct field
             Booking.end_time > datetime.utcnow(),      # Booking has not ended yet
-            func.trim(func.lower(Booking.status)).notin_(['cancelled', 'rejected', 'cancelled_by_admin', 'cancelled_admin_acknowledged']) # Booking is active
+            sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_quota_statuses) # Booking is active
         ).count()
 
         if user_booking_count + len(occurrences) > max_bookings_per_user_effective:
@@ -154,7 +160,7 @@ def create_booking():
                 Booking.user_name == user_name_for_record,
                 Booking.start_time < first_occ_end,
                 Booking.end_time > first_occ_start,
-                func.trim(func.lower(Booking.status)).notin_(['cancelled', 'rejected', 'completed', 'cancelled_by_admin', 'cancelled_admin_acknowledged'])
+                sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_conflict_statuses)
             ).first()
 
             if first_slot_user_conflict:
@@ -167,7 +173,7 @@ def create_booking():
             Booking.resource_id == resource_id,
             Booking.start_time < occ_end,
             Booking.end_time > occ_start,
-            func.trim(func.lower(Booking.status)).notin_(['cancelled', 'rejected', 'completed', 'cancelled_by_admin', 'cancelled_admin_acknowledged'])
+            sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_conflict_statuses)
         ).first()
         if conflicting:
             current_app.logger.info(f"Booking conflict for resource {resource_id} on slot {occ_start}-{occ_end} with existing booking {conflicting.id}.")
@@ -187,7 +193,7 @@ def create_booking():
                 Booking.resource_id != resource_id, # Check on other resources
                 Booking.start_time < occ_end,
                 Booking.end_time > occ_start,
-                func.trim(func.lower(Booking.status)).notin_(['cancelled', 'rejected', 'completed', 'cancelled_by_admin', 'cancelled_admin_acknowledged'])
+                sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_conflict_statuses)
             ).first()
 
             if user_conflicting_recurring:
