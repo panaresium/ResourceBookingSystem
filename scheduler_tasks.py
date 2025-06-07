@@ -7,7 +7,7 @@ from extensions import db
 # Assuming models are defined in models.py
 from models import Booking, Resource, User # Added User
 # Assuming utility functions are in utils.py
-from utils import _load_schedule_from_json, _get_map_configuration_data, add_audit_log, send_email, send_teams_notification # Added send_email, send_teams_notification
+from utils import load_scheduler_settings, _get_map_configuration_data, add_audit_log, send_email, send_teams_notification # Added send_email, send_teams_notification
 
 # Conditional import for azure_backup
 try:
@@ -163,60 +163,78 @@ def run_scheduled_backup_job(app):
     """
     with app.app_context():
         logger = app.logger
-        logger.info("run_scheduled_backup_job: Checking backup schedule (from JSON)...")
+        logger.info("run_scheduled_backup_job: Checking backup schedule (from UI settings)...")
         try:
-            # _load_schedule_from_json is expected to use app.config internally
-            # This change is not part of this subtask, but noted.
-            schedule_data = _load_schedule_from_json()
+            settings = load_scheduler_settings()
+            full_backup_schedule = settings.get('full_backup', {}) # Default to empty dict if key missing
 
-            if not schedule_data.get('is_enabled'):
-                logger.info("run_scheduled_backup_job: Scheduled backups are disabled (JSON). Skipping.")
+            if not full_backup_schedule.get('is_enabled'):
+                logger.info("run_scheduled_backup_job: Full backups are disabled via UI settings. Skipping.")
                 return
 
             now_utc = datetime.now(timezone.utc)
             current_time_utc = now_utc.time()
-            scheduled_time_str = schedule_data.get('time_of_day', "02:00")
+            # Use default from new structure if key missing
+            scheduled_time_str = full_backup_schedule.get('time_of_day', "02:00")
             try:
                 scheduled_time_obj = datetime.strptime(scheduled_time_str, '%H:%M').time()
             except ValueError:
-                logger.error(f"run_scheduled_backup_job: Invalid time_of_day '{scheduled_time_str}' in JSON. Using 02:00.")
+                logger.error(f"run_scheduled_backup_job: Invalid time_of_day '{scheduled_time_str}' in UI settings. Using 02:00.")
                 scheduled_time_obj = time(2,0)
 
             backup_due = False
-            schedule_type = schedule_data.get('schedule_type', 'daily')
+            # Use default from new structure if key missing
+            schedule_type = full_backup_schedule.get('schedule_type', 'daily')
 
+            # Check if current time matches scheduled time (hour and minute)
+            # Note: APScheduler should ideally trigger the job at the correct time,
+            # so this check is a secondary confirmation.
             if current_time_utc.hour == scheduled_time_obj.hour and current_time_utc.minute == scheduled_time_obj.minute:
                 if schedule_type == 'daily':
                     backup_due = True
                 elif schedule_type == 'weekly':
-                    day_of_week_json = schedule_data.get('day_of_week')
-                    if day_of_week_json is not None and now_utc.weekday() == day_of_week_json:
+                    day_of_week_setting = full_backup_schedule.get('day_of_week') # This is an int (0-6)
+                    if day_of_week_setting is not None and now_utc.weekday() == day_of_week_setting:
                         backup_due = True
 
-            if backup_due:
-                logger.info(f"run_scheduled_backup_job: Backup is due (JSON config) at {scheduled_time_str}. Starting backup...")
-                timestamp_str = now_utc.strftime('%Y%m%d_%H%M%S')
-                map_config = _get_map_configuration_data()
+            if not backup_due:
+                # This part of the logic might be less relevant if APScheduler is configured precisely.
+                # However, it's kept for consistency with the original logic.
+                # A more robust check might involve seeing if the *last run time* for this job
+                # was more than 23 hours ago (for daily) or 6 days ago (for weekly at specific time).
+                # For now, stick to time comparison.
+                logger.debug(f"run_scheduled_backup_job: Backup not currently due based on time/day check. Current UTC: {current_time_utc.strftime('%H:%M')}, Scheduled UTC: {scheduled_time_str}, Type: {schedule_type}, Today's weekday: {now_utc.weekday()}")
+                # APScheduler should handle the precise triggering, so if this job runs, it's likely due.
+                # Forcing backup_due = True if the job is triggered by a precisely timed scheduler.
+                # However, to respect the 'time_of_day' and 'day_of_week' from UI, the check is maintained.
+                # If this job is run by a simple interval (e.g. every hour), then this time check is critical.
 
-                if not create_full_backup: # Check if azure_backup.create_full_backup was imported
+
+            if backup_due: # If the above logic determined it's time
+                logger.info(f"run_scheduled_backup_job: Backup is due (UI settings) at {scheduled_time_str} UTC. Starting backup...")
+                timestamp_str = now_utc.strftime('%Y%m%d_%H%M%S')
+                map_config = _get_map_configuration_data() # This uses app_context
+
+                if not create_full_backup:
                     logger.error("run_scheduled_backup_job: create_full_backup function not available/imported.")
                     return
 
-                # Assuming create_full_backup does not need socketio instance when run by scheduler
                 success = create_full_backup(timestamp_str, map_config_data=map_config, socketio_instance=None, task_id=None)
 
                 if success:
-                    logger.info(f"run_scheduled_backup_job: Scheduled backup (JSON) completed successfully. Timestamp: {timestamp_str}")
-                    add_audit_log(action="SCHEDULED_BACKUP_SUCCESS_JSON", details=f"Scheduled backup successful (JSON). Timestamp: {timestamp_str}", username="System")
+                    logger.info(f"run_scheduled_backup_job: Scheduled backup (UI settings) completed successfully. Timestamp: {timestamp_str}")
+                    add_audit_log(action="SCHEDULED_BACKUP_SUCCESS_UI", details=f"Scheduled backup successful (UI settings). Timestamp: {timestamp_str}", username="System")
                 else:
-                    logger.error(f"run_scheduled_backup_job: Scheduled backup (JSON) failed. Timestamp attempted: {timestamp_str}")
-                    add_audit_log(action="SCHEDULED_BACKUP_FAILED_JSON", details=f"Scheduled backup failed (JSON). Timestamp attempted: {timestamp_str}", username="System")
-            else:
-                logger.debug(f"run_scheduled_backup_job: Backup not currently due. Current: {current_time_utc.strftime('%H:%M')}, Scheduled: {scheduled_time_str}, Type: {schedule_type}")
+                    logger.error(f"run_scheduled_backup_job: Scheduled backup (UI settings) failed. Timestamp attempted: {timestamp_str}")
+                    add_audit_log(action="SCHEDULED_BACKUP_FAILED_UI", details=f"Scheduled backup failed (UI settings). Timestamp attempted: {timestamp_str}", username="System")
+            # else:
+                # logger.debug already covered above
+                # logger.debug(f"run_scheduled_backup_job: Backup not currently due. Current: {current_time_utc.strftime('%H:%M')}, Scheduled: {scheduled_time_str}, Type: {schedule_type}")
+
 
         except Exception as e:
-            logger.exception("run_scheduled_backup_job: Error during scheduled backup job execution (JSON config).")
-            add_audit_log(action="SCHEDULED_BACKUP_ERROR_JSON", details=f"Exception: {str(e)}", username="System")
+            logger.exception("run_scheduled_backup_job: Error during scheduled backup job execution (UI settings).")
+            add_audit_log(action="SCHEDULED_BACKUP_ERROR_UI", details=f"Exception: {str(e)}", username="System")
 
 
 def run_scheduled_booking_csv_backup(app):
@@ -225,49 +243,53 @@ def run_scheduled_booking_csv_backup(app):
     """
     with app.app_context():
         logger = app.logger
-        logger.info("Starting scheduled booking CSV backup based on configured settings...")
+        logger.info("run_scheduled_booking_csv_backup: Checking CSV backup schedule (from UI settings)...")
         try:
             if not backup_bookings_csv:
-                logger.error("Scheduled booking CSV backup: backup_bookings_csv function not available/imported. Cannot proceed.")
+                logger.error("run_scheduled_booking_csv_backup: backup_bookings_csv function not available/imported. Cannot proceed.")
                 return
 
-            settings = app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS', {})
-            # 'enabled' flag is checked by the scheduler job adder in app_factory,
-            # so if this job runs, it's assumed to be enabled.
-            # However, settings might be missing if config file was deleted after app start.
-            if not settings:
-                logger.warning("Scheduled booking CSV backup: Settings not found in app.config. Using fallback (all bookings).")
+            settings = load_scheduler_settings()
+            # Use default from new structure if key missing
+            csv_backup_schedule = settings.get('booking_csv_backup', {})
 
-            range_type = settings.get('range_type', 'all')
-            range_label = range_type # Used for filename and logging
+            if not csv_backup_schedule.get('is_enabled'):
+                logger.info("run_scheduled_booking_csv_backup: Booking CSV backups are disabled via UI settings. Skipping.")
+                return
+
+            # The job for CSV backup is expected to be run by APScheduler at the specified interval.
+            # So, if this function is called, it means it's time to run the backup.
+            # The 'interval_minutes' from csv_backup_schedule is used by APScheduler setup, not directly here.
+
+            # Use default from new structure if key missing
+            range_setting = csv_backup_schedule.get('range', 'all')
+            # range_label will be the same as range_setting for filename and logging
+            range_label = range_setting
 
             start_date_dt = None
             end_date_dt = None
 
-            # Consistent with manual backup date logic: end_date is start of next day (exclusive)
-            # and start_date is X days before that.
-            # All datetime objects should be timezone-aware (UTC) for consistency.
-            if range_type != 'all':
+            if range_setting != 'all':
                 utcnow = datetime.now(timezone.utc)
-                # Set end_date_dt to be the beginning of "tomorrow" UTC to include all of "today"
                 end_date_dt = datetime(utcnow.year, utcnow.month, utcnow.day, tzinfo=timezone.utc) + timedelta(days=1)
 
-                if range_type == "1day":
+                if range_setting == "1day":
                     start_date_dt = end_date_dt - timedelta(days=1)
-                elif range_type == "3days":
+                elif range_setting == "3days":
                     start_date_dt = end_date_dt - timedelta(days=3)
-                elif range_type == "7days":
+                elif range_setting == "7days":
                     start_date_dt = end_date_dt - timedelta(days=7)
+                # Add other range options if they become available in UI settings
                 else:
-                    logger.warning(f"Scheduled booking CSV backup: Unknown range_type '{range_type}'. Defaulting to 'all'.")
-                    range_label = 'all' # Fallback range_label
+                    logger.warning(f"run_scheduled_booking_csv_backup: Unknown range '{range_setting}' in UI settings. Defaulting to 'all'.")
+                    range_label = 'all' # Fallback range_label for filename consistency
 
             task_id_str = f"scheduled_booking_csv_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-            logger.info(f"Running scheduled booking CSV backup for range: {range_label}, Start: {start_date_dt}, End: {end_date_dt}. Task ID: {task_id_str}")
+            logger.info(f"run_scheduled_booking_csv_backup: Running scheduled booking CSV backup (UI settings) for range: {range_label}, Start: {start_date_dt}, End: {end_date_dt}. Task ID: {task_id_str}")
 
             success = backup_bookings_csv(
-                app=app,
-                socketio_instance=None, # Scheduler runs non-interactively
+                app=app, # app_context is already active
+                socketio_instance=None,
                 task_id=task_id_str,
                 start_date_dt=start_date_dt,
                 end_date_dt=end_date_dt,
@@ -275,11 +297,11 @@ def run_scheduled_booking_csv_backup(app):
             )
 
             if success:
-                logger.info(f"Scheduled booking CSV backup (range: {range_label}) completed successfully.")
-                add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_SUCCESS", details=f"Scheduled booking CSV backup (range: {range_label}) successful.", username="System")
+                logger.info(f"run_scheduled_booking_csv_backup: Scheduled booking CSV backup (UI settings, range: {range_label}) completed successfully.")
+                add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_SUCCESS_UI", details=f"Scheduled booking CSV backup (UI settings, range: {range_label}) successful.", username="System")
             else:
-                logger.error("Scheduled booking CSV backup failed.")
-                add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_FAILED", details="Scheduled booking CSV backup failed.", username="System")
+                logger.error(f"run_scheduled_booking_csv_backup: Scheduled booking CSV backup (UI settings, range: {range_label}) failed.")
+                add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_FAILED_UI", details=f"Scheduled booking CSV backup (UI settings, range: {range_label}) failed.", username="System")
         except Exception as e:
-            logger.exception("Error during scheduled booking CSV backup execution.")
-            add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_ERROR", details=f"Exception: {str(e)}", username="System")
+            logger.exception("run_scheduled_booking_csv_backup: Error during scheduled booking CSV backup execution (UI settings).")
+            add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_ERROR_UI", details=f"Exception: {str(e)}", username="System")
