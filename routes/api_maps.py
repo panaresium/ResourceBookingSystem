@@ -6,6 +6,7 @@ from werkzeug.utils import secure_filename
 from flask import Blueprint, jsonify, request, url_for, current_app
 from flask_login import login_required, current_user
 from sqlalchemy import func # For func.date in get_map_details
+from sqlalchemy.sql import func as sqlfunc # Added for explicit use of sqlfunc.trim/lower
 
 # Local imports
 from extensions import db
@@ -384,6 +385,8 @@ def import_map_configuration():
 
 @api_maps_bp.route('/map_details/<int:map_id>', methods=['GET'])
 def get_map_details(map_id):
+    active_booking_statuses_for_conflict_map_details = ['approved', 'pending', 'checked_in', 'confirmed']
+
     date_str = request.args.get('date')
     target_date_obj = None
     if date_str:
@@ -418,7 +421,8 @@ def get_map_details(map_id):
         for resource in mapped_resources_query:
             bookings_on_date = Booking.query.filter(
                 Booking.resource_id == resource.id,
-                func.date(Booking.start_time) == target_date_obj # func.date needs sqlalchemy import
+                func.date(Booking.start_time) == target_date_obj, # func.date needs sqlalchemy import
+                sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_booking_statuses_for_conflict_map_details)
             ).all()
             bookings_info = [{'title': b.title, 'user_name': b.user_name,
                               'start_time': b.start_time.strftime('%H:%M:%S'),
