@@ -346,6 +346,8 @@ def get_my_bookings():
 @api_bookings_bp.route('/bookings/my_bookings_for_date', methods=['GET'])
 @login_required
 def get_my_bookings_for_date():
+    active_booking_statuses_for_user_schedule = ['approved', 'pending', 'checked_in', 'confirmed']
+
     """
     Fetches bookings for the currently authenticated user for a specific date.
     Expects a 'date' query parameter in 'YYYY-MM-DD' format.
@@ -372,6 +374,7 @@ def get_my_bookings_for_date():
             ).join(Resource, Booking.resource_id == Resource.id)\
             .filter(Booking.user_name == current_user.username)\
             .filter(func.date(Booking.start_time) == target_date_obj)\
+            .filter(sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_booking_statuses_for_user_schedule))\
             .order_by(Booking.start_time.asc())\
             .all()
 

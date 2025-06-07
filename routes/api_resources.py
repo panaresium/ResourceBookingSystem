@@ -46,6 +46,8 @@ def get_resources():
 @api_resources_bp.route('/resources/<int:resource_id>/availability', methods=['GET'])
 def get_resource_availability(resource_id):
     logger = current_app.logger
+    active_booking_statuses = ['approved', 'pending', 'checked_in', 'confirmed'] # Define active statuses
+
     date_str = request.args.get('date')
     target_date_obj = None
     if date_str:
@@ -68,7 +70,8 @@ def get_resource_availability(resource_id):
 
         bookings_on_date = Booking.query.filter(
             Booking.resource_id == resource_id,
-            func.date(Booking.start_time) == target_date_obj
+            func.date(Booking.start_time) == target_date_obj,
+            func.trim(func.lower(Booking.status)).in_(active_booking_statuses)
         ).all()
         booked_slots = []
         for booking in bookings_on_date:
