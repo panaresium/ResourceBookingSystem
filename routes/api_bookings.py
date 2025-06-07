@@ -427,7 +427,12 @@ def get_my_bookings_for_date():
 def bookings_calendar():
     """Return bookings for the current user in FullCalendar format."""
     try:
-        user_bookings = Booking.query.filter_by(user_name=current_user.username).all()
+        # Define statuses considered valid for display on the calendar
+        valid_calendar_statuses = ['approved', 'checked_in', 'confirmed', 'pending']
+        user_bookings = Booking.query.filter(
+            Booking.user_name == current_user.username,
+            Booking.status.in_(valid_calendar_statuses)
+        ).all()
         events = []
         for booking in user_bookings:
             resource = Resource.query.get(booking.resource_id)
