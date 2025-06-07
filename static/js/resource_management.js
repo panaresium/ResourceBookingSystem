@@ -649,8 +649,8 @@ document.addEventListener('DOMContentLoaded', function() {
             actionsCell.innerHTML = `
                 <button class="button btn-pin-action btn-edit-pin" data-pin-id="${pin.id}" data-resource-id="${resourceId}" title="Edit PIN"><span aria-hidden="true">✏️</span></button>
                 <button class="button btn-pin-action btn-delete-pin danger" data-pin-id="${pin.id}" data-resource-id="${resourceId}" title="Delete PIN"><span aria-hidden="true">🗑️</span></button>
-                <button class="button button-small copy-pin-url-btn" data-pin-value="${pin.pin_value}" data-resource-id="${resourceId}" title="Copy Check-in URL" style="margin-left:5px;">Copy URL</button>
-                <button class="button button-small show-qr-code-btn" data-pin-value="${pin.pin_value}" data-resource-id="${resourceId}" title="Show QR Code" style="margin-left:5px;">Show QR</button>
+                <button class="button btn-pin-action copy-pin-url-btn" data-pin-value="${pin.pin_value}" data-resource-id="${resourceId}" title="Copy Check-in URL" style="margin-left:5px;"><span aria-hidden="true">🔗</span></button>
+                <button class="button btn-pin-action show-qr-code-btn" data-pin-value="${pin.pin_value}" data-resource-id="${resourceId}" title="Show PIN QR Code" style="margin-left:5px;"><span aria-hidden="true">📱</span></button>
             `;
         });
     }
