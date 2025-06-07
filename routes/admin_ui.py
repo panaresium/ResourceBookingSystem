@@ -10,6 +10,7 @@ from extensions import db, socketio # Try to import socketio
 # Assuming permission_required is in auth.py
 from auth import permission_required # Corrected: auth.py is at root
 from datetime import datetime, timedelta # Add datetime imports
+from utils import load_scheduler_settings, save_scheduler_settings # Added for scheduler settings
 
 # Import backup/restore functions
 # Note: backup_bookings_csv is added here
@@ -128,6 +129,12 @@ def serve_backup_restore_page():
     has_prev = page > 1
     has_next = page < total_pages
 
+    # Load scheduler settings
+    scheduler_settings = load_scheduler_settings()
+    full_backup_settings = scheduler_settings.get('full_backup', {})
+    booking_csv_backup_settings = scheduler_settings.get('booking_csv_backup', {})
+
+
     return render_template(
         'admin_backup_restore.html',
         full_backups=full_backups,
@@ -135,7 +142,9 @@ def serve_backup_restore_page():
         booking_csv_page=page,
         booking_csv_total_pages=total_pages,
         booking_csv_has_prev=has_prev,
-        booking_csv_has_next=has_next
+        booking_csv_has_next=has_next,
+        full_backup_settings=full_backup_settings,
+        booking_csv_backup_settings=booking_csv_backup_settings # Pass to template
     )
 
 @admin_ui_bp.route('/admin/restore_booking_csv/<timestamp_str>', methods=['POST'])
@@ -368,6 +377,87 @@ def save_booking_csv_schedule_route():
         current_app.logger.error(f"Error saving Booking CSV backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
         flash(_('An error occurred while saving the schedule settings. Please check the logs.'), 'danger')
 
+    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+
+
+@admin_ui_bp.route('/settings/schedule/full_backup', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def save_full_backup_schedule_settings():
+    current_app.logger.info(f"User {current_user.username} attempting to save Full Backup schedule settings.")
+    try:
+        all_settings = load_scheduler_settings()
+
+        # Ensure 'full_backup' key exists, using a copy of defaults if not
+        if 'full_backup' not in all_settings:
+            from utils import DEFAULT_FULL_BACKUP_SCHEDULE # Import default for safety
+            all_settings['full_backup'] = DEFAULT_FULL_BACKUP_SCHEDULE.copy()
+
+        all_settings['full_backup']['is_enabled'] = request.form.get('full_backup_enabled') == 'true'
+        all_settings['full_backup']['schedule_type'] = request.form.get('full_backup_schedule_type', 'daily')
+        all_settings['full_backup']['time_of_day'] = request.form.get('full_backup_time_of_day', '02:00')
+
+        day_of_week_str = request.form.get('full_backup_day_of_week')
+        if day_of_week_str is not None and day_of_week_str.isdigit():
+            all_settings['full_backup']['day_of_week'] = int(day_of_week_str)
+        elif all_settings['full_backup']['schedule_type'] == 'weekly':
+            all_settings['full_backup']['day_of_week'] = 0 # Default to Monday if weekly and not specified
+        else:
+            all_settings['full_backup']['day_of_week'] = None
+
+
+        save_scheduler_settings(all_settings)
+        flash(_('Full backup schedule settings saved successfully.'), 'success')
+        current_app.logger.info(f"Full backup schedule settings saved by {current_user.username}: {all_settings['full_backup']}")
+
+        # Here you might want to update APScheduler if it's running, similar to booking_csv_schedule_route
+        # For now, this subtask focuses on saving to JSON. APScheduler update is a separate concern.
+
+    except Exception as e:
+        current_app.logger.error(f"Error saving Full Backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
+        flash(_('An error occurred while saving the full backup schedule settings. Please check the logs.'), 'danger')
+    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+
+
+@admin_ui_bp.route('/settings/schedule/booking_csv', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def save_booking_csv_schedule_settings():
+    current_app.logger.info(f"User {current_user.username} attempting to save Booking CSV Backup schedule settings.")
+    try:
+        all_settings = load_scheduler_settings()
+
+        if 'booking_csv_backup' not in all_settings:
+            from utils import DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE # Import default for safety
+            all_settings['booking_csv_backup'] = DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy()
+
+        all_settings['booking_csv_backup']['is_enabled'] = request.form.get('booking_csv_backup_enabled') == 'true'
+
+        interval_minutes_str = request.form.get('booking_csv_backup_interval_minutes', '60')
+        try:
+            interval_minutes = int(interval_minutes_str)
+            if interval_minutes < 1:
+                flash(_('Interval for Booking CSV backup must be at least 1 minute.'), 'danger')
+                return redirect(url_for('admin_ui.serve_backup_restore_page'))
+            all_settings['booking_csv_backup']['interval_minutes'] = interval_minutes
+        except ValueError:
+            flash(_('Invalid interval value for Booking CSV backup. Please enter a number.'), 'danger')
+            return redirect(url_for('admin_ui.serve_backup_restore_page'))
+
+        all_settings['booking_csv_backup']['range'] = request.form.get('booking_csv_backup_range_type', 'all')
+        # The key in settings is 'range', but form field is 'range_type' for clarity.
+
+        save_scheduler_settings(all_settings)
+        flash(_('Booking CSV backup schedule settings saved successfully.'), 'success')
+        current_app.logger.info(f"Booking CSV backup schedule settings saved by {current_user.username}: {all_settings['booking_csv_backup']}")
+
+        # Here you might want to update APScheduler if it's running.
+        # This is a complex task involving removing the old job and adding a new one with the new interval.
+        # For this subtask, focusing on saving to JSON. APScheduler update is a separate concern.
+
+    except Exception as e:
+        current_app.logger.error(f"Error saving Booking CSV backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
+        flash(_('An error occurred while saving the Booking CSV backup schedule settings. Please check the logs.'), 'danger')
     return redirect(url_for('admin_ui.serve_backup_restore_page'))
 
 

@@ -144,43 +144,79 @@
             <h2 class="card-title h5">{{ _('Scheduled Full System Backups') }}</h2>
         </div>
         <div class="card-body">
-            <div id="schedule-status-message" class="status-message my-2" role="alert"></div>
-            <form id="backup-schedule-form"> <!-- Removed mb-4 from form as card has mb-4 -->
+            {# This message area can be used by Flask flash messages after form submission #}
+            {# <div id="full-backup-schedule-status-message" class="status-message my-2" role="alert"></div> #}
+
+            <form method="POST" action="{{ url_for('admin_ui.save_full_backup_schedule_settings') }}" id="full-backup-schedule-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <div class="form-group mb-2">
                     <div class="form-check">
-                        <input type="checkbox" class="form-check-input" id="schedule-enabled" name="is_enabled">
-                        <label class="form-check-label" for="schedule-enabled">{{ _('Enable Scheduled Backups') }}</label>
+                        <input type="checkbox" class="form-check-input" id="full_backup_enabled" name="full_backup_enabled" value="true" {% if full_backup_settings.is_enabled %}checked{% endif %}>
+                        <label class="form-check-label" for="full_backup_enabled">{{ _('Enable Scheduled Full Backups') }}</label>
                     </div>
                 </div>
                 <div class="form-group mb-2">
-                    <label for="schedule-type">{{ _('Schedule Type') }}</label>
-                    <select id="schedule-type" name="schedule_type" class="form-control form-select">
-                        <option value="daily">{{ _('Daily') }}</option>
-                        <option value="weekly">{{ _('Weekly') }}</option>
+                    <label for="full_backup_schedule_type">{{ _('Schedule Type') }}</label>
+                    <select id="full_backup_schedule_type" name="full_backup_schedule_type" class="form-control form-select">
+                        <option value="daily" {% if full_backup_settings.schedule_type == 'daily' %}selected{% endif %}>{{ _('Daily') }}</option>
+                        <option value="weekly" {% if full_backup_settings.schedule_type == 'weekly' %}selected{% endif %}>{{ _('Weekly') }}</option>
                     </select>
                 </div>
-                <div class="form-group mb-2" id="day-of-week-group" style="display: none;"> <!-- Hidden by default -->
-                    <label for="schedule-day-of-week">{{ _('Day of Week') }}</label>
-                    <select id="schedule-day-of-week" name="day_of_week" class="form-control form-select">
-                        <option value="0">{{ _('Monday') }}</option>
-                        <option value="1">{{ _('Tuesday') }}</option>
-                        <option value="2">{{ _('Wednesday') }}</option>
-                        <option value="3">{{ _('Thursday') }}</option>
-                        <option value="4">{{ _('Friday') }}</option>
-                        <option value="5">{{ _('Saturday') }}</option>
-                        <option value="6">{{ _('Sunday') }}</option>
+                {# Keep original IDs for JS compatibility for now, but names are updated #}
+                <div class="form-group mb-2" id="day-of-week-group" {% if full_backup_settings.schedule_type != 'weekly' %}style="display: none;"{% endif %}>
+                    <label for="full_backup_day_of_week">{{ _('Day of Week') }}</label>
+                    <select id="full_backup_day_of_week" name="full_backup_day_of_week" class="form-control form-select">
+                        <option value="0" {% if full_backup_settings.day_of_week == 0 %}selected{% endif %}>{{ _('Monday') }}</option>
+                        <option value="1" {% if full_backup_settings.day_of_week == 1 %}selected{% endif %}>{{ _('Tuesday') }}</option>
+                        <option value="2" {% if full_backup_settings.day_of_week == 2 %}selected{% endif %}>{{ _('Wednesday') }}</option>
+                        <option value="3" {% if full_backup_settings.day_of_week == 3 %}selected{% endif %}>{{ _('Thursday') }}</option>
+                        <option value="4" {% if full_backup_settings.day_of_week == 4 %}selected{% endif %}>{{ _('Friday') }}</option>
+                        <option value="5" {% if full_backup_settings.day_of_week == 5 %}selected{% endif %}>{{ _('Saturday') }}</option>
+                        <option value="6" {% if full_backup_settings.day_of_week == 6 %}selected{% endif %}>{{ _('Sunday') }}</option>
                     </select>
                 </div>
                 <div class="form-group mb-2">
-                    <label for="schedule-time-of-day">{{ _('Time of Day (UTC)') }}</label>
-                    <input type="time" id="schedule-time-of-day" name="time_of_day" class="form-control" required>
+                    <label for="full_backup_time_of_day">{{ _('Time of Day (UTC)') }}</label>
+                    <input type="time" id="full_backup_time_of_day" name="full_backup_time_of_day" class="form-control" value="{{ full_backup_settings.time_of_day | default('02:00') }}" required>
                 </div>
-                <button type="submit" id="save-schedule-btn" class="btn btn-success"><i class="fas fa-save"></i> {{ _('Save Schedule') }}</button>
+                <button type="submit" class="btn btn-success"><i class="fas fa-save"></i> {{ _('Save Full Backup Schedule') }}</button>
             </form>
         </div> <!-- End card-body for Scheduled Full System Backups -->
     </div> <!-- End card for Scheduled Full System Backups -->
 
-    <!-- Booking CSV Backups Card -->
+    <!-- Scheduled Booking CSV Backups Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="card-title h5">{{ _('Scheduled Booking CSV Backups') }}</h2>
+        </div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('admin_ui.save_booking_csv_schedule_settings') }}" id="booking-csv-schedule-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="form-group mb-2">
+                    <div class="form-check">
+                        <input type="checkbox" class="form-check-input" id="booking_csv_backup_enabled" name="booking_csv_backup_enabled" value="true" {% if booking_csv_backup_settings.is_enabled %}checked{% endif %}>
+                        <label class="form-check-label" for="booking_csv_backup_enabled">{{ _('Enable Scheduled Booking CSV Backups') }}</label>
+                    </div>
+                </div>
+                <div class="form-group mb-2">
+                    <label for="booking_csv_backup_interval_minutes">{{ _('Backup Interval (minutes)') }}</label>
+                    <input type="number" class="form-control" id="booking_csv_backup_interval_minutes" name="booking_csv_backup_interval_minutes" value="{{ booking_csv_backup_settings.interval_minutes | default(60) }}" min="1" required>
+                </div>
+                <div class="form-group mb-2">
+                    <label for="booking_csv_backup_range_type">{{ _('Backup Data Range') }}</label>
+                    <select id="booking_csv_backup_range_type" name="booking_csv_backup_range_type" class="form-control form-select">
+                        <option value="all" {% if booking_csv_backup_settings.range == 'all' %}selected{% endif %}>{{ _('All Bookings') }}</option>
+                        <option value="1day" {% if booking_csv_backup_settings.range == '1day' %}selected{% endif %}>{{ _('Last 1 Day') }}</option>
+                        <option value="3days" {% if booking_csv_backup_settings.range == '3days' %}selected{% endif %}>{{ _('Last 3 Days') }}</option>
+                        <option value="7days" {% if booking_csv_backup_settings.range == '7days' %}selected{% endif %}>{{ _('Last 7 Days') }}</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-success"><i class="fas fa-save"></i> {{ _('Save Booking CSV Schedule') }}</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Booking CSV Backups Card (Manual Operations) -->
     <div class="card mb-4">
         <div class="card-header">
             <h2 class="card-title h5">{{ _('Booking CSV Backups') }}</h2>
@@ -354,7 +390,7 @@
         const interactiveElementSelectors = [
             '#one-click-backup-btn',
             '#list-backups-btn',
-            '#save-schedule-btn',
+            // '#save-schedule-btn', // Removed - standard form POST now for full backup schedule
             '.restore-btn', // Dynamically generated
             '.restore-dry-run-btn', // Dynamically generated
             '.delete-backup-btn', // Dynamically generated
@@ -365,17 +401,28 @@
             'form[action*="restore_booking_csv_route"] button[type="submit"]',
             'form[action*="verify_booking_csv_backup_route"] button[type="submit"]',
             'form[action*="delete_booking_csv_backup_route"] button[type="submit"]',
-            'form[action*="save_booking_csv_schedule_route"] button[type="submit"]',
+            'form[action*="save_booking_csv_schedule_route"] button[type="submit"]', // This is for CSV schedule, keep it
+            // Full Backup Schedule Form (standard submit, but inputs can be disabled)
+            '#full-backup-schedule-form button[type="submit"]', // New
+            '#full_backup_enabled', // New
+            '#full_backup_schedule_type', // New
+            '#full_backup_day_of_week', // New
+            '#full_backup_time_of_day', // New
+            // Booking CSV Schedule Form
+            '#booking-csv-schedule-form button[type="submit"]',
+            '#booking_csv_backup_enabled',
+            '#booking_csv_backup_interval_minutes',
+            '#booking_csv_backup_range_type',
             // Pagination buttons for full backups
             '#backup-prev-page a.page-link',
             '#backup-next-page a.page-link',
             // Pagination for booking CSV backups (these are direct links, less critical to disable, but for consistency)
-            // 'nav[aria-label="Booking CSV Backup Pagination"] a.page-link', // These are <a> tags, not buttons. Disabling might be complex or not standard.
-            // Schedule form inputs
-            '#schedule-enabled',
-            '#schedule-type',
-            '#schedule-day-of-week',
-            '#schedule-time-of-day',
+            // 'nav[aria-label="Booking CSV Backup Pagination"] a.page-link',
+            // Schedule form inputs (Old IDs for full backup, now replaced by full_backup_... IDs)
+            // '#schedule-enabled', // Old
+            // '#schedule-type', // Old
+            // '#schedule-day-of_week', // Old
+            // '#schedule-time-of-day', // Old
             // Selective restore checkboxes (disabling these during operation might be good)
             '#selective-restore-form input.component-checkbox',
             '#selective-restore-form input#component-all'
@@ -445,14 +492,16 @@
         const availableBackupsTbody = document.getElementById('available-backups-tbody');
         const availableBackupsTable = document.getElementById('available-backups-table');
 
-        const scheduleForm = document.getElementById('backup-schedule-form');
-        const scheduleEnabledCheckbox = document.getElementById('schedule-enabled');
-        const scheduleTypeSelect = document.getElementById('schedule-type');
-        const dayOfWeekGroup = document.getElementById('day-of-week-group');
-        const scheduleDayOfWeekSelect = document.getElementById('schedule-day-of-week');
-        const scheduleTimeOfDayInput = document.getElementById('schedule-time-of-day');
-        const saveScheduleButton = document.getElementById('save-schedule-btn');
-        const scheduleStatusMessage = document.getElementById('schedule-status-message');
+        // Comment out old variables for full backup schedule form
+        // const scheduleForm = document.getElementById('backup-schedule-form');
+        // const scheduleEnabledCheckbox = document.getElementById('schedule-enabled');
+        // const scheduleTypeSelect = document.getElementById('schedule-type');
+        // const dayOfWeekGroup = document.getElementById('day-of-week-group'); // Still used by ID in toggleDayOfWeekVisibility
+        // const scheduleDayOfWeekSelect = document.getElementById('schedule-day-of-week');
+        // const scheduleTimeOfDayInput = document.getElementById('schedule-time-of-day');
+        // const saveScheduleButton = document.getElementById('save-schedule-btn');
+        // const scheduleStatusMessage = document.getElementById('schedule-status-message');
+
 
         // Selective Restore Modal Elements
         const selectiveRestoreModal = document.getElementById('selective-restore-modal');
@@ -1185,15 +1234,29 @@
         });
 
 
-        function toggleDayOfWeekVisibility() { /* ... existing ... */
-            if (scheduleTypeSelect.value === 'weekly') {
-                dayOfWeekGroup.style.display = 'block';
-            } else {
-                dayOfWeekGroup.style.display = 'none';
+        });
+
+
+        function toggleDayOfWeekVisibility() {
+            const typeSelect = document.getElementById('full_backup_schedule_type'); // Use new ID
+            const dayGroup = document.getElementById('day-of-week-group'); // Kept old ID for this specific div
+            if (typeSelect && dayGroup) { // Ensure elements exist
+                if (typeSelect.value === 'weekly') {
+                    dayGroup.style.display = 'block';
+                } else {
+                    dayGroup.style.display = 'none';
+                }
             }
         }
-        scheduleTypeSelect.addEventListener('change', toggleDayOfWeekVisibility);
+        const newFullBackupScheduleTypeSelect = document.getElementById('full_backup_schedule_type');
+        if (newFullBackupScheduleTypeSelect) {
+            newFullBackupScheduleTypeSelect.addEventListener('change', toggleDayOfWeekVisibility);
+            // Initial call to set visibility based on Jinja-rendered settings
+            toggleDayOfWeekVisibility();
+        }
 
+        // Comment out old loadBackupSchedule function and its call
+        /*
         function loadBackupSchedule() {
             disablePageInteractions(); // Disable while loading
             scheduleStatusMessage.textContent = "{{ _('Loading schedule...') }}";
@@ -1221,7 +1284,7 @@
                 } else {
                     scheduleTimeOfDayInput.value = "02:00";
                 }
-                toggleDayOfWeekVisibility();
+                toggleDayOfWeekVisibility(); // This would need to use old IDs if not updated
                 scheduleStatusMessage.textContent = "{{ _('Schedule loaded.') }}";
                 scheduleStatusMessage.className = 'alert alert-success';
             })
@@ -1234,48 +1297,19 @@
                 enablePageInteractions(); // Re-enable after loading
             });
         }
-        scheduleForm.addEventListener('submit', function(event) {
-            event.preventDefault();
-            disablePageInteractions(); // Disable during save
-            // saveScheduleButton.disabled = true; // This will be handled by disablePageInteractions
-            scheduleStatusMessage.textContent = "{{ _('Saving schedule...') }}";
-            scheduleStatusMessage.className = 'alert alert-info';
-            const payload = {
-                is_enabled: scheduleEnabledCheckbox.checked,
-                schedule_type: scheduleTypeSelect.value,
-                time_of_day: scheduleTimeOfDayInput.value
-            };
-            if (payload.schedule_type === 'weekly') {
-                payload.day_of_week = parseInt(scheduleDayOfWeekSelect.value, 10);
-            } else {
-                payload.day_of_week = null;
-            }
-            fetch('/api/admin/backup_schedule', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken, 'Accept': 'application/json' },
-                body: JSON.stringify(payload)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    scheduleStatusMessage.textContent = "{{ _('Schedule saved successfully.') }} " + (data.message || "");
-                    scheduleStatusMessage.className = 'alert alert-success';
-                } else {
-                    scheduleStatusMessage.textContent = "{{ _('Failed to save schedule:') }} " + (data.message || "{{ _('Unknown error.') }}");
-                    scheduleStatusMessage.className = 'alert alert-danger';
-                }
-            })
-            .catch(error => {
-                console.error('Save schedule error:', error);
-                scheduleStatusMessage.textContent = "{{ _('Error saving schedule:') }} " + error.toString();
-                scheduleStatusMessage.className = 'alert alert-danger';
-            })
-            .finally(() => {
-                enablePageInteractions(); // Re-enable after save attempt
-                // saveScheduleButton.disabled = false; // Handled by enablePageInteractions
+        */
+        // loadBackupSchedule(); // Initial Load - Commented out
+
+        // Comment out old scheduleForm submit listener
+        /*
+        const oldScheduleForm = document.getElementById('backup-schedule-form'); // Assuming this was the old ID
+        if (oldScheduleForm) {
+            oldScheduleForm.addEventListener('submit', function(event) {
+                event.preventDefault();
+                // ... old AJAX submission logic ...
             });
-        });
-        loadBackupSchedule(); // Initial Load
+        }
+        */
 
         // --- Troubleshooting Tools Event Listeners (Moved to admin_troubleshooting.html) ---
     });

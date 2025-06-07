@@ -33,15 +33,102 @@ active_booking_statuses_for_conflict = ['approved', 'pending', 'checked_in', 'co
 
 # This will be imported from config.py in the app factory context
 # For now, if a util needs it directly and utils.py is at root:
-# basedir = os.path.abspath(os.path.dirname(__file__))
-# DATA_DIR = os.path.join(basedir, 'data')
-# SCHEDULE_CONFIG_FILE = os.path.join(DATA_DIR, 'backup_schedule.json')
+basedir = os.path.abspath(os.path.dirname(__file__))
+DATA_DIR = os.path.join(basedir, 'data')
+# SCHEDULE_CONFIG_FILE = os.path.join(DATA_DIR, 'backup_schedule.json') # Related to old backup schedule
 # DEFAULT_SCHEDULE_DATA = {
 # "is_enabled": False,
 # "schedule_type": "daily",
 # "day_of_week": None,
 # "time_of_day": "02:00"
 # }
+
+# --- Scheduler Settings ---
+SCHEDULER_SETTINGS_FILE_PATH = os.path.join(DATA_DIR, 'scheduler_settings.json')
+
+DEFAULT_FULL_BACKUP_SCHEDULE = {
+    "is_enabled": False,
+    "schedule_type": "daily",  # 'daily' or 'weekly'
+    "day_of_week": None,       # 0=Monday, 6=Sunday (used if schedule_type is 'weekly')
+    "time_of_day": "02:00"     # HH:MM format (24-hour)
+}
+
+DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE = {
+    "is_enabled": False,
+    "schedule_type": "interval", # 'interval'
+    "interval_minutes": 60,
+    "range": "all" # e.g. "all", "1day", "7days"
+}
+
+DEFAULT_SCHEDULER_SETTINGS = {
+    "full_backup": DEFAULT_FULL_BACKUP_SCHEDULE.copy(),
+    "booking_csv_backup": DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy()
+}
+
+def load_scheduler_settings() -> dict:
+    """Loads scheduler settings from a JSON file, merging with defaults."""
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
+    if not os.path.exists(SCHEDULER_SETTINGS_FILE_PATH):
+        logger.info(f"Scheduler settings file not found at '{SCHEDULER_SETTINGS_FILE_PATH}'. Creating with default settings.")
+        try:
+            # Ensure DATA_DIR exists
+            os.makedirs(DATA_DIR, exist_ok=True)
+            with open(SCHEDULER_SETTINGS_FILE_PATH, 'w', encoding='utf-8') as f:
+                json.dump(DEFAULT_SCHEDULER_SETTINGS, f, indent=2)
+            logger.info(f"Successfully saved default scheduler settings to '{SCHEDULER_SETTINGS_FILE_PATH}'.")
+        except IOError as e:
+            logger.error(f"Error saving default scheduler settings to '{SCHEDULER_SETTINGS_FILE_PATH}': {e}", exc_info=True)
+        return DEFAULT_SCHEDULER_SETTINGS.copy()
+
+    try:
+        with open(SCHEDULER_SETTINGS_FILE_PATH, 'r', encoding='utf-8') as f:
+            loaded_settings = json.load(f)
+
+        # Merge loaded settings with defaults to ensure all keys are present
+        # and new default sub-schedules are added if missing from file.
+        # The file's values take precedence for existing keys within each sub-schedule.
+        final_settings = DEFAULT_SCHEDULER_SETTINGS.copy() # Start with a fresh copy of defaults
+
+        for schedule_key, default_schedule_values in DEFAULT_SCHEDULER_SETTINGS.items():
+            if schedule_key in loaded_settings:
+                # If the schedule_key (e.g., "full_backup") exists in the loaded file,
+                # merge its contents with the defaults for that specific schedule.
+                # This ensures that new keys within a sub-schedule are added if missing from the file.
+                merged_schedule = default_schedule_values.copy()
+                merged_schedule.update(loaded_settings[schedule_key])
+                final_settings[schedule_key] = merged_schedule
+            # If schedule_key is not in loaded_settings, the default from final_settings remains.
+
+        # Ensure no extraneous top-level keys from the file are carried over
+        # (though current logic effectively does this by starting with DEFAULT_SCHEDULER_SETTINGS)
+        # final_settings = {key: final_settings[key] for key in DEFAULT_SCHEDULER_SETTINGS if key in final_settings}
+
+
+        return final_settings
+
+    except json.JSONDecodeError as e:
+        logger.warning(f"Error decoding JSON from '{SCHEDULER_SETTINGS_FILE_PATH}': {e}. Returning default settings.", exc_info=True)
+        return DEFAULT_SCHEDULER_SETTINGS.copy()
+    except IOError as e:
+        logger.error(f"IOError reading scheduler settings file '{SCHEDULER_SETTINGS_FILE_PATH}': {e}. Returning default settings.", exc_info=True)
+        return DEFAULT_SCHEDULER_SETTINGS.copy()
+    except Exception as e:
+        logger.error(f"Unexpected error loading scheduler settings from '{SCHEDULER_SETTINGS_FILE_PATH}': {e}. Returning default settings.", exc_info=True)
+        return DEFAULT_SCHEDULER_SETTINGS.copy()
+
+def save_scheduler_settings(settings_dict: dict):
+    """Saves the provided scheduler settings dictionary to a JSON file."""
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
+    try:
+        # Ensure DATA_DIR exists
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(SCHEDULER_SETTINGS_FILE_PATH, 'w', encoding='utf-8') as f:
+            json.dump(settings_dict, f, indent=2)
+        logger.info(f"Successfully saved scheduler settings to '{SCHEDULER_SETTINGS_FILE_PATH}'.")
+    except IOError as e:
+        logger.error(f"Error saving scheduler settings to '{SCHEDULER_SETTINGS_FILE_PATH}': {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Unexpected error saving scheduler settings to '{SCHEDULER_SETTINGS_FILE_PATH}': {e}", exc_info=True)
 
 
 def add_audit_log(action: str, details: str, user_id: int = None, username: str = None):
@@ -874,6 +961,8 @@ def _save_schedule_to_json(data_to_save):
     except IOError as e:
         logger.error(f"Error saving schedule to JSON '{schedule_config_file}': {e}")
         return False, f"Error saving schedule to JSON: {e}"
+
+
 
 
 def check_booking_permission(user: User, resource: Resource, logger_instance) -> tuple[bool, str | None]:
