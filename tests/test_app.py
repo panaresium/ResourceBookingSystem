@@ -9,9 +9,10 @@ from datetime import datetime as datetime_original, timedelta as timedelta_origi
 
 from app import app # app object
 from extensions import db # db object
-from models import User, Resource, Booking, WaitlistEntry, FloorMap, AuditLog, BookingSettings, ResourcePIN # Models
+from models import User, Resource, Booking, WaitlistEntry, FloorMap, AuditLog, BookingSettings, ResourcePIN, Role # Models
 from utils import email_log, teams_log, slack_log # Test log lists
 from unittest.mock import patch # For mocking datetime
+from datetime import datetime, timedelta, time as dt_time # Added for new test
 
 # from flask_login import current_user # Not directly used for assertions here
 
@@ -3488,6 +3489,213 @@ class TestAdminBookingCancellation(TestAdminBookings):
         # Log back in as admin for subsequent tests in this class (if any, or for teardown consistency)
         self.logout()
         self.login(self.admin_user.username, "adminpass") # self.admin_user is from TestAdminBookingCancellation setUp
+
+    def test_same_user_can_rebook_after_admin_cancellation(self):
+        """Test if the same user can re-book a slot after their original booking for that slot was cancelled by an admin."""
+        with self.app_context: # Ensure app context for DB operations
+            # 1. Setup Resource and User A
+            isolated_resource_name = f"SameUserRebookTestRes_{datetime.utcnow().timestamp()}"
+            # Ensure status is published or whatever status allows booking by default in your app
+            isolated_resource = Resource(name=isolated_resource_name, status='published')
+            db.session.add(isolated_resource)
+            db.session.commit()
+
+            user_a_username = f"surb_user_{datetime.utcnow().timestamp()}"
+            user_a_email = f"surb_{datetime.utcnow().timestamp()}@example.com"
+            user_a = User(username=user_a_username, email=user_a_email, is_admin=False, is_active=True)
+            user_a.set_password('password')
+            db.session.add(user_a)
+            db.session.commit()
+
+            # 2. User A Books Slot
+            login_response = self.login(user_a_username, 'password')
+            self.assertEqual(login_response.status_code, 200, f"Failed to log in user_A. Response: {login_response.get_data(as_text=True)}")
+
+            # Define a future, bookable slot
+            booking_start_dt = datetime.utcnow().replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(days=3)
+            if booking_start_dt.weekday() >= 5: # Saturday (5) or Sunday (6)
+                booking_start_dt += timedelta(days=(7 - booking_start_dt.weekday())) # Move to next Monday
+
+            booking_end_dt = booking_start_dt + timedelta(hours=1)
+            # Use correct keys for payload as expected by /api/bookings
+            date_str = booking_start_dt.strftime('%Y-%m-%d')
+            start_time_str = booking_start_dt.strftime('%H:%M')
+            end_time_str = booking_end_dt.strftime('%H:%M')
+
+            booking_payload_user_a = {
+                'resource_id': isolated_resource.id,
+                'date': date_str, # Corrected key
+                'start_time': start_time_str, # Corrected key
+                'end_time': end_time_str, # Corrected key
+                'title': 'User A Initial Booking',
+                'user_name': user_a_username
+            }
+            response_book_a = self.client.post('/api/bookings', json=booking_payload_user_a)
+            # Check if booking was successful
+            self.assertEqual(response_book_a.status_code, 201, f"User A initial booking failed. Response: {response_book_a.get_data(as_text=True)}, Payload: {booking_payload_user_a}")
+            booking_a_id = response_book_a.json['bookings'][0]['id'] # Assuming API returns list of bookings
+            self.logout()
+
+            # 3. Admin Cancels User A's Booking
+            admin_login_response = self.login(self.admin_user.username, 'adminpass') # Use self.admin_user
+            self.assertEqual(admin_login_response.status_code, 200, "Admin login failed")
+
+            cancel_response = self.client.post(f'/api/admin/bookings/{booking_a_id}/cancel_by_admin', json={}) # No reason needed
+            self.assertEqual(cancel_response.status_code, 200, f"Admin cancellation failed. Response: {cancel_response.get_data(as_text=True)}")
+
+            cancelled_booking = Booking.query.get(booking_a_id)
+            self.assertIsNotNone(cancelled_booking, "Cancelled booking not found in DB")
+            self.assertEqual(cancelled_booking.status, 'cancelled_by_admin')
+            self.assertIsNone(cancelled_booking.admin_deleted_message) # Default reason is None
+            self.logout()
+
+            # 4. User A Attempts to Re-book Same Slot
+            login_response_user_a_again = self.login(user_a_username, 'password')
+            self.assertEqual(login_response_user_a_again.status_code, 200, "User A re-login failed")
+
+            rebooking_payload_user_a = { # Use the same details
+                'resource_id': isolated_resource.id,
+                'date': date_str,
+                'start_time': start_time_str,
+                'end_time': end_time_str,
+                'title': 'User A Re-Booking Attempt', # New title for clarity
+                'user_name': user_a_username
+            }
+            response_rebook_a = self.client.post('/api/bookings', json=rebooking_payload_user_a)
+
+            # 5. Assert Re-booking Success
+            detailed_failure_message = (
+                f"Re-booking failed with status {response_rebook_a.status_code}. Expected 201.\n"
+                f"API Response: {response_rebook_a.get_data(as_text=True)}\n"
+                f"Original booking ID {booking_a_id} was cancelled. Its status was '{cancelled_booking.status}'.\n"
+                f"Attempted to re-book slot: Start={booking_start_dt.isoformat()}, End={booking_end_dt.isoformat()} "
+                f"for User={user_a_username} on Resource={isolated_resource.id}"
+            )
+            self.assertEqual(response_rebook_a.status_code, 201, detailed_failure_message)
+
+            if response_rebook_a.status_code == 201:
+                new_booking_id = response_rebook_a.json['bookings'][0]['id']
+                new_booking = Booking.query.get(new_booking_id)
+                self.assertIsNotNone(new_booking, "New booking not found in DB after successful re-booking.")
+                self.assertEqual(new_booking.user_id, user_a.id) # Check user_id association
+                self.assertIn(new_booking.status, ['pending', 'approved'], "New booking status is not 'pending' or 'approved'.")
+                self.assertNotEqual(new_booking.id, booking_a_id, "New booking ID should not be the same as the cancelled one.")
+
+            self.logout()
+
+
+class TestApiMapsAvailability(AppTests):
+    def setUp(self):
+        super().setUp()
+        self.admin_user = User(username='map_avail_admin', email='map_avail_admin@example.com', is_admin=True)
+        self.admin_user.set_password('adminpass')
+        db.session.add(self.admin_user)
+
+        self.test_booker = User(username='map_avail_booker', email='map_avail_booker@example.com', is_admin=False)
+        self.test_booker.set_password('password')
+        db.session.add(self.test_booker)
+
+        self.test_map = FloorMap(name="Map Availability Test Map", image_filename="map_avail.png")
+        db.session.add(self.test_map)
+        db.session.commit() # Commit users and map to get IDs
+
+        self.res1_on_map = Resource(name="Res1_MapAvail", status="published", floor_map_id=self.test_map.id, capacity=10)
+        self.res2_on_map = Resource(name="Res2_MapAvail", status="published", floor_map_id=self.test_map.id, capacity=5)
+        db.session.add_all([self.res1_on_map, self.res2_on_map])
+        db.session.commit() # Commit resources to get IDs
+
+        self.primary_slots = [(dt_time(8, 0), dt_time(12, 0)), (dt_time(13, 0), dt_time(17, 0))]
+
+        self.login(self.admin_user.username, 'adminpass')
+
+    def _create_booking_at_slot(self, resource_id, user_obj, target_date, time_slot, title, status='approved'):
+        start_dt = datetime.combine(target_date, time_slot[0])
+        end_dt = datetime.combine(target_date, time_slot[1])
+        booking = Booking(
+            resource_id=resource_id,
+            user_name=user_obj.username,
+            start_time=start_dt,
+            end_time=end_dt,
+            title=title,
+            status=status
+        )
+        db.session.add(booking)
+        # db.session.commit() # Commit is handled by the test method after all bookings for a scenario are added
+        return booking
+
+    def test_maps_availability_reflects_cancellations(self):
+        target_date = date.today() + timedelta(days=7)
+        target_date_str = target_date.strftime("%Y-%m-%d")
+
+        # Scenario for self.res1_on_map
+        self._create_booking_at_slot(self.res1_on_map.id, self.test_booker, target_date, self.primary_slots[0], "Approved Booking Res1", status='approved')
+        self._create_booking_at_slot(self.res1_on_map.id, self.test_booker, target_date, self.primary_slots[1], "Admin Cancelled Res1", status='cancelled_by_admin')
+        db.session.commit() # Commit bookings for res1
+
+        # self.res2_on_map has no bookings for this date
+
+        response = self.client.get(f'/api/maps-availability?date={target_date_str}')
+        self.assertEqual(response.status_code, 200, f"API call failed: {response.get_data(as_text=True)}")
+
+        data = response.get_json()
+        map_data = next((m for m in data if m['id'] == self.test_map.id), None)
+        self.assertIsNotNone(map_data, f"Test map ID {self.test_map.id} not found in API response: {data}")
+
+        # Expected calculations:
+        # res1: 2 total primary slots, 1 available (cancelled_by_admin slot is available)
+        # res2: 2 total primary slots, 2 available (no bookings)
+        # Total for map: 4 total primary slots, 3 available primary slots
+        expected_total_slots = len(self.primary_slots) * 2 # 2 resources
+        expected_available_slots = 1 + len(self.primary_slots) # 1 from res1, 2 from res2
+
+        self.assertEqual(map_data.get('total_primary_slots'), expected_total_slots, "Mismatch in total_primary_slots")
+        self.assertEqual(map_data.get('available_primary_slots_for_user'), expected_available_slots, "Mismatch in available_primary_slots_for_user")
+
+        availability_percentage = (expected_available_slots / expected_total_slots) * 100 if expected_total_slots > 0 else 0
+        expected_status = 'low'
+        if availability_percentage >= 50:
+            expected_status = 'high'
+        elif availability_percentage > 0:
+            expected_status = 'medium'
+
+        self.assertEqual(map_data.get('availability_status'), expected_status, f"Expected status {expected_status} for {availability_percentage}% availability")
+
+    def test_maps_availability_with_completed_bookings(self):
+        target_date = date.today() + timedelta(days=8) # Different date for isolation
+        target_date_str = target_date.strftime("%Y-%m-%d")
+
+        # Scenario for self.res1_on_map
+        self._create_booking_at_slot(self.res1_on_map.id, self.test_booker, target_date, self.primary_slots[0], "Approved Res1 Completed Test", status='approved')
+        self._create_booking_at_slot(self.res1_on_map.id, self.test_booker, target_date, self.primary_slots[1], "Completed Res1", status='completed')
+        db.session.commit() # Commit bookings for res1
+
+        # self.res2_on_map has no bookings
+
+        response = self.client.get(f'/api/maps-availability?date={target_date_str}')
+        self.assertEqual(response.status_code, 200, f"API call failed: {response.get_data(as_text=True)}")
+
+        data = response.get_json()
+        map_data = next((m for m in data if m['id'] == self.test_map.id), None)
+        self.assertIsNotNone(map_data, f"Test map ID {self.test_map.id} not found in API response: {data}")
+
+        # Expected calculations:
+        # res1: 2 total primary slots, 1 available (completed slot is available)
+        # res2: 2 total primary slots, 2 available
+        # Total for map: 4 total primary slots, 3 available
+        expected_total_slots = len(self.primary_slots) * 2
+        expected_available_slots = 1 + len(self.primary_slots)
+
+        self.assertEqual(map_data.get('total_primary_slots'), expected_total_slots, "Mismatch in total_primary_slots for completed test")
+        self.assertEqual(map_data.get('available_primary_slots_for_user'), expected_available_slots, "Mismatch in available_primary_slots_for_user for completed test")
+
+        availability_percentage = (expected_available_slots / expected_total_slots) * 100 if expected_total_slots > 0 else 0
+        expected_status = 'low'
+        if availability_percentage >= 50:
+            expected_status = 'high'
+        elif availability_percentage > 0:
+            expected_status = 'medium'
+
+        self.assertEqual(map_data.get('availability_status'), expected_status, f"Expected status {expected_status} for {availability_percentage}% availability in completed test")
 
 
 class TestAdminBookingSettingsPINConfig(AppTests):
