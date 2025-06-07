@@ -432,16 +432,102 @@ class TestBookingUserActions(AppTests):
         db.session.commit()
 
     def test_get_my_bookings_includes_check_in_out_setting(self):
-        """Test /api/bookings/my_bookings includes check_in_out_enabled flag and booking details."""
+        """Test /api/bookings/my_bookings returns categorized and sorted bookings."""
         self.login('testuser', 'password')
+        user = User.query.filter_by(username='testuser').first()
 
-        # Test with enable_check_in_out = True
-        self._run_get_my_bookings_check_in_out_test(True)
+        for check_in_out_setting in [True, False]:
+            with self.subTest(check_in_out_enabled=check_in_out_setting):
+                BookingSettings.query.delete()
+                db.session.add(BookingSettings(enable_check_in_out=check_in_out_setting))
+                db.session.commit()
 
-        # Test with enable_check_in_out = False
-        self._run_get_my_bookings_check_in_out_test(False)
+                # Clean up previous bookings for this user to ensure a clean test state
+                Booking.query.filter_by(user_name=user.username).delete()
+                db.session.commit()
 
-        # Clean up BookingSettings
+                now = datetime.utcnow()
+                # Upcoming
+                booking_future_near = self._create_booking(user.username, self.resource1.id, start_offset_hours=2, title="Future Near")
+                booking_future_far = self._create_booking(user.username, self.resource1.id, start_offset_hours=24, title="Future Far")
+                # Past
+                booking_past_recent = self._create_booking(user.username, self.resource2.id, start_offset_hours=-2, title="Past Recent")
+                booking_past_older = self._create_booking(user.username, self.resource2.id, start_offset_hours=-24, title="Past Older")
+                # Admin Cancelled (Past)
+                booking_admin_cancelled_past = self._create_booking(user.username, self.resource1.id, start_offset_hours=-48, title="Admin Cancelled Past")
+                booking_admin_cancelled_past.status = 'cancelled_by_admin'
+                # Admin Cancelled (Future) - to test if it's returned by API (JS should handle display)
+                booking_admin_cancelled_future = self._create_booking(user.username, self.resource1.id, start_offset_hours=48, title="Admin Cancelled Future")
+                booking_admin_cancelled_future.status = 'cancelled_by_admin'
+                db.session.commit()
+
+                all_test_bookings_ids = {
+                    booking_future_near.id, booking_future_far.id,
+                    booking_past_recent.id, booking_past_older.id,
+                    booking_admin_cancelled_past.id, booking_admin_cancelled_future.id
+                }
+
+
+                response = self.client.get('/api/bookings/my_bookings')
+                self.assertEqual(response.status_code, 200)
+                data = response.get_json()
+
+                self.assertIn('upcoming_bookings', data)
+                self.assertIsInstance(data['upcoming_bookings'], list)
+                self.assertIn('past_bookings', data)
+                self.assertIsInstance(data['past_bookings'], list)
+                self.assertEqual(data['check_in_out_enabled'], check_in_out_setting)
+
+                upcoming_list = data['upcoming_bookings']
+                past_list = data['past_bookings']
+
+                upcoming_ids = {b['id'] for b in upcoming_list}
+                past_ids = {b['id'] for b in past_list}
+
+                # Expected categorization (API returns based on time; JS handles display of status)
+                # The API is expected to return all bookings, categorized by time.
+                # The create_booking helper creates bookings with 'approved' status by default.
+                self.assertIn(booking_future_near.id, upcoming_ids)
+                self.assertIn(booking_future_far.id, upcoming_ids)
+                self.assertIn(booking_admin_cancelled_future.id, upcoming_ids) # It's future, API should return it.
+
+                self.assertIn(booking_past_recent.id, past_ids)
+                self.assertIn(booking_past_older.id, past_ids)
+                self.assertIn(booking_admin_cancelled_past.id, past_ids) # It's past.
+
+                # Ensure no booking is in both lists
+                self.assertTrue(upcoming_ids.isdisjoint(past_ids))
+
+                # Count check: 3 upcoming, 3 past
+                self.assertEqual(len(upcoming_list), 3, f"Upcoming bookings: {upcoming_ids}")
+                self.assertEqual(len(past_list), 3, f"Past bookings: {past_ids}")
+
+
+                # Assert Correct Sorting
+                if len(upcoming_list) > 1:
+                    upcoming_start_times = [b['start_time'] for b in upcoming_list]
+                    self.assertEqual(upcoming_start_times, sorted(upcoming_start_times), "Upcoming bookings not sorted correctly.")
+                    # Specific order for future bookings (nearest first)
+                    self.assertEqual(upcoming_list[0]['id'], booking_future_near.id)
+                    self.assertEqual(upcoming_list[1]['id'], booking_future_far.id)
+                    # The admin_cancelled_future would be last if sorted by time
+                    self.assertEqual(upcoming_list[2]['id'], booking_admin_cancelled_future.id)
+
+
+                if len(past_list) > 1:
+                    past_start_times = [b['start_time'] for b in past_list]
+                    self.assertEqual(past_start_times, sorted(past_start_times, reverse=True), "Past bookings not sorted correctly.")
+                    # Specific order for past bookings (most recent past first)
+                    self.assertEqual(past_list[0]['id'], booking_past_recent.id)
+                    self.assertEqual(past_list[1]['id'], booking_past_older.id)
+                    self.assertEqual(past_list[2]['id'], booking_admin_cancelled_past.id)
+
+
+                # Clean up created bookings for this sub-test iteration
+                Booking.query.filter(Booking.id.in_(all_test_bookings_ids)).delete()
+                db.session.commit()
+
+        # Clean up BookingSettings at the end of the main test method
         BookingSettings.query.delete()
         db.session.commit()
 

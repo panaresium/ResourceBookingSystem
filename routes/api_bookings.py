@@ -258,83 +258,87 @@ def create_booking():
 @login_required
 def get_my_bookings():
     """
-    Fetches all bookings for the currently authenticated user.
-    Orders bookings by start_time descending (most recent/upcoming first).
+    Fetches all bookings for the currently authenticated user, categorized into
+    upcoming and past bookings, and sorted accordingly.
     Also includes a global setting `check_in_out_enabled`.
     """
     try:
         booking_settings = BookingSettings.query.first()
         enable_check_in_out = booking_settings.enable_check_in_out if booking_settings else False
-        # Fetch dynamic check-in window settings
-        if booking_settings:
-            check_in_minutes_before = booking_settings.check_in_minutes_before
-            check_in_minutes_after = booking_settings.check_in_minutes_after
-        else:
-            current_app.logger.warning("BookingSettings not found in DB, using default check-in window (15/15 mins) for get_my_bookings.")
-            check_in_minutes_before = 15
-            check_in_minutes_after = 15
+        check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings else 15
+        check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings else 15
+        if not booking_settings:
+             current_app.logger.warning("BookingSettings not found in DB, using default check-in window (15/15 mins) for get_my_bookings.")
 
-        user_bookings = Booking.query.filter_by(user_name=current_user.username)\
-                                     .order_by(Booking.start_time.desc())\
-                                     .all()
 
-        bookings_list = []
-        for booking in user_bookings:
+        # Fetch all bookings for the user. Sorting can be done in Python after categorization.
+        user_all_bookings = Booking.query.filter_by(user_name=current_user.username).all()
+
+        upcoming_bookings_data = []
+        past_bookings_data = []
+        now_utc = datetime.now(timezone.utc)
+
+        for booking in user_all_bookings:
             resource = Resource.query.get(booking.resource_id)
             resource_name = resource.name if resource else "Unknown Resource"
-            # grace = current_app.config.get('CHECK_IN_GRACE_MINUTES', 15) # Replaced
-            now = datetime.now(timezone.utc)
 
-            # Ensure booking.start_time is offset-aware (UTC) before comparison
             booking_start_time_aware = booking.start_time
-            if booking_start_time_aware.tzinfo is None:
+            if booking_start_time_aware.tzinfo is None: # Assuming DB stores naive UTC
                 booking_start_time_aware = booking_start_time_aware.replace(tzinfo=timezone.utc)
 
             can_check_in = (
+                enable_check_in_out and # Only if feature is enabled
                 booking.checked_in_at is None and
-                # Use new dynamic settings for check-in window
-                booking_start_time_aware - timedelta(minutes=check_in_minutes_before) <= now <= booking_start_time_aware + timedelta(minutes=check_in_minutes_after)
+                booking.status == 'approved' and # Only for approved bookings
+                booking_start_time_aware - timedelta(minutes=check_in_minutes_before) <= now_utc <= \
+                booking_start_time_aware + timedelta(minutes=check_in_minutes_after)
             )
 
-            # Determine if the check_in_token should be exposed
             display_check_in_token = None
             if booking.check_in_token and booking.checked_in_at is None and booking.status == 'approved':
-                # Ensure booking.check_in_token_expires_at is offset-aware (UTC) for comparison
                 token_expires_at_aware = booking.check_in_token_expires_at
                 if token_expires_at_aware and token_expires_at_aware.tzinfo is None:
                     token_expires_at_aware = token_expires_at_aware.replace(tzinfo=timezone.utc)
 
-                # Ensure booking.end_time is offset-aware (UTC) for comparison
                 booking_end_time_aware = booking.end_time
                 if booking_end_time_aware.tzinfo is None:
                     booking_end_time_aware = booking_end_time_aware.replace(tzinfo=timezone.utc)
 
-                if token_expires_at_aware and token_expires_at_aware > now and booking_end_time_aware > now:
+                if token_expires_at_aware and token_expires_at_aware > now_utc and booking_end_time_aware > now_utc:
                     display_check_in_token = booking.check_in_token
 
-            bookings_list.append({
+            booking_dict = {
                 'id': booking.id,
                 'resource_id': booking.resource_id,
                 'resource_name': resource_name,
                 'user_name': booking.user_name,
-                'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
-                'end_time': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
+                'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(), # Ensure ISO format with Z
+                'end_time': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),   # Ensure ISO format with Z
                 'title': booking.title,
                 'status': booking.status,
                 'recurrence_rule': booking.recurrence_rule,
-                'admin_deleted_message': booking.admin_deleted_message,
+                'admin_deleted_message': booking.admin_deleted_message, # Keep for potential internal use, JS should hide it
                 'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else None,
                 'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else None,
                 'can_check_in': can_check_in,
                 'check_in_token': display_check_in_token
-            })
+            }
 
-        current_app.logger.info(f"User '{current_user.username}' fetched their bookings. Count: {len(bookings_list)}. Check-in/out enabled: {enable_check_in_out}")
-        current_app.logger.info(f"User '{current_user.username}' - Bookings prepared for JSON: {bookings_list}")
-        current_app.logger.info(f"User '{current_user.username}' - Check-in/out setting: {enable_check_in_out}")
-        current_app.logger.info(f"User '{current_user.username}' - Number of bookings being returned: {len(bookings_list)}")
+            if booking_start_time_aware >= now_utc:
+                upcoming_bookings_data.append(booking_dict)
+            else:
+                past_bookings_data.append(booking_dict)
+
+        # Sort upcoming bookings chronologically (nearest first)
+        upcoming_bookings_data.sort(key=lambda b: b['start_time'])
+        # Sort past bookings reverse chronologically (most recent past first)
+        past_bookings_data.sort(key=lambda b: b['start_time'], reverse=True)
+
+        current_app.logger.info(f"User '{current_user.username}' fetched their bookings. Upcoming: {len(upcoming_bookings_data)}, Past: {len(past_bookings_data)}. Check-in/out enabled: {enable_check_in_out}")
+
         return jsonify({
-            'bookings': bookings_list,
+            'upcoming_bookings': upcoming_bookings_data,
+            'past_bookings': past_bookings_data,
             'check_in_out_enabled': enable_check_in_out
         }), 200
 
