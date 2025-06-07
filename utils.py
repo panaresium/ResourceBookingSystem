@@ -620,7 +620,8 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
                 fm.image_filename = fm_data.get('image_filename', fm.image_filename)
                 fm.location = fm_data.get('location', fm.location)
                 fm.floor = fm_data.get('floor', fm.floor)
-                if fm.image_filename and not os.path.exists(os.path.join(current_app.config['UPLOAD_FOLDER'], fm.image_filename)):
+                upload_folder_path = current_app.config.get('UPLOAD_FOLDER', os.path.join(current_app.root_path, 'static', 'floor_map_uploads'))
+                if fm.image_filename and not os.path.exists(os.path.join(upload_folder_path, fm.image_filename)):
                     image_reminders.append(f"Ensure image '{fm.image_filename}' for map '{fm.name}' exists.")
                 if action == "CREATE_FLOOR_MAP_VIA_IMPORT": db.session.add(fm); maps_created += 1
                 else: maps_updated += 1
@@ -639,7 +640,9 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
                 if not resource and res_map_data.get('name'): resource = Resource.query.filter_by(name=res_map_data['name']).first()
 
                 if not resource:
-                    resource_errors.append({'error': f"Resource not found: '{res_map_data.get('name') or res_map_data.get('id', 'N/A')}'", 'data': res_map_data})
+                    error_message = f"Resource not found during map import: Name='{res_map_data.get('name', 'N/A')}', ID='{res_map_data.get('id', 'N/A')}'. Skipping mapping for this resource."
+                    logger.warning(error_message) # Explicitly log as warning
+                    resource_errors.append({'error': error_message, 'data': res_map_data})
                     continue
                 else: # Resource found
                     _ = resource.bookings # Load bookings to prevent delete-orphan cascade
