@@ -568,7 +568,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- PIN Management Functions ---
     async function loadResourcePins(resourceId, existingPins = null) {
-        console.log('[DEBUG] loadResourcePins called. resourceId:', resourceId, 'existingPins:', existingPins);
         const pinStatusEl = document.getElementById('resource-pin-form-status');
         currentResourceIdForPins = resourceId;
         const pinsTableBody = document.querySelector('#resource-pins-table tbody');
@@ -601,13 +600,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             currentPinValueSpan.textContent = resourceCurrentPin;
-            console.log('[DEBUG] About to render PINs table. pinsToRender:', pinsToRender, 'resourceId for table:', resourceId);
-            console.log('[DEBUG] resourceCurrentPin for display:', resourceCurrentPin);
             renderPinsTable(pinsToRender, resourceId);
 
             // Fetch global BookingSettings to control UI visibility
             const bookingSettings = await apiCall('/api/system/booking_settings');
-            console.log('[DEBUG] About to update Add PIN form visibility. bookingSettings:', bookingSettings);
             updateAddPinFormVisibility(bookingSettings);
             hideMessage(pinStatusEl);
 
@@ -617,7 +613,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderPinsTable(pins, resourceId) {
-        console.log('[DEBUG] renderPinsTable called. pins:', pins, 'resourceId:', resourceId);
         const pinsTableBody = document.querySelector('#resource-pins-table tbody');
         pinsTableBody.innerHTML = ''; // Clear existing rows
 
@@ -656,14 +651,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // ATTACH EVENT LISTENER LOGIC HERE
         const currentPinsTableElement = document.getElementById('resource-pins-table');
-        console.log('[EVENT_LISTENER_DEBUG] Attempting to set up listener INSIDE renderPinsTable. Found table element:', currentPinsTableElement);
 
         if (currentPinsTableElement) {
             if (!currentPinsTableElement._listenerAttached) {
-                console.log('[EVENT_LISTENER_DEBUG] Adding click listener to pinsTable (ID: resource-pins-table) now.');
                 currentPinsTableElement.addEventListener('click', async function(event) {
-                    console.log('[EVENT_LISTENER_DEBUG] A click occurred on pinsTable. Event target:', event.target);
-                    console.log('[EVENT_LISTENER_DEBUG] Event target classList:', event.target.classList);
 
                     const statusEl = document.getElementById('resource-pin-form-status'); // Ensure statusEl is defined for handlers
 
@@ -672,7 +663,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         const pinId = event.target.dataset.pinId;
                         const resourceIdForToggle = event.target.dataset.resourceId; // Use specific resourceId from checkbox
                         const newStatus = event.target.checked;
-                        console.log(`[DEBUG] pin-active-toggle clicked for pinId: ${pinId}`);
                         showLoading(statusEl, `Updating PIN ${pinId} status...`);
                         try {
                             const updatedPinData = await apiCall(`/api/resources/${resourceIdForToggle}/pins/${pinId}`, {
@@ -695,17 +685,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
 
                     const targetButton = event.target.closest('button.btn-pin-action');
-                    console.log('[EVENT_LISTENER_DEBUG] Closest button.btn-pin-action:', targetButton);
 
                     if (!targetButton) {
-                        console.log('[EVENT_LISTENER_DEBUG] Click was not on a .btn-pin-action button or its child.');
                         return;
                     }
 
                     const target = targetButton; // Now target is definitely the button
 
                     if (target.classList.contains('copy-pin-url-btn')) {
-                        console.log('!!! COPY URL CLICK HANDLER ENTERED !!!');
                         const pinValue = target.dataset.pinValue;
                         const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`; // resourceId from renderPinsTable scope
                         try {
@@ -716,70 +703,48 @@ document.addEventListener('DOMContentLoaded', function() {
                             console.error('Failed to copy URL: ', err);
                         }
                     } else if (target.classList.contains('show-qr-code-btn')) {
-                        console.log('!!! QR ICON CLICK HANDLER ENTERED !!!');
                         const pinValue = target.dataset.pinValue;
                         const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`; // resourceId from renderPinsTable scope
                         const qrCodeModal = document.getElementById('qr-code-modal');
                         const qrCodeDisplay = document.getElementById('qr-code-display');
                         const qrCodeUrlText = document.getElementById('qr-code-url-text');
-                        console.log('[QR DEBUG] Show QR button clicked. URL:', checkinUrl);
-                        console.log('[QR DEBUG] Modal elements: qrCodeModal:', !!qrCodeModal, 'qrCodeDisplay:', !!qrCodeDisplay, 'qrCodeUrlText:', !!qrCodeUrlText);
 
                         if (qrCodeModal && qrCodeDisplay && qrCodeUrlText) {
-                            console.log('[QR DEBUG] Initial qrCodeDisplay.innerHTML:', qrCodeDisplay.innerHTML);
                             qrCodeDisplay.innerHTML = '';
                             qrCodeUrlText.textContent = checkinUrl;
-                            console.log('[QR DEBUG] Cleared qrCodeDisplay. Set qrCodeUrlText to:', checkinUrl);
                             let attempts = 0;
                             const maxAttempts = 5;
                             const retryInterval = 200;
                             function tryGenerateQRCode() {
-                                console.log(`[QR DEBUG] tryGenerateQRCode attempt ${attempts + 1}/${maxAttempts}.`);
                                 if (typeof QRCode !== 'undefined') {
-                                    console.log('[QR DEBUG] QRCode library IS defined.');
                                     qrCodeDisplay.innerHTML = '';
                                     try {
-                                        console.log('[QR DEBUG] Attempting to instantiate QRCode object...');
                                         new QRCode(qrCodeDisplay, { text: checkinUrl, width: 200, height: 200, colorDark : "#000000", colorLight : "#ffffff", correctLevel : QRCode.CorrectLevel.H });
-                                        console.log('[QR DEBUG] QRCode instance supposedly created.');
-                                        if (qrCodeDisplay.innerHTML.trim() === '') {
-                                            console.warn('[QR DEBUG] QRCode object created, but qrCodeDisplay is empty. Forcing debug message.');
-                                            qrCodeDisplay.innerHTML = '<p style="color: orange;">Debug: QRCode created but display is empty.</p>';
-                                        } else {
-                                            console.log('[QR DEBUG] qrCodeDisplay content after new QRCode():', qrCodeDisplay.innerHTML.substring(0, 100) + '...');
-                                        }
                                         if (statusEl) hideMessage(statusEl);
                                     } catch (e) {
-                                        console.error('[QR DEBUG] Error during new QRCode() instantiation:', e);
+                                        console.error('[QR Code] Error creating QRCode instance:', e); // Kept specific error for instantiation
                                         qrCodeDisplay.innerHTML = '<p style="color: red; font-weight: bold;">Error during QR Code generation.</p>' + '<p><small>Details: ' + e.message + '</small></p>';
                                         if (statusEl) showError(statusEl, 'Error generating QR Code.');
                                     }
-                                    console.log('[QR DEBUG] Setting qrCodeModal.style.display = "block". Current display state:', qrCodeModal.style.display);
                                     qrCodeModal.style.display = 'block';
-                                    console.log('[QR DEBUG] qrCodeModal.style.display set to "block". New display state:', qrCodeModal.style.display);
                                 } else {
                                     attempts++;
-                                    console.log(`[QR DEBUG] QRCode library IS UNDEFINED (attempt ${attempts}).`);
                                     if (attempts < maxAttempts) {
-                                        console.log(`[QR DEBUG] Retrying in ${retryInterval}ms...`);
                                         setTimeout(tryGenerateQRCode, retryInterval);
                                     } else {
-                                        console.error('[QR DEBUG] QRCode library still undefined after multiple attempts.');
+                                        console.error('[QR Code] QRCode library not loaded after multiple attempts.'); // Kept specific error for library load failure
                                         qrCodeDisplay.innerHTML = '<p style="color: red; font-weight: bold;">QR Code library could not load.</p>' + '<p>Check internet connection or browser extensions.</p>';
                                         if (statusEl) showError(statusEl, 'QR Code library failed to load.');
-                                        console.log('[QR DEBUG] Setting qrCodeModal.style.display = "block" (library load failed). Current display state:', qrCodeModal.style.display);
                                         qrCodeModal.style.display = 'block';
-                                        console.log('[QR DEBUG] qrCodeModal.style.display set to "block" (library load failed). New display state:', qrCodeModal.style.display);
                                     }
                                 }
                             }
                             tryGenerateQRCode();
                         } else {
-                            console.error('[QR DEBUG] Critical: Modal UI elements (qrCodeModal, qrCodeDisplay, or qrCodeUrlText) not found.');
+                            console.error('[QR Code] Modal elements not found.'); // Kept specific error for missing UI
                             if (statusEl) showError(statusEl, 'QR Code modal elements missing.');
                         }
                     } else if (target.classList.contains('delete-pin-btn')) {
-                        console.log('!!! DELETE PIN CLICK HANDLER ENTERED !!!');
                         const pinId = target.dataset.pinId;
                         if (!confirm(`Are you sure you want to delete PIN ID ${pinId}?`)) return;
                         showLoading(statusEl, 'Deleting PIN...');
@@ -793,22 +758,15 @@ document.addEventListener('DOMContentLoaded', function() {
                             }
                         } catch (error) { /* Handled by apiCall */ }
                     } else if (target.classList.contains('btn-edit-pin')) {
-                        console.log('!!! EDIT PIN CLICK HANDLER ENTERED !!!');
                         alert('Edit PIN functionality not yet implemented. PIN ID: ' + target.dataset.pinId);
                     }
                 });
                 currentPinsTableElement._listenerAttached = true;
-                console.log('[EVENT_LISTENER_DEBUG] Click listener successfully ADDED to pinsTable (ID: resource-pins-table).');
-            } else {
-                console.log('[EVENT_LISTENER_DEBUG] Listener already attached to pinsTable. Skipping re-attachment.');
             }
-        } else {
-            console.error('[EVENT_LISTENER_DEBUG] pinsTable element NOT FOUND inside renderPinsTable. Cannot add click listener.');
         }
     }
 
     function updateAddPinFormVisibility(bookingSettings) {
-        console.log('[DEBUG] updateAddPinFormVisibility called. bookingSettings:', bookingSettings);
         const manualPinInput = document.getElementById('manual_pin_value');
         const addManualPinBtn = document.getElementById('btn-add-manual-pin');
         const autoGeneratePinBtn = document.getElementById('btn-auto-generate-pin');
