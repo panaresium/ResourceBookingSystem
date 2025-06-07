@@ -206,6 +206,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             cebmStatusMessage.textContent = response.message || 'Booking updated successfully!';
             cebmStatusMessage.className = 'status-message success-message'; // Ensure you have .success-message CSS
+
+            allUserEvents = []; // Clear the cache to force a fresh fetch
             calendar.refetchEvents(); // Refresh calendar events
 
             // Close modal and clear message after a short delay
@@ -221,6 +223,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (error.message && error.message.includes("No changes supplied.")) {
                 cebmStatusMessage.textContent = 'No changes detected. Booking details are already up to date.';
                 cebmStatusMessage.className = 'status-message success-message'; // Treat as success
+
+                allUserEvents = []; // Clear the cache
                 calendar.refetchEvents(); // Refresh calendar events
 
                 setTimeout(() => {
