@@ -458,6 +458,114 @@ document.addEventListener('DOMContentLoaded', function() {
 
     fetchAndDisplayResources();
 
+    // --- Bulk PIN Actions UI Elements ---
+    const bulkPinActionsArea = document.getElementById('bulk-pin-actions-area');
+    const bulkPinActionSelect = document.getElementById('bulk-pin-action-select');
+    const btnExecuteBulkPinAction = document.getElementById('btn-execute-bulk-pin-action');
+    const bulkPinActionStatus = document.getElementById('bulk-pin-action-status');
+
+    function updateBulkPinActionsUI() {
+        const selectedCheckboxes = document.querySelectorAll('.select-resource-checkbox:checked');
+        const count = selectedCheckboxes.length;
+
+        if (count > 0) {
+            if (bulkPinActionsArea) bulkPinActionsArea.style.display = 'block';
+            if (btnExecuteBulkPinAction) btnExecuteBulkPinAction.disabled = false;
+        } else {
+            if (bulkPinActionsArea) bulkPinActionsArea.style.display = 'none';
+            if (btnExecuteBulkPinAction) btnExecuteBulkPinAction.disabled = true;
+            if (bulkPinActionSelect) bulkPinActionSelect.value = ""; // Reset dropdown
+            if (bulkPinActionStatus) hideMessage(bulkPinActionStatus);
+        }
+
+        // Update "Select All" checkbox state
+        if (selectAllCheckbox) {
+            const totalCheckboxes = document.querySelectorAll('.select-resource-checkbox').length;
+            selectAllCheckbox.checked = (totalCheckboxes > 0 && count === totalCheckboxes);
+        }
+    }
+
+    // Event listener for "Select All" checkbox
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', function() {
+            document.querySelectorAll('.select-resource-checkbox').forEach(checkbox => {
+                checkbox.checked = this.checked;
+            });
+            updateBulkPinActionsUI();
+        });
+    }
+
+    // Event delegation for individual resource checkboxes
+    tableBody.addEventListener('change', function(event) {
+        if (event.target.classList.contains('select-resource-checkbox')) {
+            updateBulkPinActionsUI();
+        }
+    });
+
+    // Event listener for "Execute Bulk PIN Action" button
+    if (btnExecuteBulkPinAction) {
+        btnExecuteBulkPinAction.addEventListener('click', async function() {
+            const selectedActionValue = bulkPinActionSelect.value;
+            const selectedResourceIds = Array.from(document.querySelectorAll('.select-resource-checkbox:checked'))
+                                          .map(cb => parseInt(cb.dataset.id, 10));
+
+            if (!selectedActionValue) {
+                showError(bulkPinActionStatus, 'Please select a bulk PIN action.');
+                return;
+            }
+            if (selectedResourceIds.length === 0) {
+                showError(bulkPinActionStatus, 'Please select at least one resource.');
+                return; // Should be prevented by button disabled state, but good check
+            }
+
+            const selectedActionText = bulkPinActionSelect.options[bulkPinActionSelect.selectedIndex].text;
+            if (!confirm(`Are you sure you want to '${selectedActionText}' for ${selectedResourceIds.length} selected resources?`)) {
+                return;
+            }
+
+            showLoading(bulkPinActionStatus, `Executing '${selectedActionText}'...`);
+            try {
+                const response = await apiCall('/api/resources/pins/bulk_action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        resource_ids: selectedResourceIds,
+                        action: selectedActionValue
+                    })
+                }, bulkPinActionStatus); // Pass status element to apiCall
+
+                // Display the message from the API response
+                let message = response.message || `Bulk action '${selectedActionText}' completed.`;
+                if (response.details && response.details.length > 0) {
+                    const successes = response.details.filter(d => d.status === 'success').length;
+                    const errors = response.details.filter(d => d.status === 'error' || d.status === 'skipped').length;
+                    message += ` Successes: ${successes}, Failures/Skipped: ${errors}.`;
+                    if (errors > 0) {
+                         message += " Check console for detailed errors per resource.";
+                         console.warn("Bulk PIN action errors/skipped details:", response.details.filter(d => d.status !== 'success'));
+                    }
+                }
+                showSuccess(bulkPinActionStatus, message);
+
+                fetchAndDisplayResources(currentFilters); // Refresh resource list to show updated current_pin etc.
+
+                // Uncheck all and hide bulk actions UI
+                if (selectAllCheckbox) selectAllCheckbox.checked = false;
+                document.querySelectorAll('.select-resource-checkbox:checked').forEach(cb => cb.checked = false);
+                updateBulkPinActionsUI();
+
+            } catch (error) {
+                // showError is typically handled by apiCall, but if not, or if we want to ensure it's shown here:
+                showError(bulkPinActionStatus, error.message || `Failed to execute bulk action '${selectedActionText}'.`);
+                console.error(`Error executing bulk PIN action '${selectedActionValue}':`, error);
+            }
+        });
+    }
+
+    // Initial UI setup
+    updateBulkPinActionsUI();
+
+
     // --- PIN Management Functions ---
     async function loadResourcePins(resourceId, existingPins = null) {
         console.log('[DEBUG] loadResourcePins called. resourceId:', resourceId, 'existingPins:', existingPins);

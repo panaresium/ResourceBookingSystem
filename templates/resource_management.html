@@ -35,6 +35,20 @@
         <button id="resource-apply-filters-btn" class="button">{{ _('Apply Filters') }}</button>
         <button id="resource-clear-filters-btn" class="button">{{ _('Clear Filters') }}</button>
     </div>
+
+    <div id="bulk-pin-actions-area" style="margin-top: 10px; margin-bottom: 10px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; display: none;">
+        <h4>{{ _('Bulk PIN Actions for Selected Resources') }}</h4>
+        <select id="bulk-pin-action-select" class="form-control" style="width: auto; display: inline-block; margin-right: 10px;">
+            <option value="">-- {{ _('Select Action') }} --</option>
+            <option value="auto_generate_new_pin">{{ _('Auto-generate New PIN for Each') }}</option>
+            <option value="deactivate_all_pins">{{ _('Deactivate All PINs for Each') }}</option>
+            <option value="activate_all_pins">{{ _('Activate All PINs for Each') }}</option>
+            <!-- Add more actions here if needed in future -->
+        </select>
+        <button id="btn-execute-bulk-pin-action" class="button primary-button" disabled>{{ _('Execute Action') }}</button>
+        <div id="bulk-pin-action-status" class="status-message" style="margin-top: 5px; margin-left: 10px; display: inline-block;"></div>
+    </div>
+
     <div id="resource-management-status" class="status-message" style="margin-top: 15px;"></div>
 
     <table id="resources-table" class="styled-table" style="margin-top: 15px;">
