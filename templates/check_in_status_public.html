@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}
+    {{ _('Check-in Status') }} - {% if super %}{{ super() }}{% else %}{{ _('Smart Resource Booking') }}{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="container" style="margin-top: 20px; text-align: center; padding: 15px;">
+    <h1>{{ _('Resource Check-in Status') }}</h1>
+
+    {% if status == 'success' %}
+        <div class="alert alert-success" role="alert" style="padding: 20px; border: 1px solid #28a745; border-radius: 5px; background-color: #d4edda; color: #155724; margin-bottom: 20px;">
+            <h4 class="alert-heading" style="margin-top: 0; margin-bottom: 10px; font-size: 1.5em;">{{ _('Success!') }}</h4>
+            <p style="font-size: 1.1em;">{{ message }}</p>
+            {% if booking_details %}
+                <hr style="border-top: 1px solid #155724;">
+                <div style="text-align: left; display: inline-block; margin-top: 15px;">
+                    <p style="margin-bottom: 5px;"><strong>{{ _('Booking Title:') }}</strong> {{ booking_details.title }}</p>
+                    <p style="margin-bottom: 5px;"><strong>{{ _('Resource:') }}</strong> {{ booking_details.resource_name }}</p>
+                    <p style="margin-bottom: 5px;"><strong>{{ _('User:') }}</strong> {{ booking_details.user_name }}</p>
+                    <p style="margin-bottom: 5px;"><strong>{{ _('Checked-in at:') }}</strong> {{ booking_details.checked_in_at_formatted }}</p>
+                </div>
+            {% endif %}
+        </div>
+    {% elif status == 'error' %}
+        <div class="alert alert-danger" role="alert" style="padding: 20px; border: 1px solid #dc3545; border-radius: 5px; background-color: #f8d7da; color: #721c24; margin-bottom: 20px;">
+            <h4 class="alert-heading" style="margin-top: 0; margin-bottom: 10px; font-size: 1.5em;">{{ _('Error') }}</h4>
+            <p style="font-size: 1.1em;">{{ message }}</p>
+        </div>
+    {% else %}
+        {# Fallback for unknown status or if status is not provided #}
+        <div class="alert alert-info" role="alert" style="padding: 20px; border: 1px solid #17a2b8; border-radius: 5px; background-color: #d1ecf1; color: #0c5460; margin-bottom: 20px;">
+            <h4 class="alert-heading" style="margin-top: 0; margin-bottom: 10px; font-size: 1.5em;">{{ _('Status') }}</h4>
+            <p style="font-size: 1.1em;">{{ message }}</p>
+        </div>
+    {% endif %}
+
+    <div style="margin-top: 30px;">
+        <a href="{{ url_for('ui.serve_index') }}" class="button primary-button">{{ _('Go to Homepage') }}</a>
+        {# Example for a conditional login link - logic for 'show_login_link' would be in the route #}
+        {% if show_login_link %}
+            <a href="{{ login_url }}" class="button" style="margin-left: 10px;">{{ _('Login') }}</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
