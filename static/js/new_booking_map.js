@@ -465,7 +465,7 @@ document.addEventListener('DOMContentLoaded', function () {
         updateMapLoadingStatus("Loading map configurations...", false);
         try {
             // Fetch all basic map configurations first to have a list of all maps
-            const response = await fetch('/api/admin/maps');
+            const response = await fetch('/api/maps');
             const responseText = await response.text();
             if (!response.ok) {
                 let userErrorMessage = `Error fetching map list: ${response.statusText || 'Server error'} (Status: ${response.status})`;

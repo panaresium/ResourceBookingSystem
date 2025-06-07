@@ -103,13 +103,11 @@ def login_google_callback():
 
         user = User.query.filter_by(google_id=google_user_id).first()
         if user:
-            if user.is_admin: # Application specific logic
-                login_user(user)
-                logger.info(f"Admin user {user.username} (Google ID: {google_user_id}) logged in via Google.")
-                return redirect(url_for('ui.serve_index'))
-            else:
-                logger.warning(f"Non-admin user {user.username} (Google ID: {google_user_id}) attempted Google login. Denied.")
-                return redirect(url_for('ui.serve_login'))
+            # Allow any user (admin or not) who is found by their google_id to log in
+            login_user(user)
+            logger.info(f"User {user.username} (Google ID: {google_user_id}, Admin: {user.is_admin}) logged in via Google.")
+            # Redirect to 'ui.serve_index' or a more appropriate page for all users
+            return redirect(url_for('ui.serve_index'))
 
         admin_with_email = User.query.filter_by(email=google_user_email, is_admin=True).first()
         if admin_with_email:
