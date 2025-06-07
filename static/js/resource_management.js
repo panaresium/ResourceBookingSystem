@@ -643,28 +643,15 @@ document.addEventListener('DOMContentLoaded', function() {
             row.insertCell().textContent = pin.created_at ? new Date(pin.created_at).toLocaleString() : 'N/A';
 
             const actionsCell = row.insertCell();
-            const copyUrlBtn = document.createElement('button');
-            copyUrlBtn.textContent = 'Copy Check-in URL';
-            copyUrlBtn.classList.add('button', 'button-small', 'copy-pin-url-btn');
-            copyUrlBtn.dataset.pinValue = pin.pin_value;
-            copyUrlBtn.dataset.resourceId = resourceId;
-            actionsCell.appendChild(copyUrlBtn);
+            actionsCell.style.whiteSpace = "nowrap"; // Keep buttons on one line
 
-            const showQrBtn = document.createElement('button');
-            showQrBtn.textContent = 'Show QR Code';
-            showQrBtn.classList.add('button', 'button-small', 'show-qr-code-btn');
-            showQrBtn.dataset.pinValue = pin.pin_value;
-            showQrBtn.dataset.resourceId = resourceId;
-            showQrBtn.style.marginLeft = '5px';
-            actionsCell.appendChild(showQrBtn);
-
-            const deleteBtn = document.createElement('button');
-            deleteBtn.textContent = 'Delete';
-            deleteBtn.classList.add('button', 'button-small', 'danger', 'delete-pin-btn');
-            deleteBtn.dataset.pinId = pin.id;
-            deleteBtn.dataset.resourceId = resourceId;
-            deleteBtn.style.marginLeft = '5px'; // Maintain spacing
-            actionsCell.appendChild(deleteBtn);
+            // Action buttons for each PIN
+            actionsCell.innerHTML = `
+                <button class="button btn-pin-action btn-edit-pin" data-pin-id="${pin.id}" data-resource-id="${resourceId}" title="Edit PIN"><span aria-hidden="true">✏️</span></button>
+                <button class="button btn-pin-action btn-delete-pin danger" data-pin-id="${pin.id}" data-resource-id="${resourceId}" title="Delete PIN"><span aria-hidden="true">🗑️</span></button>
+                <button class="button button-small copy-pin-url-btn" data-pin-value="${pin.pin_value}" data-resource-id="${resourceId}" title="Copy Check-in URL" style="margin-left:5px;">Copy URL</button>
+                <button class="button button-small show-qr-code-btn" data-pin-value="${pin.pin_value}" data-resource-id="${resourceId}" title="Show QR Code" style="margin-left:5px;">Show QR</button>
+            `;
         });
     }
 
