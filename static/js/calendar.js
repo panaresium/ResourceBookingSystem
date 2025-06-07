@@ -16,8 +16,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const cebmStatusMessage = document.getElementById('cebm-status-message');
     const cebmDeleteBookingBtn = document.getElementById('cebm-delete-booking-btn'); // Added
 
-    if (!calendarEl || !calendarStatusFilterSelect || !calendarEditBookingModal || !cebmDeleteBookingBtn) { // Used new ID
-        console.error("Required calendar elements or modal not found.");
+    if (!calendarEl || !calendarStatusFilterSelect || !calendarEditBookingModal || !cebmSaveChangesBtn || !cebmDeleteBookingBtn) { // Added !cebmSaveChangesBtn to the check
+        console.error("Required calendar elements (calendar, filter, modal, save button, or delete button) not found.");
         return;
     }
 
@@ -138,7 +138,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const statuses = [
             { value: 'active', text: 'Show All Relevant' }, // Default
             { value: 'approved', text: 'Approved (Pending Check-in)' },
-            { value: 'pending', text: 'Pending Approval'},
             { value: 'checked_in', text: 'Checked In' },
             { value: 'completed', text: 'Completed' },
             { value: 'cancelled_group', text: 'Cancelled/Rejected' }
