@@ -260,9 +260,13 @@ def get_my_bookings():
     """
     Fetches all bookings for the currently authenticated user, categorized into
     upcoming and past bookings, and sorted accordingly.
+    Accepts 'status_filter' and 'date_filter_value' query parameters.
     Also includes a global setting `check_in_out_enabled`.
     """
     try:
+        status_filter = request.args.get('status_filter')
+        date_filter_value_str = request.args.get('date_filter_value')
+
         booking_settings = BookingSettings.query.first()
         enable_check_in_out = booking_settings.enable_check_in_out if booking_settings else False
         check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings else 15
@@ -270,9 +274,26 @@ def get_my_bookings():
         if not booking_settings:
              current_app.logger.warning("BookingSettings not found in DB, using default check-in window (15/15 mins) for get_my_bookings.")
 
+        # Base query
+        user_bookings_query = Booking.query.filter_by(user_name=current_user.username)
 
-        # Fetch all bookings for the user. Sorting can be done in Python after categorization.
-        user_all_bookings = Booking.query.filter_by(user_name=current_user.username).all()
+        # Apply Status Filter
+        if status_filter and status_filter.lower() != 'all':
+            user_bookings_query = user_bookings_query.filter(
+                sqlfunc.trim(sqlfunc.lower(Booking.status)) == status_filter.lower()
+            )
+
+        # Apply Date Filter
+        if date_filter_value_str:
+            try:
+                target_date_obj = datetime.strptime(date_filter_value_str, '%Y-%m-%d').date()
+                user_bookings_query = user_bookings_query.filter(
+                    sqlfunc.date(Booking.start_time) == target_date_obj
+                )
+            except ValueError:
+                current_app.logger.warning(f"Invalid date_filter_value format: {date_filter_value_str}. Ignoring date filter.")
+
+        user_all_bookings = user_bookings_query.all() # Execute the query
 
         upcoming_bookings_data = []
         past_bookings_data = []

@@ -1,8 +1,17 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // const bookingsListDiv = document.getElementById('my-bookings-list'); // This was correctly commented out/removed before.
-    // upcomingBookingsContainer and pastBookingsContainer will be fetched inside fetchAndDisplayBookings.
     const bookingItemTemplate = document.getElementById('booking-item-template');
-    const statusDiv = document.getElementById('my-bookings-status'); // Keep statusDiv global to DOMContentLoaded for now.
+    const statusDiv = document.getElementById('my-bookings-status'); // Used by multiple functions in this scope
+
+    // Filter Elements
+    const statusFilterSelect = document.getElementById('my-bookings-status-filter');
+    const dateFilterTypeSelect = document.getElementById('my-bookings-date-filter-type');
+    const datePickerContainer = document.getElementById('my-bookings-date-picker-container');
+    const datePickerInput = document.getElementById('my-bookings-date-picker');
+    let flatpickrInstance = null;
+
+    // Visibility Toggles
+    const toggleUpcomingCheckbox = document.getElementById('toggle-upcoming-bookings');
+    const togglePastCheckbox = document.getElementById('toggle-past-bookings');
 
     const updateModalElement = document.getElementById('update-booking-modal');
     let updateModal;
@@ -96,23 +105,37 @@ document.addEventListener('DOMContentLoaded', () => {
         bookingItemDiv.dataset.startTime = booking.start_time;
         bookingItemDiv.dataset.endTime = booking.end_time;
 
-        bookingItemClone.querySelector('.resource-name').textContent = booking.resource_name;
-        const titleSpan = bookingItemClone.querySelector('.booking-title');
-        titleSpan.textContent = booking.title || 'N/A';
-        titleSpan.dataset.originalTitle = booking.title || '';
+        // Populate new structure
+        bookingItemClone.querySelector('.booking-title-value').textContent = booking.title || 'N/A';
+        bookingItemClone.querySelector('.resource-name-value').textContent = booking.resource_name || 'N/A';
 
-        const startTimeSpan = bookingItemClone.querySelector('.start-time');
-        startTimeSpan.textContent = new Date(booking.start_time).toUTCString(); // Or toLocaleString() for user's timezone
-        startTimeSpan.dataset.originalStartTime = booking.start_time;
+        const startDate = new Date(booking.start_time);
+        const endDate = new Date(booking.end_time);
 
-        const endTimeSpan = bookingItemClone.querySelector('.end-time');
-        endTimeSpan.textContent = new Date(booking.end_time).toUTCString(); // Or toLocaleString()
-        endTimeSpan.dataset.originalEndTime = booking.end_time;
+        // Date formatting
+        const optionsDate = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' };
+        const formattedDate = startDate.toLocaleDateString(undefined, optionsDate); // Uses browser locale but with UTC interpretation
 
-        const recurrenceSpan = bookingItemClone.querySelector('.recurrence-rule');
-        if (recurrenceSpan) { // Ensure the element exists
-            recurrenceSpan.textContent = booking.recurrence_rule || 'None';
+        // Time formatting (24-hour format)
+        const optionsTime = { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' };
+        const formattedStartTime = startDate.toLocaleTimeString(undefined, optionsTime);
+        const formattedEndTime = endDate.toLocaleTimeString(undefined, optionsTime);
+
+        bookingItemClone.querySelector('.booking-date-value').textContent = formattedDate;
+        bookingItemClone.querySelector('.booking-start-time-value').textContent = formattedStartTime;
+        bookingItemClone.querySelector('.booking-end-time-value').textContent = formattedEndTime;
+
+        const recurrenceRuleValueSpan = bookingItemClone.querySelector('.recurrence-rule-value');
+        if (recurrenceRuleValueSpan) {
+            recurrenceRuleValueSpan.textContent = booking.recurrence_rule || 'None';
         }
+
+        // Store original title and ISO times for update modal, if still needed elsewhere.
+        // The dataset attributes on bookingItemDiv for start/end time are already ISO.
+        // If the update modal relies on specific elements having original values, that needs checking.
+        // For now, assume the main display is the priority.
+        // const titleSpan = bookingItemClone.querySelector('.booking-title-value'); // Already populated
+        // titleSpan.dataset.originalTitle = booking.title || ''; // If needed
 
         const updateBtn = bookingItemClone.querySelector('.update-booking-btn');
         updateBtn.dataset.bookingId = booking.id;
@@ -125,13 +148,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const checkInControls = bookingItemClone.querySelector('.check-in-controls');
         const pinInput = bookingItemClone.querySelector('.booking-pin-input');
 
-        const bookingStatusSpan = bookingItemClone.querySelector('.booking-status');
-        if (bookingStatusSpan) {
+        const bookingStatusValueSpan = bookingItemClone.querySelector('.booking-status-value');
+        if (bookingStatusValueSpan) {
+            let statusText = booking.status ? booking.status.charAt(0).toUpperCase() + booking.status.slice(1).replace(/_/g, ' ') : 'Unknown';
             if (booking.status === 'cancelled_by_admin' || booking.status === 'cancelled_admin_acknowledged') {
-                bookingStatusSpan.textContent = 'Cancelled by Administrator';
-            } else {
-                bookingStatusSpan.textContent = booking.status ? booking.status.charAt(0).toUpperCase() + booking.status.slice(1).replace(/_/g, ' ') : 'Unknown';
+                statusText = 'Cancelled by Administrator';
             }
+            // Add more user-friendly status text as needed, e.g., for 'approved':
+            // else if (booking.status === 'approved') { statusText = 'Approved'; }
+            bookingStatusValueSpan.textContent = statusText;
         }
 
         if (checkInControls) checkInControls.style.display = 'none';
@@ -168,47 +193,55 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchAndDisplayBookings() {
         const upcomingBookingsContainer = document.getElementById('upcoming-bookings-container');
         const pastBookingsContainer = document.getElementById('past-bookings-container');
-        const myBookingsStatusDiv = document.getElementById('my-bookings-status'); // Use a local var, could shadow global statusDiv or rename global one
+        const myBookingsStatusDiv = document.getElementById('my-bookings-status'); // Uses the global statusDiv
 
         if (!upcomingBookingsContainer || !pastBookingsContainer) {
-            console.error('My Bookings page structure is missing essential container elements (upcoming-bookings-container or past-bookings-container). Cannot display bookings.');
+            console.error('My Bookings page structure is missing essential container elements.');
             if (myBookingsStatusDiv) {
                 myBookingsStatusDiv.className = 'alert alert-danger';
-                myBookingsStatusDiv.textContent = 'Error: Could not load booking display components. Required page elements are missing.';
+                myBookingsStatusDiv.textContent = 'Error: Could not load booking display components.';
                 myBookingsStatusDiv.style.display = 'block';
             }
             return;
         }
 
-        // Set loading messages for individual containers
         upcomingBookingsContainer.innerHTML = '<p class="loading-message">Loading upcoming bookings...</p>';
         pastBookingsContainer.innerHTML = '<p class="loading-message">Loading past bookings...</p>';
         if (myBookingsStatusDiv) {
-            myBookingsStatusDiv.style.display = 'none'; // Hide general status as sections have their own
+            myBookingsStatusDiv.style.display = 'none';
         }
-        // Or, if a global loading message is still desired initially:
-        // if (myBookingsStatusDiv) showLoading(myBookingsStatusDiv, 'Loading your bookings...');
 
+        let apiUrl = '/api/bookings/my_bookings';
+        const params = new URLSearchParams();
+
+        if (statusFilterSelect && statusFilterSelect.value !== 'all') {
+            params.append('status_filter', statusFilterSelect.value);
+        }
+
+        if (dateFilterTypeSelect && dateFilterTypeSelect.value === 'specific' && datePickerInput && datePickerInput.value) {
+            params.append('date_filter_value', datePickerInput.value);
+        }
+
+        const queryString = params.toString();
+        if (queryString) {
+            apiUrl += `?${queryString}`;
+        }
 
         try {
-            const apiResponse = await apiCall('/api/bookings/my_bookings');
-            // New API response structure
+            const apiResponse = await apiCall(apiUrl, {}, myBookingsStatusDiv);
             const upcomingBookings = apiResponse.upcoming_bookings;
             const pastBookings = apiResponse.past_bookings;
             const checkInOutEnabled = apiResponse.check_in_out_enabled;
-            // Assuming check_in_minutes_before and check_in_minutes_after might be part of apiResponse if needed by createBookingCardElement
-            // For now, createBookingCardElement only takes checkInOutEnabled. If it needs more, this is where they'd be passed.
+
+            upcomingBookingsContainer.innerHTML = ''; // Clear loading message
+            pastBookingsContainer.innerHTML = '';   // Clear loading message
 
             if ((!upcomingBookings || upcomingBookings.length === 0) && (!pastBookings || pastBookings.length === 0)) {
-                if (myBookingsStatusDiv) showStatusMessage(myBookingsStatusDiv, 'You have no bookings.', 'info');
-                upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings.</p>';
-                pastBookingsContainer.innerHTML = '<p>No past booking history.</p>';
+                if (myBookingsStatusDiv) showStatusMessage(myBookingsStatusDiv, 'You have no bookings matching the current filters.', 'info');
+                upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings found.</p>';
+                pastBookingsContainer.innerHTML = '<p>No past booking history found.</p>';
                 return;
             }
-
-            // Clear loading messages before appending actual cards or "no bookings" message
-            upcomingBookingsContainer.innerHTML = '';
-            pastBookingsContainer.innerHTML = '';
 
             if (upcomingBookings && upcomingBookings.length > 0) {
                 upcomingBookings.forEach(booking => {
@@ -216,7 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     upcomingBookingsContainer.appendChild(bookingCard);
                 });
             } else {
-                upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings.</p>';
+                upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings found matching your filters.</p>';
             }
 
             if (pastBookings && pastBookings.length > 0) {
@@ -225,20 +258,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     pastBookingsContainer.appendChild(bookingCard);
                 });
             } else {
-                pastBookingsContainer.innerHTML = '<p>No past booking history.</p>';
+                pastBookingsContainer.innerHTML = '<p>No past booking history found matching your filters.</p>';
             }
 
-            if (myBookingsStatusDiv) hideStatusMessage(myBookingsStatusDiv); // Hide overall loading/status if successful
+            // Only hide global status if it was showing a general loading message and not an error from apiCall
+            if (myBookingsStatusDiv && myBookingsStatusDiv.textContent === 'Loading your bookings...' && !myBookingsStatusDiv.classList.contains('alert-danger')) {
+                 hideStatusMessage(myBookingsStatusDiv);
+            }
         } catch (error) {
             console.error('Error fetching bookings:', error);
-            if (myBookingsStatusDiv) {
-                if (error.message && error.message.includes('401')) {
-                    showError(myBookingsStatusDiv, 'Please log in to view your bookings.');
-                } else {
-                    showError(myBookingsStatusDiv, error.message || 'Failed to load bookings. Please try again.');
-                }
-            }
-            // Set error messages in specific containers
+            // apiCall likely already showed an error in myBookingsStatusDiv
+            // Set specific messages for containers
             upcomingBookingsContainer.innerHTML = '<p>Could not load upcoming bookings.</p>';
             pastBookingsContainer.innerHTML = '<p>Could not load past bookings.</p>';
         }
@@ -697,6 +727,65 @@ document.addEventListener('DOMContentLoaded', () => {
         return !noOverlap; // Overlap is true if it's not "no overlap"
     }
     
-    // Initial fetch of bookings
+    // Event Listeners for filters
+    function handleFilterChange() {
+        fetchAndDisplayBookings();
+    }
+
+    if (statusFilterSelect) {
+        statusFilterSelect.addEventListener('change', handleFilterChange);
+    }
+
+    if (dateFilterTypeSelect) {
+        dateFilterTypeSelect.addEventListener('change', function() {
+            if (this.value === 'specific') {
+                if (datePickerContainer) datePickerContainer.style.display = 'block';
+                if (flatpickrInstance) flatpickrInstance.open();
+            } else {
+                if (datePickerContainer) datePickerContainer.style.display = 'none';
+                if (datePickerInput) datePickerInput.value = '';
+                if (flatpickrInstance) flatpickrInstance.clear();
+                handleFilterChange();
+            }
+        });
+    }
+
+    // Initialize Flatpickr for the date picker
+    if (datePickerInput && typeof flatpickr === "function") {
+        flatpickrInstance = flatpickr(datePickerInput, {
+            dateFormat: "Y-m-d",
+            onChange: function(selectedDates, dateStr, instance) {
+                if (dateFilterTypeSelect && dateFilterTypeSelect.value === 'specific') {
+                    fetchAndDisplayBookings();
+                }
+            }
+        });
+    } else {
+        console.warn("Flatpickr not available or datePickerInput not found. Date picker will not be initialized.");
+    }
+
+    // Initial fetch of bookings - now uses default filter values
     fetchAndDisplayBookings();
+
+    // Visibility toggles (existing logic from previous step)
+    function updateSectionVisibility() {
+        const upcomingContainer = document.getElementById('upcoming-bookings-container');
+        const pastContainer = document.getElementById('past-bookings-container');
+
+        if (toggleUpcomingCheckbox && upcomingContainer) {
+            upcomingContainer.style.display = toggleUpcomingCheckbox.checked ? '' : 'none';
+        }
+        if (togglePastCheckbox && pastContainer) {
+            pastContainer.style.display = togglePastCheckbox.checked ? '' : 'none';
+        }
+    }
+
+    if (toggleUpcomingCheckbox && togglePastCheckbox) {
+        updateSectionVisibility(); // Initial call
+
+        toggleUpcomingCheckbox.addEventListener('change', updateSectionVisibility);
+        togglePastCheckbox.addEventListener('change', updateSectionVisibility);
+    } else {
+        console.warn("Visibility toggle checkboxes not found. Section visibility control will not be active.");
+    }
 });
