@@ -439,7 +439,7 @@ def export_users():
     add_audit_log(action="EXPORT_USERS", details=f"User {current_user.username} exported user and role data.")
     return jsonify(export_data), 200
 
-@api_users_bp.route('/api/admin/users/import', methods=['POST'])
+@api_users_bp.route('/admin/users/import', methods=['POST'])
 @login_required
 @permission_required('manage_users')
 def import_users():
@@ -738,7 +738,7 @@ def import_users_csv():
                     if user.is_admin and not True: # if current user is admin and new value is False
                          if user.id == current_user.id and User.query.filter_by(is_admin=True).count() == 1:
                             errors.append({'row': row_num, 'username': username, 'error': 'Cannot remove your own admin status as the sole admin.'})
-                            db.session.rollback() # Rollback this specific user change
+                            # db.session.rollback() # Rollback this specific user change - REMOVED
                             continue
                     user.is_admin = True
                 elif is_admin_str == 'false':
@@ -746,7 +746,7 @@ def import_users_csv():
                 else:
                     errors.append({'row': row_num, 'username': username, 'error': f"Invalid value for is_admin: '{is_admin_str}'. Use 'true' or 'false'."})
                     # Potentially skip this user or just this field update. For now, let's skip user.
-                    db.session.rollback()
+                    # db.session.rollback() - REMOVED
                     continue
 
             # Role handling
@@ -763,7 +763,7 @@ def import_users_csv():
                     new_user_roles.append(role_obj)
 
                 if not found_all_roles:
-                    db.session.rollback() # Rollback changes for this user if a role was not found
+                    # db.session.rollback() # Rollback changes for this user if a role was not found - REMOVED
                     continue
 
                 # Safeguard for removing last admin role
@@ -774,7 +774,7 @@ def import_users_csv():
                         users_with_admin_role = User.query.filter(User.roles.any(id=admin_role_db.id)).count()
                         if users_with_admin_role == 1:
                             errors.append({'row': row_num, 'username': username, 'error': 'Cannot remove your own "Administrator" role as the sole holder.'})
-                            db.session.rollback()
+                            # db.session.rollback() - REMOVED
                             continue
                 user.roles = new_user_roles
             elif 'role_names' in csv_reader.fieldnames: # If 'role_names' header exists but string is empty, clear roles
