@@ -275,11 +275,13 @@ def create_app(config_object=config):
                 if restore_summary.get('status') not in ['success', 'success_no_files']:
                      app.logger.warning(f"Incremental booking restore on startup finished with status: {restore_summary.get('status')}. Errors: {restore_summary.get('errors')}")
                 # Add an audit log for the attempt
-                add_audit_log(action="STARTUP_INCREMENTAL_BOOKING_RESTORE_ATTEMPT",
-                              details=f"Status: {restore_summary.get('status')}, Files: {restore_summary.get('files_processed')}, Created: {restore_summary.get('bookings_created')}, Updated: {restore_summary.get('bookings_updated')}, Errors: {len(restore_summary.get('errors', []))}")
+                with app.app_context():  # <<< WRAPPER ADDED
+                    add_audit_log(action="STARTUP_INCREMENTAL_BOOKING_RESTORE_ATTEMPT",
+                                  details=f"Status: {restore_summary.get('status')}, Files: {restore_summary.get('files_processed')}, Created: {restore_summary.get('bookings_created')}, Updated: {restore_summary.get('bookings_updated')}, Errors: {len(restore_summary.get('errors', []))}")
             except Exception as e_incr_restore:
                 app.logger.exception(f"Error during startup incremental booking records restore: {e_incr_restore}")
-                add_audit_log(action="STARTUP_INCREMENTAL_BOOKING_RESTORE_ERROR", details=f"Exception: {str(e_incr_restore)}")
+                with app.app_context():  # <<< WRAPPER ADDED
+                    add_audit_log(action="STARTUP_INCREMENTAL_BOOKING_RESTORE_ERROR", details=f"Exception: {str(e_incr_restore)}")
         else:
             app.logger.info("Automatic restore of incremental booking records on startup is disabled in settings.")
     elif callable(load_scheduler_settings) and load_scheduler_settings().get('auto_restore_booking_records_on_startup', False):
