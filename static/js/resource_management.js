@@ -541,6 +541,14 @@ document.addEventListener('DOMContentLoaded', function() {
             copyUrlBtn.dataset.pinValue = pin.pin_value;
             copyUrlBtn.dataset.resourceId = resourceId;
             actionsCell.appendChild(copyUrlBtn);
+
+            const showQrBtn = document.createElement('button');
+            showQrBtn.textContent = 'Show QR Code';
+            showQrBtn.classList.add('button', 'button-small', 'show-qr-code-btn');
+            showQrBtn.dataset.pinValue = pin.pin_value;
+            showQrBtn.dataset.resourceId = resourceId;
+            showQrBtn.style.marginLeft = '5px';
+            actionsCell.appendChild(showQrBtn);
         });
     }
 
@@ -684,14 +692,45 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else if (target.classList.contains('copy-pin-url-btn')) {
                 const pinValue = target.dataset.pinValue;
-                const resourceId = target.dataset.resourceId; // Should be currentResourceIdForPins
-                const checkinUrl = `${window.location.origin}/r/${resourceId}/checkin?pin=${pinValue}`;
+                const resourceId = target.dataset.resourceId;
+                const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`; // Fixed URL
                 try {
                     await navigator.clipboard.writeText(checkinUrl);
                     showSuccess(statusEl, 'Check-in URL copied to clipboard!');
                 } catch (err) {
                     showError(statusEl, 'Failed to copy URL. Please copy manually.');
                     console.error('Failed to copy URL: ', err);
+                }
+            } else if (target.classList.contains('show-qr-code-btn')) {
+                const pinValue = target.dataset.pinValue;
+                const resourceId = target.dataset.resourceId;
+                const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`; // Correct URL
+
+                const qrCodeModal = document.getElementById('qr-code-modal');
+                const qrCodeDisplay = document.getElementById('qr-code-display');
+                const qrCodeUrlText = document.getElementById('qr-code-url-text');
+
+                if (qrCodeModal && qrCodeDisplay && qrCodeUrlText) {
+                    qrCodeDisplay.innerHTML = ''; // Clear previous QR code
+                    qrCodeUrlText.textContent = checkinUrl;
+
+                    if (typeof QRCode !== 'undefined') { // Check if QRCode library is loaded
+                        new QRCode(qrCodeDisplay, {
+                            text: checkinUrl,
+                            width: 200,
+                            height: 200,
+                            colorDark : "#000000",
+                            colorLight : "#ffffff",
+                            correctLevel : QRCode.CorrectLevel.H
+                        });
+                    } else {
+                        qrCodeDisplay.textContent = 'QR Code library not loaded. Please add it.';
+                        console.error('QRCode library not found. Cannot generate QR code.');
+                    }
+                    qrCodeModal.style.display = 'block';
+                } else {
+                    console.error('QR Code modal elements not found.');
+                    showError(statusEl, 'Could not display QR Code modal. Elements missing.');
                 }
             }
         });
