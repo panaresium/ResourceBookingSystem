@@ -3323,5 +3323,83 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    // --- Embedded Login Form for PIN Check-in Page ---
+    const embeddedCheckinLoginForm = document.getElementById('embedded-checkin-login-form');
+    if (embeddedCheckinLoginForm) {
+        embeddedCheckinLoginForm.addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const usernameInput = document.getElementById('embedded-username');
+            const passwordInput = document.getElementById('embedded-password');
+            const nextUrlInput = document.getElementById('embedded-next-url');
+            const messageDiv = document.getElementById('embedded-login-message');
+
+            const username = usernameInput.value;
+            const password = passwordInput.value;
+            const nextUrl = nextUrlInput.value;
+
+            if (!username || !password) {
+                if (messageDiv) {
+                    messageDiv.textContent = 'Username and password are required.';
+                    messageDiv.className = 'status-message error-message';
+                    messageDiv.style.display = 'block';
+                }
+                return;
+            }
+
+            if (messageDiv) {
+                messageDiv.textContent = 'Logging in...';
+                messageDiv.className = 'status-message';
+                messageDiv.style.display = 'block';
+            }
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        // CSRF token is typically not required for login routes marked @csrf.exempt
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    if (messageDiv) {
+                        messageDiv.textContent = 'Login successful! Redirecting...';
+                        messageDiv.className = 'status-message success-message';
+                        messageDiv.style.display = 'block';
+                    }
+                    // Update auth status for the navbar etc.
+                    // Since this is a full redirect, updateAuthLink() might not be strictly necessary before redirect,
+                    // but good to ensure session storage is updated if any subsequent script on the *next* page relies on it immediately.
+                    if (data.user) {
+                         sessionStorage.setItem('loggedInUserUsername', data.user.username);
+                         sessionStorage.setItem('loggedInUserIsAdmin', data.user.is_admin ? 'true' : 'false');
+                         sessionStorage.setItem('loggedInUserId', data.user.id);
+                    }
+                    sessionStorage.setItem('userPerformedLoginAction', 'true'); // Signal that login was intentional
+                    sessionStorage.removeItem('explicitlyLoggedOut');
+
+
+                    // Redirect to the original check-in URL
+                    window.location.href = nextUrl;
+                } else {
+                    if (messageDiv) {
+                        messageDiv.textContent = data.error || 'Login failed. Please check your credentials.';
+                        messageDiv.className = 'status-message error-message';
+                        messageDiv.style.display = 'block';
+                    }
+                }
+            } catch (error) {
+                if (messageDiv) {
+                    messageDiv.textContent = 'An error occurred during login. Please try again.';
+                    messageDiv.className = 'status-message error-message';
+                    messageDiv.style.display = 'block';
+                }
+                console.error('Embedded login error:', error);
+            }
+        });
+    }
 });
 

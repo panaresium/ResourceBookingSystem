@@ -37,9 +37,26 @@
 
     <div style="margin-top: 30px;">
         <a href="{{ url_for('ui.serve_index') }}" class="button primary-button">{{ _('Go to Homepage') }}</a>
-        {# Example for a conditional login link - logic for 'show_login_link' would be in the route #}
-        {% if show_login_link %}
-            <a href="{{ login_url }}" class="button" style="margin-left: 10px;">{{ _('Login') }}</a>
+        {# Conditional login link or embedded form #}
+        {% if show_embedded_login %}
+            <div id="embedded-login-container" style="margin-top: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 5px; max-width: 400px; margin-left: auto; margin-right: auto;">
+                <h4>{{ _('Login to Check-In') }}</h4>
+                <form id="embedded-checkin-login-form">
+                    <div>
+                        <label for="embedded-username">{{ _('Username:') }}</label>
+                        <input type="text" id="embedded-username" name="username" required style="width: 100%; margin-bottom: 10px;">
+                    </div>
+                    <div>
+                        <label for="embedded-password">{{ _('Password:') }}</label>
+                        <input type="password" id="embedded-password" name="password" required style="width: 100%; margin-bottom: 10px;">
+                    </div>
+                    <input type="hidden" id="embedded-next-url" name="next" value="{{ original_check_in_url }}">
+                    <button type="submit" class="button primary-button">{{ _('Login and Check-In') }}</button>
+                    <div id="embedded-login-message" class="status-message error-message" style="display:none; margin-top:10px;"></div>
+                </form>
+            </div>
+        {% elif show_login_link %}
+            <p style="margin-top:15px;"><a href="{{ login_url }}" class="button" style="margin-left: 10px;">{{ _('Click here to log in.') }}</a></p>
         {% endif %}
     </div>
 </div>
