@@ -1063,7 +1063,7 @@ def resource_pin_check_in(resource_id):
 
     if requires_login and not current_user.is_authenticated:
         logger.info(f"PIN check-in for resource {resource_id} requires login.")
-        login_url = url_for('auth.serve_login_page', next=request.url) # Assuming 'auth.serve_login_page' is your login route
+        login_url = url_for('ui.serve_login', next=request.url) # Assuming 'ui.serve_login' is your login route
         return render_template('check_in_status_public.html',
                                message=_('Login is required to perform this check-in. Please log in and try again.'),
                                status='error',
