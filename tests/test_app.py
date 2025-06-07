@@ -4,12 +4,14 @@ import json
 import urllib.parse
 from sqlalchemy import text
 
-from datetime import datetime, time, date, timedelta
+from datetime import datetime, time, date, timedelta, timezone as timezone_original
+from datetime import datetime as datetime_original, timedelta as timedelta_original # For mocking
 
 from app import app # app object
 from extensions import db # db object
-from models import User, Resource, Booking, WaitlistEntry, FloorMap, AuditLog, BookingSettings # Models
+from models import User, Resource, Booking, WaitlistEntry, FloorMap, AuditLog, BookingSettings, ResourcePIN # Models
 from utils import email_log, teams_log, slack_log # Test log lists
+from unittest.mock import patch # For mocking datetime
 
 # from flask_login import current_user # Not directly used for assertions here
 
@@ -745,6 +747,172 @@ class TestBookingUserActions(AppTests):
         self.assertEqual(check_in_resp.status_code, 403, f"Check-in should have failed (too late): {check_in_resp.get_data(as_text=True)}")
         expected_error_msg_part = f"Check-in is only allowed from {settings.check_in_minutes_before} minutes before to {settings.check_in_minutes_after} minutes after"
         self.assertIn(expected_error_msg_part, check_in_resp.get_json().get('error', ''))
+        self.logout()
+
+    def _create_pin_for_resource(self, resource_id, pin_value="VALIDPIN4TEST", is_active=True):
+        """Helper to create a ResourcePIN for a resource."""
+        pin = ResourcePIN.query.filter_by(resource_id=resource_id, pin_value=pin_value).first()
+        if not pin:
+            pin = ResourcePIN(resource_id=resource_id, pin_value=pin_value, is_active=is_active)
+            db.session.add(pin)
+            db.session.commit()
+        else: # Ensure it's in the desired state
+            pin.is_active = is_active
+            db.session.commit()
+
+        # Update resource.current_pin if this is the first active one or becomes active
+        resource = Resource.query.get(resource_id)
+        if is_active and (not resource.current_pin or resource.current_pin != pin_value):
+            # This simplified logic might need adjustment if multiple active PINs are handled differently for current_pin
+            resource.current_pin = pin_value
+            db.session.commit()
+        elif not is_active and resource.current_pin == pin_value:
+            resource.current_pin = None # Clear it if the deactivated PIN was current
+            # Optionally, find another active PIN to set as current if business logic requires
+            db.session.commit()
+        return pin
+
+    @patch('routes.api_bookings.datetime')
+    def test_direct_checkin_with_valid_pin(self, mock_datetime_obj):
+        user = self.helper_create_user_and_login(username="user_direct_pin_valid")
+        resource = self.helper_create_resource(name="ResourceDirectPinValid")
+        pin = self._create_pin_for_resource(resource.id, "DPIN001")
+        booking_settings = self.helper_set_checkin_window(minutes_before=15, minutes_after=15)
+
+        # Create a booking that starts "now" according to mock time
+        mocked_now_dt = datetime_original(2024, 7, 15, 12, 0, 0) # Fixed reference for "now"
+        mock_datetime_obj.now.return_value = mocked_now_dt.replace(tzinfo=timezone_original.utc)
+        mock_datetime_obj.utcnow.return_value = mocked_now_dt # if utcnow is used
+        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+
+        # Booking starts exactly at mocked_now, so it's within check-in window
+        booking = self._create_booking(user.username, resource.id, start_offset_hours=0) # This uses datetime.utcnow()
+        # Adjust booking time to be relative to mocked_now for test consistency
+        booking.start_time = mocked_now_dt
+        booking.end_time = mocked_now_dt + timedelta_original(hours=1)
+        db.session.commit()
+
+        response = self.client.post(f'/api/bookings/{booking.id}/check_in', json={'pin': pin.pin_value})
+        self.assertEqual(response.status_code, 200, f"Direct PIN check-in failed: {response.get_json()}")
+        self.assertIn("Check-in successful", response.get_json().get('message'))
+
+        db.session.refresh(booking)
+        self.assertIsNotNone(booking.checked_in_at)
+
+        audit_log = AuditLog.query.filter_by(action="USER_CHECK_IN_BOOKING").order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log)
+        self.assertEqual(audit_log.user_id, user.id)
+        self.assertIn(f"Booking ID {booking.id} checked in.", audit_log.details)
+        self.assertIn(f"PIN {pin.pin_value} used for check-in.", audit_log.details)
+        self.logout()
+
+    @patch('routes.api_bookings.datetime')
+    def test_direct_checkin_with_invalid_pin(self, mock_datetime_obj):
+        user = self.helper_create_user_and_login(username="user_direct_pin_invalid")
+        resource = self.helper_create_resource(name="ResourceDirectPinInvalid")
+        self.helper_set_checkin_window(minutes_before=15, minutes_after=15)
+
+        mocked_now_dt = datetime_original(2024, 7, 15, 12, 0, 0)
+        mock_datetime_obj.now.return_value = mocked_now_dt.replace(tzinfo=timezone_original.utc)
+        mock_datetime_obj.utcnow.return_value = mocked_now_dt
+        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+
+        booking = self._create_booking(user.username, resource.id, start_offset_hours=0)
+        booking.start_time = mocked_now_dt; booking.end_time = mocked_now_dt + timedelta_original(hours=1); db.session.commit()
+
+        response = self.client.post(f'/api/bookings/{booking.id}/check_in', json={'pin': 'INVALIDPIN123'})
+        self.assertEqual(response.status_code, 403, f"Response: {response.get_json()}")
+        self.assertIn("Invalid PIN provided for resource.", response.get_json().get('error'))
+
+        db.session.refresh(booking)
+        self.assertIsNone(booking.checked_in_at)
+
+        audit_log = AuditLog.query.filter_by(action="USER_CHECK_IN_FAIL_INVALID_PIN").order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log)
+        self.assertEqual(audit_log.user_id, user.id)
+        self.assertIn(f"Booking ID {booking.id}", audit_log.details)
+        self.assertIn("Attempted PIN: INVALIDPIN123", audit_log.details)
+        self.logout()
+
+    @patch('routes.api_bookings.datetime')
+    def test_direct_checkin_with_inactive_pin(self, mock_datetime_obj):
+        user = self.helper_create_user_and_login(username="user_direct_pin_inactive")
+        resource = self.helper_create_resource(name="ResourceDirectPinInactive")
+        pin = self._create_pin_for_resource(resource.id, "INACTIVE00", is_active=False)
+        self.helper_set_checkin_window(minutes_before=15, minutes_after=15)
+
+        mocked_now_dt = datetime_original(2024, 7, 15, 12, 0, 0)
+        mock_datetime_obj.now.return_value = mocked_now_dt.replace(tzinfo=timezone_original.utc)
+        mock_datetime_obj.utcnow.return_value = mocked_now_dt
+        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+
+        booking = self._create_booking(user.username, resource.id, start_offset_hours=0)
+        booking.start_time = mocked_now_dt; booking.end_time = mocked_now_dt + timedelta_original(hours=1); db.session.commit()
+
+
+        response = self.client.post(f'/api/bookings/{booking.id}/check_in', json={'pin': pin.pin_value})
+        self.assertEqual(response.status_code, 403, f"Response: {response.get_json()}")
+        self.assertIn("PIN is not active.", response.get_json().get('error'))
+
+        db.session.refresh(booking)
+        self.assertIsNone(booking.checked_in_at)
+        self.logout()
+
+    @patch('routes.api_bookings.datetime')
+    def test_direct_checkin_without_pin_success(self, mock_datetime_obj):
+        user = self.helper_create_user_and_login(username="user_direct_nopin")
+        resource = self.helper_create_resource(name="ResourceDirectNoPin")
+        # No PIN created for this resource, or at least not provided
+        self.helper_set_checkin_window(minutes_before=15, minutes_after=15)
+
+        mocked_now_dt = datetime_original(2024, 7, 15, 12, 0, 0)
+        mock_datetime_obj.now.return_value = mocked_now_dt.replace(tzinfo=timezone_original.utc)
+        mock_datetime_obj.utcnow.return_value = mocked_now_dt
+        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+
+        booking = self._create_booking(user.username, resource.id, start_offset_hours=0)
+        booking.start_time = mocked_now_dt; booking.end_time = mocked_now_dt + timedelta_original(hours=1); db.session.commit()
+
+        response = self.client.post(f'/api/bookings/{booking.id}/check_in', json={}) # Empty JSON, no PIN
+        self.assertEqual(response.status_code, 200, f"Direct check-in without PIN failed: {response.get_json()}")
+        self.assertIn("Check-in successful", response.get_json().get('message'))
+
+        db.session.refresh(booking)
+        self.assertIsNotNone(booking.checked_in_at)
+
+        audit_log = AuditLog.query.filter_by(action="USER_CHECK_IN_BOOKING").order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log)
+        self.assertNotIn("PIN", audit_log.details, "Audit log should not mention PIN if none was used.")
+        self.logout()
+
+    @patch('routes.api_bookings.datetime')
+    def test_direct_checkin_with_pin_outside_window(self, mock_datetime_obj):
+        user = self.helper_create_user_and_login(username="user_direct_pin_outside")
+        resource = self.helper_create_resource(name="ResourceDirectPinOutside")
+        pin = self._create_pin_for_resource(resource.id, "DPIN002")
+        booking_settings = self.helper_set_checkin_window(minutes_before=15, minutes_after=15) # Window is +/- 15 mins around start
+
+        # Mock time to be 30 minutes BEFORE booking start_time (outside window)
+        mocked_now_dt = datetime_original(2024, 7, 15, 10, 0, 0) # Reference "now"
+        booking_start_dt = mocked_now_dt + timedelta_original(minutes=30 + booking_settings.check_in_minutes_before + 1) # Booking starts far enough
+
+        mock_datetime_obj.now.return_value = mocked_now_dt.replace(tzinfo=timezone_original.utc)
+        mock_datetime_obj.utcnow.return_value = mocked_now_dt
+        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+
+        booking = self._create_booking(user.username, resource.id, start_offset_hours=0) # Create booking first
+        booking.start_time = booking_start_dt # Now align its start time
+        booking.end_time = booking_start_dt + timedelta_original(hours=1)
+        db.session.commit()
+
+        response = self.client.post(f'/api/bookings/{booking.id}/check_in', json={'pin': pin.pin_value})
+        self.assertEqual(response.status_code, 403, f"Response: {response.get_json()}")
+        # Expected error message comes from the check_in_booking function's window validation
+        expected_error_msg_part = f"Check-in is only allowed from {booking_settings.check_in_minutes_before} minutes before to {booking_settings.check_in_minutes_after} minutes after the booking start time."
+        self.assertIn(expected_error_msg_part, response.get_json().get('error', ''))
+
+        db.session.refresh(booking)
+        self.assertIsNone(booking.checked_in_at)
         self.logout()
 
 
@@ -3013,6 +3181,594 @@ class TestAdminBookings(AppTests):
         self.logout()
 
 
+class TestAdminBookingSettingsPINConfig(AppTests):
+    def _create_admin_user(self, username="settings_pin_admin", email_ext="settings_pin_admin"):
+        """Helper to create an admin user for booking settings PIN config tests."""
+        admin_user = User.query.filter_by(username=username).first()
+        if not admin_user:
+            admin_user = User(username=username, email=f"{email_ext}@example.com", is_admin=True)
+            admin_user.set_password("adminpass")
+            # Ensure admin has 'manage_system_settings' or equivalent permission if specific roles are used
+            # For simplicity, is_admin=True is often enough for initial access checks in tests.
+            # If your app uses granular role-based permissions for settings, assign the relevant role here.
+            db.session.add(admin_user)
+            db.session.commit()
+        return admin_user
+
+    def get_current_booking_settings(self):
+        return BookingSettings.query.first()
+
+    def _get_base_booking_settings_form_data(self):
+        """Returns a dictionary with all existing booking settings fields with default/valid values."""
+        # Fetch existing settings or use defaults if none exist
+        settings = self.get_current_booking_settings()
+        if not settings: # Default values if no settings exist
+            return {
+                'allow_past_bookings': '', # Not 'on' means False
+                'max_booking_days_in_future': '30',
+                'allow_multiple_resources_same_time': '',
+                'max_bookings_per_user': '',
+                'enable_check_in_out': '',
+                'past_booking_time_adjustment_hours': '0',
+                'check_in_minutes_before': '15',
+                'check_in_minutes_after': '15',
+                # PIN settings will be overlaid by tests
+            }
+        return {
+            'allow_past_bookings': 'on' if settings.allow_past_bookings else '',
+            'max_booking_days_in_future': str(settings.max_booking_days_in_future or ''),
+            'allow_multiple_resources_same_time': 'on' if settings.allow_multiple_resources_same_time else '',
+            'max_bookings_per_user': str(settings.max_bookings_per_user or ''),
+            'enable_check_in_out': 'on' if settings.enable_check_in_out else '',
+            'past_booking_time_adjustment_hours': str(settings.past_booking_time_adjustment_hours or '0'),
+            'check_in_minutes_before': str(settings.check_in_minutes_before or '15'),
+            'check_in_minutes_after': str(settings.check_in_minutes_after or '15'),
+        }
+
+    def test_update_global_pin_settings_success(self):
+        """Test successfully updating all global PIN settings."""
+        admin = self._create_admin_user()
+        self.login(admin.username, "adminpass")
+
+        # Ensure a BookingSettings row exists
+        if not self.get_current_booking_settings():
+            db.session.add(BookingSettings())
+            db.session.commit()
+
+        form_data = self._get_base_booking_settings_form_data()
+        form_data.update({
+            'pin_auto_generation_enabled': 'on',
+            'pin_length': '8',
+            'pin_allow_manual_override': 'on',
+            'resource_checkin_url_requires_login': 'on',
+        })
+
+        response = self.client.post(url_for('admin_ui.update_booking_settings'), data=form_data, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Booking settings updated successfully.", response.data)
+
+        settings = self.get_current_booking_settings()
+        self.assertIsNotNone(settings)
+        self.assertTrue(settings.pin_auto_generation_enabled)
+        self.assertEqual(settings.pin_length, 8)
+        self.assertTrue(settings.pin_allow_manual_override)
+        self.assertTrue(settings.resource_checkin_url_requires_login)
+        self.logout()
+
+    def test_update_global_pin_settings_pin_length_validation(self):
+        """Test validation for pin_length (too short, too long, non-integer)."""
+        admin = self._create_admin_user()
+        self.login(admin.username, "adminpass")
+
+        initial_settings = self.get_current_booking_settings()
+        if not initial_settings:
+            initial_settings = BookingSettings(pin_length=6) # Default to a valid length
+            db.session.add(initial_settings)
+            db.session.commit()
+        initial_pin_length = initial_settings.pin_length
+
+        test_cases = [
+            ('3', f"PIN length must be between {app.config.get('MIN_PIN_LENGTH', 4)} and {app.config.get('MAX_PIN_LENGTH', 32)}."), # Too short
+            ('33', f"PIN length must be between {app.config.get('MIN_PIN_LENGTH', 4)} and {app.config.get('MAX_PIN_LENGTH', 32)}."), # Too long
+            ('abc', "Invalid input for PIN length. Must be an integer.") # Non-integer
+        ]
+
+        for invalid_length, error_message_part in test_cases:
+            with self.subTest(pin_length=invalid_length):
+                form_data = self._get_base_booking_settings_form_data()
+                form_data.update({
+                    'pin_auto_generation_enabled': 'on',
+                    'pin_length': invalid_length, # Invalid length
+                    'pin_allow_manual_override': 'on',
+                    'resource_checkin_url_requires_login': 'on',
+                })
+                response = self.client.post(url_for('admin_ui.update_booking_settings'), data=form_data, follow_redirects=True)
+                self.assertEqual(response.status_code, 200) # Lands on page again
+                self.assertIn(bytes(error_message_part, 'utf-8'), response.data)
+
+                settings_after_error = self.get_current_booking_settings()
+                self.assertEqual(settings_after_error.pin_length, initial_pin_length, "PIN length should not have updated on validation error.")
+        self.logout()
+
+
+class TestAPIResourcePINs(AppTests):
+    def _create_admin_user_and_login(self, username="pin_api_admin", password="adminpass"):
+        """Creates an admin user and logs them in."""
+        admin_user = User.query.filter_by(username=username).first()
+        if not admin_user:
+            admin_user = User(username=username, email=f"{username}@example.com", is_admin=True)
+            admin_user.set_password(password)
+            # Assign manage_resources permission if your app uses granular roles
+            # For simplicity, is_admin=True is often sufficient for tests.
+            # admin_role = Role.query.filter_by(name="Administrator").first() # Assuming Administrator role has all_permissions
+            # if admin_role and admin_role not in admin_user.roles:
+            # admin_user.roles.append(admin_role)
+            db.session.add(admin_user)
+            db.session.commit()
+
+        login_response = self.login(username, password)
+        self.assertEqual(login_response.status_code, 200, "Admin login failed in test setup.")
+        self.assertTrue(login_response.get_json().get('success'), "Admin login API call was not successful.")
+        return admin_user
+
+    def _create_test_resource(self, name="Test Resource for PINs"):
+        """Creates a test resource."""
+        resource = Resource.query.filter_by(name=name).first()
+        if not resource:
+            resource = Resource(name=name, capacity=1, status='published')
+            db.session.add(resource)
+            db.session.commit()
+        return resource
+
+    def _set_booking_pin_settings(self, auto_enabled=True, length=6, manual_allowed=True, checkin_url_requires_login=True):
+        """Configures BookingSettings for PINs."""
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings()
+            db.session.add(settings)
+
+        settings.pin_auto_generation_enabled = auto_enabled
+        settings.pin_length = length
+        settings.pin_allow_manual_override = manual_allowed
+        settings.resource_checkin_url_requires_login = checkin_url_requires_login
+        # Add other relevant settings if needed
+        db.session.commit()
+        return settings
+
+    def _add_pin_via_api(self, resource_id, pin_value=None, notes=''):
+        """Helper to make the POST request for adding a PIN."""
+        payload = {'notes': notes}
+        if pin_value is not None:
+            payload['pin_value'] = pin_value
+
+        response = self.client.post(url_for('api_resources.add_resource_pin', resource_id=resource_id), json=payload)
+        return response
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self._create_admin_user_and_login()
+        self.resource = self._create_test_resource()
+        # Default BookingSettings for PINs, can be overridden in tests
+        self._set_booking_pin_settings()
+
+    def tearDown(self):
+        # It's good practice to clean up specific test data,
+        # but AppTests.tearDown() drops all tables, which handles it.
+        # If specific cleanup before table drop is needed, add here.
+        # For example, explicitly deleting ResourcePINs or Resources if they cause issues.
+        # ResourcePIN.query.delete()
+        # Resource.query.filter_by(name=self.resource.name).delete()
+        # BookingSettings.query.delete()
+        # User.query.filter_by(username=self.admin.username).delete()
+        # db.session.commit()
+        super().tearDown()
+
+
+    def test_add_auto_generated_pin(self):
+        """Test adding an auto-generated PIN to a resource."""
+        pin_len = 7
+        self._set_booking_pin_settings(auto_enabled=True, length=pin_len, manual_allowed=False)
+
+        response = self._add_pin_via_api(self.resource.id, notes='Auto-gen test')
+
+        self.assertEqual(response.status_code, 201, f"Failed to add auto-generated PIN: {response.get_json()}")
+        pin_data = response.get_json()
+
+        self.assertIsNotNone(pin_data.get('id'))
+        self.assertIsNotNone(pin_data.get('pin_value'))
+        self.assertEqual(len(pin_data['pin_value']), pin_len)
+        self.assertTrue(pin_data.get('is_active'))
+        self.assertEqual(pin_data.get('notes'), 'Auto-gen test')
+
+        db_pin = ResourcePIN.query.get(pin_data['id'])
+        self.assertIsNotNone(db_pin)
+        self.assertEqual(db_pin.pin_value, pin_data['pin_value'])
+        self.assertEqual(db_pin.resource_id, self.resource.id)
+
+        db.session.refresh(self.resource) # Refresh resource from DB
+        self.assertEqual(self.resource.current_pin, db_pin.pin_value, "Resource current_pin not set to the new auto-generated PIN.")
+
+    def test_add_manual_pin_success(self):
+        """Test adding a manual PIN successfully."""
+        self._set_booking_pin_settings(manual_allowed=True, auto_enabled=False)
+        manual_pin_value = "MANUAL123"
+
+        response = self._add_pin_via_api(self.resource.id, pin_value=manual_pin_value, notes='Manual test success')
+        self.assertEqual(response.status_code, 201, f"Failed to add manual PIN: {response.get_json()}")
+        pin_data = response.get_json()
+
+        self.assertEqual(pin_data.get('pin_value'), manual_pin_value)
+        self.assertTrue(pin_data.get('is_active'))
+        self.assertEqual(pin_data.get('notes'), 'Manual test success')
+
+        db_pin = ResourcePIN.query.filter_by(pin_value=manual_pin_value, resource_id=self.resource.id).first()
+        self.assertIsNotNone(db_pin)
+
+        db.session.refresh(self.resource)
+        self.assertEqual(self.resource.current_pin, manual_pin_value)
+
+    def test_add_manual_pin_validation(self):
+        """Test validation for manual PINs (duplicate, disallowed, length)."""
+        # 1. Duplicate PIN for the same resource
+        self._set_booking_pin_settings(manual_allowed=True)
+        duplicate_pin = "DUPLICATE1"
+        self._add_pin_via_api(self.resource.id, pin_value=duplicate_pin, notes='Initial duplicate') # Add first time
+
+        response_duplicate = self._add_pin_via_api(self.resource.id, pin_value=duplicate_pin, notes='Attempt duplicate')
+        self.assertEqual(response_duplicate.status_code, 400, "Duplicate PIN should result in 400.")
+        self.assertIn("PIN value 'DUPLICATE1' already exists for this resource.", response_duplicate.get_json().get('error', ''))
+
+        # 2. Disallowed manual PIN
+        self._set_booking_pin_settings(manual_allowed=False, auto_enabled=True) # Disable manual, enable auto
+        response_disallowed = self._add_pin_via_api(self.resource.id, pin_value="MANUALDISALLOWED", notes='Disallowed manual')
+        self.assertEqual(response_disallowed.status_code, 403, "Disallowed manual PIN should result in 403.")
+        self.assertIn("Manual PIN entry is not allowed by current settings.", response_disallowed.get_json().get('error', ''))
+
+        # 3. PIN length validation (assuming manual PINs also check BookingSettings.pin_length)
+        # The add_resource_pin route has its own MIN_PIN_LENGTH and MAX_PIN_LENGTH, but also checks BookingSettings.pin_length for auto-gen
+        # Let's test against the general MIN/MAX length for manual pins.
+        # If BookingSettings.pin_length is meant to apply to manual pins too, the route needs adjustment.
+        # Based on current `add_resource_pin` logic, manual pins are checked against fixed MIN/MAX (4-32).
+        self._set_booking_pin_settings(manual_allowed=True, length=6) # Set a specific length for settings
+
+        # Too short (manual)
+        response_short = self._add_pin_via_api(self.resource.id, pin_value="123", notes='Short manual')
+        self.assertEqual(response_short.status_code, 400)
+        # Error message depends on whether it's compared to BookingSettings.pin_length or fixed range.
+        # Current `add_resource_pin` checks `MIN_PIN_LENGTH` (4) and `MAX_PIN_LENGTH` (32) for manual.
+        self.assertIn(f"Manual PIN length must be between {app.config.get('MIN_PIN_LENGTH', 4)} and {app.config.get('MAX_PIN_LENGTH', 32)} characters.", response_short.get_json().get('error', ''))
+
+        # Too long (manual)
+        response_long = self._add_pin_via_api(self.resource.id, pin_value="A"*33, notes='Long manual')
+        self.assertEqual(response_long.status_code, 400)
+        self.assertIn(f"Manual PIN length must be between {app.config.get('MIN_PIN_LENGTH', 4)} and {app.config.get('MAX_PIN_LENGTH', 32)} characters.", response_long.get_json().get('error', ''))
+
+
+    def test_update_pin_status_and_notes(self):
+        """Test updating a PIN's active status and notes."""
+        self._set_booking_pin_settings(manual_allowed=True)
+        # Create an initial active PIN
+        add_resp = self._add_pin_via_api(self.resource.id, pin_value="PINTOUPDATE", notes='Initial PIN')
+        self.assertEqual(add_resp.status_code, 201)
+        pin_id = add_resp.get_json()['id']
+
+        db.session.refresh(self.resource)
+        self.assertEqual(self.resource.current_pin, "PINTOUPDATE") # Should be current
+
+        # Deactivate and update notes
+        update_payload1 = {'is_active': False, 'notes': 'Updated notes, deactivated'}
+        response_update1 = self.client.put(url_for('api_resources.update_resource_pin', resource_id=self.resource.id, pin_id=pin_id), json=update_payload1)
+        self.assertEqual(response_update1.status_code, 200, f"Failed to update PIN: {response_update1.get_json()}")
+        updated_data1 = response_update1.get_json()
+        self.assertFalse(updated_data1['is_active'])
+        self.assertEqual(updated_data1['notes'], 'Updated notes, deactivated')
+
+        db_pin1 = ResourcePIN.query.get(pin_id)
+        self.assertFalse(db_pin1.is_active)
+        self.assertEqual(db_pin1.notes, 'Updated notes, deactivated')
+
+        db.session.refresh(self.resource)
+        self.assertIsNone(self.resource.current_pin, "Current PIN should be cleared when the only PIN is deactivated.")
+
+        # Add another PIN, then reactivate the first one to see current_pin behavior
+        add_resp2 = self._add_pin_via_api(self.resource.id, pin_value="OTHERPIN", notes='Another active PIN')
+        self.assertEqual(add_resp2.status_code, 201)
+        db.session.refresh(self.resource)
+        self.assertEqual(self.resource.current_pin, "OTHERPIN")
+
+
+        # Reactivate the first PIN
+        update_payload2 = {'is_active': True, 'notes': 'Reactivated PIN'}
+        response_update2 = self.client.put(url_for('api_resources.update_resource_pin', resource_id=self.resource.id, pin_id=pin_id), json=update_payload2)
+        self.assertEqual(response_update2.status_code, 200)
+        updated_data2 = response_update2.get_json()
+        self.assertTrue(updated_data2['is_active'])
+
+        db_pin2 = ResourcePIN.query.get(pin_id)
+        self.assertTrue(db_pin2.is_active)
+
+        db.session.refresh(self.resource)
+        # When reactivating, if another PIN ('OTHERPIN') was already current, reactivating 'PINTOUPDATE'
+        # should NOT automatically make 'PINTOUPDATE' the current_pin if the logic prioritizes existing current_pin.
+        # The current logic in `update_resource_pin` is:
+        # If activating a PIN and resource has no current_pin, set it.
+        # If deactivating the current_pin, clear it and try to set a new one.
+        # So, if 'OTHERPIN' is current, reactivating 'PINTOUPDATE' shouldn't change current_pin.
+        self.assertEqual(self.resource.current_pin, "OTHERPIN", "Reactivating an older PIN should not make it current if another is already current.")
+
+        # Now, deactivate 'OTHERPIN'. 'PINTOUPDATE' (which is active) should become current.
+        other_pin_id = add_resp2.get_json()['id']
+        self.client.put(url_for('api_resources.update_resource_pin', resource_id=self.resource.id, pin_id=other_pin_id), json={'is_active': False})
+        db.session.refresh(self.resource)
+        self.assertEqual(self.resource.current_pin, "PINTOUPDATE", "PINTOUPDATE should become current after OTHERPIN is deactivated.")
+
+
+    def test_get_resource_details_includes_pins(self):
+        """Test that admin resource details endpoint includes associated PINs."""
+        self._set_booking_pin_settings(manual_allowed=True)
+        pin1_resp = self._add_pin_via_api(self.resource.id, pin_value="DETAILPIN1", notes='Detail Test 1')
+        pin2_resp = self._add_pin_via_api(self.resource.id, pin_value="DETAILPIN2", notes='Detail Test 2')
+        self.assertEqual(pin1_resp.status_code, 201)
+        self.assertEqual(pin2_resp.status_code, 201)
+
+        # Deactivate one PIN to test that all are returned regardless of status
+        pin1_id = pin1_resp.get_json()['id']
+        self.client.put(url_for('api_resources.update_resource_pin', resource_id=self.resource.id, pin_id=pin1_id), json={'is_active': False})
+
+        response = self.client.get(url_for('api_resources.get_resource_details_admin', resource_id=self.resource.id))
+        self.assertEqual(response.status_code, 200, f"Failed to get resource details: {response.get_json()}")
+
+        details_data = response.get_json()
+        self.assertIn('pins', details_data)
+        self.assertIsInstance(details_data['pins'], list)
+        self.assertEqual(len(details_data['pins']), 2)
+
+        pin_values_in_response = {p['pin_value'] for p in details_data['pins']}
+        self.assertIn("DETAILPIN1", pin_values_in_response)
+        self.assertIn("DETAILPIN2", pin_values_in_response)
+
+        for pin_in_list in details_data['pins']:
+            self.assertIn('id', pin_in_list)
+            self.assertIn('pin_value', pin_in_list)
+            self.assertIn('is_active', pin_in_list)
+            self.assertIn('notes', pin_in_list)
+            self.assertIn('created_at', pin_in_list)
+            if pin_in_list['pin_value'] == "DETAILPIN1":
+                self.assertFalse(pin_in_list['is_active'])
+            if pin_in_list['pin_value'] == "DETAILPIN2":
+                self.assertTrue(pin_in_list['is_active'])
+
+        # Also check current_pin is present in the main resource details
+        # DETAILPIN2 should be current as DETAILPIN1 was deactivated
+        self.assertEqual(details_data.get('current_pin'), "DETAILPIN2")
+
+
+from unittest.mock import patch
+from datetime import datetime as datetime_original, timezone as timezone_original, timedelta as timedelta_original
+
+class TestResourceURLCheckin(AppTests):
+    def _create_user_for_checkin_test(self, username="checkin_user"):
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            user = User(username=username, email=f"{username}@example.com")
+            user.set_password("password")
+            db.session.add(user)
+            db.session.commit()
+        return user
+
+    def _create_resource_for_checkin_test(self, name="CheckinResource"):
+        resource = Resource.query.filter_by(name=name).first()
+        if not resource:
+            resource = Resource(name=name, status="published")
+            db.session.add(resource)
+            db.session.commit()
+        return resource
+
+    def _create_pin_for_resource(self, resource_id, pin_value="VALIDPIN123", is_active=True):
+        pin = ResourcePIN(resource_id=resource_id, pin_value=pin_value, is_active=is_active)
+        db.session.add(pin)
+        db.session.commit()
+        # Update resource's current_pin if this is the first active one
+        resource = Resource.query.get(resource_id)
+        if is_active and not resource.current_pin:
+            resource.current_pin = pin_value
+            db.session.commit()
+        return pin
+
+    def _create_booking_for_checkin_test(self, user_id, resource_id, start_offset_hours=0, duration_hours=1, status='approved'):
+        # Creates a booking relative to a fixed reference time for predictability
+        # The actual "current time" will be mocked in tests.
+        # Let's use a fixed date for bookings to avoid issues with month/year boundaries in tests.
+        booking_start_dt = datetime_original(2024, 7, 15, 12, 0, 0) + timedelta_original(hours=start_offset_hours)
+        booking_end_dt = booking_start_dt + timedelta_original(hours=duration_hours)
+
+        user = User.query.get(user_id)
+        booking = Booking(
+            user_name=user.username, # Assuming user_name is sufficient for booking association in tests
+            resource_id=resource_id,
+            start_time=booking_start_dt,
+            end_time=booking_end_dt,
+            title="Checkin Test Booking",
+            status=status
+        )
+        db.session.add(booking)
+        db.session.commit()
+        return booking
+
+    def _set_checkin_booking_settings(self, requires_login=True, minutes_before=15, minutes_after=15):
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings()
+            db.session.add(settings)
+        settings.resource_checkin_url_requires_login = requires_login
+        settings.check_in_minutes_before = minutes_before
+        settings.check_in_minutes_after = minutes_after
+        settings.enable_check_in_out = True # Crucial for any check-in logic to be active
+        db.session.commit()
+        return settings
+
+    def setUp(self):
+        super().setUp()
+        self.user = self._create_user_for_checkin_test()
+        self.resource = self._create_resource_for_checkin_test()
+        self.pin = self._create_pin_for_resource(self.resource.id, "VALIDPIN789")
+        self.booking = self._create_booking_for_checkin_test(self.user.id, self.resource.id, start_offset_hours=0) # Starts at 2024-07-15 12:00
+        self.settings = self._set_checkin_booking_settings()
+
+    @patch('routes.api_bookings.datetime')
+    def test_resource_url_checkin_success_loggedin(self, mock_datetime_obj):
+        self._set_checkin_booking_settings(requires_login=True, minutes_before=15, minutes_after=15)
+        self.login(self.user.username, "password")
+
+        # Mock time to be at the start of the booking (well within 15 min before/after window)
+        mocked_now = self.booking.start_time # This is a naive datetime from model
+        # The route uses datetime.now(timezone.utc), so ensure mocked_now is offset-aware if comparing directly
+        # or ensure mocked_now is what datetime.now(timezone.utc) will return.
+        # For simplicity, if route uses .now(timezone.utc), we mock that.
+        mock_datetime_obj.now.return_value = mocked_now.replace(tzinfo=timezone_original.utc)
+        # If the route uses .utcnow(), then:
+        # mock_datetime_obj.utcnow.return_value = mocked_now
+
+        # Allow other datetime functions to work normally if used by the route or its helpers
+        mock_datetime_obj.strptime = datetime_original.strptime
+        mock_datetime_obj.combine = datetime_original.combine
+        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+
+
+        response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
+        self.assertEqual(response.status_code, 200, f"Check-in failed: {response.get_json()}")
+        self.assertIn("Check-in successful", response.get_json().get('message', ''))
+
+        db.session.refresh(self.booking)
+        self.assertIsNotNone(self.booking.checked_in_at)
+
+        audit_log = AuditLog.query.filter_by(action="CHECK_IN_VIA_RESOURCE_URL").order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log)
+        self.assertEqual(audit_log.user_id, self.user.id)
+        self.assertIn(f"Booking ID {self.booking.id}", audit_log.details)
+        self.assertIn(f"Resource ID {self.resource.id}", audit_log.details)
+        self.assertIn(f"PIN {self.pin.pin_value} used", audit_log.details)
+
+    @patch('routes.api_bookings.datetime')
+    def test_resource_url_checkin_invalid_pin(self, mock_datetime_obj):
+        self.login(self.user.username, "password")
+        mock_datetime_obj.now.return_value = self.booking.start_time.replace(tzinfo=timezone_original.utc)
+        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+
+
+        response = self.client.get(f'/r/{self.resource.id}/checkin?pin=INVALIDPINXYZ')
+        self.assertEqual(response.status_code, 403, f"Response: {response.get_json()}")
+        self.assertIn("Invalid PIN provided.", response.get_json().get('error', ''))
+
+    @patch('routes.api_bookings.datetime')
+    def test_resource_url_checkin_no_pin(self, mock_datetime_obj):
+        self.login(self.user.username, "password")
+        mock_datetime_obj.now.return_value = self.booking.start_time.replace(tzinfo=timezone_original.utc)
+        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+
+        response = self.client.get(f'/r/{self.resource.id}/checkin')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("PIN is required for check-in.", response.get_json().get('error', ''))
+
+    @patch('routes.api_bookings.datetime')
+    def test_resource_url_checkin_inactive_pin(self, mock_datetime_obj):
+        self.pin.is_active = False
+        db.session.commit()
+        self.login(self.user.username, "password")
+        mock_datetime_obj.now.return_value = self.booking.start_time.replace(tzinfo=timezone_original.utc)
+        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+
+        response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("PIN is not active.", response.get_json().get('error', ''))
+
+    @patch('routes.api_bookings.datetime')
+    def test_resource_url_checkin_login_required_fail(self, mock_datetime_obj):
+        self._set_checkin_booking_settings(requires_login=True)
+        # DO NOT LOGIN
+        mock_datetime_obj.now.return_value = self.booking.start_time.replace(tzinfo=timezone_original.utc)
+        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+
+        response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
+        self.assertEqual(response.status_code, 401) # Unauthorized as login is required
+        self.assertIn("Login required for this check-in method.", response.get_json().get('error', ''))
+
+    @patch('routes.api_bookings.datetime')
+    def test_resource_url_checkin_login_not_required_no_user_session_fails_to_find_booking(self, mock_datetime_obj):
+        self._set_checkin_booking_settings(requires_login=False)
+        # Ensure no user is logged in (client is fresh or logged out)
+        self.logout() # Ensure any previous session is cleared.
+
+        mock_datetime_obj.now.return_value = self.booking.start_time.replace(tzinfo=timezone_original.utc)
+        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+
+        response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
+        # Even if login not required, the current logic tries to find a booking for current_user.
+        # If no current_user (anonymous), it won't find self.booking which is tied to self.user.
+        # This behavior is as per current implementation. A truly anonymous check-in for *any* booking
+        # would require different logic.
+        self.assertEqual(response.status_code, 404, f"Response: {response.get_json()}")
+        self.assertIn("No active booking found for your session within the check-in window for this resource.", response.get_json().get('error', ''))
+
+    @patch('routes.api_bookings.datetime')
+    def test_resource_url_checkin_outside_window_too_early(self, mock_datetime_obj):
+        self.login(self.user.username, "password")
+        minutes_before = self.settings.check_in_minutes_before
+
+        # Time is set to be 1 minute before the check-in window opens
+        mocked_now = (self.booking.start_time - timedelta_original(minutes=minutes_before + 1))
+        mock_datetime_obj.now.return_value = mocked_now.replace(tzinfo=timezone_original.utc)
+        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+
+
+        response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
+        self.assertEqual(response.status_code, 404) # Endpoint returns 404 if no valid booking in window
+        self.assertIn("No active booking found for your session within the check-in window for this resource.", response.get_json().get('error', ''))
+        # Or, if a more specific message is added for "too early/late":
+        # self.assertIn("Check-in window is not open yet.", response.get_json().get('error', ''))
+
+    @patch('routes.api_bookings.datetime')
+    def test_resource_url_checkin_outside_window_too_late(self, mock_datetime_obj):
+        self.login(self.user.username, "password")
+        minutes_after = self.settings.check_in_minutes_after # From BookingSettings
+
+        # Time is set to be 1 minute after the check-in window closes
+        # Check-in window closes at self.booking.start_time + timedelta(minutes=minutes_after)
+        # No, it's booking.end_time or booking.start_time + grace_after.
+        # The route uses: valid_check_in_end = booking.start_time + timedelta(minutes=settings.check_in_minutes_after)
+        mocked_now = (self.booking.start_time + timedelta_original(minutes=minutes_after + 1))
+        mock_datetime_obj.now.return_value = mocked_now.replace(tzinfo=timezone_original.utc)
+        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+
+        response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("No active booking found for your session within the check-in window for this resource.", response.get_json().get('error', ''))
+        # Or a more specific message:
+        # self.assertIn("Check-in window has passed.", response.get_json().get('error', ''))
+
+    @patch('routes.api_bookings.datetime')
+    def test_resource_url_checkin_no_active_booking_found(self, mock_datetime_obj):
+        self.login(self.user.username, "password")
+        mock_datetime_obj.now.return_value = self.booking.start_time.replace(tzinfo=timezone_original.utc) # Time is fine
+        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+
+        # Make the existing booking 'cancelled'
+        self.booking.status = 'cancelled'
+        db.session.commit()
+
+        response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("No active booking found for your session within the check-in window for this resource.", response.get_json().get('error', ''))
+
+        # Test with booking already checked in
+        self.booking.status = 'approved' # Reset status
+        self.booking.checked_in_at = datetime_original.utcnow() - timedelta_original(minutes=5) # Checked in 5 mins ago
+        db.session.commit()
+        response_already_checked_in = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
+        self.assertEqual(response_already_checked_in.status_code, 400) # Or could be 200 with a message "already checked in"
+        self.assertIn("Booking has already been checked in.", response_already_checked_in.get_json().get('error', ''))
+
+
 # --- Test Class for FloorMap Role Functionality ---
 class TestFloorMapRoles(AppTests):
     def setUp(self):
@@ -3181,6 +3937,9 @@ class TestFloorMapRoles(AppTests):
         self.logout()
 
 # --- End of TestFloorMapRoles ---
+
+# Ensure ResourcePIN is imported if not already at the top
+# from models import ResourcePIN
 
 
 class TestBulkUserOperationsAPI(AppTests):
