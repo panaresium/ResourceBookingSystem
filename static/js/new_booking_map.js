@@ -742,6 +742,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     }, 2000);
                     if (currentMapId && currentSelectedDateStr) { // Use global date string
                         loadMapDetails(currentMapId, currentSelectedDateStr);
+                        updateLocationFloorButtons(); // Update map selection buttons
                     }
                 } else {
                     if (!modalStatusMessageP.classList.contains('error') && !modalStatusMessageP.classList.contains('success')) {
