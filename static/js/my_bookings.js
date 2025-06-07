@@ -136,8 +136,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // The dataset attributes on bookingItemDiv for start/end time are already ISO.
         // If the update modal relies on specific elements having original values, that needs checking.
         // For now, assume the main display is the priority.
-        // const titleSpan = bookingItemClone.querySelector('.booking-title-value'); // Already populated
-        // titleSpan.dataset.originalTitle = booking.title || ''; // If needed
+        const titleSpan = bookingItemClone.querySelector('.booking-title-value'); // Already populated
+        titleSpan.dataset.originalTitle = booking.title || ''; // Set original title for comparison later
 
         const updateBtn = bookingItemClone.querySelector('.update-booking-btn');
         updateBtn.dataset.bookingId = booking.id;
@@ -331,10 +331,23 @@ document.addEventListener('DOMContentLoaded', () => {
         if (target.classList.contains('update-booking-btn')) {
             const bookingId = target.dataset.bookingId;
             const bookingItemDiv = target.closest('.booking-item');
-            const currentTitle = bookingItemDiv.querySelector('.booking-title').dataset.originalTitle;
+
+            if (!bookingItemDiv) {
+                console.error('Could not find .booking-item parent for update button.');
+                return;
+            }
+
+            const titleValueElement = bookingItemDiv.querySelector('.booking-title-value');
+            const resourceNameElement = bookingItemDiv.querySelector('.resource-name-value');
+
+            if (!titleValueElement || !resourceNameElement) {
+                console.error('Could not find title or resource name element within booking item.');
+                return;
+            }
+
+            const currentTitle = titleValueElement.dataset.originalTitle || titleValueElement.textContent; // Use originalTitle if available, else current text
             const currentStartTimeISO = bookingItemDiv.dataset.startTime;
-            // const currentEndTimeISO = bookingItemDiv.dataset.endTime; // Not immediately needed for new modal
-            const resourceName = bookingItemDiv.querySelector('.resource-name').textContent;
+            const resourceName = resourceNameElement.textContent;
             const resourceId = bookingItemDiv.dataset.resourceId;
 
             modalBookingIdInput.value = bookingId;
@@ -463,7 +476,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let noChangesMade = false;
 
         if (bookingItemDiv) {
-            const originalTitle = bookingItemDiv.querySelector('.booking-title').dataset.originalTitle;
+            const titleValueElement = bookingItemDiv.querySelector('.booking-title-value');
+            const originalTitle = titleValueElement ? (titleValueElement.dataset.originalTitle || titleValueElement.textContent) : '';
             const originalStartTimeISO = bookingItemDiv.dataset.startTime; // Full ISO string from booking item
             const originalEndTimeISO = bookingItemDiv.dataset.endTime;     // Full ISO string from booking item
 
@@ -515,16 +529,26 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (bookingItemDiv) {
-                const titleSpan = bookingItemDiv.querySelector('.booking-title');
-                titleSpan.textContent = updatedBooking.title;
-                titleSpan.dataset.originalTitle = updatedBooking.title;
+                const titleValueSpan = bookingItemDiv.querySelector('.booking-title-value');
+                if (titleValueSpan) {
+                    titleValueSpan.textContent = updatedBooking.title;
+                    titleValueSpan.dataset.originalTitle = updatedBooking.title; // Update original title as well
+                }
 
-                const startTimeSpan = bookingItemDiv.querySelector('.start-time');
-                startTimeSpan.textContent = new Date(updatedBooking.start_time).toUTCString();
+                // Assuming booking-date-value, booking-start-time-value, booking-end-time-value are the correct classes for display
+                const dateValueSpan = bookingItemDiv.querySelector('.booking-date-value');
+                const startTimeValueSpan = bookingItemDiv.querySelector('.booking-start-time-value');
+                const endTimeValueSpan = bookingItemDiv.querySelector('.booking-end-time-value');
+
+                const newStartDate = new Date(updatedBooking.start_time);
+                const newEndDate = new Date(updatedBooking.end_time);
+
+                if (dateValueSpan) dateValueSpan.textContent = newStartDate.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+                if (startTimeValueSpan) startTimeValueSpan.textContent = newStartDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' });
+                if (endTimeValueSpan) endTimeValueSpan.textContent = newEndDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' });
+
+                // Update dataset attributes on the .booking-item itself
                 bookingItemDiv.dataset.startTime = updatedBooking.start_time;
-
-                const endTimeSpan = bookingItemDiv.querySelector('.end-time');
-                endTimeSpan.textContent = new Date(updatedBooking.end_time).toUTCString();
                 bookingItemDiv.dataset.endTime = updatedBooking.end_time;
             }
             
