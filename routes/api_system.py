@@ -592,6 +592,50 @@ def api_delete_backup_set(backup_timestamp):
 def init_api_system_routes(app):
     app.register_blueprint(api_system_bp)
 
+@api_system_bp.route('/api/system/booking_settings', methods=['GET'])
+@login_required # Or @permission_required('some_permission_if_not_all_logged_in_users_can_see')
+def get_booking_settings():
+    """Fetches all current booking settings."""
+    try:
+        settings = BookingSettings.query.first()
+        if settings:
+            # Convert Decimal fields to string for JSON serialization if any exist.
+            # Example: 'pin_length': str(settings.pin_length) if isinstance(settings.pin_length, Decimal) else settings.pin_length,
+            settings_data = {
+                'allow_past_bookings': settings.allow_past_bookings,
+                'max_booking_days_in_future': settings.max_booking_days_in_future,
+                'allow_multiple_resources_same_time': settings.allow_multiple_resources_same_time,
+                'max_bookings_per_user': settings.max_bookings_per_user,
+                'enable_check_in_out': settings.enable_check_in_out,
+                'past_booking_time_adjustment_hours': settings.past_booking_time_adjustment_hours,
+                'check_in_minutes_before': settings.check_in_minutes_before,
+                'check_in_minutes_after': settings.check_in_minutes_after,
+                'pin_auto_generation_enabled': settings.pin_auto_generation_enabled,
+                'pin_length': settings.pin_length,
+                'pin_allow_manual_override': settings.pin_allow_manual_override,
+                'resource_checkin_url_requires_login': settings.resource_checkin_url_requires_login,
+                # Add any other settings fields here
+            }
+            current_app.logger.info(f"User {current_user.username} fetched booking settings.")
+            return jsonify(settings_data), 200
+        else:
+            # Return default values or an empty object if no settings are found
+            # This matches the behavior of the admin_ui.serve_booking_settings_page
+            # when no settings exist.
+            current_app.logger.info("Booking settings requested but none found in DB; returning defaults for an API context.")
+            # Consider if API should return 404 or default structure. For PIN UI, defaults are likely better.
+            return jsonify({
+                'allow_past_bookings': False, 'max_booking_days_in_future': 30, # Example defaults
+                'allow_multiple_resources_same_time': False, 'max_bookings_per_user': None,
+                'enable_check_in_out': False, 'past_booking_time_adjustment_hours': 0,
+                'check_in_minutes_before': 15, 'check_in_minutes_after': 15,
+                'pin_auto_generation_enabled': True, 'pin_length': 6,
+                'pin_allow_manual_override': True, 'resource_checkin_url_requires_login': True,
+            }), 200 # Or 404 if settings must exist
+    except Exception as e:
+        current_app.logger.exception(f"Error fetching booking settings for user {current_user.username}:")
+        return jsonify({'error': 'Failed to fetch booking settings due to a server error.'}), 500
+
 # --- Raw DB View Route ---
 
 @api_system_bp.route('/api/admin/view_db_raw_top100', methods=['GET'])

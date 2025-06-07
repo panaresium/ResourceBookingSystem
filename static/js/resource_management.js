@@ -301,7 +301,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (event.target.classList.contains('edit-resource-btn')) {
             const id = event.target.dataset.id;
             try {
+                console.log('[DEBUG] Edit button clicked for resource ID:', id);
                 const data = await apiCall(`/api/admin/resources/${id}`);
+                console.log('[DEBUG] Resource data received:', data);
                 resourceForm.reset();
                 resourceIdInput.value = data.id;
                 resourceNameInput.value = data.name || '';
@@ -314,8 +316,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // --- PIN Management UI ---
                 const pinsManagementArea = document.getElementById('resource-pins-management-area');
+                console.log('[DEBUG] Edit button clicked for resource ID:', id); // Duplicate, but as per request
+                console.log('[DEBUG] Resource data received:', data); // Duplicate, but as per request
                 if (pinsManagementArea) {
+                    console.log('[DEBUG] pinsManagementArea found. Attempting to show. Current display:', pinsManagementArea.style.display);
                     pinsManagementArea.style.display = 'block'; // Show the PINs area
+                    console.log('[DEBUG] pinsManagementArea display set to block. New display:', pinsManagementArea.style.display);
+                    console.log('[DEBUG] Calling loadResourcePins with resourceId:', id, 'and data.pins:', data.pins);
                     loadResourcePins(id, data.pins); // Pass existing pins if available in 'data'
                 }
                 // --- End PIN Management UI ---
@@ -453,12 +460,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- PIN Management Functions ---
     async function loadResourcePins(resourceId, existingPins = null) {
+        console.log('[DEBUG] loadResourcePins called. resourceId:', resourceId, 'existingPins:', existingPins);
+        const pinStatusEl = document.getElementById('resource-pin-form-status');
         currentResourceIdForPins = resourceId;
         const pinsTableBody = document.querySelector('#resource-pins-table tbody');
         const currentPinValueSpan = document.getElementById('current-pin-value');
         if (!pinsTableBody || !currentPinValueSpan) return;
 
-        showLoading(document.getElementById('resource-pin-form-status'), 'Loading PINs...');
+        showLoading(pinStatusEl, 'Loading PINs...');
 
         try {
             // Fetch full resource details again OR rely on existingPins if comprehensive enough
@@ -484,19 +493,23 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             currentPinValueSpan.textContent = resourceCurrentPin;
+            console.log('[DEBUG] About to render PINs table. pinsToRender:', pinsToRender, 'resourceId for table:', resourceId);
+            console.log('[DEBUG] resourceCurrentPin for display:', resourceCurrentPin);
             renderPinsTable(pinsToRender, resourceId);
 
             // Fetch global BookingSettings to control UI visibility
             const bookingSettings = await apiCall('/api/system/booking_settings');
+            console.log('[DEBUG] About to update Add PIN form visibility. bookingSettings:', bookingSettings);
             updateAddPinFormVisibility(bookingSettings);
-            hideMessage(document.getElementById('resource-pin-form-status'));
+            hideMessage(pinStatusEl);
 
         } catch (error) {
-            showError(document.getElementById('resource-pin-form-status'), `Error loading PINs: ${error.message}`);
+            showError(pinStatusEl, `Error loading PINs: ${error.message}`);
         }
     }
 
     function renderPinsTable(pins, resourceId) {
+        console.log('[DEBUG] renderPinsTable called. pins:', pins, 'resourceId:', resourceId);
         const pinsTableBody = document.querySelector('#resource-pins-table tbody');
         pinsTableBody.innerHTML = ''; // Clear existing rows
 
@@ -532,6 +545,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function updateAddPinFormVisibility(bookingSettings) {
+        console.log('[DEBUG] updateAddPinFormVisibility called. bookingSettings:', bookingSettings);
         const manualPinInput = document.getElementById('manual_pin_value');
         const addManualPinBtn = document.getElementById('btn-add-manual-pin');
         const autoGeneratePinBtn = document.getElementById('btn-auto-generate-pin');
