@@ -809,9 +809,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const resourceId = target.dataset.resourceId;
                 const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`; // Correct URL
 
-                const pinValue = target.dataset.pinValue;
-                const resourceId = target.dataset.resourceId;
-                const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`;
+                // Duplicated declarations removed below
 
                 const qrCodeModal = document.getElementById('qr-code-modal');
                 const qrCodeDisplay = document.getElementById('qr-code-display');
