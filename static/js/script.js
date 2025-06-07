@@ -88,7 +88,7 @@ async function apiCall(url, options = {}, messageElement = null) {
         let csrfToken = csrfTokenTag ? csrfTokenTag.content : null;
         if (csrfToken) {
             if (!options.headers) options.headers = {};
-            if (!options.headers['Content-Type'] && (method === 'POST' || method === 'PUT' || method === 'PATCH') && options.body) {
+            if (!(options.body instanceof FormData) && !options.headers['Content-Type'] && (method === 'POST' || method === 'PUT' || method === 'PATCH') && options.body) {
                 options.headers['Content-Type'] = 'application/json';
             }
             options.headers['X-CSRFToken'] = csrfToken;
