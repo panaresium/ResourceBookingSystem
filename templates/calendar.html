@@ -10,10 +10,9 @@
 <h2>{{ _('My Calendar') }}</h2>
 
 <div class="mb-3">
-    <label for="calendar-resource-select" class="form-label">{{ _('Filter by Resource:') }}</label> {# Changed label for clarity #}
-    <select id="calendar-resource-select" class="form-select">
-        <option value="all" selected>-- {{ _('All My Booked Resources') }} --</option>
-        {# Options for individual resources will be populated by JavaScript #}
+    <label for="calendar-status-filter" class="form-label">{{ _('Filter by Status:') }}</label>
+    <select id="calendar-status-filter" class="form-select">
+        {# Options will be populated by JavaScript #}
     </select>
 </div>
 
