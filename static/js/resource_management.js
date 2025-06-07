@@ -809,32 +809,66 @@ document.addEventListener('DOMContentLoaded', function() {
                 const resourceId = target.dataset.resourceId;
                 const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`; // Correct URL
 
+                const pinValue = target.dataset.pinValue;
+                const resourceId = target.dataset.resourceId;
+                const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`;
+
                 const qrCodeModal = document.getElementById('qr-code-modal');
                 const qrCodeDisplay = document.getElementById('qr-code-display');
                 const qrCodeUrlText = document.getElementById('qr-code-url-text');
-                console.log('[DEBUG QR MODAL ELEMENTS] qrCodeModal:', qrCodeModal, 'qrCodeDisplay:', qrCodeDisplay, 'qrCodeUrlText:', qrCodeUrlText);
+                const statusEl = document.getElementById('resource-pin-form-status'); // For user messages
+
+                console.log('[QR Code] Show QR button clicked. URL:', checkinUrl);
 
                 if (qrCodeModal && qrCodeDisplay && qrCodeUrlText) {
-                    qrCodeDisplay.innerHTML = ''; // Clear previous QR code
+                    qrCodeDisplay.innerHTML = ''; // Clear previous QR code or error messages
                     qrCodeUrlText.textContent = checkinUrl;
 
-                    if (typeof QRCode !== 'undefined') { // Check if QRCode library is loaded
-                        new QRCode(qrCodeDisplay, {
-                            text: checkinUrl,
-                            width: 200,
-                            height: 200,
-                            colorDark : "#000000",
-                            colorLight : "#ffffff",
-                            correctLevel : QRCode.CorrectLevel.H
-                        });
-                    } else {
-                        qrCodeDisplay.textContent = 'QR Code library not loaded. Please add it.';
-                        console.error('QRCode library not found. Cannot generate QR code.');
+                    let attempts = 0;
+                    const maxAttempts = 5;
+                    const retryInterval = 200; // ms
+
+                    function tryGenerateQRCode() {
+                        console.log(`[QR Code] Attempt ${attempts + 1} to check for QRCode library.`);
+                        if (typeof QRCode !== 'undefined') {
+                            console.log('[QR Code] QRCode library found. Generating QR code.');
+                            try {
+                                new QRCode(qrCodeDisplay, {
+                                    text: checkinUrl,
+                                    width: 200,
+                                    height: 200,
+                                    colorDark : "#000000",
+                                    colorLight : "#ffffff",
+                                    correctLevel : QRCode.CorrectLevel.H
+                                });
+                                console.log('[QR Code] QR code instance created.');
+                                if (statusEl) hideMessage(statusEl); // Clear any previous messages
+                            } catch (e) {
+                                console.error('[QR Code] Error creating QRCode instance:', e);
+                                qrCodeDisplay.textContent = 'Error generating QR code. See console for details.';
+                            }
+                            qrCodeModal.style.display = 'block';
+                        } else {
+                            attempts++;
+                            if (attempts < maxAttempts) {
+                                console.log(`[QR Code] QRCode library not found. Retrying in ${retryInterval}ms...`);
+                                setTimeout(tryGenerateQRCode, retryInterval);
+                            } else {
+                                console.error('[QR Code] QRCode library not loaded after multiple attempts.');
+                                qrCodeDisplay.innerHTML = '<p style="color: red; font-weight: bold;">QR Code library could not be loaded.</p>' +
+                                                          '<p>Please check your internet connection or browser extensions, then try again.</p>' +
+                                                          '<p><small>If the issue persists, contact support.</small></p>';
+                                // Also show a message via the general status mechanism if available
+                                if (statusEl) showError(statusEl, 'QR Code library failed to load. Cannot display QR Code.');
+                                qrCodeModal.style.display = 'block'; // Show modal with the error message
+                            }
+                        }
                     }
-                    qrCodeModal.style.display = 'block';
+                    tryGenerateQRCode(); // Start the process
+
                 } else {
-                    console.error('QR Code modal elements not found.');
-                    showError(statusEl, 'Could not display QR Code modal. Elements missing.');
+                    console.error('[QR Code] Modal elements not found.');
+                    if (statusEl) showError(statusEl, 'Could not display QR Code modal. UI Elements missing.');
                 }
             } else if (target.classList.contains('delete-pin-btn')) {
                 const pinId = target.dataset.pinId;
