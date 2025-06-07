@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request, current_app, abort, render_templa
 from flask_login import login_required, current_user
 import json # Added json import
 from sqlalchemy import func
-from flask_babel import _ # For translations
+from translations import _ # For translations
 import secrets
 from datetime import datetime, timedelta, timezone, time
 
