@@ -240,7 +240,7 @@ def api_one_click_restore():
             if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Importing resource configurations...', 'detail': resource_configs_json_path})
             try:
                 with open(resource_configs_json_path, 'r', encoding='utf-8') as f: resource_configs_to_import = json.load(f)
-                res_created, res_updated, res_errors = _import_resource_configurations_data(resource_configs_to_import, db) # Pass db instance
+                res_created, res_updated, res_errors = _import_resource_configurations_data(resource_configs_to_import) # Pass db instance
                 resource_import_summary_msg = f"Resource config import: {res_created} created, {res_updated} updated."
                 if res_errors: resource_import_summary_msg += f" Errors: {len(res_errors)} (see logs for details)."
                 if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': f'Resource configurations import: {resource_import_summary_msg}', 'detail': json.dumps(res_errors) if res_errors else 'Completed.'})
@@ -286,7 +286,7 @@ def api_one_click_restore():
             if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': 'Importing user/role configurations...', 'detail': user_configs_json_path})
             try:
                 with open(user_configs_json_path, 'r', encoding='utf-8') as f: user_configs_to_import = json.load(f)
-                r_created, r_updated, u_created, u_updated, u_errors = _import_user_configurations_data(user_configs_to_import, db) # Pass db instance
+                r_created, r_updated, u_created, u_updated, u_errors = _import_user_configurations_data(user_configs_to_import) # Pass db instance
                 user_import_summary_msg = f"User/Role config import: Roles ({r_created} created, {r_updated} updated), Users ({u_created} created, {u_updated} updated)."
                 if u_errors: user_import_summary_msg += f" Errors: {len(u_errors)} (see logs for details)."
                 if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': f'User/role configurations import: {user_import_summary_msg}', 'detail': json.dumps(u_errors) if u_errors else 'Completed.'})
