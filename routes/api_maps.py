@@ -384,6 +384,7 @@ def import_map_configuration():
     return jsonify(summary), status_code
 
 @api_maps_bp.route('/map_details/<int:map_id>', methods=['GET'])
+@login_required
 def get_map_details(map_id):
     active_booking_statuses_for_conflict_map_details = ['approved', 'pending', 'checked_in', 'confirmed']
 
@@ -418,46 +419,70 @@ def get_map_details(map_id):
         ).all()
 
         mapped_resources_list = []
+        user_role_ids = [role.id for role in current_user.roles]
+
         for resource in mapped_resources_query:
-            bookings_on_date = Booking.query.filter(
-                Booking.resource_id == resource.id,
-                func.date(Booking.start_time) == target_date_obj, # func.date needs sqlalchemy import
-                sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_booking_statuses_for_conflict_map_details)
-            ).all()
-            bookings_info = [{'title': b.title, 'user_name': b.user_name,
-                              'start_time': b.start_time.strftime('%H:%M:%S'),
-                              'end_time': b.end_time.strftime('%H:%M:%S')} for b in bookings_on_date]
+            can_view_resource = False
+            if current_user.is_admin:
+                can_view_resource = True
+            else:
+                if resource.map_allowed_role_ids:
+                    try:
+                        allowed_role_ids_for_resource = json.loads(resource.map_allowed_role_ids)
+                        if not isinstance(allowed_role_ids_for_resource, list):
+                            current_app.logger.warning(f"Resource {resource.id} has malformed map_allowed_role_ids (not a list): {resource.map_allowed_role_ids}")
+                            allowed_role_ids_for_resource = []
 
-            resource_info = {
-                'id': resource.id, 'name': resource.name, 'capacity': resource.capacity,
-                'equipment': resource.equipment,
-                'image_url': url_for('static', filename=f'resource_uploads/{resource.image_filename}', _external=False) if resource.image_filename else None,
-                'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
-                'booking_restriction': resource.booking_restriction, 'status': resource.status,
-                'published_at': resource.published_at.isoformat() if resource.published_at else None,
-                'allowed_user_ids': resource.allowed_user_ids,
-                # 'roles': [{'id': role.id, 'name': role.name} for role in resource.roles], # Old implementation
-                'is_under_maintenance': resource.is_under_maintenance,
-                'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
-                'bookings_on_date': bookings_info
-            }
-            # New implementation for roles using map_allowed_role_ids
-            allowed_roles_info = []
-            if resource.map_allowed_role_ids: # Check if not None or empty string
-                try:
-                    role_ids = json.loads(resource.map_allowed_role_ids)
-                    if isinstance(role_ids, list) and all(isinstance(rid, int) for rid in role_ids):
-                        # Query roles based on the parsed IDs
-                        roles = Role.query.filter(Role.id.in_(role_ids)).all()
-                        allowed_roles_info = [{'id': role.id, 'name': role.name} for role in roles]
-                    else:
-                        current_app.logger.warning(f"Parsed map_allowed_role_ids for resource {resource.id} is not a list of integers: {role_ids}")
-                except json.JSONDecodeError:
-                    current_app.logger.warning(f"Failed to decode map_allowed_role_ids for resource {resource.id}: '{resource.map_allowed_role_ids}'")
-            resource_info['roles'] = allowed_roles_info
-            mapped_resources_list.append(resource_info)
+                        if not allowed_role_ids_for_resource: # Empty list means viewable by any authenticated user
+                            can_view_resource = True
+                        else:
+                            if any(role_id in allowed_role_ids_for_resource for role_id in user_role_ids):
+                                can_view_resource = True
+                    except json.JSONDecodeError:
+                        current_app.logger.warning(f"Resource {resource.id} has invalid JSON in map_allowed_role_ids: {resource.map_allowed_role_ids}")
+                        can_view_resource = False
+                    except TypeError:
+                        current_app.logger.warning(f"Resource {resource.id} has map_allowed_role_ids that is None or not a string: {resource.map_allowed_role_ids}")
+                        can_view_resource = True
+                else:
+                    can_view_resource = True
 
-        current_app.logger.info(f"Fetched map details for map ID {map_id} for date {target_date_obj}.")
+            if can_view_resource:
+                bookings_on_date = Booking.query.filter(
+                    Booking.resource_id == resource.id,
+                    func.date(Booking.start_time) == target_date_obj, # func.date needs sqlalchemy import
+                    sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_booking_statuses_for_conflict_map_details)
+                ).all()
+                bookings_info = [{'title': b.title, 'user_name': b.user_name,
+                                  'start_time': b.start_time.strftime('%H:%M:%S'),
+                                  'end_time': b.end_time.strftime('%H:%M:%S')} for b in bookings_on_date]
+
+                resource_info = {
+                    'id': resource.id, 'name': resource.name, 'capacity': resource.capacity,
+                    'equipment': resource.equipment,
+                    'image_url': url_for('static', filename=f'resource_uploads/{resource.image_filename}', _external=False) if resource.image_filename else None,
+                    'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
+                    'booking_restriction': resource.booking_restriction, 'status': resource.status,
+                    'published_at': resource.published_at.isoformat() if resource.published_at else None,
+                    'allowed_user_ids': resource.allowed_user_ids,
+                    'is_under_maintenance': resource.is_under_maintenance,
+                    'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
+                    'bookings_on_date': bookings_info
+                }
+
+                allowed_roles_info = []
+                if resource.map_allowed_role_ids:
+                    try:
+                        role_ids = json.loads(resource.map_allowed_role_ids)
+                        if isinstance(role_ids, list) and all(isinstance(rid, int) for rid in role_ids):
+                            roles = Role.query.filter(Role.id.in_(role_ids)).all()
+                            allowed_roles_info = [{'id': role.id, 'name': role.name} for role in roles]
+                    except (json.JSONDecodeError, TypeError):
+                         pass # Already logged during can_view_resource check
+                resource_info['roles'] = allowed_roles_info
+                mapped_resources_list.append(resource_info)
+
+        current_app.logger.info(f"User {current_user.username} fetched map details for map ID {map_id} for date {target_date_obj}. Filtered resources: {len(mapped_resources_list)}.")
         return jsonify({
             'map_details': map_details_response,
             'mapped_resources': mapped_resources_list

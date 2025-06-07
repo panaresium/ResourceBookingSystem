@@ -41,6 +41,7 @@ def serve_index():
         return redirect(url_for('ui.serve_login'))
 
 @ui_bp.route("/resources")
+@login_required
 def serve_resources():
     return render_template("resources.html")
 
