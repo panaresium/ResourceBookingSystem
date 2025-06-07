@@ -410,7 +410,7 @@ def import_resources_admin():
     if not isinstance(resources_data, list): return jsonify({'error': 'JSON must be a list.'}), 400
 
     # Pass db instance from extensions
-    created, updated, errors = _import_resource_configurations_data(resources_data, db)
+    created, updated, errors = _import_resource_configurations_data(resources_data)
 
     summary = f"Import completed. Created: {created}, Updated: {updated}, Errors: {len(errors)}."
     add_audit_log(action="IMPORT_RESOURCES", details=f"User {current_user.username} imported resources. {summary} Errors: {errors}")
