@@ -38,6 +38,12 @@ body.dark-theme {
     --border-color: #555555;           /* Border color for dark mode */
 }
 
+body.dark-theme #upcoming-bookings {
+    background-color: #000000; /* Black background for dark mode */
+    /* Text color should be inherited from body.dark-theme, which is --text-color-dark (#e0e0e0) */
+    /* Border color is already using var(--border-color) which is updated in dark mode, so it should adapt. */
+}
+
 body {
     font-family: var(--font-family-modern);
     margin: 0;
@@ -83,8 +89,8 @@ body {
 /* Style for the moved navigation links and containers */
 .header-content > a, /* Direct <a> links like Home, Resources, Calendar */
 .header-content > div { /* Wrappers for My Bookings, Welcome, Auth, User Dropdown */
-    color: #000000 !important;
-    font-weight: bold !important;
+    color: inherit;
+    font-weight: bold;
     text-decoration: none;
     padding: 0.5em 0.75em; /* Uniform padding for clickable areas */
     border-radius: 4px;
@@ -140,8 +146,8 @@ body {
     align-items: center;
     background-color: transparent; /* Changed from background: none; */
     border: none;
-    color: #000000 !important; /* Ensure color from header */
-    font-weight: bold !important;
+    color: inherit !important; /* Ensure color from header */
+    font-weight: bold;
     font-size: 1em; /* Or inherit */
     cursor: pointer;
     padding: 10px; /* Adjust as needed */
@@ -188,8 +194,8 @@ body {
 
 .app-header #auth-link-container a,
 .app-header #welcome-message-container {
-    color: #000000 !important; /* Applied new style */
-    font-weight: bold !important; /* Applied new style */
+    color: inherit !important; /* Applied new style */
+    font-weight: bold; /* Applied new style */
     text-decoration: none;
     display: flex; /* To align icon and text if icons are used in #auth-link-container */
     align-items: center;
