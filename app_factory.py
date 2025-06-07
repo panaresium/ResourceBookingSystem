@@ -28,15 +28,17 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from scheduler_tasks import cancel_unchecked_bookings, apply_scheduled_resource_status_changes, run_scheduled_backup_job, run_scheduled_booking_csv_backup # Added new task
 # Conditional import for azure_backup
 try:
-    from azure_backup import restore_latest_backup_set_on_startup, backup_if_changed as azure_backup_if_changed
+    from azure_backup import restore_latest_backup_set_on_startup, backup_if_changed as azure_backup_if_changed, restore_incremental_bookings
     azure_backup_available = True
 except ImportError:
     restore_latest_backup_set_on_startup = None
     azure_backup_if_changed = None # Keep for scheduler
+    restore_incremental_bookings = None # Add placeholder
     azure_backup_available = False
 
 # Imports for processing downloaded configs during startup restore
 from utils import (
+    load_scheduler_settings, # Added for new setting
     _import_map_configuration_data,
     _import_resource_configurations_data,
     _import_user_configurations_data,
@@ -257,6 +259,33 @@ def create_app(config_object=config):
             app.logger.exception(f"Error during startup restore process (restore_latest_backup_set_on_startup call or subsequent logic): {e}")
     else:
         app.logger.info("Azure backup utilities not available (azure_backup or restore_latest_backup_set_on_startup not imported). Skipping startup restore from Azure.")
+
+    # New: Conditional restore of incremental booking backups
+    if azure_backup_available and callable(restore_incremental_bookings):
+        app.logger.info("Checking configuration for automatic restore of incremental booking records on startup...")
+        scheduler_settings = load_scheduler_settings() # Load from utils.py
+        should_restore_bookings = scheduler_settings.get('auto_restore_booking_records_on_startup', False)
+
+        if should_restore_bookings:
+            app.logger.info("Attempting to restore incremental booking records on startup as configured...")
+            try:
+                # Pass app instance directly. SocketIO and task_id are None for startup.
+                restore_summary = restore_incremental_bookings(app=app, socketio_instance=None, task_id=None)
+                app.logger.info(f"Incremental booking records restore attempt completed. Summary: {restore_summary}")
+                if restore_summary.get('status') not in ['success', 'success_no_files']:
+                     app.logger.warning(f"Incremental booking restore on startup finished with status: {restore_summary.get('status')}. Errors: {restore_summary.get('errors')}")
+                # Add an audit log for the attempt
+                add_audit_log(action="STARTUP_INCREMENTAL_BOOKING_RESTORE_ATTEMPT",
+                              details=f"Status: {restore_summary.get('status')}, Files: {restore_summary.get('files_processed')}, Created: {restore_summary.get('bookings_created')}, Updated: {restore_summary.get('bookings_updated')}, Errors: {len(restore_summary.get('errors', []))}")
+            except Exception as e_incr_restore:
+                app.logger.exception(f"Error during startup incremental booking records restore: {e_incr_restore}")
+                add_audit_log(action="STARTUP_INCREMENTAL_BOOKING_RESTORE_ERROR", details=f"Exception: {str(e_incr_restore)}")
+        else:
+            app.logger.info("Automatic restore of incremental booking records on startup is disabled in settings.")
+    elif callable(load_scheduler_settings) and load_scheduler_settings().get('auto_restore_booking_records_on_startup', False):
+        # This case handles if setting is true, but azure_backup_available or restore_incremental_bookings is not.
+        app.logger.warning("Automatic restore of incremental booking records is configured, but Azure backup utilities (restore_incremental_bookings) are not available. Skipping.")
+
 
     # 3. Initialize Extensions
     # db.init_app(app) has been moved to earlier in the factory function

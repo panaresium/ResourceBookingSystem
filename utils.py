@@ -57,12 +57,14 @@ DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE = {
     "is_enabled": False,
     "schedule_type": "interval", # 'interval'
     "interval_minutes": 60,
-    "range": "all" # e.g. "all", "1day", "7days"
+    "booking_backup_type": "full_export", # New field: 'full_export' or 'incremental'
+    "range": "all" # e.g. "all", "1day", "7days" - Relevant for full_export
 }
 
 DEFAULT_SCHEDULER_SETTINGS = {
     "full_backup": DEFAULT_FULL_BACKUP_SCHEDULE.copy(),
-    "booking_csv_backup": DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy()
+    "booking_csv_backup": DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy(),
+    "auto_restore_booking_records_on_startup": False # New setting
 }
 
 def load_scheduler_settings() -> dict:

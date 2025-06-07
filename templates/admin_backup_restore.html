@@ -203,7 +203,14 @@
                     <input type="number" class="form-control" id="booking_csv_backup_interval_minutes" name="booking_csv_backup_interval_minutes" value="{{ booking_csv_backup_settings.interval_minutes | default(60) }}" min="1" required>
                 </div>
                 <div class="form-group mb-2">
-                    <label for="booking_csv_backup_range_type">{{ _('Backup Data Range') }}</label>
+                    <label for="booking_backup_type_select">{{ _('Backup Type') }}</label>
+                    <select id="booking_backup_type_select" name="booking_backup_type" class="form-control form-select">
+                        <option value="full_export" {% if booking_csv_backup_settings.booking_backup_type == 'full_export' %}selected{% endif %}>{{ _('Full Export of Range') }}</option>
+                        <option value="incremental" {% if booking_csv_backup_settings.booking_backup_type == 'incremental' %}selected{% endif %}>{{ _('Incremental (Only Changes)') }}</option>
+                    </select>
+                </div>
+                <div class="form-group mb-2" id="booking_csv_backup_range_type_group">
+                    <label for="booking_csv_backup_range_type">{{ _('Backup Data Range (for Full Export)') }}</label>
                     <select id="booking_csv_backup_range_type" name="booking_csv_backup_range_type" class="form-control form-select">
                         <option value="all" {% if booking_csv_backup_settings.range == 'all' %}selected{% endif %}>{{ _('All Bookings') }}</option>
                         <option value="1day" {% if booking_csv_backup_settings.range == '1day' %}selected{% endif %}>{{ _('Last 1 Day') }}</option>
@@ -320,58 +327,27 @@
         </div> <!-- End card-body for Booking CSV Backups -->
     </div> <!-- End card for Booking CSV Backups -->
 
-    <!-- Scheduled Booking CSV Backups Card -->
+    <!-- Startup Behavior Settings Card -->
     <div class="card mb-4">
         <div class="card-header">
-            <h2 class="card-title h5">{{ _('Scheduled Booking CSV Backups') }}</h2>
+            <h2 class="card-title h5">{{ _('Startup Behavior Settings') }}</h2>
         </div>
         <div class="card-body">
-            <section id="booking-csv-schedule-section"> <!-- Removed mb-5 -->
-                {# Ensure the route name 'admin_ui.save_booking_csv_schedule_route' is what will be created later #}
-                <form method="POST" action="{{ url_for('admin_ui.save_booking_csv_schedule_route') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                    <!-- h3 removed as card-title is used -->
-                    <div class="form-group">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="booking_csv_schedule_enabled" name="booking_csv_schedule_enabled" value="true">
-                            <label class="form-check-label" for="booking_csv_schedule_enabled">
-                                {{ _('Enable Scheduled Booking CSV Backups') }}
-                            </label>
-                        </div>
+            <form method="POST" action="{{ url_for('admin_ui.save_auto_restore_booking_records_settings') }}" id="startup-settings-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="form-group mb-2">
+                    <div class="form-check">
+                        <input type="checkbox" class="form-check-input" id="auto_restore_booking_records_enabled" name="auto_restore_booking_records_enabled" value="true" {% if auto_restore_booking_records_on_startup %}checked{% endif %}>
+                        <label class="form-check-label" for="auto_restore_booking_records_enabled">
+                            {{ _('Enable Automatic Restore of Booking Records on Application Startup') }}
+                            <small class="form-text text-muted">{{ _('(Applies incremental booking backups if available)') }}</small>
+                        </label>
                     </div>
-
-                    <div class="form-row">
-                        <div class="form-group col-md-3">
-                            <label for="booking_csv_schedule_interval_value">{{ _('Backup Interval Value') }}</label>
-                            <input type="number" class="form-control" id="booking_csv_schedule_interval_value" name="booking_csv_schedule_interval_value" value="24" min="1">
-                        </div>
-                        <div class="form-group col-md-3">
-                            <label for="booking_csv_schedule_interval_unit">{{ _('Interval Unit') }}</label>
-                            <select class="custom-select" id="booking_csv_schedule_interval_unit" name="booking_csv_schedule_interval_unit">
-                                <option value="hours" selected>{{ _('Hours') }}</option>
-                                <option value="days">{{ _('Days') }}</option>
-                                <option value="minutes">{{ _('Minutes') }}</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="booking_csv_schedule_range_type">{{ _('Backup Data Range for Schedule') }}</label>
-                        <select class="custom-select" id="booking_csv_schedule_range_type" name="booking_csv_schedule_range_type">
-                            <option value="all" selected>{{ _('All Bookings') }}</option>
-                            <option value="1day">{{ _('Last 1 Day') }}</option>
-                            <option value="3days">{{ _('Last 3 Days') }}</option>
-                            <option value="7days">{{ _('Last 7 Days') }}</option>
-                        </select>
-                    </div>
-
-                    <button type="submit" class="btn btn-success">
-                        <i class="fas fa-save"></i> {{ _('Save Schedule Settings') }}
-                    </button>
-                </form>
-            </section>
-        </div> <!-- End card-body for Scheduled Booking CSV Backups -->
-    </div> <!-- End card for Scheduled Booking CSV Backups -->
+                </div>
+                <button type="submit" class="btn btn-success"><i class="fas fa-save"></i> {{ _('Save Startup Settings') }}</button>
+            </form>
+        </div>
+    </div>
 
     {# The System Troubleshooting Tools section that was here has been moved to admin_troubleshooting.html #}
     {# Ensure the <hr> that was above it is also removed if it's now redundant, or kept if it separates from the above section. #}
@@ -412,7 +388,11 @@
             '#booking-csv-schedule-form button[type="submit"]',
             '#booking_csv_backup_enabled',
             '#booking_csv_backup_interval_minutes',
+            '#booking_backup_type_select', // New
             '#booking_csv_backup_range_type',
+            // Startup Behavior Settings Form
+            '#startup-settings-form button[type="submit"]',
+            '#auto_restore_booking_records_enabled',
             // Pagination buttons for full backups
             '#backup-prev-page a.page-link',
             '#backup-next-page a.page-link',
@@ -1234,9 +1214,6 @@
         });
 
 
-        });
-
-
         function toggleDayOfWeekVisibility() {
             const typeSelect = document.getElementById('full_backup_schedule_type'); // Use new ID
             const dayGroup = document.getElementById('day-of-week-group'); // Kept old ID for this specific div
@@ -1253,6 +1230,26 @@
             newFullBackupScheduleTypeSelect.addEventListener('change', toggleDayOfWeekVisibility);
             // Initial call to set visibility based on Jinja-rendered settings
             toggleDayOfWeekVisibility();
+        }
+
+        // JS for Booking CSV Backup Type visibility
+        const bookingBackupTypeSelect = document.getElementById('booking_backup_type_select');
+        const bookingRangeGroup = document.getElementById('booking_csv_backup_range_type_group');
+
+        function toggleBookingRangeVisibility() {
+            if (bookingBackupTypeSelect && bookingRangeGroup) {
+                if (bookingBackupTypeSelect.value === 'full_export') {
+                    bookingRangeGroup.style.display = 'block';
+                } else {
+                    bookingRangeGroup.style.display = 'none';
+                }
+            }
+        }
+
+        if (bookingBackupTypeSelect) {
+            bookingBackupTypeSelect.addEventListener('change', toggleBookingRangeVisibility);
+            // Initial call to set visibility
+            toggleBookingRangeVisibility();
         }
 
         // Comment out old loadBackupSchedule function and its call
@@ -1315,5 +1312,3 @@
     });
 </script>
 {% endblock %}
-
-[end of templates/admin_backup_restore.html]
