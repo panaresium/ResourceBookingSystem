@@ -3240,6 +3240,29 @@ class TestAdminBookingCancellation(TestAdminBookings):
         self.assertIn(f"Your booking for '{self.resource1.name}'", email_log[-1]['body'])
         self.assertIn(f"has been cancelled by an administrator. Reason: {cancellation_reason}", email_log[-1]['body'])
 
+        # --- Enhancement: Call clear_admin_message and verify ---
+        # Ensure email_log is cleared or count emails before this step if sensitive to new emails from clear_admin_message
+        # For this test, we are primarily focused on the status and audit log of clear_admin_message.
+
+        clear_message_response = self.client.post(f'/api/admin/bookings/{booking_id}/clear_admin_message')
+        self.assertEqual(clear_message_response.status_code, 200, f"Clear admin message failed: {clear_message_response.get_data(as_text=True)}")
+        clear_message_data = clear_message_response.get_json()
+        self.assertEqual(clear_message_data.get('message'), 'Admin message cleared and booking acknowledged.')
+        self.assertEqual(clear_message_data.get('new_status'), 'cancelled_admin_acknowledged')
+
+        # Fetch booking from DB again and verify updated status and cleared message
+        cleared_booking_db = Booking.query.get(booking_id)
+        self.assertIsNotNone(cleared_booking_db)
+        self.assertEqual(cleared_booking_db.status, 'cancelled_admin_acknowledged')
+        self.assertIsNone(cleared_booking_db.admin_deleted_message)
+
+        # Verify new audit log entry for "ADMIN_CLEAR_BOOKING_MESSAGE"
+        clear_audit_log = AuditLog.query.filter_by(action="ADMIN_CLEAR_BOOKING_MESSAGE", user_id=self.admin_user.id).order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(clear_audit_log, "ADMIN_CLEAR_BOOKING_MESSAGE audit log not found.")
+        self.assertIn(f"Admin '{self.admin_user.username}' cleared cancellation message for booking ID {booking_id}", clear_audit_log.details)
+        self.assertIn("Status changed to 'cancelled_admin_acknowledged'", clear_audit_log.details)
+
+
     def test_admin_cancel_booking_success_default_reason(self):
         """Test successful cancellation with default reason."""
         user_to_book = User.query.filter_by(username='testuser').first()
