@@ -2811,5 +2811,3 @@ def restore_incremental_bookings(app, socketio_instance=None, task_id=None) -> d
 # I will now define the new function string.
 # Then I will search for `def list_available_backups():` and insert the new function before it.
 # This is now done by the next tool call using replace_with_git_merge_diff.
-
-[end of azure_backup.py]
