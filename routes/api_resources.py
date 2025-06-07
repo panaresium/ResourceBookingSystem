@@ -986,6 +986,62 @@ def update_resource_pin(resource_id, pin_id):
         logger.exception(f"Error updating PIN {pin_id} for resource {resource_id} by user {current_user.username}: {e}")
         return jsonify({'error': 'Failed to update PIN due to a server error.'}), 500
 
+@api_resources_bp.route('/resources/<int:resource_id>/pins/<int:pin_id>', methods=['DELETE'])
+@login_required
+@permission_required('manage_resources')
+def delete_resource_pin(resource_id, pin_id):
+    logger = current_app.logger
+    pin = ResourcePIN.query.filter_by(id=pin_id, resource_id=resource_id).first()
+
+    if not pin:
+        logger.warning(f"Attempt to delete non-existent PIN ID {pin_id} for resource ID {resource_id} by user {current_user.username}.")
+        return jsonify({'error': 'PIN not found for this resource.'}), 404
+
+    resource = Resource.query.get(resource_id) # Should exist if pin was found, but good to have for name and current_pin update
+    if not resource: # Should ideally not happen if PIN was found and correctly associated
+        logger.error(f"Resource ID {resource_id} not found for PIN ID {pin_id} during deletion attempt by {current_user.username}.")
+        return jsonify({'error': 'Associated resource not found.'}), 500 # Server-side inconsistency
+
+    deleted_pin_value_for_log = pin.pin_value # Store before deleting
+    resource_name_for_log = resource.name
+
+    try:
+        db.session.delete(pin)
+
+        # Update Resource.current_pin if the deleted PIN was the current one
+        if resource.current_pin == deleted_pin_value_for_log:
+            next_active_pin = ResourcePIN.query.filter(
+                ResourcePIN.resource_id == resource_id,
+                ResourcePIN.is_active == True
+                # No need to filter out pin_id as it's already marked for deletion from session
+            ).order_by(ResourcePIN.created_at.desc()).first()
+            resource.current_pin = next_active_pin.pin_value if next_active_pin else None
+
+        db.session.commit()
+
+        # Truncate PIN value for logging to avoid storing full PINs in logs
+        log_pin_display = deleted_pin_value_for_log[:3] + "..." if len(deleted_pin_value_for_log) > 3 else deleted_pin_value_for_log
+
+        add_audit_log(
+            action="DELETE_RESOURCE_PIN",
+            details=(
+                f"PIN ID {pin_id} (value starting with {log_pin_display}) for resource "
+                f"ID {resource_id} ('{resource_name_for_log}') deleted by {current_user.username}."
+            )
+        )
+        logger.info(f"PIN ID {pin_id} for resource {resource_id} deleted by user {current_user.username}.")
+
+        return jsonify({
+            'message': 'PIN deleted successfully',
+            'deleted_pin_id': pin_id,
+            'resource_current_pin': resource.current_pin # Return the new current_pin of the resource
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Error deleting PIN {pin_id} for resource {resource_id} by user {current_user.username}: {e}")
+        return jsonify({'error': 'Failed to delete PIN due to a server error.'}), 500
+
 def init_api_resources_routes(app):
     app.register_blueprint(api_resources_bp)
 

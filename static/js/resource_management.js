@@ -657,6 +657,14 @@ document.addEventListener('DOMContentLoaded', function() {
             showQrBtn.dataset.resourceId = resourceId;
             showQrBtn.style.marginLeft = '5px';
             actionsCell.appendChild(showQrBtn);
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.textContent = 'Delete';
+            deleteBtn.classList.add('button', 'button-small', 'danger', 'delete-pin-btn');
+            deleteBtn.dataset.pinId = pin.id;
+            deleteBtn.dataset.resourceId = resourceId;
+            deleteBtn.style.marginLeft = '5px'; // Maintain spacing
+            actionsCell.appendChild(deleteBtn);
         });
     }
 
@@ -840,6 +848,46 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else {
                     console.error('QR Code modal elements not found.');
                     showError(statusEl, 'Could not display QR Code modal. Elements missing.');
+                }
+            } else if (target.classList.contains('delete-pin-btn')) {
+                const pinId = target.dataset.pinId;
+                const resourceId = target.dataset.resourceId; // This should be currentResourceIdForPins
+
+                if (!confirm(`Are you sure you want to delete PIN ID ${pinId}?`)) return;
+
+                const statusEl = document.getElementById('resource-pin-form-status');
+                showLoading(statusEl, 'Deleting PIN...');
+
+                try {
+                    const responseData = await apiCall(`/api/resources/${resourceId}/pins/${pinId}`, {
+                        method: 'DELETE'
+                    }, statusEl); // Pass statusEl for error/success messages from apiCall
+
+                    showSuccess(statusEl, responseData.message || 'PIN deleted successfully.');
+
+                    // Refresh the PINs list and current PIN display by calling loadResourcePins
+                    // currentResourceIdForPins should be set correctly when the modal is opened.
+                    if (typeof loadResourcePins === 'function' && currentResourceIdForPins) {
+                        await loadResourcePins(currentResourceIdForPins);
+                    } else {
+                        // Fallback if loadResourcePins or currentResourceIdForPins is not available
+                        // This might mean parts of the UI (like current PIN display) don't update immediately
+                        target.closest('tr').remove();
+                        const pinsTableBody = document.querySelector('#resource-pins-table tbody');
+                        if (pinsTableBody && pinsTableBody.children.length === 0) {
+                            pinsTableBody.innerHTML = '<tr><td colspan="5">No PINs found for this resource.</td></tr>';
+                        }
+                        // Manual update of current PIN display is harder without fetching new current PIN
+                        const currentPinValueSpan = document.getElementById('current-pin-value');
+                        if (currentPinValueSpan) {
+                             currentPinValueSpan.textContent = responseData.resource_current_pin || 'N/A';
+                        }
+                    }
+                } catch (error) {
+                    // showError is typically handled by apiCall if statusEl is passed.
+                    // If apiCall doesn't update statusEl for all errors, or if an error occurs outside apiCall:
+                    // showError(statusEl, error.message || 'Failed to delete PIN.'); // May be redundant
+                    // No explicit showError here as apiCall should handle it by now.
                 }
             }
         });

@@ -3542,6 +3542,114 @@ class TestAPIResourcePINs(AppTests):
         # DETAILPIN2 should be current as DETAILPIN1 was deactivated
         self.assertEqual(details_data.get('current_pin'), "DETAILPIN2")
 
+    def test_delete_resource_pin_success(self):
+        """Test successful deletion of a resource PIN."""
+        # self.admin is logged in from setUp
+        # self.resource is available from setUp
+        # Add a PIN to delete
+        add_response = self._add_pin_via_api(self.resource.id, pin_value="PIN_TO_DELETE", notes="Test Deletion")
+        self.assertEqual(add_response.status_code, 201)
+        pin_data = add_response.get_json()
+        pin_id_to_delete = pin_data['id']
+        original_pin_value = pin_data['pin_value']
+
+        # Make DELETE request
+        delete_response = self.client.delete(f'/api/resources/{self.resource.id}/pins/{pin_id_to_delete}')
+        self.assertEqual(delete_response.status_code, 200)
+        delete_data = delete_response.get_json()
+        self.assertEqual(delete_data['message'], 'PIN deleted successfully')
+        self.assertEqual(delete_data['deleted_pin_id'], pin_id_to_delete)
+
+        # Verify PIN is deleted from DB
+        self.assertIsNone(ResourcePIN.query.get(pin_id_to_delete))
+
+        # Verify AuditLog
+        audit_log = AuditLog.query.filter_by(action="DELETE_RESOURCE_PIN", user_id=self.admin.id).order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log)
+        self.assertIn(f"PIN ID {pin_id_to_delete}", audit_log.details)
+        self.assertIn(f"value starting with {original_pin_value[:3]}...", audit_log.details) # Check for truncated PIN
+        self.assertIn(f"resource ID {self.resource.id} ('{self.resource.name}')", audit_log.details)
+        self.assertIn(f"deleted by {self.admin.username}", audit_log.details)
+
+    def test_delete_resource_pin_updates_current_pin(self):
+        """Test that resource.current_pin is updated correctly after PIN deletion."""
+        # Add PIN1 (will become current)
+        add_resp1 = self._add_pin_via_api(self.resource.id, pin_value="PIN1CUR", notes="PIN 1")
+        self.assertEqual(add_resp1.status_code, 201)
+        pin1_id = add_resp1.get_json()['id']
+        pin1_value = add_resp1.get_json()['pin_value']
+        db.session.refresh(self.resource)
+        self.assertEqual(self.resource.current_pin, pin1_value)
+
+        # Add PIN2 (will become current as it's newer and active by default)
+        add_resp2 = self._add_pin_via_api(self.resource.id, pin_value="PIN2CUR", notes="PIN 2")
+        self.assertEqual(add_resp2.status_code, 201)
+        pin2_id = add_resp2.get_json()['id']
+        pin2_value = add_resp2.get_json()['pin_value']
+        # The _add_pin_via_api sets the new PIN as current if it's the only active one.
+        # If PIN1 was active, and PIN2 is added active, current logic in add_resource_pin might not make PIN2 current
+        # Let's ensure it is for the test:
+        self.resource.current_pin = pin2_value
+        db.session.commit()
+        db.session.refresh(self.resource)
+        self.assertEqual(self.resource.current_pin, pin2_value)
+
+
+        # Delete PIN2 (which is current_pin)
+        delete_resp2 = self.client.delete(f'/api/resources/{self.resource.id}/pins/{pin2_id}')
+        self.assertEqual(delete_resp2.status_code, 200)
+        db.session.refresh(self.resource)
+        self.assertEqual(self.resource.current_pin, pin1_value, "current_pin should fall back to PIN1")
+        self.assertEqual(delete_resp2.get_json().get('resource_current_pin'), pin1_value)
+
+
+        # Delete PIN1 (which is now current_pin)
+        delete_resp1 = self.client.delete(f'/api/resources/{self.resource.id}/pins/{pin1_id}')
+        self.assertEqual(delete_resp1.status_code, 200)
+        db.session.refresh(self.resource)
+        self.assertIsNone(self.resource.current_pin, "current_pin should be None after all active PINs are deleted")
+        self.assertIsNone(delete_resp1.get_json().get('resource_current_pin'))
+
+
+    def test_delete_resource_pin_not_found(self):
+        """Test deleting a non-existent PIN ID."""
+        response = self.client.delete(f'/api/resources/{self.resource.id}/pins/99999')
+        self.assertEqual(response.status_code, 404)
+        self.assertIn('PIN not found', response.get_json().get('error', ''))
+
+    def test_delete_resource_pin_wrong_resource(self):
+        """Test deleting a PIN that does not belong to the specified resource."""
+        resource2 = self._create_test_resource(name="Other Resource for PIN Test")
+        add_pin_resp = self._add_pin_via_api(resource2.id, pin_value="PIN_FOR_RES2")
+        self.assertEqual(add_pin_resp.status_code, 201)
+        pin_for_resource2_id = add_pin_resp.get_json()['id']
+
+        # Attempt to delete pin_for_resource2_id using self.resource.id in URL
+        response = self.client.delete(f'/api/resources/{self.resource.id}/pins/{pin_for_resource2_id}')
+        self.assertEqual(response.status_code, 404) # PIN not found *for this resource*
+        self.assertIn('PIN not found for this resource', response.get_json().get('error', ''))
+
+    def test_delete_resource_pin_no_permission(self):
+        """Test deleting a PIN without 'manage_resources' permission."""
+        # Create a PIN first as admin
+        add_resp = self._add_pin_via_api(self.resource.id, pin_value="PIN_NO_PERM_DEL")
+        self.assertEqual(add_resp.status_code, 201)
+        pin_id = add_resp.get_json()['id']
+
+        self.logout() # Log out admin
+
+        # Create and login as non-admin user (testuser from AppTests setup)
+        non_admin_login_resp = self.login('testuser', 'password')
+        self.assertEqual(non_admin_login_resp.status_code, 200)
+        self.assertTrue(non_admin_login_resp.get_json().get('success'))
+
+        response = self.client.delete(f'/api/resources/{self.resource.id}/pins/{pin_id}')
+        self.assertEqual(response.status_code, 403) # Forbidden
+        self.assertIn('You do not have the required permissions', response.get_json().get('error', ''))
+
+        # Verify PIN still exists
+        self.assertIsNotNone(ResourcePIN.query.get(pin_id))
+
 
 from unittest.mock import patch
 from datetime import datetime as datetime_original, timezone as timezone_original, timedelta as timedelta_original
