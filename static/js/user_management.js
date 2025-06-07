@@ -184,11 +184,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 // If using apiCall and it has a default 'Content-Type' header, it needs to be omitted for FormData.
 
                 // Using fetch directly for clarity with FormData
-                const response = await fetch('/api/admin/users/import/csv', {
+                const csrfTokenTag = document.querySelector('meta[name="csrf-token"]');
+                const csrfToken = csrfTokenTag ? csrfTokenTag.content : null;
+
+                const fetchOptions = {
                     method: 'POST',
-                    body: formData
-                    // No 'Content-Type' header here, browser will set it for FormData
-                });
+                    body: formData,
+                    headers: {} // Initialize headers
+                };
+                if (csrfToken) {
+                    fetchOptions.headers['X-CSRFToken'] = csrfToken;
+                }
+
+                const response = await fetch('/api/admin/users/import/csv', fetchOptions);
 
                 const result = await response.json();
 
