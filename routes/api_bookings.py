@@ -140,7 +140,7 @@ def create_booking():
         user_booking_count = Booking.query.filter(
             Booking.user_name == current_user.username, # Assuming current_user.username is the correct field
             Booking.end_time > datetime.utcnow(),      # Booking has not ended yet
-            Booking.status.notin_(['cancelled', 'rejected']) # Booking is active
+            Booking.status.notin_(['cancelled', 'rejected', 'cancelled_by_admin', 'cancelled_admin_acknowledged']) # Booking is active
         ).count()
 
         if user_booking_count + len(occurrences) > max_bookings_per_user_effective:
@@ -154,7 +154,7 @@ def create_booking():
                 Booking.user_name == user_name_for_record,
                 Booking.start_time < first_occ_end,
                 Booking.end_time > first_occ_start,
-                Booking.status.notin_(['cancelled', 'rejected', 'completed'])
+                Booking.status.notin_(['cancelled', 'rejected', 'completed', 'cancelled_by_admin', 'cancelled_admin_acknowledged'])
             ).first()
 
             if first_slot_user_conflict:
@@ -167,7 +167,7 @@ def create_booking():
             Booking.resource_id == resource_id,
             Booking.start_time < occ_end,
             Booking.end_time > occ_start,
-            Booking.status.notin_(['cancelled', 'rejected', 'completed'])
+            Booking.status.notin_(['cancelled', 'rejected', 'completed', 'cancelled_by_admin', 'cancelled_admin_acknowledged'])
         ).first()
         if conflicting:
             current_app.logger.info(f"Booking conflict for resource {resource_id} on slot {occ_start}-{occ_end} with existing booking {conflicting.id}.")
@@ -187,7 +187,7 @@ def create_booking():
                 Booking.resource_id != resource_id, # Check on other resources
                 Booking.start_time < occ_end,
                 Booking.end_time > occ_start,
-                Booking.status.notin_(['cancelled', 'rejected', 'completed'])
+                Booking.status.notin_(['cancelled', 'rejected', 'completed', 'cancelled_by_admin', 'cancelled_admin_acknowledged'])
             ).first()
 
             if user_conflicting_recurring:

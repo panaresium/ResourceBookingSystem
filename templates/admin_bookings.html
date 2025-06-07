@@ -70,7 +70,7 @@
                           </button>
                         {% elif booking.status and booking.status.lower() not in ['cancelled', 'rejected', 'completed', 'checked_out', 'cancelled_by_admin'] %}
                         {# Delete button for active bookings might still be relevant for hard deletion #}
-                        <button class="button button-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Delete') }}</button>
+                        <button class="button button-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel') }}</button>
                         {% else %}
                         {# For completed, cancelled, rejected bookings, show a dash or specific info #}
                         <span class="text-muted">-</span>
@@ -97,14 +97,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const row = this.closest('tr'); // Get the table row
 
             // Updated confirmation message
-            if (!confirm("{{ _('Are you sure you want to DELETE this booking? This action cannot be undone and the booking will be permanently removed.') }}")) {
+            if (!confirm("{{ _('Are you sure you want to CANCEL this booking? The booking status will be updated to cancelled and the resource will be released.') }}")) {
                 return;
             }
             this.disabled = true;
             this.textContent = "{{ _('Processing...') }}";
 
             // Updated fetch URL
-            fetch(`/api/admin/bookings/${bookingId}/delete`, {
+            fetch(`/api/admin/bookings/${bookingId}/cancel_by_admin`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
             })
@@ -112,75 +112,125 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(({ ok, status, data }) => {
                 if (ok) {
                     // Updated success logic
-                    statusDiv.textContent = data.message || "{{ _('Booking deleted successfully.') }}"; // Use message from response
-                    statusDiv.className = 'alert alert-success';
-                    row.remove(); // Remove the row from the table
-                    // No need to interact with the button further as it's removed with the row
-                } else {
-                    // Error handling remains largely the same
-                    throw new Error(data.error || `{{ _('Error deleting booking (Status: ${status}).') }}`);
-                }
-            })
-            .catch(error => {
-                statusDiv.textContent = `{{ _('Error') }}: ${error.message}`;
-                statusDiv.className = 'alert alert-danger';
-                this.disabled = false;
-                this.textContent = "{{ _('Delete') }}"; // Ensure button text reverts correctly
-            });
-        });
-    });
-
-    document.querySelectorAll('.dismiss-admin-message-btn').forEach(button => {
-        button.addEventListener('click', function() {
-            const bookingId = this.dataset.bookingId;
-            const row = this.closest('tr');
-            const messageDiv = row.querySelector('.alert.alert-warning');
-
-            this.disabled = true;
-            this.textContent = "{{ _('Processing...') }}";
-
-            fetch(`/api/admin/bookings/${bookingId}/clear_admin_message`, { // Corrected API endpoint
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-            })
-            .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, data })))
-            .then(({ ok, status, data }) => {
-                if (ok) {
-                    statusDiv.textContent = data.message || "{{ _('Admin message cleared and booking acknowledged.') }}";
+                    statusDiv.textContent = data.message || "{{ _('Booking cancelled successfully.') }}"; // Use message from response
                     statusDiv.className = 'alert alert-success';
 
-                    if (messageDiv) messageDiv.remove();
-                    this.remove(); // Remove the dismiss button
+                    // Update row content instead of removing
+                    const statusCell = row.cells[6]; // 7th cell for status
+                    const actionCell = row.cells[7]; // 8th cell for actions
 
-                    // Update status display
-                    const statusCell = row.cells[6]; // Assuming status is the 7th cell
                     if (statusCell && data.new_status) {
-                        // For translation, ideally the backend would send translated status or use a mapping here
-                        // For now, using the raw status string, which might not be ideal for display if it's an enum key.
-                        // The _() function is not directly available in JS unless passed specifically.
-                        // Simple approach: use the new_status string.
-                        statusCell.innerHTML = `<span class="status-badge status-${data.new_status.toLowerCase()}">${data.new_status.replace('_', ' ').capitalize()}</span>`;
+                        statusCell.innerHTML = `<span class="status-badge status-${data.new_status.toLowerCase().replace(/_/g, '-')}">${data.new_status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>`;
                     }
 
-                    // Update row styling
-                    row.classList.remove('table-warning');
-                    // Optionally add another class like 'table-light' or 'table-secondary' if desired
-                    // row.classList.add('table-light');
-                     row.className = `booking-row-${data.new_status.toLowerCase().replace('_', '-')}`;
+                    if (actionCell) {
+                        actionCell.innerHTML = ''; // Clear existing buttons
+                        if (data.admin_message) {
+                            // If there's an admin message (e.g. from cancellation), show dismiss button
+                            const dismissButton = document.createElement('button');
+                            dismissButton.className = 'btn btn-sm btn-outline-secondary dismiss-admin-message-btn';
+                            dismissButton.dataset.bookingId = bookingId;
+                            dismissButton.textContent = "{{ _('Dismiss Message') }}";
+                            // Add event listener for this new button - requires moving or duplicating dismiss logic
+                            // For simplicity, we'll assume the existing dismiss logic will pick it up if it's re-run or if the page has a global handler that's periodically re-attached.
+                            // A better approach might be to attach the listener directly here.
+                            actionCell.appendChild(dismissButton);
+                             // Re-attach event listener for the new dismiss button
+                            dismissButton.addEventListener('click', dismissAdminMessageHandler);
+                        } else {
+                            actionCell.innerHTML = '<span class="text-muted">-</span>'; // Or some other indication
+                        }
+                    }
 
+                    // Update row class
+                    row.className = `booking-row-${data.new_status.toLowerCase().replace(/_/g, '-')}`;
+                    if (data.admin_message) {
+                        row.classList.add('table-warning');
+                    }
 
                 } else {
-                    throw new Error(data.error || `{{ _('Failed to clear admin message (Status: ${status}).') }}`);
+                    // Error handling remains largely the same
+                    throw new Error(data.error || `{{ _('Error cancelling booking (Status: ${status}).') }}`);
                 }
             })
             .catch(error => {
                 statusDiv.textContent = `{{ _('Error') }}: ${error.message}`;
                 statusDiv.className = 'alert alert-danger';
                 this.disabled = false;
-                this.textContent = "{{ _('Dismiss Message') }}"; // Revert button text
+                this.textContent = "{{ _('Cancel') }}"; // Ensure button text reverts correctly
             });
         });
     });
+
+    // Centralized function to handle dismissing admin messages
+    function dismissAdminMessageHandler(event) { // event object is implicitly passed
+        const button = event.currentTarget; // Use event.currentTarget to get the button
+        const bookingId = button.dataset.bookingId;
+        const row = button.closest('tr');
+        // const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content'); // Already available globally
+
+        button.disabled = true;
+        button.textContent = "{{ _('Processing...') }}";
+
+        fetch(`/api/admin/bookings/${bookingId}/clear_admin_message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        })
+        .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, data })))
+        .then(({ ok, status, data }) => {
+            if (ok) {
+                statusDiv.textContent = data.message || "{{ _('Admin message cleared and booking acknowledged.') }}";
+                statusDiv.className = 'alert alert-success';
+
+                // Remove the specific alert message div within the title cell if it exists
+                // This was targeting a div that might not be the one we want.
+                // The original HTML has the message in the title cell (booking.title)
+                const titleCell = Array.from(row.cells).find(cell => cell.querySelector('.alert.alert-warning.p-1.my-1'));
+                if (titleCell) {
+                    const adminMessageDiv = titleCell.querySelector('.alert.alert-warning.p-1.my-1');
+                    if (adminMessageDiv) adminMessageDiv.remove();
+                }
+
+                button.remove(); // Remove the dismiss button
+
+                // Update status display if new_status is provided (e.g. 'acknowledged')
+                const statusCell = row.cells[6];
+                if (statusCell && data.new_status) {
+                     statusCell.innerHTML = `<span class="status-badge status-${data.new_status.toLowerCase().replace(/_/g, '-')}">${data.new_status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>`;
+                     // Update row class based on new status
+                     row.className = `booking-row-${data.new_status.toLowerCase().replace(/_/g, '-')}`;
+                } else {
+                    // If no new_status, just ensure the warning class is removed if the message was the cause
+                     row.classList.remove('table-warning');
+                }
+                 // If new_status was 'cancelled_by_admin' and message is now cleared, it should not have table-warning unless another condition applies
+                if (data.new_status !== 'cancelled_by_admin' || !data.admin_message) { // Simplified logic
+                    row.classList.remove('table-warning');
+                }
+
+
+            } else {
+                throw new Error(data.error || `{{ _('Failed to clear admin message (Status: ${status}).') }}`);
+            }
+        })
+        .catch(error => {
+            statusDiv.textContent = `{{ _('Error') }}: ${error.message}`;
+            statusDiv.className = 'alert alert-danger';
+            button.disabled = false;
+            button.textContent = "{{ _('Dismiss Message') }}";
+        });
+    }
+
+    // Attach the handler to all existing and dynamically added dismiss buttons
+    document.querySelectorAll('.dismiss-admin-message-btn').forEach(button => {
+        button.removeEventListener('click', dismissAdminMessageHandler); // Remove if any old one attached
+        button.addEventListener('click', dismissAdminMessageHandler);
+    });
+
+    // If new dismiss buttons are added dynamically (e.g. after cancelling a booking),
+    // ensure their event listeners are also attached.
+    // This is handled by the cancel success logic which calls:
+    // dismissButton.addEventListener('click', dismissAdminMessageHandler);
 });
 </script>
 

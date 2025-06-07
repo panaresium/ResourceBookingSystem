@@ -122,6 +122,88 @@ def admin_delete_booking(booking_id):
         return jsonify({'error': 'Failed to delete booking due to a server error.'}), 500
 
 
+@admin_api_bookings_bp.route('/bookings/<int:booking_id>/cancel_by_admin', methods=['POST'])
+@login_required
+@permission_required('manage_bookings')
+def admin_cancel_booking(booking_id):
+    current_app.logger.info(f"Admin user {current_user.username} attempting to cancel booking ID: {booking_id}")
+    try:
+        booking = Booking.query.get(booking_id)
+
+        if not booking:
+            current_app.logger.warning(f"Admin cancel attempt: Booking ID {booking_id} not found.")
+            return jsonify({'error': 'Booking not found.'}), 404
+
+        # Check if the booking can be cancelled
+        non_cancellable_statuses = ['completed', 'checked_out', 'rejected', 'cancelled_by_admin', 'cancelled_admin_acknowledged']
+        if booking.status in non_cancellable_statuses:
+            current_app.logger.warning(
+                f"Admin cancel attempt for booking ID {booking_id}: Booking status '{booking.status}' is not cancellable."
+            )
+            return jsonify({'error': f"Booking is already in a state ('{booking.status}') that cannot be cancelled by admin."}), 400
+
+        data = request.get_json() if request.data else {}
+        reason = data.get('reason', 'Cancelled by admin.')
+
+        # Update booking status and admin message
+        booking.status = 'cancelled_by_admin'
+        booking.admin_deleted_message = reason
+        db.session.commit()
+
+        # Audit log
+        audit_details = (
+            f"Admin '{current_user.username}' CANCELLED booking ID {booking.id}. "
+            f"Reason: '{reason}'. "
+            f"Booked by: '{booking.user_name}'. "
+            f"Resource: '{booking.resource_booked.name if booking.resource_booked else 'Unknown Resource'}' (ID: {booking.resource_id}). "
+            f"Title: '{booking.title or 'N/A'}'."
+        )
+        add_audit_log(action="ADMIN_CANCEL_BOOKING", details=audit_details)
+
+        # SocketIO event
+        socketio.emit('booking_updated', {
+            'action': 'cancelled_by_admin',
+            'booking_id': booking.id,
+            'resource_id': booking.resource_id,
+            'new_status': booking.status,
+            'admin_message': reason,
+            'user_name': booking.user_name # Useful for UI updates on client side
+        })
+
+        # Notify user
+        user = User.query.filter_by(username=booking.user_name).first()
+        if user and user.email:
+            try:
+                send_email(
+                    user.email,
+                    'Booking Cancelled by Admin',
+                    f"Your booking for '{booking.resource_booked.name if booking.resource_booked else 'resource'}' "
+                    f"(ID: {booking.id}, Title: {booking.title or 'N/A'}) "
+                    f"from {booking.start_time.strftime('%Y-%m-%d %H:%M')} to {booking.end_time.strftime('%Y-%m-%d %H:%M')} "
+                    f"has been cancelled by an administrator. Reason: {reason}"
+                )
+                current_app.logger.info(f"Cancellation email sent to {user.email} for booking ID {booking.id}.")
+            except Exception as e_mail:
+                current_app.logger.error(f"Failed to send cancellation email for booking {booking.id} to {user.email}: {e_mail}")
+
+
+        current_app.logger.info(f"Admin user {current_user.username} successfully CANCELLED booking ID: {booking.id}.")
+        return jsonify({
+            'message': 'Booking cancelled successfully.',
+            'new_status': booking.status,
+            'admin_message': reason
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception(f"Error during admin cancellation of booking ID {booking_id}:")
+        add_audit_log(
+            action="ADMIN_CANCEL_BOOKING_FAILED",
+            details=f"Admin '{current_user.username}' failed to CANCEL booking ID {booking_id}. Error: {str(e)}"
+        )
+        return jsonify({'error': 'Failed to cancel booking due to a server error.'}), 500
+
+
 @admin_api_bookings_bp.route('/bookings/<int:booking_id>/clear_admin_message', methods=['POST'])
 @login_required
 @permission_required('manage_bookings')
