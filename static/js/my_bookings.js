@@ -139,8 +139,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     // Existing logic for rendering active bookings
                     const bookingItemClone = bookingItemTemplate.content.cloneNode(true);
-                    // Existing logic for rendering active bookings
-                    const bookingItemClone = bookingItemTemplate.content.cloneNode(true);
                     const bookingItemDiv = bookingItemClone.querySelector('.booking-item');
 
                     // Apply conditional classes for status

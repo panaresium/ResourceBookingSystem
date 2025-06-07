@@ -3768,6 +3768,36 @@ class TestResourceURLCheckin(AppTests):
         self.assertEqual(response_already_checked_in.status_code, 400) # Or could be 200 with a message "already checked in"
         self.assertIn("Booking has already been checked in.", response_already_checked_in.get_json().get('error', ''))
 
+    def test_resource_url_checkin_redirects_to_correct_login_when_login_required(self):
+        """Test that resource URL check-in redirects to the correct login page when login is required."""
+        self._set_checkin_booking_settings(requires_login=True)
+        self.logout()  # Ensure client is logged out
+
+        # Perform a GET request to the check-in URL
+        response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
+
+        # Assert that the status code is 401 (Unauthorized, as it renders a page indicating login is needed)
+        self.assertEqual(response.status_code, 401)
+
+        # Assert that the response data (HTML content) contains the correct login URL part
+        response_data_str = response.data.decode('utf-8')
+        # url_for('ui.serve_login') generates '/ui/login'
+        expected_login_url_part = url_for('ui.serve_login') # This will be '/ui/login'
+
+        # Check for the href attribute containing the login URL and the next parameter
+        # Example: href="/ui/login?next=%2Fr%2F1%2Fcheckin%3Fpin%3DVALIDPIN789"
+        # We need to be careful about how `next` is URL-encoded.
+        # For simplicity, we'll check for the base login path and the presence of `next=`.
+        self.assertIn(f'href="{expected_login_url_part}?next=', response_data_str)
+
+        # More robust check for the next parameter pointing to the original URL
+        original_url = f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}'
+        # url_for encodes the `next` parameter. We should check for the encoded version.
+        from urllib.parse import quote_plus
+        encoded_next_url = quote_plus(original_url)
+        self.assertIn(encoded_next_url, response_data_str)
+        self.assertIn("Login is required to perform this check-in.", response_data_str)
+
 
 class TestAPIBulkResourcePINs(AppTests):
     def _create_admin_user_and_login(self, username="bulk_pin_admin", password="adminpass"):
