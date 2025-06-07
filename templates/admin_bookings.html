@@ -125,27 +125,43 @@ document.addEventListener('DOMContentLoaded', function() {
 
                     if (actionCell) {
                         actionCell.innerHTML = ''; // Clear existing buttons
-                        if (data.admin_message) {
-                            // If there's an admin message (e.g. from cancellation), show dismiss button
+                        // Check if admin_message is present and not an empty string
+                        if (data.admin_message && data.admin_message.trim() !== "") {
+                            // Dynamically add the cancellation message to the title cell (e.g., row.cells[3])
+                            const titleCell = row.cells[3]; // Assuming title is the 4th cell
+                            if (titleCell) {
+                                // Remove any existing message div first
+                                const existingMessageDiv = titleCell.querySelector('.admin-cancel-message-display');
+                                if (existingMessageDiv) {
+                                    existingMessageDiv.remove();
+                                }
+                                const messageDiv = document.createElement('div');
+                                messageDiv.className = 'alert alert-warning p-1 my-1 admin-cancel-message-display'; // Added specific class
+                                messageDiv.innerHTML = `<small><strong>{{ _('Admin Cancellation:') }}</strong> ${data.admin_message}</small>`;
+                                // Prepend or append as appropriate. Appending to keep it similar to Jinja.
+                                titleCell.appendChild(messageDiv);
+                            }
+
                             const dismissButton = document.createElement('button');
                             dismissButton.className = 'btn btn-sm btn-outline-secondary dismiss-admin-message-btn';
                             dismissButton.dataset.bookingId = bookingId;
                             dismissButton.textContent = "{{ _('Dismiss Message') }}";
-                            // Add event listener for this new button - requires moving or duplicating dismiss logic
-                            // For simplicity, we'll assume the existing dismiss logic will pick it up if it's re-run or if the page has a global handler that's periodically re-attached.
-                            // A better approach might be to attach the listener directly here.
                             actionCell.appendChild(dismissButton);
-                             // Re-attach event listener for the new dismiss button
                             dismissButton.addEventListener('click', dismissAdminMessageHandler);
                         } else {
-                            actionCell.innerHTML = '<span class="text-muted">-</span>'; // Or some other indication
+                            actionCell.innerHTML = '<span class="text-muted">-</span>';
                         }
                     }
 
                     // Update row class
+                    // The base class should always be set based on the new status.
                     row.className = `booking-row-${data.new_status.toLowerCase().replace(/_/g, '-')}`;
-                    if (data.admin_message) {
+                    // Add table-warning class only if there's an actual admin_message.
+                    if (data.admin_message && data.admin_message.trim() !== "") {
                         row.classList.add('table-warning');
+                    } else {
+                        // Ensure table-warning is removed if no message, in case it was there before for some reason
+                        row.classList.remove('table-warning');
                     }
 
                 } else {

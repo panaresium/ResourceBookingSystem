@@ -3231,14 +3231,15 @@ class TestAdminBookingCancellation(TestAdminBookings):
         audit_log = AuditLog.query.filter_by(action="ADMIN_CANCEL_BOOKING", user_id=self.admin_user.id).order_by(AuditLog.id.desc()).first()
         self.assertIsNotNone(audit_log, "ADMIN_CANCEL_BOOKING audit log not found.")
         self.assertIn(f"Admin '{self.admin_user.username}' CANCELLED booking ID {booking_id}", audit_log.details)
-        self.assertIn(f"Reason: '{cancellation_reason}'", audit_log.details)
+        self.assertIn(f"Reason: '{cancellation_reason}'", audit_log.details) # Verify custom reason
 
         # Check for email notification (inspect utils.email_log)
         self.assertTrue(len(email_log) >= 1, "No email was logged.")
-        self.assertEqual(email_log[-1]['to'], original_user_email)
-        self.assertEqual(email_log[-1]['subject'], 'Booking Cancelled by Admin')
-        self.assertIn(f"Your booking for '{self.resource1.name}'", email_log[-1]['body'])
-        self.assertIn(f"has been cancelled by an administrator. Reason: {cancellation_reason}", email_log[-1]['body'])
+        last_email = email_log[-1]
+        self.assertEqual(last_email['to'], original_user_email)
+        self.assertEqual(last_email['subject'], 'Booking Cancelled by Admin')
+        self.assertIn(f"Your booking for '{self.resource1.name}'", last_email['body'])
+        self.assertIn(f"has been cancelled by an administrator. Reason: {cancellation_reason}", last_email['body']) # Verify custom reason
 
         # --- Enhancement: Call clear_admin_message and verify ---
         # Ensure email_log is cleared or count emails before this step if sensitive to new emails from clear_admin_message
@@ -3268,15 +3269,31 @@ class TestAdminBookingCancellation(TestAdminBookings):
         user_to_book = User.query.filter_by(username='testuser').first()
         booking = self._create_booking(user_name=user_to_book.username, resource_id=self.resource1.id, start_offset_hours=24)
         booking_id = booking.id
+        original_user_email = user_to_book.email # For email check
 
         response = self.client.post(f'/api/admin/bookings/{booking_id}/cancel_by_admin', json={}) # No reason in payload
         self.assertEqual(response.status_code, 200)
         response_data = response.get_json()
         self.assertEqual(response_data.get('new_status'), 'cancelled_by_admin')
-        self.assertEqual(response_data.get('admin_message'), "Cancelled by admin.") # Default reason
+        self.assertIsNone(response_data.get('admin_message')) # Should be None
 
         cancelled_booking_db = Booking.query.get(booking_id)
-        self.assertEqual(cancelled_booking_db.admin_deleted_message, "Cancelled by admin.")
+        self.assertIsNone(cancelled_booking_db.admin_deleted_message) # Should be None in DB
+
+        # Audit Log Check
+        audit_log = AuditLog.query.filter_by(action="ADMIN_CANCEL_BOOKING", user_id=self.admin_user.id).order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log, "ADMIN_CANCEL_BOOKING audit log not found.")
+        self.assertIn(f"Admin '{self.admin_user.username}' CANCELLED booking ID {booking_id}", audit_log.details)
+        self.assertIn("Reason: 'N/A'", audit_log.details) # Check for N/A placeholder
+
+        # Email Log Check
+        self.assertTrue(len(email_log) >= 1, "No email was logged for default reason cancellation.")
+        last_email = email_log[-1]
+        self.assertEqual(last_email['to'], original_user_email)
+        self.assertEqual(last_email['subject'], 'Booking Cancelled by Admin')
+        self.assertIn("No specific reason was provided.", last_email['body'])
+        self.assertNotIn("Reason: Cancelled by admin.", last_email['body']) # Ensure old default isn't there
+        self.assertNotIn("Reason: N/A", last_email['body']) # Ensure "N/A" isn't in email, but "No specific reason..."
 
     def test_admin_cancel_booking_already_terminal_status(self):
         """Test cancelling a booking that is already in a terminal state."""
@@ -3328,76 +3345,117 @@ class TestAdminBookingCancellation(TestAdminBookings):
 
 
     def test_resource_availability_after_admin_cancellation(self):
-        """Test that a resource becomes available after admin cancellation."""
+        """Test that a resource becomes available after admin cancellation and can be booked by another user."""
+        # Admin is already logged in from setUp
+
         # Create a specific resource for this test
-        test_resource = Resource(name="CancellableResource", capacity=1, status='published')
+        test_resource = Resource(name="CancellableResourceTest", capacity=1, status='published')
         db.session.add(test_resource)
         db.session.commit()
 
-        # Create initial user and booking
-        user_initial = User(username='user_initial_booker', email='initial@example.com')
-        user_initial.set_password('password')
-        db.session.add(user_initial)
-        db.session.commit()
+        # Create user_A
+        user_a = User.query.filter_by(username='user_a_avail_test').first()
+        if not user_a:
+            user_a = User(username='user_a_avail_test', email='usera_avail@example.com')
+            user_a.set_password('password')
+            db.session.add(user_a)
+            db.session.commit()
 
-        booking_start_dt = datetime.utcnow() + timedelta(days=5, hours=10) # Specific future time
-        booking_end_dt = booking_start_dt + timedelta(hours=1)
+        # Define precise booking time
+        # Using a fixed future date to avoid issues with current time being too close to midnight, etc.
+        booking_date = date.today() + timedelta(days=7)
+        booking_start_time_obj = time(10, 0)
+        booking_end_time_obj = time(11, 0)
 
+        booking_start_dt = datetime.combine(booking_date, booking_start_time_obj)
+        booking_end_dt = datetime.combine(booking_date, booking_end_time_obj)
+
+        # Create a booking for user_A on resourceX at timeT
         initial_booking = Booking(
-            user_name=user_initial.username,
+            user_name=user_a.username,
             resource_id=test_resource.id,
             start_time=booking_start_dt,
             end_time=booking_end_dt,
-            title="Initial Booking for Cancellation Test",
-            status="approved" # Assume it's approved
+            title="Initial Booking for Availability Test",
+            status="approved" # Start with an approved booking
         )
         db.session.add(initial_booking)
         db.session.commit()
         initial_booking_id = initial_booking.id
 
-        # Admin (self.admin_user, logged in from setUp) cancels this booking
-        cancel_reason = "Freeing up for another user."
+        # Admin cancels user_A's booking
+        cancel_reason = "Testing resource release."
         cancel_response = self.client.post(f'/api/admin/bookings/{initial_booking_id}/cancel_by_admin',
                                            json={'reason': cancel_reason})
-        self.assertEqual(cancel_response.status_code, 200, f"Admin cancellation failed: {cancel_response.get_json()}")
+        self.assertEqual(cancel_response.status_code, 200,
+                         f"Admin cancellation failed: {cancel_response.get_data(as_text=True)}")
+        cancelled_booking_db = Booking.query.get(initial_booking_id)
+        self.assertIsNotNone(cancelled_booking_db, "Cancelled booking should still exist in DB.")
+        self.assertEqual(cancelled_booking_db.status, 'cancelled_by_admin', "Booking status was not updated to cancelled_by_admin.")
 
-        # Verify initial booking is cancelled
-        cancelled_booking = Booking.query.get(initial_booking_id)
-        self.assertEqual(cancelled_booking.status, 'cancelled_by_admin')
+        # Admin logs out
+        logout_response = self.logout()
+        self.assertEqual(logout_response.status_code, 200)
+        auth_status_after_admin_logout = self.client.get('/api/auth/status').get_json()
+        self.assertFalse(auth_status_after_admin_logout.get('logged_in'), "Admin user should be logged out.")
 
-        # Create a new user to make a new booking
-        user_new = User(username='user_new_booker', email='newbooker@example.com')
-        user_new.set_password('password')
-        db.session.add(user_new)
-        db.session.commit()
 
-        # Log out admin, log in as the new user
-        self.logout()
-        self.login(user_new.username, 'password')
+        # Create user_B
+        user_b = User.query.filter_by(username='user_b_avail_test').first()
+        if not user_b:
+            user_b = User(username='user_b_avail_test', email='userb_avail@example.com')
+            user_b.set_password('password')
+            db.session.add(user_b)
+            db.session.commit()
 
-        # Attempt to create a new booking for the same resource and time slot
+        # Log in user_B and verify
+        login_resp_user_b = self.login(user_b.username, 'password')
+        self.assertEqual(login_resp_user_b.status_code, 200, f"Login for user_B failed: {login_resp_user_b.get_data(as_text=True)}")
+        auth_status_user_b = self.client.get('/api/auth/status').get_json()
+        self.assertTrue(auth_status_user_b.get('logged_in'), "User_B should be logged in.")
+        self.assertEqual(auth_status_user_b.get('user', {}).get('username'), user_b.username)
+
+        # New Check: Query DB for active bookings on resourceX at timeT
+        # These statuses are considered "active" or "blocking" for conflict checking in create_booking
+        active_statuses = ['pending', 'approved', 'confirmed', 'checked_in'] # As per create_booking conflict logic usually
+
+        conflicting_bookings = Booking.query.filter(
+            Booking.resource_id == test_resource.id,
+            Booking.start_time < booking_end_dt,
+            Booking.end_time > booking_start_dt,
+            Booking.status.in_(active_statuses)
+        ).all()
+
+        self.assertEqual(len(conflicting_bookings), 0,
+                         f"Resource slot should be free. Found conflicting bookings: {[(b.id, b.status) for b in conflicting_bookings]}")
+
+        # User_B attempts to create a new booking on resourceX at timeT
         new_booking_payload = {
             'resource_id': test_resource.id,
             'date_str': booking_start_dt.strftime('%Y-%m-%d'),
             'start_time_str': booking_start_dt.strftime('%H:%M'),
             'end_time_str': booking_end_dt.strftime('%H:%M'),
-            'title': "New Booking After Cancellation",
-            'user_name': user_new.username # Booking for self
+            'title': "New Booking by User B After Admin Cancellation",
+            'user_name': user_b.username
         }
         new_booking_response = self.client.post('/api/bookings', json=new_booking_payload)
-        self.assertEqual(new_booking_response.status_code, 201,
-                         f"New booking creation failed after cancellation: {new_booking_response.get_json()}")
 
-        # Verify the new booking exists in the database
+        # Assert the API response is 201. If not, include the API error in the test failure message.
+        response_json_on_fail = new_booking_response.get_json() if new_booking_response.content_type == 'application/json' else {}
+        self.assertEqual(new_booking_response.status_code, 201,
+                         f"New booking creation by User B failed. Status: {new_booking_response.status_code}. Error: {response_json_on_fail.get('error', 'No JSON error message.')}")
+
+        # Verify user_B's booking exists in the DB
         if new_booking_response.status_code == 201:
             new_booking_id = new_booking_response.get_json()['bookings'][0]['id']
             final_booking = Booking.query.get(new_booking_id)
-            self.assertIsNotNone(final_booking)
-            self.assertEqual(final_booking.user_name, user_new.username)
+            self.assertIsNotNone(final_booking, "User B's booking was not found in DB after supposedly successful creation.")
+            self.assertEqual(final_booking.user_name, user_b.username)
             self.assertEqual(final_booking.resource_id, test_resource.id)
             self.assertEqual(final_booking.start_time, booking_start_dt)
+            self.assertEqual(final_booking.status, 'approved') # Default status for new bookings
 
-        # Log back in as admin for subsequent tests in this class
+        # Log back in as admin for subsequent tests in this class (if any, or for teardown consistency)
         self.logout()
         self.login(self.admin_user.username, "adminpass")
 
