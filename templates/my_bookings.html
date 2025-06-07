@@ -14,8 +14,23 @@
     <div id="my-bookings-status" class="alert" style="display:none;"></div>
 
     <div id="my-bookings-list">
-        <!-- Bookings will be loaded here by JavaScript -->
-        <p>{{ _('Loading your bookings...') }}</p>
+        <div id="upcoming-bookings-section">
+            <h2>{{ _('Upcoming Bookings') }}</h2>
+            <div id="upcoming-bookings-container">
+                <!-- Upcoming bookings will be loaded here by JavaScript -->
+                <p class="loading-message">{{ _('Loading upcoming bookings...') }}</p>
+            </div>
+        </div>
+
+        <hr class="my-4"> <!-- Optional separator -->
+
+        <div id="past-bookings-section" class="mt-4">
+            <h2>{{ _('Past Bookings') }}</h2>
+            <div id="past-bookings-container">
+                <!-- Past bookings will be loaded here by JavaScript -->
+                <p class="loading-message">{{ _('Loading past bookings...') }}</p>
+            </div>
+        </div>
     </div>
 
     <!-- Template for a single booking item (hidden, used by JS) -->

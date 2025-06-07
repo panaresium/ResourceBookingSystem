@@ -80,129 +80,131 @@ document.addEventListener('DOMContentLoaded', () => {
         slotsSelect.innerHTML = `<option value="">${message}</option>`;
         slotsSelect.disabled = true;
     }
-    
+
+    function createBookingCardElement(booking, checkInOutEnabled) {
+        const bookingItemClone = bookingItemTemplate.content.cloneNode(true);
+        const bookingItemDiv = bookingItemClone.querySelector('.booking-item');
+
+        // Apply conditional classes for status
+        bookingItemDiv.classList.remove('booking-completed', 'booking-cancelled', 'booking-rejected', 'booking-cancelled-by-admin', 'booking-cancelled-admin-acknowledged');
+        const statusClass = `booking-${booking.status.toLowerCase().replace(/_/g, '-')}`;
+        bookingItemDiv.classList.add(statusClass);
+
+        bookingItemDiv.dataset.bookingId = booking.id;
+        bookingItemDiv.dataset.resourceId = booking.resource_id;
+        bookingItemDiv.dataset.startTime = booking.start_time;
+        bookingItemDiv.dataset.endTime = booking.end_time;
+
+        bookingItemClone.querySelector('.resource-name').textContent = booking.resource_name;
+        const titleSpan = bookingItemClone.querySelector('.booking-title');
+        titleSpan.textContent = booking.title || 'N/A';
+        titleSpan.dataset.originalTitle = booking.title || '';
+
+        const startTimeSpan = bookingItemClone.querySelector('.start-time');
+        startTimeSpan.textContent = new Date(booking.start_time).toUTCString(); // Or toLocaleString() for user's timezone
+        startTimeSpan.dataset.originalStartTime = booking.start_time;
+
+        const endTimeSpan = bookingItemClone.querySelector('.end-time');
+        endTimeSpan.textContent = new Date(booking.end_time).toUTCString(); // Or toLocaleString()
+        endTimeSpan.dataset.originalEndTime = booking.end_time;
+
+        const recurrenceSpan = bookingItemClone.querySelector('.recurrence-rule');
+        if (recurrenceSpan) { // Ensure the element exists
+            recurrenceSpan.textContent = booking.recurrence_rule || 'None';
+        }
+
+        const updateBtn = bookingItemClone.querySelector('.update-booking-btn');
+        updateBtn.dataset.bookingId = booking.id;
+
+        const cancelBtn = bookingItemClone.querySelector('.cancel-booking-btn');
+        cancelBtn.dataset.bookingId = booking.id;
+
+        const checkInBtn = bookingItemClone.querySelector('.check-in-btn');
+        const checkOutBtn = bookingItemClone.querySelector('.check-out-btn');
+        const checkInControls = bookingItemClone.querySelector('.check-in-controls');
+        const pinInput = bookingItemClone.querySelector('.booking-pin-input');
+
+        const bookingStatusSpan = bookingItemClone.querySelector('.booking-status');
+        if (bookingStatusSpan) {
+            if (booking.status === 'cancelled_by_admin' || booking.status === 'cancelled_admin_acknowledged') {
+                bookingStatusSpan.textContent = 'Cancelled by Administrator';
+            } else {
+                bookingStatusSpan.textContent = booking.status ? booking.status.charAt(0).toUpperCase() + booking.status.slice(1).replace(/_/g, ' ') : 'Unknown';
+            }
+        }
+
+        if (checkInControls) checkInControls.style.display = 'none';
+        if (checkOutBtn) checkOutBtn.style.display = 'none';
+        if (cancelBtn) cancelBtn.style.display = 'inline-block';
+        if (updateBtn) updateBtn.style.display = 'inline-block';
+
+        const terminalStatuses = ['completed', 'cancelled', 'rejected', 'cancelled_by_admin', 'cancelled_admin_acknowledged'];
+        if (terminalStatuses.includes(booking.status)) {
+            if (checkInControls) checkInControls.style.display = 'none';
+            if (checkOutBtn) checkOutBtn.style.display = 'none';
+            if (cancelBtn) cancelBtn.style.display = 'none';
+            if (updateBtn) updateBtn.style.display = 'none';
+        } else if (checkInOutEnabled) {
+            if (booking.can_check_in && !booking.checked_in_at) {
+                if (checkInControls) checkInControls.style.display = 'inline-block';
+            }
+            if (booking.checked_in_at && !booking.checked_out_at) {
+                if (checkOutBtn) checkOutBtn.style.display = 'inline-block';
+                if (checkInControls) checkInControls.style.display = 'none';
+            }
+        } else {
+            if (checkInControls) checkInControls.style.display = 'none';
+            if (checkOutBtn) checkOutBtn.style.display = 'none';
+        }
+
+        if (checkInBtn) checkInBtn.dataset.bookingId = booking.id;
+        if (pinInput) pinInput.dataset.bookingId = booking.id;
+        if (checkOutBtn) checkOutBtn.dataset.bookingId = booking.id;
+
+        return bookingItemDiv;
+    }
+
     async function fetchAndDisplayBookings() {
         showLoading(statusDiv, 'Loading your bookings...');
+        // Clear previous content from both containers
+        if (upcomingBookingsContainer) upcomingBookingsContainer.innerHTML = '';
+        if (pastBookingsContainer) pastBookingsContainer.innerHTML = '';
+
         try {
             const apiResponse = await apiCall('/api/bookings/my_bookings');
-            console.log('Raw API response data:', apiResponse); // Added console.log for raw response
-            const bookings = apiResponse.bookings; // Access the bookings array
-            console.log('Extracted bookings array:', bookings); // Added console.log for extracted array
-            console.log('Is bookings an array?', Array.isArray(bookings));
-            if (bookings) {
-                console.log('Length of bookings array:', bookings.length);
-            }
-            const checkInOutEnabled = apiResponse.check_in_out_enabled; // Store the flag
+            // New API response structure
+            const upcomingBookings = apiResponse.upcoming_bookings;
+            const pastBookings = apiResponse.past_bookings;
+            const checkInOutEnabled = apiResponse.check_in_out_enabled;
+            // Assuming check_in_minutes_before and check_in_minutes_after might be part of apiResponse if needed by createBookingCardElement
+            // For now, createBookingCardElement only takes checkInOutEnabled. If it needs more, this is where they'd be passed.
 
-            bookingsListDiv.innerHTML = ''; // Clear loading message or previous bookings
-
-            if (!bookings || bookings.length === 0) { // Check if bookings is undefined or empty
+            if ((!upcomingBookings || upcomingBookings.length === 0) && (!pastBookings || pastBookings.length === 0)) {
                 showStatusMessage(statusDiv, 'You have no bookings.', 'info');
+                if (upcomingBookingsContainer) upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings.</p>';
+                if (pastBookingsContainer) pastBookingsContainer.innerHTML = '<p>No past booking history.</p>';
                 return;
             }
 
-            bookings.forEach(booking => {
-                // Unified logic for rendering all bookings
-                const bookingItemClone = bookingItemTemplate.content.cloneNode(true);
-                const bookingItemDiv = bookingItemClone.querySelector('.booking-item');
+            if (upcomingBookings && upcomingBookings.length > 0) {
+                upcomingBookings.forEach(booking => {
+                    const bookingCard = createBookingCardElement(booking, checkInOutEnabled);
+                    if (upcomingBookingsContainer) upcomingBookingsContainer.appendChild(bookingCard);
+                });
+            } else {
+                if (upcomingBookingsContainer) upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings.</p>';
+            }
 
-                // Apply conditional classes for status
-                bookingItemDiv.classList.remove('booking-completed', 'booking-cancelled', 'booking-rejected', 'booking-cancelled-by-admin', 'booking-cancelled-admin-acknowledged'); // Clear previous status classes
-                if (booking.status === 'completed') {
-                    bookingItemDiv.classList.add('booking-completed');
-                } else if (booking.status === 'cancelled') {
-                    bookingItemDiv.classList.add('booking-cancelled');
-                } else if (booking.status === 'rejected') {
-                    bookingItemDiv.classList.add('booking-rejected');
-                } else if (booking.status === 'cancelled_by_admin') {
-                    bookingItemDiv.classList.add('booking-cancelled-by-admin');
-                } else if (booking.status === 'cancelled_admin_acknowledged') {
-                    bookingItemDiv.classList.add('booking-cancelled-admin-acknowledged');
-                }
-                // Add other status classes as needed
+            if (pastBookings && pastBookings.length > 0) {
+                pastBookings.forEach(booking => {
+                    const bookingCard = createBookingCardElement(booking, checkInOutEnabled);
+                    if (pastBookingsContainer) pastBookingsContainer.appendChild(bookingCard);
+                });
+            } else {
+                if (pastBookingsContainer) pastBookingsContainer.innerHTML = '<p>No past booking history.</p>';
+            }
 
-                bookingItemDiv.dataset.bookingId = booking.id; // Store booking ID on the item div
-                    bookingItemDiv.dataset.resourceId = booking.resource_id; // Store resource ID
-                    bookingItemDiv.dataset.startTime = booking.start_time; // Store full start time
-                    bookingItemDiv.dataset.endTime = booking.end_time; // Store full end time
-
-                    bookingItemClone.querySelector('.resource-name').textContent = booking.resource_name;
-                    const titleSpan = bookingItemClone.querySelector('.booking-title');
-                    titleSpan.textContent = booking.title || 'N/A';
-                    titleSpan.dataset.originalTitle = booking.title || ''; // Store original title
-
-                    const startTimeSpan = bookingItemClone.querySelector('.start-time');
-                    startTimeSpan.textContent = new Date(booking.start_time).toUTCString();
-                    startTimeSpan.dataset.originalStartTime = booking.start_time;
-
-                    const endTimeSpan = bookingItemClone.querySelector('.end-time');
-                    endTimeSpan.textContent = new Date(booking.end_time).toUTCString();
-                    endTimeSpan.dataset.originalEndTime = booking.end_time;
-
-                    bookingItemClone.querySelector('.recurrence-rule').textContent = booking.recurrence_rule || '';
-
-                    const updateBtn = bookingItemClone.querySelector('.update-booking-btn');
-                    updateBtn.dataset.bookingId = booking.id;
-
-                    const cancelBtn = bookingItemClone.querySelector('.cancel-booking-btn');
-                    cancelBtn.dataset.bookingId = booking.id;
-
-                    const checkInBtn = bookingItemClone.querySelector('.check-in-btn'); // Part of checkInControls
-                    const checkOutBtn = bookingItemClone.querySelector('.check-out-btn');
-                    const checkInControls = bookingItemClone.querySelector('.check-in-controls');
-                    const pinInput = bookingItemClone.querySelector('.booking-pin-input'); // Part of checkInControls
-
-                    // Populate Status text
-                    const bookingStatusSpan = bookingItemClone.querySelector('.booking-status');
-                    if (bookingStatusSpan) {
-                        if (booking.status === 'cancelled_by_admin' || booking.status === 'cancelled_admin_acknowledged') {
-                            bookingStatusSpan.textContent = 'Cancelled by Administrator';
-                        } else {
-                            bookingStatusSpan.textContent = booking.status ? booking.status.charAt(0).toUpperCase() + booking.status.slice(1).replace(/_/g, ' ') : 'Unknown';
-                        }
-                    }
-
-                    // Ensure admin_deleted_message is NOT displayed
-                    // (No specific element for it in the template for active bookings, so no action needed here to remove it)
-
-                    // Ensure buttons/controls are hidden by default before applying logic
-                    if (checkInControls) checkInControls.style.display = 'none';
-                    if (checkOutBtn) checkOutBtn.style.display = 'none';
-                    if (cancelBtn) cancelBtn.style.display = 'inline-block'; // Default for active bookings
-                    if (updateBtn) updateBtn.style.display = 'inline-block'; // Default for active bookings
-
-
-                    const terminalStatuses = ['completed', 'cancelled', 'rejected', 'cancelled_by_admin', 'cancelled_admin_acknowledged'];
-                    if (terminalStatuses.includes(booking.status)) {
-                        if (checkInControls) checkInControls.style.display = 'none';
-                        if (checkOutBtn) checkOutBtn.style.display = 'none';
-                        if (cancelBtn) cancelBtn.style.display = 'none';
-                        if (updateBtn) updateBtn.style.display = 'none';
-                    } else if (checkInOutEnabled) { // Active bookings, apply check-in/out logic
-                        if (booking.can_check_in && !booking.checked_in_at) { // Ensure not already checked in
-                            if (checkInControls) checkInControls.style.display = 'inline-block';
-                        }
-                        if (booking.checked_in_at && !booking.checked_out_at) {
-                            if (checkOutBtn) checkOutBtn.style.display = 'inline-block';
-                            if (checkInControls) checkInControls.style.display = 'none'; // Hide check-in once checked-in
-                        }
-                        // Cancel and Update buttons remain visible for non-terminal, active bookings
-                    } else {
-                        // If checkInOut is NOT enabled, all related check-in/out buttons should be hidden
-                        if (checkInControls) checkInControls.style.display = 'none';
-                        if (checkOutBtn) checkOutBtn.style.display = 'none';
-                    }
-
-                    // Ensure "Dismiss Message" button is NOT added for the user
-                    // (This is implicitly handled by removing the `if (booking.admin_deleted_message)` block)
-
-                    // Assign dataset attributes after elements are confirmed
-                    if (checkInBtn) checkInBtn.dataset.bookingId = booking.id;
-                    if (checkOutBtn) checkOutBtn.dataset.bookingId = booking.id;
-
-                    bookingsListDiv.appendChild(bookingItemClone);
-            });
-            hideStatusMessage(statusDiv);
+            hideStatusMessage(statusDiv); // Hide overall loading/status if successful
         } catch (error) {
             console.error('Error fetching bookings:', error);
             if (error.message && error.message.includes('401')) {
@@ -210,12 +212,28 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 showError(statusDiv, error.message || 'Failed to load bookings. Please try again.');
             }
+            // Clear specific containers on error too, or show specific error messages within them
+            if (upcomingBookingsContainer) upcomingBookingsContainer.innerHTML = '<p>Could not load upcoming bookings.</p>';
+            if (pastBookingsContainer) pastBookingsContainer.innerHTML = '<p>Could not load past bookings.</p>';
         }
     }
 
-    // Event listener for dynamically created buttons
-    bookingsListDiv.addEventListener('click', async (event) => {
+    // Event listener for dynamically created buttons (needs to be on a static parent)
+    // Using document as the closest static parent, can be refined if #my-bookings-list is always present
+    document.addEventListener('click', async (event) => {
         const target = event.target;
+
+        // Check if the click is within the new containers or their children
+        // This helps avoid processing clicks on other parts of the page if this listener is too broad.
+        const clickedBookingItem = target.closest('.booking-item');
+        if (!clickedBookingItem || (!upcomingBookingsContainer.contains(clickedBookingItem) && !pastBookingsContainer.contains(clickedBookingItem))) {
+            // If the click is not on a booking item within our containers, do nothing specific here.
+            // Modal clicks are handled separately by their own listeners on modal buttons.
+            // This check is important if 'document' is used as the listener base.
+            if (!target.closest('.modal')) { // Allow clicks inside modals
+                 return;
+            }
+        }
 
         if (target.classList.contains('cancel-booking-btn')) {
             const bookingId = target.dataset.bookingId;
@@ -224,11 +242,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     await apiCall(`/api/bookings/${bookingId}`, { method: 'DELETE' });
                     showSuccess(statusDiv, `Booking ${bookingId} cancelled successfully.`);
-                    // Remove the booking item from the UI
-                    target.closest('.booking-item').remove();
-                    if (bookingsListDiv.children.length === 0) {
+                    const bookingItemToRemove = target.closest('.booking-item');
+                    const parentContainer = bookingItemToRemove.parentElement; // upcomingBookingsContainer or pastBookingsContainer
+
+                    if (bookingItemToRemove) {
+                        bookingItemToRemove.remove();
+                    }
+
+                    // Check if specific container is empty
+                    if (parentContainer === upcomingBookingsContainer && upcomingBookingsContainer.children.length === 0) {
+                        upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings.</p>';
+                    } else if (parentContainer === pastBookingsContainer && pastBookingsContainer.children.length === 0) {
+                        pastBookingsContainer.innerHTML = '<p>No past booking history.</p>';
+                    }
+
+                    // Check if both containers are empty to show overall "no bookings" message
+                    if (upcomingBookingsContainer.children.length === 0 && pastBookingsContainer.children.length === 0) {
+                        // This might overwrite the specific "no upcoming/past" messages if statusDiv is global.
+                        // Consider if a different global message area is better or if this is fine.
                         showStatusMessage(statusDiv, 'You have no bookings remaining.', 'info');
                     }
+
                 } catch (error) {
                     console.error('Error cancelling booking:', error);
                     showError(statusDiv, error.message || `Failed to cancel booking ${bookingId}.`);
@@ -362,7 +396,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Refined "No Changes" detection
         const originalButtonText = saveBookingTitleBtn.textContent; // Keep this for button state reset later
-        const bookingItemDiv = bookingsListDiv.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
+
+        // Find the booking item in either upcoming or past container
+        let bookingItemDiv = upcomingBookingsContainer.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
+        if (!bookingItemDiv) {
+            bookingItemDiv = pastBookingsContainer.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
+        }
         let noChangesMade = false;
 
         if (bookingItemDiv) {
@@ -411,8 +450,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify(payload)
             });
             
-            // Update the UI
-            const bookingItemDiv = bookingsListDiv.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
+            // Update the UI (find in either upcoming or past container)
+            let bookingItemDiv = upcomingBookingsContainer.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
+            if (!bookingItemDiv) {
+                bookingItemDiv = pastBookingsContainer.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
+            }
+
             if (bookingItemDiv) {
                 const titleSpan = bookingItemDiv.querySelector('.booking-title');
                 titleSpan.textContent = updatedBooking.title;
