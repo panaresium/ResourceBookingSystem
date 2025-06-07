@@ -988,3 +988,112 @@ def update_resource_pin(resource_id, pin_id):
 
 def init_api_resources_routes(app):
     app.register_blueprint(api_resources_bp)
+
+
+# --- Bulk Resource PIN Actions ---
+def _update_resource_current_pin(resource_obj):
+    """
+    Helper to intelligently set or clear the resource.current_pin.
+    Sets to the most recently created active PIN if any exist, otherwise clears it.
+    """
+    if not resource_obj:
+        return
+
+    latest_active_pin = ResourcePIN.query.filter_by(
+        resource_id=resource_obj.id,
+        is_active=True
+    ).order_by(ResourcePIN.created_at.desc()).first()
+
+    if latest_active_pin:
+        resource_obj.current_pin = latest_active_pin.pin_value
+    else:
+        resource_obj.current_pin = None
+    # Caller is responsible for db.session.commit()
+
+
+@api_resources_bp.route('/resources/pins/bulk_action', methods=['POST'])
+@login_required
+@permission_required('manage_resources')
+def bulk_resource_pin_action():
+    logger = current_app.logger
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
+
+    resource_ids = data.get('resource_ids')
+    action = data.get('action')
+
+    if not resource_ids or not isinstance(resource_ids, list):
+        return jsonify({'error': 'Missing or invalid "resource_ids" (must be a list).'}), 400
+    if not all(isinstance(rid, int) for rid in resource_ids):
+        return jsonify({'error': 'All resource_ids must be integers.'}), 400
+    if not action:
+        return jsonify({'error': 'Missing "action".'}), 400
+
+    allowed_actions = ['auto_generate_new_pin', 'deactivate_all_pins', 'activate_all_pins']
+    if action not in allowed_actions:
+        return jsonify({'error': f'Invalid action. Allowed actions are: {", ".join(allowed_actions)}'}), 400
+
+    booking_settings = BookingSettings.query.first() # Needed for pin_length
+    pin_length = booking_settings.pin_length if booking_settings and booking_settings.pin_length else 6
+
+    processed_count = 0
+    error_count = 0
+    action_details = []
+
+    resources_to_process = Resource.query.filter(Resource.id.in_(resource_ids)).all()
+
+    if not resources_to_process:
+        return jsonify({'error': 'No valid resources found for the provided IDs.'}), 404
+
+    for resource in resources_to_process:
+        try:
+            if action == 'auto_generate_new_pin':
+                if not (booking_settings and booking_settings.pin_auto_generation_enabled):
+                    action_details.append({'resource_id': resource.id, 'status': 'skipped', 'reason': 'Auto-generation disabled in settings.'})
+                    error_count += 1
+                    continue
+
+                new_pin_val = generate_unique_pin(resource.id, pin_length) # Uses helper from this file
+                new_pin_obj = ResourcePIN(
+                    resource_id=resource.id,
+                    pin_value=new_pin_val,
+                    is_active=True,
+                    notes="Auto-generated via bulk action",
+                    created_at=datetime.utcnow()
+                )
+                db.session.add(new_pin_obj)
+                _update_resource_current_pin(resource) # Update current_pin
+                action_details.append({'resource_id': resource.id, 'status': 'success', 'new_pin': new_pin_val, 'current_pin': resource.current_pin})
+
+            elif action == 'deactivate_all_pins':
+                pins_updated_count = ResourcePIN.query.filter_by(resource_id=resource.id, is_active=True).update({'is_active': False})
+                resource.current_pin = None
+                action_details.append({'resource_id': resource.id, 'status': 'success', 'deactivated_count': pins_updated_count, 'current_pin': None})
+
+            elif action == 'activate_all_pins':
+                pins_updated_count = ResourcePIN.query.filter_by(resource_id=resource.id, is_active=False).update({'is_active': True})
+                _update_resource_current_pin(resource) # Update current_pin
+                action_details.append({'resource_id': resource.id, 'status': 'success', 'activated_count': pins_updated_count, 'current_pin': resource.current_pin})
+
+            processed_count += 1
+        except Exception as e:
+            logger.error(f"Error processing action '{action}' for resource {resource.id}: {str(e)}")
+            error_count +=1
+            action_details.append({'resource_id': resource.id, 'status': 'error', 'reason': str(e)})
+            # db.session.rollback() # Rollback for this specific resource if needed, or handle globally
+
+    try:
+        db.session.commit()
+        log_message = f"Bulk PIN action '{action}' completed for user {current_user.username}. Processed: {processed_count}, Errors/Skipped: {error_count}. Details: {action_details}"
+        add_audit_log(action="BULK_PIN_ACTION", details=log_message)
+        logger.info(log_message)
+        return jsonify({
+            'message': f'Bulk action "{action}" applied. Processed: {processed_count}. Errors/Skipped: {error_count}.',
+            'details': action_details
+        }), 200 if error_count == 0 else 207
+    except Exception as e_commit:
+        db.session.rollback()
+        logger.exception(f"Error committing bulk PIN action '{action}' by user {current_user.username}: {e_commit}")
+        return jsonify({'error': f'Failed to commit bulk PIN action due to a server error: {str(e_commit)}'}), 500
