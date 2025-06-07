@@ -425,25 +425,41 @@ def get_my_bookings_for_date():
 @api_bookings_bp.route('/bookings/calendar', methods=['GET'])
 @login_required
 def bookings_calendar():
-    """Return bookings for the current user in FullCalendar format."""
+    """Return bookings for the current user in FullCalendar format, optionally filtered by status."""
     try:
-        # Define statuses considered valid for display on the calendar
-        valid_calendar_statuses = ['approved', 'checked_in', 'confirmed', 'pending']
-        user_bookings = Booking.query.filter(
-            Booking.user_name == current_user.username,
-            Booking.status.in_(valid_calendar_statuses)
-        ).all()
+        status_filter_str = request.args.get('status_filter')
+
+        query = Booking.query.filter_by(user_name=current_user.username)
+
+        if status_filter_str:
+            # Handle comma-separated statuses for groups like 'cancelled'
+            statuses_to_filter = [status.strip().lower() for status in status_filter_str.split(',')]
+            # Basic validation: ensure all provided statuses are strings
+            if not all(isinstance(s, str) for s in statuses_to_filter):
+                current_app.logger.warning(f"Invalid status value in status_filter: {status_filter_str}")
+                return jsonify({'error': 'Invalid status value provided in filter.'}), 400
+            query = query.filter(Booking.status.in_(statuses_to_filter))
+        else:
+            # Default behavior: if no status_filter is provided, show active/relevant bookings
+            default_active_statuses = ['approved', 'pending', 'checked_in', 'confirmed']
+            query = query.filter(Booking.status.in_(default_active_statuses))
+
+        user_bookings = query.all()
+
         events = []
         for booking in user_bookings:
             resource = Resource.query.get(booking.resource_id)
             title = booking.title or (resource.name if resource else 'Booking')
+            resource_name = resource.name if resource else "Unknown Resource" # Get resource name
             events.append({
                 'id': booking.id,
                 'title': title,
                 'start': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
                 'end': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
                 'recurrence_rule': booking.recurrence_rule,
-                'resource_id': booking.resource_id
+                'resource_id': booking.resource_id,
+                'resource_name': resource_name, # Include resource name
+                'status': booking.status # Include status
             })
         return jsonify(events), 200
     except Exception as e:
