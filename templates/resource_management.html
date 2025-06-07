@@ -132,14 +132,14 @@
                             <label for="pin_notes">{{ _('Notes:') }}</label>
                             <input type="text" id="pin_notes" class="form-control" style="width: auto; display: inline-block; margin-right: 10px;">
                         </div>
-                        <button type="button" id="btn-add-manual-pin" class="button">{{ _('Add/Set Manual PIN') }}</button>
-                        <button type="button" id="btn-auto-generate-pin" class="button">{{ _('Auto-generate New PIN') }}</button>
+                        <button type="button" id="btn-add-manual-pin" class="button" title="{{ _('Add/Set Manual PIN') }}"><span aria-hidden="true">➕</span></button>
+                        <button type="button" id="btn-auto-generate-pin" class="button" title="{{ _('Auto-generate New PIN') }}"><span aria-hidden="true">✨</span></button>
                     </div>
                      <div id="resource-pin-form-status" class="status-message" style="margin-top: 10px;"></div>
                 </div>
                 <!-- End Resource PINs Management Area -->
 
-                <button type="submit" class="button" style="margin-top: 10px;">{{ _('Save Resource') }}</button>
+                <button type="submit" class="button" style="margin-top: 10px;" title="{{ _('Save Resource') }}"><span aria-hidden="true">💾</span></button>
                 <div id="resource-form-modal-status" class="status-message" style="margin-top: 10px;"></div>
             </form>
         </div>
