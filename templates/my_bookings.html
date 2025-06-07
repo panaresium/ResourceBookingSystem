@@ -54,11 +54,12 @@
 
     <div id="my-bookings-list">
         <div id="upcoming-bookings-section">
-            <div class="form-check form-switch mb-2">
+            <h2>{{ _('Upcoming Bookings') }}</h2>
+			<div class="form-check form-switch mb-2">
                 <input class="form-check-input" type="checkbox" role="switch" id="toggle-upcoming-bookings" checked>
                 <label class="form-check-label" for="toggle-upcoming-bookings">{{ _('Show Upcoming Bookings') }}</label>
             </div>
-            <h2>{{ _('Upcoming Bookings') }}</h2>
+            
             <div id="upcoming-bookings-container">
                 <!-- Upcoming bookings will be loaded here by JavaScript -->
                 <p class="loading-message">{{ _('Loading upcoming bookings...') }}</p>
@@ -68,11 +69,11 @@
         <hr class="my-4"> <!-- Optional separator -->
 
         <div id="past-bookings-section" class="mt-4">
-            <div class="form-check form-switch mb-2">
+            <h2>{{ _('Past Bookings') }}</h2>
+			<div class="form-check form-switch mb-2">
                 <input class="form-check-input" type="checkbox" role="switch" id="toggle-past-bookings">
                 <label class="form-check-label" for="toggle-past-bookings">{{ _('Show Past Bookings') }}</label>
             </div>
-            <h2>{{ _('Past Bookings') }}</h2>
             <div id="past-bookings-container">
                 <!-- Past bookings will be loaded here by JavaScript -->
                 <p class="loading-message">{{ _('Loading past bookings...') }}</p>
