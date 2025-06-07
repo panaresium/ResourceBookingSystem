@@ -1067,8 +1067,11 @@ def resource_pin_check_in(resource_id):
         return render_template('check_in_status_public.html',
                                message=_('Login is required to perform this check-in. Please log in and try again.'),
                                status='error',
-                               show_login_link=True,
-                               login_url=login_url), 401
+                               show_login_link=True, # Keep this, maybe for fallback or if JS fails
+                               login_url=login_url,
+                               show_embedded_login=True, # New flag
+                               original_check_in_url=request.url # Pass the original URL
+                              ), 401
 
     # Find the booking to check in
     target_booking = None
