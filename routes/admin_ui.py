@@ -58,7 +58,12 @@ def serve_resource_management_page():
 @permission_required('manage_bookings')
 def serve_admin_bookings_page():
     logger = current_app.logger
-    logger.info(f"User {current_user.username} accessed Admin Bookings page.")
+    status_filter = request.args.get('status_filter')
+    logger.info(f"User {current_user.username} accessed Admin Bookings page. Status filter: '{status_filter}'")
+
+    # Define the list of possible statuses for the dropdown
+    possible_statuses = ['approved', 'checked_in', 'completed', 'cancelled', 'rejected', 'cancelled_by_admin']
+
     try:
         bookings_query = db.session.query(
             Booking.id,
@@ -70,7 +75,10 @@ def serve_admin_bookings_page():
             User.username.label('user_username'),
             Resource.name.label('resource_name')
         ).join(Resource, Booking.resource_id == Resource.id)\
-         .join(User, Booking.user_name == User.username) # Ensure User model is imported
+         .join(User, Booking.user_name == User.username)
+
+        if status_filter:
+            bookings_query = bookings_query.filter(Booking.status == status_filter)
 
         all_bookings = bookings_query.order_by(Booking.start_time.desc()).all()
 
@@ -84,12 +92,19 @@ def serve_admin_bookings_page():
                 'status': booking_row.status,
                 'user_username': booking_row.user_username,
                 'resource_name': booking_row.resource_name,
-                'admin_deleted_message': booking_row.admin_deleted_message # Added admin_deleted_message to dict
+                'admin_deleted_message': booking_row.admin_deleted_message
             })
-        return render_template("admin_bookings.html", bookings=bookings_list)
+        return render_template("admin_bookings.html",
+                               bookings=bookings_list,
+                               all_statuses=possible_statuses,
+                               current_status_filter=status_filter)
     except Exception as e:
         logger.error(f"Error fetching bookings for admin page: {e}", exc_info=True)
-        return render_template("admin_bookings.html", bookings=[], error="Could not load bookings.")
+        return render_template("admin_bookings.html",
+                               bookings=[],
+                               error="Could not load bookings.",
+                               all_statuses=possible_statuses,
+                               current_status_filter=status_filter)
 
 @admin_ui_bp.route('/backup_restore')
 @login_required

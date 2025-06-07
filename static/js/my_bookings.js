@@ -139,7 +139,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     // Existing logic for rendering active bookings
                     const bookingItemClone = bookingItemTemplate.content.cloneNode(true);
+                    // Existing logic for rendering active bookings
+                    const bookingItemClone = bookingItemTemplate.content.cloneNode(true);
                     const bookingItemDiv = bookingItemClone.querySelector('.booking-item');
+
+                    // Apply conditional classes for status
+                    bookingItemDiv.classList.remove('booking-completed', 'booking-cancelled', 'booking-rejected', 'booking-cancelled-by-admin'); // Clear previous status classes
+                    if (booking.status === 'completed') {
+                        bookingItemDiv.classList.add('booking-completed');
+                    } else if (booking.status === 'cancelled') {
+                        bookingItemDiv.classList.add('booking-cancelled');
+                    } else if (booking.status === 'rejected') {
+                        bookingItemDiv.classList.add('booking-rejected');
+                    } else if (booking.status === 'cancelled_by_admin') {
+                        // This case is handled by the admin_deleted_message block,
+                        // but if it were to reach here, this class could be added.
+                        // bookingItemDiv.classList.add('booking-cancelled-by-admin');
+                    }
+
 
                     bookingItemDiv.dataset.bookingId = booking.id; // Store booking ID on the item div
                     bookingItemDiv.dataset.resourceId = booking.resource_id; // Store resource ID
@@ -167,29 +184,49 @@ document.addEventListener('DOMContentLoaded', () => {
                     const cancelBtn = bookingItemClone.querySelector('.cancel-booking-btn');
                     cancelBtn.dataset.bookingId = booking.id;
 
-                    const checkInBtn = bookingItemClone.querySelector('.check-in-btn');
+                    const checkInBtn = bookingItemClone.querySelector('.check-in-btn'); // Part of checkInControls
                     const checkOutBtn = bookingItemClone.querySelector('.check-out-btn');
-                    const checkInControls = bookingItemClone.querySelector('.check-in-controls'); // Get the wrapper
-                    const pinInput = bookingItemClone.querySelector('.booking-pin-input');
+                    const checkInControls = bookingItemClone.querySelector('.check-in-controls');
+                    const pinInput = bookingItemClone.querySelector('.booking-pin-input'); // Part of checkInControls
 
-                    checkInBtn.dataset.bookingId = booking.id;
-                    checkOutBtn.dataset.bookingId = booking.id;
-                    if (pinInput) pinInput.dataset.bookingId = booking.id;
+                    // Populate Status text
+                    const bookingStatusSpan = bookingItemClone.querySelector('.booking-status');
+                    if (bookingStatusSpan) {
+                        bookingStatusSpan.textContent = booking.status ? booking.status.charAt(0).toUpperCase() + booking.status.slice(1).replace(/_/g, ' ') : 'Unknown';
+                    }
 
 
-                    // Ensure buttons/controls are hidden by default
+                    // Ensure buttons/controls are hidden by default before applying logic
                     if (checkInControls) checkInControls.style.display = 'none';
-                    checkOutBtn.style.display = 'none';
+                    if (checkOutBtn) checkOutBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block'; // Default for active bookings
 
-                    if (checkInOutEnabled) {
-                        if (booking.can_check_in) {
-                            if (checkInControls) checkInControls.style.display = 'inline-block'; // Show wrapper
+                    const terminalStatuses = ['completed', 'cancelled', 'rejected', 'cancelled_by_admin'];
+                    if (terminalStatuses.includes(booking.status)) {
+                        if (checkInControls) checkInControls.style.display = 'none';
+                        if (checkOutBtn) checkOutBtn.style.display = 'none';
+                        if (cancelBtn) cancelBtn.style.display = 'none';
+                        if (updateBtn) updateBtn.style.display = 'none'; // Also hide update for terminal states
+                    } else if (checkInOutEnabled) { // Active bookings, apply check-in/out logic
+                        if (booking.can_check_in && !booking.checked_in_at) { // Ensure not already checked in
+                            if (checkInControls) checkInControls.style.display = 'inline-block';
                         }
                         if (booking.checked_in_at && !booking.checked_out_at) {
-                            checkOutBtn.style.display = 'inline-block';
+                            if (checkOutBtn) checkOutBtn.style.display = 'inline-block';
+                            if (checkInControls) checkInControls.style.display = 'none'; // Hide check-in once checked-in
                         }
+                        // Cancel button remains visible for active, non-terminal bookings
+                        // Update button also remains visible
+                    } else {
+                        // If checkInOut is NOT enabled, all related buttons should be hidden
+                        if (checkInControls) checkInControls.style.display = 'none';
+                        if (checkOutBtn) checkOutBtn.style.display = 'none';
                     }
-                    // If checkInOutEnabled is false, controls remain hidden.
+
+                    // Assign dataset attributes after elements are confirmed
+                    if (checkInBtn) checkInBtn.dataset.bookingId = booking.id;
+                    if (checkOutBtn) checkOutBtn.dataset.bookingId = booking.id;
+                    // pinInput is inside checkInControls, its dataset can be assigned when checkInControls is shown if needed
 
                     bookingsListDiv.appendChild(bookingItemClone);
                 }
