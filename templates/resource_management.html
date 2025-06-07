@@ -219,3 +219,19 @@
     {{ super() }}
     <script src="{{ url_for('static', filename='js/resource_management.js') }}" defer></script>
 {% endblock %}
+
+
+{% block modals %}
+{{ super() }}
+<!-- QR Code Modal -->
+<div id="qr-code-modal" class="modal" style="display: none; text-align: center;">
+    <div class="modal-content" style="display: inline-block; padding: 20px;">
+        <span class="close-modal-btn" data-modal-id="qr-code-modal" style="position: absolute; top: 10px; right: 15px;">&times;</span>
+        <h4 id="qr-code-modal-title">{{ _('Check-in QR Code') }}</h4>
+        <div id="qr-code-display" style="margin-top: 15px; margin-bottom: 15px;">
+            <!-- QR Code will be rendered here by JavaScript -->
+        </div>
+        <p id="qr-code-url-text" style="font-size: 0.9em; word-break: break-all;"></p>
+    </div>
+</div>
+{% endblock %}
