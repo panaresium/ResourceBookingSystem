@@ -764,6 +764,11 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn("Flatpickr not available or datePickerInput not found. Date picker will not be initialized.");
     }
 
+    // Set default status filter before the initial fetch
+    if (statusFilterSelect) {
+        statusFilterSelect.value = 'approved';
+    }
+
     // Initial fetch of bookings - now uses default filter values
     fetchAndDisplayBookings();
 
