@@ -3697,6 +3697,63 @@ class TestApiMapsAvailability(AppTests):
 
         self.assertEqual(map_data.get('availability_status'), expected_status, f"Expected status {expected_status} for {availability_percentage}% availability in completed test")
 
+    def test_get_map_details_filters_statuses_correctly(self):
+        """
+        Tests that the /api/map_details/<map_id> endpoint correctly filters bookings
+        based on their status, only returning active ones.
+        """
+        target_date = date.today() + timedelta(days=10)
+        target_date_str = target_date.strftime("%Y-%m-%d")
+
+        test_resource_on_map = self.res1_on_map # Use one of the resources from setUp
+
+        # Define booking times for clarity
+        time_slot1 = (dt_time(9, 0), dt_time(10, 0))
+        time_slot2 = (dt_time(10, 0), dt_time(11, 0))
+        time_slot3 = (dt_time(11, 0), dt_time(12, 0))
+        time_slot4 = (dt_time(13, 0), dt_time(14, 0))
+
+        # Create bookings with various statuses
+        booking_approved = self._create_booking_at_slot(
+            test_resource_on_map.id, self.test_booker, target_date, time_slot1, "Approved Booking For Map Detail", status='approved'
+        )
+        booking_cancelled = self._create_booking_at_slot(
+            test_resource_on_map.id, self.test_booker, target_date, time_slot2, "Cancelled By Admin For Map Detail", status='cancelled_by_admin'
+        )
+        booking_completed = self._create_booking_at_slot(
+            test_resource_on_map.id, self.test_booker, target_date, time_slot3, "Completed Booking For Map Detail", status='completed'
+        )
+        booking_pending = self._create_booking_at_slot(
+            test_resource_on_map.id, self.test_booker, target_date, time_slot4, "Pending Booking For Map Detail", status='pending'
+        )
+        db.session.commit()
+
+        # API Call
+        response = self.client.get(f'/api/map_details/{self.test_map.id}?date={target_date_str}')
+        self.assertEqual(response.status_code, 200, f"API call failed: {response.get_data(as_text=True)}")
+
+        # Assertions
+        data = response.get_json()
+
+        mapped_resources_data = data.get('mapped_resources', [])
+        resource_data_from_api = next((r for r in mapped_resources_data if r['id'] == test_resource_on_map.id), None)
+
+        self.assertIsNotNone(resource_data_from_api, f"Resource ID {test_resource_on_map.id} not found in mapped_resources.")
+
+        bookings_on_date_api = resource_data_from_api.get('bookings_on_date', [])
+
+        # active_booking_statuses_for_conflict_map_details = ['approved', 'pending', 'checked_in', 'confirmed']
+        # Based on this, only 'approved' and 'pending' should be returned.
+        self.assertEqual(len(bookings_on_date_api), 2,
+                         f"Expected 2 active bookings, but got {len(bookings_on_date_api)}. API returned: {bookings_on_date_api}")
+
+        returned_titles = [b['title'] for b in bookings_on_date_api]
+
+        self.assertIn(booking_approved.title, returned_titles, "Approved booking should be present.")
+        self.assertIn(booking_pending.title, returned_titles, "Pending booking should be present.")
+        self.assertNotIn(booking_cancelled.title, returned_titles, "Cancelled by admin booking should NOT be present.")
+        self.assertNotIn(booking_completed.title, returned_titles, "Completed booking should NOT be present.")
+
 
 class TestAdminBookingSettingsPINConfig(AppTests):
     def _create_admin_user(self, username="settings_pin_admin", email_ext="settings_pin_admin"):
