@@ -1497,4 +1497,34 @@ a.fc-daygrid-event.fc-event {
 
 /* --------------- END MAP RESOURCE AREA STYLES --------------- */
 
+/* PIN action icon buttons in table */
+.btn-pin-action {
+    padding: 5px 8px; /* Smaller padding */
+    font-size: 1.2em; /* Slightly larger for better icon visibility, can be adjusted */
+    line-height: 1; /* Ensure consistent height */
+    margin: 2px; /* Adjust spacing between buttons */
+    vertical-align: middle; /* Align icons nicely if they vary in height */
+}
+
+/* Ensure icon buttons don't have excessive default button height if text is removed */
+.btn-pin-action span[aria-hidden="true"] {
+    display: inline-block; /* Helps with sizing and alignment */
+}
+
+/* Add New PIN buttons (text-based and smaller) */
+#btn-add-manual-pin,
+#btn-auto-generate-pin {
+    padding: 6px 10px; /* Smaller padding */
+    font-size: 0.9em; /* Smaller text */
+    /* The following lines are to ensure text is displayed if icons were previously used via JS/HTML structure */
+    /* However, the primary change to text content should be in HTML/JS */
+}
+/* If #btn-add-manual-pin and #btn-auto-generate-pin use <span> for icons, this would hide them: */
+/*
+#btn-add-manual-pin span[aria-hidden="true"],
+#btn-auto-generate-pin span[aria-hidden="true"] {
+    display: none;
+}
+*/
+
 [end of static/style.css]
