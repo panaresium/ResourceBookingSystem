@@ -653,6 +653,158 @@ document.addEventListener('DOMContentLoaded', function() {
                 <button class="button btn-pin-action show-qr-code-btn" data-pin-value="${pin.pin_value}" data-resource-id="${resourceId}" title="Show PIN QR Code" style="margin-left:5px;"><span aria-hidden="true">📱</span></button>
             `;
         });
+
+        // ATTACH EVENT LISTENER LOGIC HERE
+        const currentPinsTableElement = document.getElementById('resource-pins-table');
+        console.log('[EVENT_LISTENER_DEBUG] Attempting to set up listener INSIDE renderPinsTable. Found table element:', currentPinsTableElement);
+
+        if (currentPinsTableElement) {
+            if (!currentPinsTableElement._listenerAttached) {
+                console.log('[EVENT_LISTENER_DEBUG] Adding click listener to pinsTable (ID: resource-pins-table) now.');
+                currentPinsTableElement.addEventListener('click', async function(event) {
+                    console.log('[EVENT_LISTENER_DEBUG] A click occurred on pinsTable. Event target:', event.target);
+                    console.log('[EVENT_LISTENER_DEBUG] Event target classList:', event.target.classList);
+
+                    const statusEl = document.getElementById('resource-pin-form-status'); // Ensure statusEl is defined for handlers
+
+                    // Handle pin-active-toggle separately as it's an input
+                    if (event.target.classList.contains('pin-active-toggle')) {
+                        const pinId = event.target.dataset.pinId;
+                        const resourceIdForToggle = event.target.dataset.resourceId; // Use specific resourceId from checkbox
+                        const newStatus = event.target.checked;
+                        console.log(`[DEBUG] pin-active-toggle clicked for pinId: ${pinId}`);
+                        showLoading(statusEl, `Updating PIN ${pinId} status...`);
+                        try {
+                            const updatedPinData = await apiCall(`/api/resources/${resourceIdForToggle}/pins/${pinId}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ is_active: newStatus })
+                            }, statusEl);
+                            const currentPinValueSpan = document.getElementById('current-pin-value');
+                            if (currentPinValueSpan && updatedPinData.resource_current_pin) {
+                                currentPinValueSpan.textContent = updatedPinData.resource_current_pin;
+                            } else if (currentPinValueSpan) {
+                                 currentPinValueSpan.textContent = 'N/A';
+                            }
+                            showSuccess(statusEl, `PIN ${pinId} status updated.`);
+                            event.target.checked = updatedPinData.is_active;
+                        } catch (error) {
+                            event.target.checked = !newStatus;
+                        }
+                        return; // Processed, no need to check for button
+                    }
+
+                    const targetButton = event.target.closest('button.btn-pin-action');
+                    console.log('[EVENT_LISTENER_DEBUG] Closest button.btn-pin-action:', targetButton);
+
+                    if (!targetButton) {
+                        console.log('[EVENT_LISTENER_DEBUG] Click was not on a .btn-pin-action button or its child.');
+                        return;
+                    }
+
+                    const target = targetButton; // Now target is definitely the button
+
+                    if (target.classList.contains('copy-pin-url-btn')) {
+                        console.log('!!! COPY URL CLICK HANDLER ENTERED !!!');
+                        const pinValue = target.dataset.pinValue;
+                        const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`; // resourceId from renderPinsTable scope
+                        try {
+                            await navigator.clipboard.writeText(checkinUrl);
+                            showSuccess(statusEl, 'Check-in URL copied to clipboard!');
+                        } catch (err) {
+                            showError(statusEl, 'Failed to copy URL. Please copy manually.');
+                            console.error('Failed to copy URL: ', err);
+                        }
+                    } else if (target.classList.contains('show-qr-code-btn')) {
+                        console.log('!!! QR ICON CLICK HANDLER ENTERED !!!');
+                        const pinValue = target.dataset.pinValue;
+                        const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`; // resourceId from renderPinsTable scope
+                        const qrCodeModal = document.getElementById('qr-code-modal');
+                        const qrCodeDisplay = document.getElementById('qr-code-display');
+                        const qrCodeUrlText = document.getElementById('qr-code-url-text');
+                        console.log('[QR DEBUG] Show QR button clicked. URL:', checkinUrl);
+                        console.log('[QR DEBUG] Modal elements: qrCodeModal:', !!qrCodeModal, 'qrCodeDisplay:', !!qrCodeDisplay, 'qrCodeUrlText:', !!qrCodeUrlText);
+
+                        if (qrCodeModal && qrCodeDisplay && qrCodeUrlText) {
+                            console.log('[QR DEBUG] Initial qrCodeDisplay.innerHTML:', qrCodeDisplay.innerHTML);
+                            qrCodeDisplay.innerHTML = '';
+                            qrCodeUrlText.textContent = checkinUrl;
+                            console.log('[QR DEBUG] Cleared qrCodeDisplay. Set qrCodeUrlText to:', checkinUrl);
+                            let attempts = 0;
+                            const maxAttempts = 5;
+                            const retryInterval = 200;
+                            function tryGenerateQRCode() {
+                                console.log(`[QR DEBUG] tryGenerateQRCode attempt ${attempts + 1}/${maxAttempts}.`);
+                                if (typeof QRCode !== 'undefined') {
+                                    console.log('[QR DEBUG] QRCode library IS defined.');
+                                    qrCodeDisplay.innerHTML = '';
+                                    try {
+                                        console.log('[QR DEBUG] Attempting to instantiate QRCode object...');
+                                        new QRCode(qrCodeDisplay, { text: checkinUrl, width: 200, height: 200, colorDark : "#000000", colorLight : "#ffffff", correctLevel : QRCode.CorrectLevel.H });
+                                        console.log('[QR DEBUG] QRCode instance supposedly created.');
+                                        if (qrCodeDisplay.innerHTML.trim() === '') {
+                                            console.warn('[QR DEBUG] QRCode object created, but qrCodeDisplay is empty. Forcing debug message.');
+                                            qrCodeDisplay.innerHTML = '<p style="color: orange;">Debug: QRCode created but display is empty.</p>';
+                                        } else {
+                                            console.log('[QR DEBUG] qrCodeDisplay content after new QRCode():', qrCodeDisplay.innerHTML.substring(0, 100) + '...');
+                                        }
+                                        if (statusEl) hideMessage(statusEl);
+                                    } catch (e) {
+                                        console.error('[QR DEBUG] Error during new QRCode() instantiation:', e);
+                                        qrCodeDisplay.innerHTML = '<p style="color: red; font-weight: bold;">Error during QR Code generation.</p>' + '<p><small>Details: ' + e.message + '</small></p>';
+                                        if (statusEl) showError(statusEl, 'Error generating QR Code.');
+                                    }
+                                    console.log('[QR DEBUG] Setting qrCodeModal.style.display = "block". Current display state:', qrCodeModal.style.display);
+                                    qrCodeModal.style.display = 'block';
+                                    console.log('[QR DEBUG] qrCodeModal.style.display set to "block". New display state:', qrCodeModal.style.display);
+                                } else {
+                                    attempts++;
+                                    console.log(`[QR DEBUG] QRCode library IS UNDEFINED (attempt ${attempts}).`);
+                                    if (attempts < maxAttempts) {
+                                        console.log(`[QR DEBUG] Retrying in ${retryInterval}ms...`);
+                                        setTimeout(tryGenerateQRCode, retryInterval);
+                                    } else {
+                                        console.error('[QR DEBUG] QRCode library still undefined after multiple attempts.');
+                                        qrCodeDisplay.innerHTML = '<p style="color: red; font-weight: bold;">QR Code library could not load.</p>' + '<p>Check internet connection or browser extensions.</p>';
+                                        if (statusEl) showError(statusEl, 'QR Code library failed to load.');
+                                        console.log('[QR DEBUG] Setting qrCodeModal.style.display = "block" (library load failed). Current display state:', qrCodeModal.style.display);
+                                        qrCodeModal.style.display = 'block';
+                                        console.log('[QR DEBUG] qrCodeModal.style.display set to "block" (library load failed). New display state:', qrCodeModal.style.display);
+                                    }
+                                }
+                            }
+                            tryGenerateQRCode();
+                        } else {
+                            console.error('[QR DEBUG] Critical: Modal UI elements (qrCodeModal, qrCodeDisplay, or qrCodeUrlText) not found.');
+                            if (statusEl) showError(statusEl, 'QR Code modal elements missing.');
+                        }
+                    } else if (target.classList.contains('delete-pin-btn')) {
+                        console.log('!!! DELETE PIN CLICK HANDLER ENTERED !!!');
+                        const pinId = target.dataset.pinId;
+                        if (!confirm(`Are you sure you want to delete PIN ID ${pinId}?`)) return;
+                        showLoading(statusEl, 'Deleting PIN...');
+                        try {
+                            // Use resourceId from renderPinsTable scope for the API call
+                            const responseData = await apiCall(`/api/resources/${resourceId}/pins/${pinId}`, { method: 'DELETE' }, statusEl);
+                            showSuccess(statusEl, responseData.message || 'PIN deleted successfully.');
+                            // currentResourceIdForPins is a global; loadResourcePins might need it or the specific resourceId
+                            if (typeof loadResourcePins === 'function') {
+                                await loadResourcePins(currentResourceIdForPins); // Or resourceId, if loadResourcePins can take it
+                            }
+                        } catch (error) { /* Handled by apiCall */ }
+                    } else if (target.classList.contains('btn-edit-pin')) {
+                        console.log('!!! EDIT PIN CLICK HANDLER ENTERED !!!');
+                        alert('Edit PIN functionality not yet implemented. PIN ID: ' + target.dataset.pinId);
+                    }
+                });
+                currentPinsTableElement._listenerAttached = true;
+                console.log('[EVENT_LISTENER_DEBUG] Click listener successfully ADDED to pinsTable (ID: resource-pins-table).');
+            } else {
+                console.log('[EVENT_LISTENER_DEBUG] Listener already attached to pinsTable. Skipping re-attachment.');
+            }
+        } else {
+            console.error('[EVENT_LISTENER_DEBUG] pinsTable element NOT FOUND inside renderPinsTable. Cannot add click listener.');
+        }
     }
 
     function updateAddPinFormVisibility(bookingSettings) {
@@ -755,16 +907,22 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    /*
     // Event delegation for "Toggle Active" and "Copy Check-in URL" on pins table
     const pinsTable = document.getElementById('resource-pins-table');
+    console.log('[EVENT_LISTENER_DEBUG] pinsTable element:', pinsTable);
+
     if (pinsTable) {
+        console.log('[EVENT_LISTENER_DEBUG] Attempting to add click listener to pinsTable.');
         pinsTable.addEventListener('click', async function(event) {
+            console.log('[EVENT_LISTENER_DEBUG] A click occurred on pinsTable. Event target:', event.target);
+
             const target = event.target;
             const statusEl = document.getElementById('resource-pin-form-status');
 
             if (target.classList.contains('pin-active-toggle')) {
                 const pinId = target.dataset.pinId;
-                const resourceId = target.dataset.resourceId; // Should be currentResourceIdForPins
+                const resourceId = target.dataset.resourceId;
                 const newStatus = target.checked;
 
                 showLoading(statusEl, `Updating PIN ${pinId} status...`);
@@ -775,7 +933,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         body: JSON.stringify({ is_active: newStatus })
                     }, statusEl);
 
-                    // Update the current PIN display if it changed
                     const currentPinValueSpan = document.getElementById('current-pin-value');
                     if (currentPinValueSpan && updatedPinData.resource_current_pin) {
                         currentPinValueSpan.textContent = updatedPinData.resource_current_pin;
@@ -783,20 +940,15 @@ document.addEventListener('DOMContentLoaded', function() {
                          currentPinValueSpan.textContent = 'N/A';
                     }
                     showSuccess(statusEl, `PIN ${pinId} status updated.`);
-                    // Optionally, just update the specific row visually instead of full reload
-                    // For now, a full reload ensures consistency:
-                    // loadResourcePins(resourceId);
-                    // Or, even better, update just the one pin in the table from response
-                    target.checked = updatedPinData.is_active; // Reflect actual server state
+                    target.checked = updatedPinData.is_active;
 
                 } catch (error) {
-                    target.checked = !newStatus; // Revert checkbox on error
-                    // showError is handled by apiCall
+                    target.checked = !newStatus;
                 }
             } else if (target.classList.contains('copy-pin-url-btn')) {
                 const pinValue = target.dataset.pinValue;
                 const resourceId = target.dataset.resourceId;
-                const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`; // Fixed URL
+                const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`;
                 try {
                     await navigator.clipboard.writeText(checkinUrl);
                     showSuccess(statusEl, 'Check-in URL copied to clipboard!');
@@ -805,10 +957,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.error('Failed to copy URL: ', err);
                 }
             } else if (target.classList.contains('show-qr-code-btn')) {
-                console.log('!!! QR ICON CLICK HANDLER ENTERED !!!'); // <-- NEW HIGH-VISIBILITY LOG
+                console.log('!!! QR ICON CLICK HANDLER ENTERED !!!');
                 const pinValue = target.dataset.pinValue;
                 const resourceId = target.dataset.resourceId;
-                const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`; // Correct URL
+                const checkinUrl = `${window.location.origin}/api/r/${resourceId}/checkin?pin=${pinValue}`;
 
                 const qrCodeModal = document.getElementById('qr-code-modal');
                 const qrCodeDisplay = document.getElementById('qr-code-display');
@@ -820,19 +972,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 if (qrCodeModal && qrCodeDisplay && qrCodeUrlText) {
                     console.log('[QR DEBUG] Initial qrCodeDisplay.innerHTML:', qrCodeDisplay.innerHTML);
-                    qrCodeDisplay.innerHTML = ''; // Clear previous QR code or error messages
+                    qrCodeDisplay.innerHTML = '';
                     qrCodeUrlText.textContent = checkinUrl;
                     console.log('[QR DEBUG] Cleared qrCodeDisplay. Set qrCodeUrlText to:', checkinUrl);
 
                     let attempts = 0;
                     const maxAttempts = 5;
-                    const retryInterval = 200; // ms
+                    const retryInterval = 200;
 
                     function tryGenerateQRCode() {
                         console.log(`[QR DEBUG] tryGenerateQRCode attempt ${attempts + 1}/${maxAttempts}.`);
                         if (typeof QRCode !== 'undefined') {
                             console.log('[QR DEBUG] QRCode library IS defined.');
-                            qrCodeDisplay.innerHTML = ''; // Ensure it's clear before QR Code instantiation
+                            qrCodeDisplay.innerHTML = '';
                             try {
                                 console.log('[QR DEBUG] Attempting to instantiate QRCode object...');
                                 new QRCode(qrCodeDisplay, {
@@ -844,7 +996,6 @@ document.addEventListener('DOMContentLoaded', function() {
                                     correctLevel : QRCode.CorrectLevel.H
                                 });
                                 console.log('[QR DEBUG] QRCode instance supposedly created.');
-                                // Check if QRCode actually added content (an img or canvas)
                                 if (qrCodeDisplay.innerHTML.trim() === '') {
                                     console.warn('[QR DEBUG] QRCode object created, but qrCodeDisplay is empty. Forcing debug message.');
                                     qrCodeDisplay.innerHTML = '<p style="color: orange;">Debug: QRCode created but display is empty.</p>';
@@ -886,7 +1037,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else if (target.classList.contains('delete-pin-btn')) {
                 const pinId = target.dataset.pinId;
-                const resourceId = target.dataset.resourceId; // This should be currentResourceIdForPins
+                const resourceId = target.dataset.resourceId;
 
                 if (!confirm(`Are you sure you want to delete PIN ID ${pinId}?`)) return;
 
@@ -896,35 +1047,30 @@ document.addEventListener('DOMContentLoaded', function() {
                 try {
                     const responseData = await apiCall(`/api/resources/${resourceId}/pins/${pinId}`, {
                         method: 'DELETE'
-                    }, statusEl); // Pass statusEl for error/success messages from apiCall
+                    }, statusEl);
 
                     showSuccess(statusEl, responseData.message || 'PIN deleted successfully.');
 
-                    // Refresh the PINs list and current PIN display by calling loadResourcePins
-                    // currentResourceIdForPins should be set correctly when the modal is opened.
                     if (typeof loadResourcePins === 'function' && currentResourceIdForPins) {
                         await loadResourcePins(currentResourceIdForPins);
                     } else {
-                        // Fallback if loadResourcePins or currentResourceIdForPins is not available
-                        // This might mean parts of the UI (like current PIN display) don't update immediately
                         target.closest('tr').remove();
                         const pinsTableBody = document.querySelector('#resource-pins-table tbody');
                         if (pinsTableBody && pinsTableBody.children.length === 0) {
                             pinsTableBody.innerHTML = '<tr><td colspan="5">No PINs found for this resource.</td></tr>';
                         }
-                        // Manual update of current PIN display is harder without fetching new current PIN
                         const currentPinValueSpan = document.getElementById('current-pin-value');
                         if (currentPinValueSpan) {
                              currentPinValueSpan.textContent = responseData.resource_current_pin || 'N/A';
                         }
                     }
                 } catch (error) {
-                    // showError is typically handled by apiCall if statusEl is passed.
-                    // If apiCall doesn't update statusEl for all errors, or if an error occurs outside apiCall:
-                    // showError(statusEl, error.message || 'Failed to delete PIN.'); // May be redundant
-                    // No explicit showError here as apiCall should handle it by now.
                 }
             }
         });
+        console.log('[EVENT_LISTENER_DEBUG] Click listener supposedly ADDED to pinsTable.');
+    } else {
+        console.error('[EVENT_LISTENER_DEBUG] pinsTable element NOT FOUND. Cannot add click listener.');
     }
+    */
 });
