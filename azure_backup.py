@@ -14,8 +14,9 @@ from azure.core.exceptions import ResourceNotFoundError, HttpResponseError, Serv
 # If this script is run by a scheduler that doesn't initialize Flask app context fully,
 # direct model imports might fail or behave unexpectedly.
 # For now, proceeding with the import as requested by the subtask.
-from models import Booking
+from models import Booking # Ensure Booking model is imported
 from utils import export_bookings_to_csv_string, import_bookings_from_csv_file
+from datetime import datetime # Added for type hinting if necessary, and general datetime operations
 
 try:
     from azure.storage.fileshare import ShareServiceClient, ShareClient, ShareDirectoryClient, ShareFileClient
@@ -42,6 +43,14 @@ HASH_DB = os.path.join(DATA_DIR, 'backup_hashes.db')
 
 # Module-level logger used for backup operations
 logger = logging.getLogger(__name__)
+
+# Ensure DATA_DIR is defined, similar to how it's done in utils.py or config.py if not already robustly available
+# For azure_backup.py, it seems BASE_DIR and DATA_DIR are already defined.
+# BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+# DATA_DIR = os.path.join(BASE_DIR, 'data')
+
+LAST_INCREMENTAL_BOOKING_TIMESTAMP_FILE = os.path.join(DATA_DIR, 'last_incremental_booking_timestamp.txt')
+BOOKING_INCREMENTAL_BACKUPS_DIR = 'booking_incremental_backups'
 
 
 # Constants for backup directories and prefixes
@@ -2342,3 +2351,390 @@ def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
 
 if __name__ == '__main__':
     main()
+
+def get_modified_bookings_since(since_timestamp_utc: datetime, app) -> list[Booking]:
+    """
+    Retrieves bookings that have been modified since the given UTC timestamp.
+
+    Args:
+        since_timestamp_utc (datetime): The UTC timestamp to compare against.
+                                        Bookings modified after this time will be returned.
+        app: The Flask application object, used to access the application context.
+
+    Returns:
+        list[Booking]: A list of Booking objects that were modified after the specified timestamp.
+                       Returns an empty list if no such bookings are found or in case of an error.
+    """
+    logger.info(f"Attempting to retrieve bookings modified since {since_timestamp_utc.isoformat()} UTC.")
+    modified_bookings = []
+    try:
+        with app.app_context():
+            # Ensure the timestamp is timezone-aware (UTC) for comparison,
+            # assuming Booking.last_modified is also stored as UTC.
+            # If since_timestamp_utc is naive, it should ideally be localized to UTC first.
+            # For this function, we assume since_timestamp_utc is already a UTC datetime object.
+            if since_timestamp_utc.tzinfo is None:
+                logger.warning("get_modified_bookings_since received a naive datetime for since_timestamp_utc. Assuming UTC.")
+                # Optionally, make it timezone-aware:
+                # from datetime import timezone
+                # since_timestamp_utc = since_timestamp_utc.replace(tzinfo=timezone.utc)
+
+            modified_bookings = Booking.query.filter(Booking.last_modified > since_timestamp_utc).all()
+            count = len(modified_bookings)
+            logger.info(f"Found {count} booking(s) modified since {since_timestamp_utc.isoformat()} UTC.")
+    except Exception as e:
+        logger.error(f"Error retrieving modified bookings since {since_timestamp_utc.isoformat()} UTC: {e}", exc_info=True)
+        # Return empty list in case of error to prevent downstream issues
+        return []
+    return modified_bookings
+
+def backup_incremental_bookings(app, socketio_instance=None, task_id=None) -> bool:
+    """
+    Creates an incremental backup of booking records modified since the last backup.
+    Uploads a JSON file containing a list of modified booking objects.
+    """
+    event_name = 'incremental_booking_backup_progress' # For SocketIO
+    _emit_progress(socketio_instance, task_id, event_name, 'Starting incremental booking backup...', level='INFO')
+    logger.info("Starting incremental booking backup process.")
+
+    since_timestamp_utc = None
+    # 1. Read Last Backup Timestamp
+    try:
+        if os.path.exists(LAST_INCREMENTAL_BOOKING_TIMESTAMP_FILE):
+            with open(LAST_INCREMENTAL_BOOKING_TIMESTAMP_FILE, 'r', encoding='utf-8') as f:
+                timestamp_str = f.read().strip()
+            if timestamp_str:
+                since_timestamp_utc = datetime.fromisoformat(timestamp_str)
+                # Ensure it's UTC if parsed from ISO string that might lack explicit tzinfo
+                if since_timestamp_utc.tzinfo is None:
+                    from datetime import timezone # Local import for safety
+                    since_timestamp_utc = since_timestamp_utc.replace(tzinfo=timezone.utc)
+                logger.info(f"Last incremental backup timestamp found: {since_timestamp_utc.isoformat()}")
+                _emit_progress(socketio_instance, task_id, event_name, f"Last backup timestamp: {since_timestamp_utc.isoformat()}", level='INFO')
+            else:
+                logger.info("Timestamp file is empty.")
+        else:
+            logger.info(f"Timestamp file '{LAST_INCREMENTAL_BOOKING_TIMESTAMP_FILE}' not found.")
+
+        if since_timestamp_utc is None:
+            from datetime import timezone # Local import for safety
+            since_timestamp_utc = datetime(1970, 1, 1, tzinfo=timezone.utc)
+            logger.info(f"No valid last backup timestamp. Using default: {since_timestamp_utc.isoformat()} (first run or reset). This may capture all existing bookings.")
+            _emit_progress(socketio_instance, task_id, event_name, f"First run or reset. Using default start timestamp: {since_timestamp_utc.isoformat()}", level='INFO')
+
+    except Exception as e:
+        logger.error(f"Error reading or parsing last backup timestamp: {e}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, "Error reading last backup timestamp.", detail=str(e), level='ERROR')
+        return False
+
+    current_run_timestamp_utc = datetime.now(timezone.utc)
+
+    # 2. Fetch Modified Bookings
+    _emit_progress(socketio_instance, task_id, event_name, "Fetching modified bookings...", detail=f"Since {since_timestamp_utc.isoformat()}", level='INFO')
+    modified_bookings_objects = get_modified_bookings_since(since_timestamp_utc, app)
+
+    if not modified_bookings_objects:
+        logger.info("No bookings modified since the last backup timestamp. No incremental backup needed.")
+        _emit_progress(socketio_instance, task_id, event_name, "No modified bookings found. Backup not needed.", level='INFO')
+        # Optionally, still update the timestamp file to current_run_timestamp_utc to reflect that a check was made.
+        # This prevents re-checking the same "empty" period repeatedly if the job runs frequently.
+        try:
+            os.makedirs(os.path.dirname(LAST_INCREMENTAL_BOOKING_TIMESTAMP_FILE), exist_ok=True)
+            with open(LAST_INCREMENTAL_BOOKING_TIMESTAMP_FILE, 'w', encoding='utf-8') as f:
+                f.write(current_run_timestamp_utc.isoformat())
+            logger.info(f"Updated last incremental backup timestamp to {current_run_timestamp_utc.isoformat()} even though no changes were found.")
+        except IOError as e_io:
+            logger.error(f"Failed to update timestamp file after no changes: {e_io}", exc_info=True)
+            # This isn't a critical failure of the backup itself if no data needed backing up.
+        return True # Successful in the sense that no backup was needed and the process completed.
+
+    _emit_progress(socketio_instance, task_id, event_name, f"Found {len(modified_bookings_objects)} modified bookings. Processing...", level='INFO')
+
+    # 3. Serialize Bookings
+    serialized_bookings = []
+    for booking in modified_bookings_objects:
+        serialized_bookings.append({
+            'id': booking.id,
+            'resource_id': booking.resource_id,
+            'user_name': booking.user_name,
+            'start_time': booking.start_time.isoformat() if booking.start_time else None,
+            'end_time': booking.end_time.isoformat() if booking.end_time else None,
+            'title': booking.title,
+            'checked_in_at': booking.checked_in_at.isoformat() if booking.checked_in_at else None,
+            'checked_out_at': booking.checked_out_at.isoformat() if booking.checked_out_at else None,
+            'status': booking.status,
+            'recurrence_rule': booking.recurrence_rule,
+            'admin_deleted_message': booking.admin_deleted_message,
+            'check_in_token': booking.check_in_token,
+            'check_in_token_expires_at': booking.check_in_token_expires_at.isoformat() if booking.check_in_token_expires_at else None,
+            'last_modified': booking.last_modified.isoformat() # Crucial field for incremental logic
+        })
+
+    logger.info(f"Serialized {len(serialized_bookings)} bookings for incremental backup.")
+
+    # 4. Upload to Azure File Share
+    try:
+        service_client = _get_service_client()
+        share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups') # Using config share as per plan
+        share_client = service_client.get_share_client(share_name)
+
+        if not _client_exists(share_client):
+            logger.info(f"Creating share '{share_name}' for incremental booking backups.")
+            _emit_progress(socketio_instance, task_id, event_name, f"Creating share '{share_name}'...", level='INFO')
+            _create_share_with_retry(share_client, share_name)
+
+        _ensure_directory_exists(share_client, BOOKING_INCREMENTAL_BACKUPS_DIR)
+
+        since_ts_str = since_timestamp_utc.strftime('%Y%m%d_%H%M%S')
+        current_ts_str = current_run_timestamp_utc.strftime('%Y%m%d_%H%M%S')
+        filename = f"bookings_incremental_{since_ts_str}_to_{current_ts_str}.json"
+        remote_path_on_azure = f"{BOOKING_INCREMENTAL_BACKUPS_DIR}/{filename}"
+
+        json_data_bytes = json.dumps(serialized_bookings, indent=2).encode('utf-8')
+
+        file_client = share_client.get_file_client(remote_path_on_azure)
+        _emit_progress(socketio_instance, task_id, event_name, f"Uploading {filename} to {share_name}...", level='INFO')
+        logger.info(f"Attempting to upload incremental booking backup: {share_name}/{remote_path_on_azure}")
+
+        file_client.upload_file(data=json_data_bytes, overwrite=True) # overwrite=True is default behavior if file exists
+
+        logger.info(f"Successfully backed up incremental bookings to '{share_name}/{remote_path_on_azure}'.")
+        _emit_progress(socketio_instance, task_id, event_name, 'Incremental booking backup uploaded successfully.', detail=f'{share_name}/{remote_path_on_azure}', level='SUCCESS')
+
+    except Exception as e:
+        logger.error(f"Failed to upload incremental booking backup: {e}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, 'Incremental booking backup failed during upload.', detail=str(e), level='ERROR')
+        return False
+
+    # 5. Save Current Backup Timestamp
+    try:
+        os.makedirs(os.path.dirname(LAST_INCREMENTAL_BOOKING_TIMESTAMP_FILE), exist_ok=True)
+        with open(LAST_INCREMENTAL_BOOKING_TIMESTAMP_FILE, 'w', encoding='utf-8') as f:
+            f.write(current_run_timestamp_utc.isoformat())
+        logger.info(f"Successfully updated last incremental backup timestamp to {current_run_timestamp_utc.isoformat()}")
+        _emit_progress(socketio_instance, task_id, event_name, 'Timestamp file updated.', level='INFO')
+    except IOError as e_io:
+        logger.error(f"CRITICAL: Failed to update last incremental backup timestamp file after successful backup: {e_io}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, 'CRITICAL: Failed to update timestamp file. Future incrementals may be incorrect.', detail=str(e_io), level='ERROR')
+        # Even if timestamp file fails, the backup itself was successful.
+        # However, this is a critical state for the next run.
+        return True # Or False if this state is considered a failure of the overall job. For now, True as data is on Azure.
+
+    return True
+
+def restore_incremental_bookings(app, socketio_instance=None, task_id=None) -> dict:
+    """
+    Restores booking records by applying incremental backup files from Azure File Share.
+    Files are processed in chronological order based on the 'to_timestamp' in their names.
+    """
+    event_name = 'incremental_booking_restore_progress'
+    _emit_progress(socketio_instance, task_id, event_name, 'Starting incremental booking restore...', level='INFO')
+    logger.info("Starting incremental booking restore process.")
+
+    summary = {
+        'status': 'pending',
+        'files_processed': 0,
+        'bookings_created': 0,
+        'bookings_updated': 0,
+        'errors': []
+    }
+
+    try:
+        service_client = _get_service_client()
+        share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
+        share_client = service_client.get_share_client(share_name)
+
+        if not _client_exists(share_client):
+            msg = f"Azure share '{share_name}' not found for incremental booking restore."
+            logger.error(msg)
+            _emit_progress(socketio_instance, task_id, event_name, msg, level='ERROR')
+            summary['errors'].append(msg)
+            summary['status'] = 'failure'
+            return summary
+
+        backup_dir_client = share_client.get_directory_client(BOOKING_INCREMENTAL_BACKUPS_DIR)
+        if not _client_exists(backup_dir_client):
+            msg = f"Incremental booking backup directory '{BOOKING_INCREMENTAL_BACKUPS_DIR}' not found on share '{share_name}'."
+            logger.info(msg) # Info, as it might just mean no incrementals exist yet
+            _emit_progress(socketio_instance, task_id, event_name, msg, level='INFO')
+            summary['status'] = 'success_no_files' # Special status if dir not found
+            return summary
+
+        # List and sort files
+        # Filename format: bookings_incremental_{since_ts_str}_to_{current_ts_str}.json
+        # We sort by the 'to' timestamp part.
+        backup_files = []
+        for item in backup_dir_client.list_directories_and_files():
+            if not item['is_directory'] and item['name'].startswith('bookings_incremental_') and item['name'].endswith('.json'):
+                try:
+                    # Extract 'to' timestamp string: bookings_incremental_YYYYMMDD_HHMMSS_to_YYYYMMDD_HHMMSS.json
+                    #                                                                      ^------------------^
+                    parts = item['name'].split('_to_')
+                    if len(parts) == 2:
+                        to_ts_str = parts[1].replace('.json', '')
+                        # Validate format briefly before trying to parse for sort key
+                        datetime.strptime(to_ts_str, '%Y%m%d%H%M%S') # Validates format
+                        backup_files.append({'name': item['name'], 'sort_key': to_ts_str})
+                    else:
+                        logger.warning(f"Skipping file with unexpected name format: {item['name']}")
+                except ValueError:
+                    logger.warning(f"Skipping file with invalid timestamp in name: {item['name']}")
+
+        backup_files.sort(key=lambda x: x['sort_key']) # Sort chronologically
+
+        if not backup_files:
+            logger.info("No incremental booking backup files found to process.")
+            _emit_progress(socketio_instance, task_id, event_name, "No incremental files found.", level='INFO')
+            summary['status'] = 'success_no_files'
+            return summary
+
+        _emit_progress(socketio_instance, task_id, event_name, f"Found {len(backup_files)} incremental files to process.", level='INFO')
+
+        with app.app_context():
+            for file_info in backup_files:
+                filename = file_info['name']
+                remote_file_path = f"{BOOKING_INCREMENTAL_BACKUPS_DIR}/{filename}"
+                _emit_progress(socketio_instance, task_id, event_name, f"Processing file: {filename}", level='INFO')
+                logger.info(f"Processing incremental backup file: {remote_file_path}")
+
+                file_client = share_client.get_file_client(remote_file_path)
+                if not _client_exists(file_client):
+                    msg = f"File {filename} not found during processing (was it deleted recently?). Skipping."
+                    logger.error(msg)
+                    summary['errors'].append(msg)
+                    _emit_progress(socketio_instance, task_id, event_name, msg, level='ERROR')
+                    continue # Skip to next file
+
+                try:
+                    downloader = file_client.download_file()
+                    file_content_bytes = downloader.readall()
+                    bookings_data_list = json.loads(file_content_bytes.decode('utf-8'))
+
+                    file_bookings_created = 0
+                    file_bookings_updated = 0
+
+                    for booking_data in bookings_data_list:
+                        booking_id = booking_data.get('id')
+                        if not booking_id:
+                            logger.warning(f"Skipping booking data without ID in file {filename}: {booking_data}")
+                            summary['errors'].append(f"File {filename}: Found booking data without ID.")
+                            continue
+
+                        # Convert relevant string datetimes from JSON back to datetime objects
+                        try:
+                            # Timestamps from backup are expected to be in ISO format and UTC
+                            json_last_modified_str = booking_data.get('last_modified')
+                            if not json_last_modified_str: # Should always be present in incremental backups
+                                logger.warning(f"Booking ID {booking_id} in {filename} missing last_modified. Skipping update for this record.")
+                                summary['errors'].append(f"File {filename}, Booking ID {booking_id}: Missing last_modified field.")
+                                continue
+
+                            json_last_modified_dt = datetime.fromisoformat(json_last_modified_str)
+                            # Ensure it's UTC if parsed from ISO string that might lack explicit tzinfo
+                            if json_last_modified_dt.tzinfo is None:
+                                from datetime import timezone # Local import for safety
+                                json_last_modified_dt = json_last_modified_dt.replace(tzinfo=timezone.utc)
+
+                            # Other datetime fields
+                            start_time_dt = datetime.fromisoformat(booking_data['start_time']) if booking_data.get('start_time') else None
+                            end_time_dt = datetime.fromisoformat(booking_data['end_time']) if booking_data.get('end_time') else None
+                            checked_in_at_dt = datetime.fromisoformat(booking_data['checked_in_at']) if booking_data.get('checked_in_at') else None
+                            checked_out_at_dt = datetime.fromisoformat(booking_data['checked_out_at']) if booking_data.get('checked_out_at') else None
+                            token_expires_dt = datetime.fromisoformat(booking_data['check_in_token_expires_at']) if booking_data.get('check_in_token_expires_at') else None
+
+                        except ValueError as ve:
+                            logger.error(f"Error parsing datetime for booking ID {booking_id} in {filename}: {ve}. Skipping record.")
+                            summary['errors'].append(f"File {filename}, Booking ID {booking_id}: Date parsing error - {ve}")
+                            continue
+
+                        existing_booking = Booking.query.get(booking_id)
+
+                        if existing_booking:
+                            # Ensure existing_booking.last_modified is UTC if it's naive
+                            db_last_modified = existing_booking.last_modified
+                            if db_last_modified.tzinfo is None: # Should not happen if DB stores UTC correctly
+                                from datetime import timezone
+                                db_last_modified = db_last_modified.replace(tzinfo=timezone.utc)
+
+                            if json_last_modified_dt >= db_last_modified:
+                                existing_booking.resource_id = booking_data.get('resource_id', existing_booking.resource_id)
+                                existing_booking.user_name = booking_data.get('user_name', existing_booking.user_name)
+                                existing_booking.start_time = start_time_dt if start_time_dt else existing_booking.start_time
+                                existing_booking.end_time = end_time_dt if end_time_dt else existing_booking.end_time
+                                existing_booking.title = booking_data.get('title', existing_booking.title)
+                                existing_booking.checked_in_at = checked_in_at_dt # Can be None
+                                existing_booking.checked_out_at = checked_out_at_dt # Can be None
+                                existing_booking.status = booking_data.get('status', existing_booking.status)
+                                existing_booking.recurrence_rule = booking_data.get('recurrence_rule', existing_booking.recurrence_rule)
+                                existing_booking.admin_deleted_message = booking_data.get('admin_deleted_message', existing_booking.admin_deleted_message)
+                                existing_booking.check_in_token = booking_data.get('check_in_token', existing_booking.check_in_token)
+                                existing_booking.check_in_token_expires_at = token_expires_dt # Can be None
+                                # last_modified will be updated by DB `onupdate` or SQLAlchemy event if configured
+                                # If not, explicitly set: existing_booking.last_modified = json_last_modified_dt
+                                # (but this might fire onupdate again if not careful, SQLAlchemy handles this for its default/onupdate)
+                                file_bookings_updated += 1
+                            else:
+                                logger.info(f"Skipping update for booking ID {booking_id} from file {filename}: backup data is older than DB data.")
+                        else: # New booking
+                            new_booking = Booking(
+                                id=booking_id, # Set ID explicitly if restoring deleted items or from different system
+                                resource_id=booking_data.get('resource_id'),
+                                user_name=booking_data.get('user_name'),
+                                start_time=start_time_dt,
+                                end_time=end_time_dt,
+                                title=booking_data.get('title'),
+                                checked_in_at=checked_in_at_dt,
+                                checked_out_at=checked_out_at_dt,
+                                status=booking_data.get('status', 'approved'), # Default status if not in backup
+                                recurrence_rule=booking_data.get('recurrence_rule'),
+                                admin_deleted_message=booking_data.get('admin_deleted_message'),
+                                check_in_token=booking_data.get('check_in_token'),
+                                check_in_token_expires_at=token_expires_dt
+                                # last_modified will be set by DB default/onupdate or SQLAlchemy event
+                                # If needed explicitly: last_modified=json_last_modified_dt
+                            )
+                            db.session.add(new_booking)
+                            file_bookings_created += 1
+
+                    db.session.commit()
+                    logger.info(f"Committed changes for file {filename}: {file_bookings_created} created, {file_bookings_updated} updated.")
+                    _emit_progress(socketio_instance, task_id, event_name, f"Processed {filename}: {file_bookings_created} created, {file_bookings_updated} updated.", level='INFO')
+                    summary['files_processed'] += 1
+                    summary['bookings_created'] += file_bookings_created
+                    summary['bookings_updated'] += file_bookings_updated
+
+                except json.JSONDecodeError as jde:
+                    msg = f"Error decoding JSON from file {filename}: {jde}"
+                    logger.error(msg, exc_info=True)
+                    summary['errors'].append(msg)
+                    _emit_progress(socketio_instance, task_id, event_name, f"Error decoding {filename}.", detail=str(jde), level='ERROR')
+                    # Decide if to stop or continue; for now, continue
+                except Exception as e_file_proc:
+                    msg = f"Error processing data from file {filename}: {e_file_proc}"
+                    logger.error(msg, exc_info=True)
+                    summary['errors'].append(msg)
+                    _emit_progress(socketio_instance, task_id, event_name, f"Error processing {filename}.", detail=str(e_file_proc), level='ERROR')
+                    db.session.rollback() # Rollback changes from this problematic file
+
+        if not summary['errors']:
+            summary['status'] = 'success'
+            _emit_progress(socketio_instance, task_id, event_name, "Incremental booking restore completed successfully.", level='SUCCESS')
+        else:
+            summary['status'] = 'completed_with_errors'
+            _emit_progress(socketio_instance, task_id, event_name, "Incremental booking restore completed with errors.", detail=f"{len(summary['errors'])} errors.", level='WARNING')
+
+        logger.info(f"Incremental booking restore finished. Summary: {summary}")
+
+    except Exception as e:
+        msg = f"Critical error during incremental booking restore process: {e}"
+        logger.error(msg, exc_info=True)
+        summary['errors'].append(msg)
+        summary['status'] = 'failure'
+        _emit_progress(socketio_instance, task_id, event_name, "Critical error in restore process.", detail=str(e), level='ERROR')
+        # Ensure rollback if error occurs outside the per-file loop's context
+        if 'app' in locals() and app and hasattr(db, 'session'): # Check if app and db.session are available
+            with app.app_context(): # Need app context for rollback
+                 db.session.rollback()
+
+
+    return summary

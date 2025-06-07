@@ -133,6 +133,7 @@ def serve_backup_restore_page():
     scheduler_settings = load_scheduler_settings()
     full_backup_settings = scheduler_settings.get('full_backup', {})
     booking_csv_backup_settings = scheduler_settings.get('booking_csv_backup', {})
+    auto_restore_booking_records_on_startup = scheduler_settings.get('auto_restore_booking_records_on_startup', False)
 
 
     return render_template(
@@ -144,7 +145,8 @@ def serve_backup_restore_page():
         booking_csv_has_prev=has_prev,
         booking_csv_has_next=has_next,
         full_backup_settings=full_backup_settings,
-        booking_csv_backup_settings=booking_csv_backup_settings # Pass to template
+        booking_csv_backup_settings=booking_csv_backup_settings,
+        auto_restore_booking_records_on_startup=auto_restore_booking_records_on_startup # Pass new setting
     )
 
 @admin_ui_bp.route('/admin/restore_booking_csv/<timestamp_str>', methods=['POST'])
@@ -444,8 +446,19 @@ def save_booking_csv_schedule_settings():
             flash(_('Invalid interval value for Booking CSV backup. Please enter a number.'), 'danger')
             return redirect(url_for('admin_ui.serve_backup_restore_page'))
 
-        all_settings['booking_csv_backup']['range'] = request.form.get('booking_csv_backup_range_type', 'all')
-        # The key in settings is 'range', but form field is 'range_type' for clarity.
+        all_settings['booking_csv_backup']['booking_backup_type'] = request.form.get('booking_backup_type', 'full_export')
+
+        # Only save 'range' if type is 'full_export', otherwise it's not applicable for 'incremental'
+        if all_settings['booking_csv_backup']['booking_backup_type'] == 'full_export':
+            all_settings['booking_csv_backup']['range'] = request.form.get('booking_csv_backup_range_type', 'all')
+        else:
+            # For incremental, 'range' is not used in the same way.
+            # We can set it to a default or remove it, or keep the last known value.
+            # For simplicity, let's keep the last known value or the default 'all' if not present.
+            # The scheduler task for incremental will ignore it.
+            if 'range' not in all_settings['booking_csv_backup']: # Ensure key exists if it was never set
+                 all_settings['booking_csv_backup']['range'] = 'all'
+
 
         save_scheduler_settings(all_settings)
         flash(_('Booking CSV backup schedule settings saved successfully.'), 'success')
@@ -458,6 +471,32 @@ def save_booking_csv_schedule_settings():
     except Exception as e:
         current_app.logger.error(f"Error saving Booking CSV backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
         flash(_('An error occurred while saving the Booking CSV backup schedule settings. Please check the logs.'), 'danger')
+    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+
+
+@admin_ui_bp.route('/settings/startup/auto_restore_bookings', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def save_auto_restore_booking_records_settings():
+    current_app.logger.info(f"User {current_user.username} attempting to save 'Auto Restore Booking Records on Startup' settings.")
+    try:
+        all_settings = load_scheduler_settings()
+
+        is_enabled = request.form.get('auto_restore_booking_records_enabled') == 'true'
+        all_settings['auto_restore_booking_records_on_startup'] = is_enabled
+
+        save_scheduler_settings(all_settings)
+
+        if is_enabled:
+            flash(_('Automatic restore of booking records on startup ENABLED.'), 'success')
+        else:
+            flash(_('Automatic restore of booking records on startup DISABLED.'), 'success')
+
+        current_app.logger.info(f"'Auto Restore Booking Records on Startup' setting saved by {current_user.username}: {is_enabled}")
+
+    except Exception as e:
+        current_app.logger.error(f"Error saving 'Auto Restore Booking Records on Startup' setting by {current_user.username}: {str(e)}", exc_info=True)
+        flash(_('An error occurred while saving the auto restore setting. Please check the logs.'), 'danger')
     return redirect(url_for('admin_ui.serve_backup_restore_page'))
 
 

@@ -11,10 +11,11 @@ from utils import load_scheduler_settings, _get_map_configuration_data, add_audi
 
 # Conditional import for azure_backup
 try:
-    from azure_backup import create_full_backup, backup_bookings_csv
+    from azure_backup import create_full_backup, backup_bookings_csv, backup_incremental_bookings # Added backup_incremental_bookings
 except ImportError:
     create_full_backup = None
     backup_bookings_csv = None # Ensure it's defined even if import fails
+    backup_incremental_bookings = None # Ensure it's defined even if import fails
 
 def cancel_unchecked_bookings(app):
     """
@@ -243,65 +244,77 @@ def run_scheduled_booking_csv_backup(app):
     """
     with app.app_context():
         logger = app.logger
-        logger.info("run_scheduled_booking_csv_backup: Checking CSV backup schedule (from UI settings)...")
+        logger.info("run_scheduled_booking_csv_backup: Checking Booking Records backup schedule (from UI settings)...")
         try:
-            if not backup_bookings_csv:
-                logger.error("run_scheduled_booking_csv_backup: backup_bookings_csv function not available/imported. Cannot proceed.")
-                return
-
             settings = load_scheduler_settings()
-            # Use default from new structure if key missing
-            csv_backup_schedule = settings.get('booking_csv_backup', {})
+            csv_backup_schedule = settings.get('booking_csv_backup', {}) # Keep using 'booking_csv_backup' key for settings
 
             if not csv_backup_schedule.get('is_enabled'):
-                logger.info("run_scheduled_booking_csv_backup: Booking CSV backups are disabled via UI settings. Skipping.")
+                logger.info("run_scheduled_booking_csv_backup: Scheduled Booking Records backups are disabled via UI settings. Skipping.")
                 return
 
-            # The job for CSV backup is expected to be run by APScheduler at the specified interval.
-            # So, if this function is called, it means it's time to run the backup.
-            # The 'interval_minutes' from csv_backup_schedule is used by APScheduler setup, not directly here.
+            backup_type = csv_backup_schedule.get('booking_backup_type', 'full_export') # Default to full_export
+            task_id_str = f"scheduled_booking_records_backup_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+            success = False
 
-            # Use default from new structure if key missing
-            range_setting = csv_backup_schedule.get('range', 'all')
-            # range_label will be the same as range_setting for filename and logging
-            range_label = range_setting
+            if backup_type == 'incremental':
+                logger.info(f"run_scheduled_booking_csv_backup: Initiating INCREMENTAL booking records backup. Task ID: {task_id_str}")
+                if not backup_incremental_bookings:
+                    logger.error("run_scheduled_booking_csv_backup: backup_incremental_bookings function not available/imported. Cannot proceed with incremental backup.")
+                    return
 
-            start_date_dt = None
-            end_date_dt = None
+                success = backup_incremental_bookings(app=app, socketio_instance=None, task_id=task_id_str)
 
-            if range_setting != 'all':
-                utcnow = datetime.now(timezone.utc)
-                end_date_dt = datetime(utcnow.year, utcnow.month, utcnow.day, tzinfo=timezone.utc) + timedelta(days=1)
-
-                if range_setting == "1day":
-                    start_date_dt = end_date_dt - timedelta(days=1)
-                elif range_setting == "3days":
-                    start_date_dt = end_date_dt - timedelta(days=3)
-                elif range_setting == "7days":
-                    start_date_dt = end_date_dt - timedelta(days=7)
-                # Add other range options if they become available in UI settings
+                if success:
+                    logger.info(f"run_scheduled_booking_csv_backup: Scheduled INCREMENTAL booking records backup completed successfully. Task ID: {task_id_str}")
+                    add_audit_log(action="SCHEDULED_INCREMENTAL_BOOKING_BACKUP_SUCCESS_UI", details=f"Scheduled incremental booking records backup successful. Task ID: {task_id_str}", username="System")
                 else:
-                    logger.warning(f"run_scheduled_booking_csv_backup: Unknown range '{range_setting}' in UI settings. Defaulting to 'all'.")
-                    range_label = 'all' # Fallback range_label for filename consistency
+                    logger.error(f"run_scheduled_booking_csv_backup: Scheduled INCREMENTAL booking records backup failed. Task ID: {task_id_str}")
+                    add_audit_log(action="SCHEDULED_INCREMENTAL_BOOKING_BACKUP_FAILED_UI", details=f"Scheduled incremental booking records backup failed. Task ID: {task_id_str}", username="System")
 
-            task_id_str = f"scheduled_booking_csv_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-            logger.info(f"run_scheduled_booking_csv_backup: Running scheduled booking CSV backup (UI settings) for range: {range_label}, Start: {start_date_dt}, End: {end_date_dt}. Task ID: {task_id_str}")
+            elif backup_type == 'full_export':
+                if not backup_bookings_csv: # This is for full export
+                    logger.error("run_scheduled_booking_csv_backup: backup_bookings_csv function not available/imported. Cannot proceed with full export.")
+                    return
 
-            success = backup_bookings_csv(
-                app=app, # app_context is already active
-                socketio_instance=None,
-                task_id=task_id_str,
-                start_date_dt=start_date_dt,
-                end_date_dt=end_date_dt,
-                range_label=range_label
-            )
+                range_setting = csv_backup_schedule.get('range', 'all')
+                range_label = range_setting
+                start_date_dt = None
+                end_date_dt = None
 
-            if success:
-                logger.info(f"run_scheduled_booking_csv_backup: Scheduled booking CSV backup (UI settings, range: {range_label}) completed successfully.")
-                add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_SUCCESS_UI", details=f"Scheduled booking CSV backup (UI settings, range: {range_label}) successful.", username="System")
+                if range_setting != 'all':
+                    utcnow = datetime.now(timezone.utc)
+                    end_date_dt = datetime(utcnow.year, utcnow.month, utcnow.day, tzinfo=timezone.utc) + timedelta(days=1)
+                    if range_setting == "1day":
+                        start_date_dt = end_date_dt - timedelta(days=1)
+                    elif range_setting == "3days":
+                        start_date_dt = end_date_dt - timedelta(days=3)
+                    elif range_setting == "7days":
+                        start_date_dt = end_date_dt - timedelta(days=7)
+                    else:
+                        logger.warning(f"run_scheduled_booking_csv_backup: Unknown range '{range_setting}' for full export. Defaulting to 'all'.")
+                        range_label = 'all'
+
+                logger.info(f"run_scheduled_booking_csv_backup: Initiating FULL EXPORT booking records backup (UI settings) for range: {range_label}, Start: {start_date_dt}, End: {end_date_dt}. Task ID: {task_id_str}")
+                success = backup_bookings_csv(
+                    app=app,
+                    socketio_instance=None,
+                    task_id=task_id_str,
+                    start_date_dt=start_date_dt,
+                    end_date_dt=end_date_dt,
+                    range_label=range_label
+                )
+
+                if success:
+                    logger.info(f"run_scheduled_booking_csv_backup: Scheduled FULL EXPORT booking records backup (UI settings, range: {range_label}) completed successfully.")
+                    add_audit_log(action="SCHEDULED_FULL_EXPORT_BOOKING_BACKUP_SUCCESS_UI", details=f"Scheduled full export booking records backup (UI settings, range: {range_label}) successful.", username="System")
+                else:
+                    logger.error(f"run_scheduled_booking_csv_backup: Scheduled FULL EXPORT booking records backup (UI settings, range: {range_label}) failed.")
+                    add_audit_log(action="SCHEDULED_FULL_EXPORT_BOOKING_BACKUP_FAILED_UI", details=f"Scheduled full export booking records backup (UI settings, range: {range_label}) failed.", username="System")
             else:
-                logger.error(f"run_scheduled_booking_csv_backup: Scheduled booking CSV backup (UI settings, range: {range_label}) failed.")
-                add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_FAILED_UI", details=f"Scheduled booking CSV backup (UI settings, range: {range_label}) failed.", username="System")
+                logger.error(f"run_scheduled_booking_csv_backup: Unknown booking_backup_type '{backup_type}' configured. Skipping job.")
+                add_audit_log(action="SCHEDULED_BOOKING_BACKUP_ERROR_UI", details=f"Unknown backup type: {backup_type}", username="System")
+
         except Exception as e:
-            logger.exception("run_scheduled_booking_csv_backup: Error during scheduled booking CSV backup execution (UI settings).")
-            add_audit_log(action="SCHEDULED_BOOKING_CSV_BACKUP_ERROR_UI", details=f"Exception: {str(e)}", username="System")
+            logger.exception("run_scheduled_booking_csv_backup: Error during scheduled booking records backup execution (UI settings).")
+            add_audit_log(action="SCHEDULED_BOOKING_BACKUP_ERROR_UI", details=f"Exception: {str(e)}", username="System")
