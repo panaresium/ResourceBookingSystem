@@ -154,7 +154,7 @@ def create_booking():
                 Booking.user_name == user_name_for_record,
                 Booking.start_time < first_occ_end,
                 Booking.end_time > first_occ_start,
-                Booking.status.notin_(['cancelled', 'rejected'])
+                Booking.status.notin_(['cancelled', 'rejected', 'completed'])
             ).first()
 
             if first_slot_user_conflict:
@@ -167,7 +167,7 @@ def create_booking():
             Booking.resource_id == resource_id,
             Booking.start_time < occ_end,
             Booking.end_time > occ_start,
-            Booking.status.notin_(['cancelled', 'rejected'])
+            Booking.status.notin_(['cancelled', 'rejected', 'completed'])
         ).first()
         if conflicting:
             current_app.logger.info(f"Booking conflict for resource {resource_id} on slot {occ_start}-{occ_end} with existing booking {conflicting.id}.")
@@ -187,7 +187,7 @@ def create_booking():
                 Booking.resource_id != resource_id, # Check on other resources
                 Booking.start_time < occ_end,
                 Booking.end_time > occ_start,
-                Booking.status.notin_(['cancelled', 'rejected'])
+                Booking.status.notin_(['cancelled', 'rejected', 'completed'])
             ).first()
 
             if user_conflicting_recurring:
@@ -886,14 +886,15 @@ def check_out_booking(booking_id):
 
         now = datetime.now(timezone.utc)
         booking.checked_out_at = now
+        booking.status = 'completed' # Set status to completed
         # Optional: Adjust booking end_time if an early check-out should free up the resource.
         # booking.end_time = now
         db.session.commit()
 
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
-        add_audit_log(action="CHECK_OUT_SUCCESS", details=f"User '{current_user.username}' checked out of booking ID {booking.id} for resource '{resource_name}'.")
-        socketio.emit('booking_updated', {'action': 'checked_out', 'booking_id': booking.id, 'checked_out_at': now.isoformat(), 'resource_id': booking.resource_id})
-        current_app.logger.info(f"User '{current_user.username}' successfully checked out of booking ID: {booking_id} at {now.isoformat()}")
+        add_audit_log(action="CHECK_OUT_SUCCESS", details=f"User '{current_user.username}' checked out of booking ID {booking.id} for resource '{resource_name}'. Status set to completed.")
+        socketio.emit('booking_updated', {'action': 'checked_out', 'booking_id': booking.id, 'checked_out_at': now.isoformat(), 'resource_id': booking.resource_id, 'status': 'completed'})
+        current_app.logger.info(f"User '{current_user.username}' successfully checked out of booking ID: {booking_id} at {now.isoformat()}. Status set to completed.")
 
         if current_user.email:
              send_teams_notification(

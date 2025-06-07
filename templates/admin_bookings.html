@@ -16,9 +16,22 @@
     </div>
     {% endif %}
 
+    <form method="GET" action="{{ url_for('admin_ui.serve_admin_bookings_page') }}" style="margin-bottom: 15px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;">
+        <label for="status_filter" style="margin-right: 5px; font-weight: bold;">{{ _('Filter by Status:') }}</label>
+        <select name="status_filter" id="status_filter" onchange="this.form.submit()" style="padding: 5px; border-radius: 3px; border: 1px solid #ced4da;">
+            <option value="">{{ _('-- All Statuses --') }}</option>
+            {% for stat in all_statuses %}
+                <option value="{{ stat }}" {% if stat == current_status_filter %}selected{% endif %}>
+                    {{ stat.replace('_', ' ').capitalize() }}
+                </option>
+            {% endfor %}
+        </select>
+        {# <button type="submit" class="button" style="margin-left: 10px; padding: 5px 10px;">Filter</button> #}
+    </form>
+
     {% if bookings %}
     <div class="table-responsive">
-        <table class="table bookings-table">
+        <table id="admin-bookings-table" class="table bookings-table"> {# Added id #}
             <thead>
                 <tr>
                     <th>{{ _('ID') }}</th>
@@ -33,7 +46,8 @@
             </thead>
             <tbody>
                 {% for booking in bookings %}
-                <tr class="{{ 'table-warning' if booking.status == 'cancelled_by_admin' else '' }}">
+                {# Added dynamic class for row styling based on status, and improved condition for table-warning #}
+                <tr class="booking-row-{{ booking.status | lower | replace('_', '-') }} {{ 'table-warning' if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message else '' }}">
                     <td>{{ booking.id }}</td>
                     <td>{{ booking.user_username }}</td>
                     <td>{{ booking.resource_name }}</td>
@@ -47,16 +61,19 @@
                     </td>
                     <td>{{ booking.start_time.strftime('%Y-%m-%d %H:%M') if booking.start_time else '-' }}</td>
                     <td>{{ booking.end_time.strftime('%Y-%m-%d %H:%M') if booking.end_time else '-' }}</td>
-                    <td><span class="status-badge status-{{ booking.status | lower }}">{{ _(booking.status) }}</span></td>
+                    {# Updated status display to be more readable and use new CSS class convention #}
+                    <td><span class="status-badge status-{{ booking.status | lower | replace('_', '-') }}">{{ booking.status.replace('_', ' ').capitalize() }}</span></td>
                     <td>
                         {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
                           <button class="btn btn-sm btn-outline-secondary dismiss-admin-message-btn" data-booking-id="{{ booking.id }}">
                             {{ _('Dismiss Message') }}
                           </button>
                         {% elif booking.status and booking.status.lower() not in ['cancelled', 'rejected', 'completed', 'checked_out', 'cancelled_by_admin'] %}
+                        {# Delete button for active bookings might still be relevant for hard deletion #}
                         <button class="button button-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Delete') }}</button>
                         {% else %}
-                        -
+                        {# For completed, cancelled, rejected bookings, show a dash or specific info #}
+                        <span class="text-muted">-</span>
                         {% endif %}
                     </td>
                 </tr>
@@ -142,13 +159,15 @@ document.addEventListener('DOMContentLoaded', function() {
                         // For now, using the raw status string, which might not be ideal for display if it's an enum key.
                         // The _() function is not directly available in JS unless passed specifically.
                         // Simple approach: use the new_status string.
-                        statusCell.innerHTML = `<span class="status-badge status-${data.new_status.toLowerCase()}">${data.new_status}</span>`;
+                        statusCell.innerHTML = `<span class="status-badge status-${data.new_status.toLowerCase()}">${data.new_status.replace('_', ' ').capitalize()}</span>`;
                     }
 
                     // Update row styling
                     row.classList.remove('table-warning');
                     // Optionally add another class like 'table-light' or 'table-secondary' if desired
                     // row.classList.add('table-light');
+                     row.className = `booking-row-${data.new_status.toLowerCase().replace('_', '-')}`;
+
 
                 } else {
                     throw new Error(data.error || `{{ _('Failed to clear admin message (Status: ${status}).') }}`);
