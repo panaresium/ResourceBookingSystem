@@ -13,6 +13,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const toggleUpcomingCheckbox = document.getElementById('toggle-upcoming-bookings');
     const togglePastCheckbox = document.getElementById('toggle-past-bookings');
 
+    const predefinedSlots = [
+        { text: "08:00 - 12:00 UTC", value: "08:00,12:00" },
+        { text: "13:00 - 17:00 UTC", value: "13:00,17:00" },
+        { text: "08:00 - 17:00 UTC", value: "08:00,17:00" }
+        // Add more slots as needed, ensuring they match calendar.js if consistency is desired
+    ];
+
     // --- Pagination State (Common) ---
     const myBookingsItemsPerPageOptions = [5, 10, 25, 50];
 
@@ -584,53 +591,109 @@ document.addEventListener('DOMContentLoaded', () => {
     // Original fetchAndDisplayBookings is effectively split into fetchUpcomingBookings and fetchPastBookings
     // The filter application logic will now trigger both.
 
-    async function loadAvailableSlotsForModal(resourceId, dateString, initialStartTime) {
-        if (!modalAvailableSlotsSelect) return;
-
-        modalAvailableSlotsSelect.innerHTML = '<option value="">Loading...</option>';
-        modalAvailableSlotsSelect.disabled = true;
-
-        // Ensure dateString is in YYYY-MM-DD format for the API
-        let formattedDateString = dateString;
-        if (dateString.includes('T')) { // If it's an ISO string
-            formattedDateString = dateString.split('T')[0];
-        }
-
+    async function fetchBookingsForResourceDate(resourceId, dateString) {
+        // Ensure dateString is in YYYY-MM-DD format
+        const formattedDate = dateString.split('T')[0];
         try {
-            // Use updateModalStatusDiv for displaying errors from this specific API call too
-            const data = await apiCall(`/api/resources/${resourceId}/available_slots?date=${formattedDateString}`, {}, updateModalStatusDiv);
-            modalAvailableSlotsSelect.innerHTML = ''; // Clear loading
-
-            if (data && data.available_slots && data.available_slots.length > 0) {
-                data.available_slots.forEach(slot => {
-                    const option = document.createElement('option');
-                    // Assuming slot.start_time and slot.end_time are full ISO strings
-                    const displayStartTime = slot.start_time.substring(11, 16);
-                    const displayEndTime = slot.end_time.substring(11, 16);
-                    option.textContent = `${displayStartTime} - ${displayEndTime}`;
-                    option.value = slot.start_time; // Store full start ISO string
-                    option.dataset.endTime = slot.end_time; // Store full end ISO string
-
-                    if (initialStartTime && initialStartTime === slot.start_time) {
-                        option.selected = true;
-                    }
-                    modalAvailableSlotsSelect.appendChild(option);
-                });
-                modalAvailableSlotsSelect.disabled = false;
-            } else {
-                modalAvailableSlotsSelect.innerHTML = '<option value="">No slots available</option>';
-                modalAvailableSlotsSelect.disabled = true;
+            const data = await apiCall(`/api/bookings/by_resource/${resourceId}?date=${formattedDate}`, {}, statusDiv); // Using main statusDiv for this generic fetch
+            if (data && data.bookings) {
+                return data.bookings;
             }
+            return []; // Return empty if no bookings data
         } catch (error) {
-            console.error('Error loading available slots:', error);
-            modalAvailableSlotsSelect.innerHTML = '<option value="">Error loading slots</option>';
-            modalAvailableSlotsSelect.disabled = true;
-            // Ensure apiCall itself shows the error in updateModalStatusDiv, or:
-            if (!updateModalStatusDiv.textContent || updateModalStatusDiv.style.display === 'none') {
-                 showModalStatus('Failed to load available time slots. ' + (error.message || ''), 'danger');
-            }
+            console.error(`Error fetching bookings for resource ${resourceId} on date ${formattedDate}:`, error);
+            showModalStatus(`Could not fetch existing bookings for the selected date: ${error.message || 'Unknown error'}. Slot availability might be inaccurate.`, 'warning');
+            return []; // Return empty array on error to allow proceeding, albeit with potential inaccuracies
         }
     }
+
+    async function loadAvailableSlotsForModal(resourceId, dateString, initialBookingStartTimeISO) {
+        if (!modalAvailableSlotsSelect || !updateModalStatusDiv) return;
+
+        hideStatusMessage(updateModalStatusDiv);
+        modalAvailableSlotsSelect.innerHTML = '<option value="">Loading available slots...</option>';
+        modalAvailableSlotsSelect.disabled = true;
+
+        const currentBookingIdStr = modalBookingIdInput.value; // String
+        const currentBookingId = parseInt(currentBookingIdStr, 10);
+
+        // Ensure dateString is just YYYY-MM-DD for consistent Date object creation
+        const cleanDateString = dateString.split('T')[0];
+
+        try {
+            const allBookingsOnDate = await fetchBookingsForResourceDate(resourceId, cleanDateString);
+            const otherBookingsOnDate = allBookingsOnDate.filter(booking => booking.id !== currentBookingId);
+
+            modalAvailableSlotsSelect.innerHTML = ''; // Clear loading message
+
+            let defaultOption = new Option("-- Select a time slot --", "");
+            modalAvailableSlotsSelect.add(defaultOption);
+
+            let availableCount = 0;
+
+            predefinedSlots.forEach(pSlot => {
+                const [pSlotStartStr, pSlotEndStr] = pSlot.value.split(','); // e.g., "08:00", "12:00"
+
+                // Construct Date objects in UTC for the predefined slot
+                const predefinedSlotStartUTC = new Date(`${cleanDateString}T${pSlotStartStr}:00Z`);
+                const predefinedSlotEndUTC = new Date(`${cleanDateString}T${pSlotEndStr}:00Z`);
+
+                let isConflicting = false;
+                for (const existingBooking of otherBookingsOnDate) {
+                    const existingBookingStart = new Date(existingBooking.start_time); // These are already ISO strings (UTC)
+                    const existingBookingEnd = new Date(existingBooking.end_time);
+
+                    // Check for overlap
+                    if (predefinedSlotStartUTC < existingBookingEnd && predefinedSlotEndUTC > existingBookingStart) {
+                        isConflicting = true;
+                        break;
+                    }
+                }
+
+                if (!isConflicting) {
+                    availableCount++;
+                    const option = new Option(pSlot.text, pSlot.value); // value is "HH:MM,HH:MM"
+                    modalAvailableSlotsSelect.add(option);
+
+                    if (initialBookingStartTimeISO) {
+                        const initialBookingDateObjUTC = new Date(initialBookingStartTimeISO);
+                        // Check if the current slot is for the same date as the initial booking
+                        if (initialBookingDateObjUTC.toISOString().split('T')[0] === cleanDateString) {
+                            const initialTimeStr = initialBookingDateObjUTC.toISOString().substring(11, 16); // "HH:MM" in UTC
+                            if (initialTimeStr === pSlotStartStr) {
+                                option.selected = true;
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (availableCount === 0) {
+                 if (modalAvailableSlotsSelect.options.length <= 1) { // Still only default
+                    defaultOption.textContent = "No conflict-free slots available";
+                 } else { // Should not happen if availableCount is 0
+                    showModalStatus("No conflict-free slots available on this date.", "info");
+                 }
+            } else {
+                 // Slots added, ensure default option is not selected if a slot is pre-selected
+                 if (modalAvailableSlotsSelect.selectedIndex > 0) {
+                     // defaultOption.selected = false; // Not strictly necessary as specific option.selected=true overrides
+                 } else if (modalAvailableSlotsSelect.options.length > 1 && modalAvailableSlotsSelect.selectedIndex === 0 && !initialBookingStartTimeISO) {
+                     // If no initial slot was to be selected, and there are slots, keep "-- Select a time slot --" selected.
+                 }
+            }
+            modalAvailableSlotsSelect.disabled = false;
+
+        } catch (error) { // Catch errors from fetchBookingsForResourceDate or other synchronous errors
+            console.error('Error in loadAvailableSlotsForModal:', error);
+            modalAvailableSlotsSelect.innerHTML = ''; // Clear
+            let errOption = new Option("Error loading slots.", "");
+            modalAvailableSlotsSelect.add(errOption);
+            modalAvailableSlotsSelect.disabled = true;
+            showModalStatus(`Error determining available slots: ${error.message || 'Unknown error'}.`, 'danger');
+        }
+    }
+
 
     if (modalBookingDateInput) {
         modalBookingDateInput.addEventListener('change', function() {
@@ -682,10 +745,12 @@ document.addEventListener('DOMContentLoaded', () => {
             hideStatusMessage(updateModalStatusDiv); // Clear previous modal messages
 
             if (resourceId && currentStartTimeISO) {
-                // Pass full currentStartTimeISO for potential pre-selection
+                // Pass currentStartTimeISO (original booking's start time) for pre-selection attempt
                 await loadAvailableSlotsForModal(resourceId, currentStartTimeISO.split('T')[0], currentStartTimeISO);
             } else {
-                clearAndDisableSlotsSelect('Select date to see slots.'); // Or some other placeholder
+                // Fallback if essential data is missing, though this path should ideally not be hit
+                modalAvailableSlotsSelect.innerHTML = '<option value="">Error: Missing booking data</option>';
+                modalAvailableSlotsSelect.disabled = true;
             }
 
             lastFocusedButtonForModal = target; // Store the button that triggered the modal
@@ -764,26 +829,32 @@ document.addEventListener('DOMContentLoaded', () => {
             let payload = { title: newTitle };
             let dateTimeChanged = false;
 
-            if (newDateValue && selectedSlotOption && selectedSlotOption.value) {
-                const selectedSlotStartTime = selectedSlotOption.value; // Full ISO string
-                const selectedSlotEndTime = selectedSlotOption.dataset.endTime; // Full ISO string
+            // newDateValue is YYYY-MM-DD from the date picker
+            // selectedSlotOption.value is "HH:MM,HH:MM"
+            if (newDateValue && selectedSlotOption && selectedSlotOption.value !== "") {
+                const [slotStartTimeStr, slotEndTimeStr] = selectedSlotOption.value.split(',');
 
-                // Check if date or time actually changed
-                if (selectedSlotStartTime !== originalStartTimeFromDataset || selectedSlotEndTime !== originalEndTimeFromDataset) {
-                    payload.start_time = selectedSlotStartTime;
-                    payload.end_time = selectedSlotEndTime;
+                // Construct new ISO8601 date-time strings in UTC
+                const newStartTimeISO = new Date(`${newDateValue}T${slotStartTimeStr}:00Z`).toISOString();
+                const newEndTimeISO = new Date(`${newDateValue}T${slotEndTimeStr}:00Z`).toISOString();
+
+                if (newStartTimeISO !== originalStartTimeFromDataset || newEndTimeISO !== originalEndTimeFromDataset) {
+                    payload.start_time = newStartTimeISO;
+                    payload.end_time = newEndTimeISO;
                     dateTimeChanged = true;
                 }
-            } else if (newDateValue && (!selectedSlotOption || !selectedSlotOption.value)) {
-                // Date is present, but no slot selected. This is an issue if the date differs from original.
-                const originalDateFromDataset = originalStartTimeFromDataset.split('T')[0];
+            } else if (newDateValue && (!selectedSlotOption || selectedSlotOption.value === "")) {
+                 // A date is selected, but no time slot.
+                 // This is only okay if the date hasn't changed from the original booking's date.
+                 // If the date HAS changed, a slot MUST be selected.
+                const originalDateFromDataset = originalStartTimeFromDataset ? originalStartTimeFromDataset.split('T')[0] : null;
                 if (newDateValue !== originalDateFromDataset) {
                     showModalStatus('Please select an available time slot for the new date.', 'danger');
                     return;
                 }
-                // If date is same as original and no new slot selected, means time is not changing.
+                // If date is the same as original and no new slot is chosen, time is not being changed.
             }
-
+            // If only title changes, payload remains {title: newTitle}
 
             const submitButton = this.querySelector('button[type="submit"]'); // This is saveBookingTitleBtn
             const originalButtonText = submitButton.textContent;
