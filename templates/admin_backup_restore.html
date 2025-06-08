@@ -773,6 +773,10 @@
             })
             .finally(() => {
                 enablePageInteractions(); // Re-enable after loading, regardless of outcome
+                // Load lists for new sections too
+                loadFullBackupsForBookingRestore();
+                loadCsvBackupsForBookingRestore();
+                loadIncrementalBackupsList();
             });
         }
 
@@ -1251,6 +1255,143 @@
             // Initial call to set visibility
             toggleBookingRangeVisibility();
         }
+
+
+        // Event Handlers for new Selective Booking Restore buttons
+        if (btnRestoreBookingsFromFullDb) {
+            btnRestoreBookingsFromFullDb.addEventListener('click', function() {
+                const selectedTimestamp = selectFullBackupForBookingRestore.value;
+                if (!selectedTimestamp) {
+                    appendLog('restore-log-area', "{{ _('Please select a full backup.') }}", '', 'error', statusRestoreBookingsFromFullDb);
+                    return;
+                }
+                if (!confirm("{{ _('WARNING: This will delete ALL current bookings and replace them with bookings from the selected full system backup. Are you sure you want to proceed?') }}")) {
+                    return;
+                }
+                currentBookingFullDbRestoreTaskId = null; // Reset
+                statusRestoreBookingsFromFullDb.innerHTML = ''; // Clear previous specific status
+                appendLog('restore-log-area', `{{ _('Initiating booking restore from full DB backup:') }} ${selectedTimestamp}...`, '', 'info', statusRestoreBookingsFromFullDb);
+                disablePageInteractions();
+
+                fetch('/api/admin/booking_restore/from_full_db', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken, 'Accept': 'application/json' },
+                    body: JSON.stringify({ backup_timestamp: selectedTimestamp })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    currentBookingFullDbRestoreTaskId = data.task_id;
+                    const messageType = data.success ? 'info' : 'error';
+                    appendLog('restore-log-area', data.message || (data.success ? "{{ _('Booking restore from full DB process started.') }}" : "{{ _('Failed to start process.') }}"), `Task ID: ${data.task_id || 'N/A'}`, messageType, statusRestoreBookingsFromFullDb);
+                    if (!data.success || (data.summary && data.summary.status && data.summary.status.includes('fail'))) { // Also check summary status
+                        enablePageInteractions();
+                    } // SocketIO 'booking_db_restore_progress' will handle final re-enable
+                })
+                .catch(error => {
+                    console.error('Restore bookings from full DB error:', error);
+                    appendLog('restore-log-area', "{{ _('Request failed:') }}", error.message, 'error', statusRestoreBookingsFromFullDb);
+                    enablePageInteractions();
+                });
+            });
+        }
+
+        if (btnRestoreBookingsFromCsv) {
+            btnRestoreBookingsFromCsv.addEventListener('click', function() {
+                const selectedTimestamp = selectCsvBackupForBookingRestore.value;
+                if (!selectedTimestamp) {
+                    appendLog('restore-log-area', "{{ _('Please select a CSV backup.') }}", '', 'error', statusRestoreBookingsFromCsv);
+                    return;
+                }
+                 if (!confirm("{{ _('Are you sure you want to restore bookings from CSV backup:') }} '" + selectCsvBackupForBookingRestore.options[selectCsvBackupForBookingRestore.selectedIndex].text + "'?")) {
+                    return;
+                }
+                currentBookingCsvRestoreTaskId = null;
+                statusRestoreBookingsFromCsv.innerHTML = '';
+                appendLog('restore-log-area', `{{ _('Initiating booking restore from CSV:') }} ${selectedTimestamp}...`, '', 'info', statusRestoreBookingsFromCsv);
+                disablePageInteractions();
+
+                fetch('/api/admin/booking_restore/from_csv', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken, 'Accept': 'application/json' },
+                    body: JSON.stringify({ backup_timestamp: selectedTimestamp })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    currentBookingCsvRestoreTaskId = data.task_id;
+                    const messageType = data.success ? 'info' : 'error';
+                    appendLog('restore-log-area', data.message || (data.success ? "{{ _('Booking restore from CSV process started.') }}" : "{{ _('Failed to start process.') }}"), `Task ID: ${data.task_id || 'N/A'}`, messageType, statusRestoreBookingsFromCsv);
+                     if (!data.success || (data.summary && data.summary.status && data.summary.status.includes('fail'))) {
+                        enablePageInteractions();
+                    } // SocketIO 'booking_csv_restore_progress' will handle final re-enable
+                })
+                .catch(error => {
+                    console.error('Restore bookings from CSV error:', error);
+                    appendLog('restore-log-area', "{{ _('Request failed:') }}", error.message, 'error', statusRestoreBookingsFromCsv);
+                    enablePageInteractions();
+                });
+            });
+        }
+
+        if (btnRestoreBookingsFromIncremental) {
+            btnRestoreBookingsFromIncremental.addEventListener('click', function() {
+                if (!confirm("{{ _('Are you sure you want to apply all available incremental booking backups? This will update your current booking records.') }}")) {
+                    return;
+                }
+                currentBookingIncrementalRestoreTaskId = null;
+                statusRestoreBookingsFromIncremental.innerHTML = '';
+                appendLog('restore-log-area', "{{ _('Initiating booking restore from incremental backups...') }}", '', 'info', statusRestoreBookingsFromIncremental);
+                disablePageInteractions();
+
+                fetch('/api/admin/booking_restore/from_incremental', {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': csrfToken, 'Accept': 'application/json' }
+                    // No body needed for this one
+                })
+                .then(response => response.json())
+                .then(data => {
+                    currentBookingIncrementalRestoreTaskId = data.task_id;
+                    const messageType = data.success ? 'info' : 'error';
+                    appendLog('restore-log-area', data.message || (data.success ? "{{ _('Booking restore from incremental backups process started.') }}" : "{{ _('Failed to start process.') }}"), `Task ID: ${data.task_id || 'N/A'}`, messageType, statusRestoreBookingsFromIncremental);
+                    if (!data.success || (data.summary && data.summary.status && data.summary.status.includes('fail'))) {
+                        enablePageInteractions();
+                    } // SocketIO 'incremental_booking_restore_progress' will handle final re-enable
+                })
+                .catch(error => {
+                    console.error('Restore bookings from incremental error:', error);
+                    appendLog('restore-log-area', "{{ _('Request failed:') }}", error.message, 'error', statusRestoreBookingsFromIncremental);
+                    enablePageInteractions();
+                });
+            });
+        }
+
+        // SocketIO listeners for new booking restore operations
+        // Ensure these use the correct task IDs and update specific status elements
+        socket.on('booking_db_restore_progress', function(data) { // Example event name from backend
+            if (data.task_id !== currentBookingFullDbRestoreTaskId) return;
+            appendLog('restore-log-area', `Full DB Restore: ${data.status}`, data.detail, data.level.toLowerCase(), statusRestoreBookingsFromFullDb);
+            if (data.status.toLowerCase().includes("completed") || data.status.toLowerCase().includes("failed") || data.status.toLowerCase().includes("error") || data.status.toLowerCase().includes("critical")) {
+                enablePageInteractions();
+                currentBookingFullDbRestoreTaskId = null;
+            }
+        });
+        socket.on('booking_csv_restore_progress', function(data) {
+            if (data.task_id !== currentBookingCsvRestoreTaskId) return;
+            appendLog('restore-log-area', `CSV Restore: ${data.status}`, data.detail, data.level.toLowerCase(), statusRestoreBookingsFromCsv);
+             if (data.status.toLowerCase().includes("completed") || data.status.toLowerCase().includes("failed") || data.status.toLowerCase().includes("error") || data.status.toLowerCase().includes("critical")) {
+                enablePageInteractions();
+                currentBookingCsvRestoreTaskId = null;
+            }
+        });
+        socket.on('incremental_booking_restore_progress', function(data) {
+            if (data.task_id !== currentBookingIncrementalRestoreTaskId) return;
+            appendLog('restore-log-area', `Incremental Restore: ${data.status}`, data.detail, data.level.toLowerCase(), statusRestoreBookingsFromIncremental);
+            if (data.status.toLowerCase().includes("completed") || data.status.toLowerCase().includes("failed") || data.status.toLowerCase().includes("error") || data.status.toLowerCase().includes("critical")) {
+                enablePageInteractions();
+                currentBookingIncrementalRestoreTaskId = null;
+                loadIncrementalBackupsList(); // Refresh list after completion
+            }
+        });
+
 
         // Comment out old loadBackupSchedule function and its call
         /*

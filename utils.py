@@ -764,164 +764,240 @@ def _parse_iso_datetime(dt_str):
         # Consider logging: logger.warning(f"Could not parse datetime string: {dt_str}", exc_info=True)
         return None
 
-def import_bookings_from_csv_file(csv_file_path, app):
+def _emit_import_progress(socketio_instance, task_id, message, detail='', level='INFO', context_prefix=""):
+    """ Helper to emit progress for import operations, prepending a context prefix. """
+    if socketio_instance and task_id:
+        full_message = f"{context_prefix}{message}"
+        # Assuming _emit_progress is a global helper or part of a class if this is a method
+        # For standalone utils.py, it might need to be passed or defined here.
+        # For now, let's assume a global _emit_progress exists or this is adapted.
+        # If azure_backup._emit_progress is intended, it needs to be imported or passed.
+        # For simplicity, assuming a local or passed _emit_progress similar to azure_backup's.
+        try:
+            from azure_backup import _emit_progress as azure_emit_progress # Try to use the one from azure_backup
+            azure_emit_progress(socketio_instance, task_id, 'import_progress', full_message, detail, level)
+        except ImportError: # Fallback if azure_backup._emit_progress is not available
+             current_app.logger.debug(f"SocketIO Emit (Import): {full_message} - {detail} ({level})")
+
+
+def import_bookings_from_csv_file(csv_file_path, app, clear_existing: bool = False, socketio_instance=None, task_id=None, import_context_message_prefix: str = ""):
     """
     Imports bookings from a CSV file.
 
     Args:
         csv_file_path (str): The path to the CSV file.
         app: The Flask application object for app context.
+        clear_existing (bool): If True, deletes all existing bookings before import.
+        socketio_instance: Optional SocketIO instance for progress.
+        task_id: Optional task ID for SocketIO.
+        import_context_message_prefix (str): Prefix for SocketIO messages to give context.
 
     Returns:
         dict: A summary of the import process.
     """
-    logger = app.logger # Use app's logger
+    logger = app.logger
+    event_name = 'import_progress' # Generic event for this util, context prefix helps distinguish
+
+    _emit_import_progress(socketio_instance, task_id, "Import process started.", detail=f"File: {os.path.basename(csv_file_path)}", level='INFO', context_prefix=import_context_message_prefix)
 
     bookings_processed = 0
     bookings_created = 0
+    bookings_updated = 0 # For future use if upsert logic is added
     bookings_skipped_duplicate = 0
+    bookings_skipped_fk_violation = 0
+    bookings_skipped_other_errors = 0
     errors = []
 
     try:
-        with open(csv_file_path, mode='r', encoding='utf-8') as file:
-            reader = csv.DictReader(file)
-            # Expected header: id,resource_id,user_name,start_time,end_time,title,checked_in_at,checked_out_at,status,recurrence_rule
-            # The 'id' column from CSV will be ignored for new bookings.
+        with app.app_context():
+            if clear_existing:
+                try:
+                    num_deleted = db.session.query(Booking).delete()
+                    # db.session.commit() # Commit separately or as part of main transaction
+                    logger.info(f"{import_context_message_prefix}Cleared {num_deleted} existing bookings before import.")
+                    _emit_import_progress(socketio_instance, task_id, f"Cleared {num_deleted} existing bookings.", level='INFO', context_prefix=import_context_message_prefix)
+                except Exception as e_clear:
+                    db.session.rollback()
+                    error_msg = f"Error clearing existing bookings: {str(e_clear)}"
+                    errors.append(error_msg)
+                    logger.error(error_msg, exc_info=True)
+                    _emit_import_progress(socketio_instance, task_id, "Error clearing existing bookings.", detail=str(e_clear), level='ERROR', context_prefix=import_context_message_prefix)
+                    return {
+                        'processed': 0, 'created': 0, 'updated': 0, 'skipped_duplicates': 0,
+                        'skipped_fk_violation': 0, 'skipped_other_errors': 0, 'errors': errors,
+                        'status': 'failed_clear_existing'
+                    }
 
-            with app.app_context():
+            # Pre-fetch existing user and resource IDs for faster FK checks if memory allows and tables are large
+            # For smaller tables, direct DB checks per row might be acceptable.
+            # For this example, direct checks will be performed.
+
+            with open(csv_file_path, mode='r', encoding='utf-8') as file:
+                reader = csv.DictReader(file)
+
+                row_count_for_progress_update = 0
                 for row in reader:
                     bookings_processed += 1
+                    row_count_for_progress_update +=1
                     line_num = reader.line_num
+
+                    if row_count_for_progress_update % 50 == 0: # Emit progress every 50 rows
+                        _emit_import_progress(socketio_instance, task_id, f"Processing row {line_num}...", detail=f"{bookings_created} created, {bookings_skipped_fk_violation} FK skips, {bookings_skipped_other_errors} other skips.", level='INFO', context_prefix=import_context_message_prefix)
 
                     try:
                         resource_id_str = row.get('resource_id')
                         if not resource_id_str:
                             errors.append(f"Row {line_num}: Missing resource_id.")
+                            bookings_skipped_other_errors += 1
                             continue
                         try:
                             resource_id = int(resource_id_str)
                         except ValueError:
                             errors.append(f"Row {line_num}: Invalid resource_id '{resource_id_str}'. Must be an integer.")
+                            bookings_skipped_other_errors += 1
                             continue
 
                         user_name = row.get('user_name', '').strip()
-                        if not user_name: # user_name is mandatory for a booking
+                        if not user_name:
                             errors.append(f"Row {line_num}: Missing user_name.")
+                            bookings_skipped_other_errors += 1
                             continue
 
                         title = row.get('title', '').strip()
-                        if not title: # title is mandatory for a booking
+                        if not title:
                             errors.append(f"Row {line_num}: Missing title.")
+                            bookings_skipped_other_errors += 1
                             continue
 
-                        start_time_str = row.get('start_time')
-                        end_time_str = row.get('end_time')
-
-                        start_time = _parse_iso_datetime(start_time_str)
-                        end_time = _parse_iso_datetime(end_time_str)
+                        start_time = _parse_iso_datetime(row.get('start_time'))
+                        end_time = _parse_iso_datetime(row.get('end_time'))
 
                         if not start_time or not end_time:
                             errors.append(f"Row {line_num}: Invalid or missing start_time or end_time format.")
+                            bookings_skipped_other_errors += 1
                             continue
-
                         if start_time >= end_time:
                             errors.append(f"Row {line_num}: Start time must be before end time.")
+                            bookings_skipped_other_errors += 1
+                            continue
+
+                        # FK Checks
+                        resource = db.session.get(Resource, resource_id)
+                        if not resource:
+                            err_msg_fk_res = f"Row {line_num}: Resource ID {resource_id} not found. Booking for '{title}' skipped."
+                            errors.append(err_msg_fk_res)
+                            logger.warning(err_msg_fk_res)
+                            bookings_skipped_fk_violation += 1
+                            continue
+
+                        user = User.query.filter_by(username=user_name).first()
+                        if not user:
+                            err_msg_fk_user = f"Row {line_num}: User '{user_name}' not found. Booking for '{title}' skipped."
+                            errors.append(err_msg_fk_user)
+                            logger.warning(err_msg_fk_user)
+                            bookings_skipped_fk_violation += 1
                             continue
 
                         status = row.get('status', 'approved').strip().lower()
-                        # Basic validation for status, can be expanded
-                        if status not in ['pending', 'approved', 'cancelled', 'rejected', 'completed']:
-                             errors.append(f"Row {line_num}: Invalid status value '{row.get('status')}'. Defaulting to 'approved' if not critical, or skip.")
-                             status = 'approved' # Or skip: continue
+                        if status not in ['pending', 'approved', 'cancelled', 'rejected', 'completed', 'checked_in']: # Added checked_in
+                             logger.warning(f"Row {line_num}: Invalid status value '{row.get('status')}' for booking '{title}'. Defaulting to 'approved'.")
+                             errors.append(f"Row {line_num}: Invalid status '{row.get('status')}' for '{title}', defaulted to 'approved'.")
+                             status = 'approved'
 
                         recurrence_rule = row.get('recurrence_rule')
-                        if recurrence_rule == '': # Treat empty string as None
-                            recurrence_rule = None
+                        if recurrence_rule == '': recurrence_rule = None
 
-                        # Optional datetime fields
                         checked_in_at = _parse_iso_datetime(row.get('checked_in_at'))
                         checked_out_at = _parse_iso_datetime(row.get('checked_out_at'))
 
-                        # Check for existing resource
-                        resource = db.session.get(Resource, resource_id)
-                        if not resource:
-                            errors.append(f"Row {line_num}: Resource with ID {resource_id} not found.")
-                            continue
+                        # ID from CSV is only used if clear_existing was true and we want to preserve original IDs
+                        # Otherwise, for adding to existing data, ID should be auto-generated.
+                        # For now, assuming new bookings get new IDs. If preserving IDs from CSV is needed,
+                        # this logic needs adjustment and a check for existing booking by ID.
+                        # The current duplicate check is semantic (user, resource, time).
 
-                        # Check for duplicate booking (based on resource, user, start, and end time)
-                        # This is a simple check; more complex rules might be needed (e.g., overlapping bookings)
-                        existing_booking = Booking.query.filter_by(
-                            resource_id=resource_id,
-                            user_name=user_name,
-                            start_time=start_time,
-                            end_time=end_time
-                        ).first()
+                        # If not clearing existing, check for duplicates
+                        if not clear_existing:
+                            existing_booking = Booking.query.filter_by(
+                                resource_id=resource_id, user_name=user_name,
+                                start_time=start_time, end_time=end_time
+                            ).first()
+                            if existing_booking:
+                                bookings_skipped_duplicate += 1
+                                logger.info(f"Row {line_num}: Skipping duplicate booking for resource {resource_id}, user '{user_name}' at {start_time}.")
+                                continue
 
-                        if existing_booking:
-                            bookings_skipped_duplicate += 1
-                            logger.info(f"Row {line_num}: Skipping duplicate booking for resource {resource_id}, user '{user_name}' at {start_time}.")
-                            continue
-
-                        # Create new booking
                         new_booking = Booking(
-                            resource_id=resource_id,
-                            user_name=user_name,
-                            start_time=start_time,
-                            end_time=end_time,
-                            title=title,
-                            status=status,
-                            recurrence_rule=recurrence_rule,
-                            checked_in_at=checked_in_at,
-                            checked_out_at=checked_out_at
-                            # id is auto-generated by DB
+                            resource_id=resource_id, user_name=user_name,
+                            start_time=start_time, end_time=end_time, title=title,
+                            status=status, recurrence_rule=recurrence_rule,
+                            checked_in_at=checked_in_at, checked_out_at=checked_out_at
                         )
+                        # If clear_existing was true, and CSV contains 'id', and we want to preserve it:
+                        # if clear_existing and 'id' in row and row['id']:
+                        #    try:
+                        #        new_booking.id = int(row['id'])
+                        #    except ValueError:
+                        #        errors.append(f"Row {line_num}: Invalid booking ID '{row['id']}' in CSV. Auto-generating ID.")
+                        #        logger.warning(f"Row {line_num}: Invalid booking ID '{row['id']}' in CSV for '{title}'. Auto-generating ID.")
+
                         db.session.add(new_booking)
                         bookings_created += 1
-                        logger.info(f"Row {line_num}: Staged new booking for resource {resource_id}, user '{user_name}' from {start_time} to {end_time}.")
 
                     except Exception as e_row:
-                        # Catch any other unexpected error during row processing
-                        errors.append(f"Row {line_num}: Unexpected error processing row: {str(e_row)}")
-                        logger.error(f"Row {line_num}: Unexpected error processing row: {row} - {str(e_row)}", exc_info=True)
-                        # Depending on severity, may or may not want to rollback here or just skip the row
-                        continue # Skip to next row
+                        errors.append(f"Row {line_num}: Unexpected error: {str(e_row)}")
+                        logger.error(f"Row {line_num}: Error processing row: {row} - {str(e_row)}", exc_info=True)
+                        bookings_skipped_other_errors += 1
+                        db.session.rollback() # Rollback this specific row's transaction part
+                        continue
 
-                if bookings_created > 0: # Only commit if new bookings were added
-                    try:
-                        db.session.commit()
-                        logger.info(f"Successfully committed {bookings_created} new bookings to the database.")
-                    except Exception as e_commit:
-                        db.session.rollback()
-                        errors.append(f"Database commit failed: {str(e_commit)}")
-                        logger.error(f"Database commit failed after processing CSV: {str(e_commit)}", exc_info=True)
-                        # Reset bookings_created if commit fails, as they weren't actually saved.
-                        bookings_created = 0 # Or adjust based on how to report this
-                elif not errors: # No new bookings created, and no errors encountered during processing
-                    logger.info("No new bookings to create from CSV file.")
+            # Final commit for all processed rows in the file (if not committed per row)
+            try:
+                db.session.commit()
+                logger.info(f"{import_context_message_prefix}Successfully committed {bookings_created} new/updated bookings from CSV.")
+                _emit_import_progress(socketio_instance, task_id, "Batch commit successful.", detail=f"{bookings_created} bookings.", level='INFO', context_prefix=import_context_message_prefix)
+            except Exception as e_commit:
+                db.session.rollback()
+                errors.append(f"Final database commit failed: {str(e_commit)}")
+                logger.error(f"{import_context_message_prefix}Database commit failed after processing CSV: {str(e_commit)}", exc_info=True)
+                _emit_import_progress(socketio_instance, task_id, "Final commit failed.", detail=str(e_commit), level='ERROR', context_prefix=import_context_message_prefix)
+                # Adjust counts if the commit failure means nothing was saved
+                bookings_created = 0
+                bookings_updated = 0
 
 
     except FileNotFoundError:
-        error_msg = f"CSV file not found at path: {csv_file_path}"
+        error_msg = f"CSV file not found: {csv_file_path}"
         errors.append(error_msg)
         logger.error(error_msg)
+        _emit_import_progress(socketio_instance, task_id, "Import file not found.", detail=csv_file_path, level='ERROR', context_prefix=import_context_message_prefix)
     except Exception as e_file:
-        # Catch other potential errors like permission issues, CSV parsing errors not caught by row loop
-        error_msg = f"Error opening or reading CSV file {csv_file_path}: {str(e_file)}"
+        error_msg = f"Error reading CSV {csv_file_path}: {str(e_file)}"
         errors.append(error_msg)
         logger.error(error_msg, exc_info=True)
-        # If db session was active and an error occurs here, ensure rollback
-        if 'app' in locals() and app: # Check if app context was even reached
-             with app.app_context():
-                 db.session.rollback()
+        _emit_import_progress(socketio_instance, task_id, "Error reading CSV file.", detail=str(e_file), level='ERROR', context_prefix=import_context_message_prefix)
+        if 'app' in locals() and app:
+             with app.app_context(): db.session.rollback()
+
+    final_status = 'completed_successfully'
+    if errors:
+        final_status = 'completed_with_errors'
+        _emit_import_progress(socketio_instance, task_id, "Import completed with errors.", detail=f"{len(errors)} errors.", level='WARNING', context_prefix=import_context_message_prefix)
+    else:
+        _emit_import_progress(socketio_instance, task_id, "Import completed successfully.", detail=f"{bookings_created} created.", level='SUCCESS', context_prefix=import_context_message_prefix)
 
 
     summary = {
         'processed': bookings_processed,
         'created': bookings_created,
+        'updated': bookings_updated, # Currently not implementing updates for existing via CSV, but placeholder is here
         'skipped_duplicates': bookings_skipped_duplicate,
-        'errors': errors
+        'skipped_fk_violation': bookings_skipped_fk_violation,
+        'skipped_other_errors': bookings_skipped_other_errors,
+        'errors': errors,
+        'status': final_status
     }
-    logger.info(f"Booking CSV import summary: {summary}")
+    logger.info(f"{import_context_message_prefix}Booking CSV import summary: {summary}")
     return summary
 
 def _load_schedule_from_json():

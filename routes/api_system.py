@@ -38,7 +38,13 @@ try:
         RESOURCE_UPLOADS,  # For selective restore media component
         restore_database_component, # For selective restore
         download_map_config_component, # For selective restore
-        restore_media_component # For selective restore
+        restore_media_component, # For selective restore
+        # Imports for new booking restore functionalities
+        list_available_booking_csv_backups,
+        restore_bookings_from_csv_backup,
+        list_available_incremental_booking_backups,
+        restore_incremental_bookings,
+        restore_bookings_from_full_db_backup
     )
     import azure_backup # To access module-level constants if needed by moved functions
 except ImportError:
@@ -54,6 +60,12 @@ except ImportError:
     restore_database_component = None
     download_map_config_component = None
     restore_media_component = None
+    # Placeholders for new booking restore functionalities
+    list_available_booking_csv_backups = None
+    restore_bookings_from_csv_backup = None
+    list_available_incremental_booking_backups = None
+    restore_incremental_bookings = None
+    restore_bookings_from_full_db_backup = None
     azure_backup = None
 
 api_system_bp = Blueprint('api_system', __name__)
@@ -460,6 +472,136 @@ def api_selective_restore():
         add_audit_log(action="SELECTIVE_RESTORE_CRITICAL_ERROR", details=error_msg, user_id=current_user.id)
         if socketio: socketio.emit('restore_progress', {'task_id': task_id, 'status': error_msg, 'detail': 'ERROR'})
         return jsonify({'success': False, 'message': error_msg, 'task_id': task_id}), 500
+
+
+# --- Selective Booking Restore API Routes ---
+
+@api_system_bp.route('/api/admin/booking_restore/list_csv', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def api_list_booking_csv_backups():
+    current_app.logger.info(f"User {current_user.username} requested list of CSV booking backups.")
+    if not list_available_booking_csv_backups:
+        return jsonify({'success': False, 'message': 'Backup module not configured.', 'backups': []}), 500
+    try:
+        backups = list_available_booking_csv_backups()
+        return jsonify({'success': True, 'backups': backups}), 200
+    except Exception as e:
+        current_app.logger.exception("Exception listing CSV booking backups:")
+        return jsonify({'success': False, 'message': f'Error: {str(e)}', 'backups': []}), 500
+
+@api_system_bp.route('/api/admin/booking_restore/list_incremental', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def api_list_incremental_booking_backups():
+    current_app.logger.info(f"User {current_user.username} requested list of incremental booking backups.")
+    if not list_available_incremental_booking_backups:
+        return jsonify({'success': False, 'message': 'Backup module not configured.', 'backups': []}), 500
+    try:
+        backups = list_available_incremental_booking_backups()
+        return jsonify({'success': True, 'backups': backups}), 200
+    except Exception as e:
+        current_app.logger.exception("Exception listing incremental booking backups:")
+        return jsonify({'success': False, 'message': f'Error: {str(e)}', 'backups': []}), 500
+
+@api_system_bp.route('/api/admin/booking_restore/list_full_backups', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def api_list_full_db_backups_for_booking_restore():
+    current_app.logger.info(f"User {current_user.username} requested list of full DB backups for booking restore.")
+    if not list_available_backups: # This is the existing function for full system backups
+        return jsonify({'success': False, 'message': 'Backup module not configured.', 'backups': []}), 500
+    try:
+        # These are full system backup timestamps, but can be used to restore just bookings from the DB
+        backups = list_available_backups()
+        # Format them slightly for consistency if needed, or return as is.
+        # For now, returning as is, UI can adapt or another transformation step can be added.
+        return jsonify({'success': True, 'backups': backups}), 200
+    except Exception as e:
+        current_app.logger.exception("Exception listing full DB backups for booking restore:")
+        return jsonify({'success': False, 'message': f'Error: {str(e)}', 'backups': []}), 500
+
+@api_system_bp.route('/api/admin/booking_restore/from_csv', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_restore_bookings_from_csv():
+    task_id = uuid.uuid4().hex
+    data = request.get_json()
+    if not data or 'backup_timestamp' not in data:
+        return jsonify({'success': False, 'message': 'Backup timestamp is required.', 'task_id': task_id}), 400
+
+    backup_timestamp = data['backup_timestamp']
+    current_app.logger.info(f"User {current_user.username} initiated booking restore from CSV (Task {task_id}): {backup_timestamp}")
+
+    if not restore_bookings_from_csv_backup:
+        return jsonify({'success': False, 'message': 'Restore function not available.', 'task_id': task_id}), 500
+
+    try:
+        summary = restore_bookings_from_csv_backup(
+            app=current_app._get_current_object(),
+            timestamp_str=backup_timestamp,
+            socketio_instance=socketio,
+            task_id=task_id
+        )
+        add_audit_log(action="RESTORE_BOOKINGS_CSV", details=f"Task {task_id}, Timestamp {backup_timestamp}. Summary: {json.dumps(summary)}", user_id=current_user.id)
+        return jsonify({'success': True, 'summary': summary, 'task_id': task_id}), 200
+    except Exception as e:
+        current_app.logger.exception(f"Exception during booking restore from CSV (Task {task_id}):")
+        add_audit_log(action="RESTORE_BOOKINGS_CSV_ERROR", details=f"Task {task_id}, Timestamp {backup_timestamp}, Error: {str(e)}", user_id=current_user.id)
+        return jsonify({'success': False, 'message': str(e), 'task_id': task_id}), 500
+
+@api_system_bp.route('/api/admin/booking_restore/from_incremental', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_restore_bookings_from_incremental():
+    task_id = uuid.uuid4().hex
+    current_app.logger.info(f"User {current_user.username} initiated booking restore from incremental backups (Task {task_id}).")
+
+    if not restore_incremental_bookings:
+        return jsonify({'success': False, 'message': 'Restore function not available.', 'task_id': task_id}), 500
+
+    try:
+        summary = restore_incremental_bookings(
+            app=current_app._get_current_object(),
+            socketio_instance=socketio,
+            task_id=task_id
+        )
+        add_audit_log(action="RESTORE_BOOKINGS_INCREMENTAL", details=f"Task {task_id}. Summary: {json.dumps(summary)}", user_id=current_user.id)
+        return jsonify({'success': True, 'summary': summary, 'task_id': task_id}), 200
+    except Exception as e:
+        current_app.logger.exception(f"Exception during booking restore from incremental (Task {task_id}):")
+        add_audit_log(action="RESTORE_BOOKINGS_INCREMENTAL_ERROR", details=f"Task {task_id}, Error: {str(e)}", user_id=current_user.id)
+        return jsonify({'success': False, 'message': str(e), 'task_id': task_id}), 500
+
+@api_system_bp.route('/api/admin/booking_restore/from_full_db', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_restore_bookings_from_full_db():
+    task_id = uuid.uuid4().hex
+    data = request.get_json()
+    if not data or 'backup_timestamp' not in data:
+        return jsonify({'success': False, 'message': 'Backup timestamp is required.', 'task_id': task_id}), 400
+
+    backup_timestamp = data['backup_timestamp']
+    current_app.logger.info(f"User {current_user.username} initiated booking restore from full DB backup (Task {task_id}): {backup_timestamp}")
+
+    if not restore_bookings_from_full_db_backup:
+        return jsonify({'success': False, 'message': 'Restore function not available.', 'task_id': task_id}), 500
+
+    try:
+        summary = restore_bookings_from_full_db_backup(
+            app=current_app._get_current_object(),
+            timestamp_str=backup_timestamp,
+            socketio_instance=socketio,
+            task_id=task_id
+        )
+        add_audit_log(action="RESTORE_BOOKINGS_FULL_DB", details=f"Task {task_id}, Timestamp {backup_timestamp}. Summary: {json.dumps(summary)}", user_id=current_user.id)
+        return jsonify({'success': True, 'summary': summary, 'task_id': task_id}), 200
+    except Exception as e:
+        current_app.logger.exception(f"Exception during booking restore from full DB (Task {task_id}):")
+        add_audit_log(action="RESTORE_BOOKINGS_FULL_DB_ERROR", details=f"Task {task_id}, Timestamp {backup_timestamp}, Error: {str(e)}", user_id=current_user.id)
+        return jsonify({'success': False, 'message': str(e), 'task_id': task_id}), 500
+
 
 @api_system_bp.route('/api/admin/verify_backup', methods=['POST'])
 @login_required
