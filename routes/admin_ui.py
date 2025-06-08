@@ -10,7 +10,7 @@ from extensions import db, socketio # Try to import socketio
 # Assuming permission_required is in auth.py
 from auth import permission_required # Corrected: auth.py is at root
 from datetime import datetime, timedelta # Add datetime imports
-from utils import load_scheduler_settings, save_scheduler_settings
+from utils import load_scheduler_settings, save_scheduler_settings, DEFAULT_FULL_BACKUP_SCHEDULE, DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE
 
 # Import backup/restore functions
 from azure_backup import (
