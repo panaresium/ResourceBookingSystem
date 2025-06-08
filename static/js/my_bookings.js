@@ -58,7 +58,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const updateBookingModalLabel = document.getElementById('updateBookingModalLabel');
     const modalBookingIdInput = document.getElementById('modal-booking-id');
     const newBookingTitleInput = document.getElementById('new-booking-title');
-    const saveBookingTitleBtn = document.getElementById('save-booking-title-btn');
+    const modalBookingDateInput = document.getElementById('modal-booking-date');
+    const modalAvailableSlotsSelect = document.getElementById('modal-available-slots-select');
+    const saveBookingTitleBtn = document.getElementById('save-booking-title-btn'); // Note: This is the submit button of the form
+
+    // Store original booking times for comparison on save
+    let originalBookingStartTime = null;
+    let originalBookingEndTime = null;
+    let lastFocusedButtonForModal = null; // For returning focus after modal closes
 
     // Add explicit event listeners for modal close buttons
     const modalHeaderCloseButton = updateModalElement.querySelector('.modal-header .btn-close');
@@ -577,23 +584,111 @@ document.addEventListener('DOMContentLoaded', () => {
     // Original fetchAndDisplayBookings is effectively split into fetchUpcomingBookings and fetchPastBookings
     // The filter application logic will now trigger both.
 
+    async function loadAvailableSlotsForModal(resourceId, dateString, initialStartTime) {
+        if (!modalAvailableSlotsSelect) return;
+
+        modalAvailableSlotsSelect.innerHTML = '<option value="">Loading...</option>';
+        modalAvailableSlotsSelect.disabled = true;
+
+        // Ensure dateString is in YYYY-MM-DD format for the API
+        let formattedDateString = dateString;
+        if (dateString.includes('T')) { // If it's an ISO string
+            formattedDateString = dateString.split('T')[0];
+        }
+
+        try {
+            // Use updateModalStatusDiv for displaying errors from this specific API call too
+            const data = await apiCall(`/api/resources/${resourceId}/available_slots?date=${formattedDateString}`, {}, updateModalStatusDiv);
+            modalAvailableSlotsSelect.innerHTML = ''; // Clear loading
+
+            if (data && data.available_slots && data.available_slots.length > 0) {
+                data.available_slots.forEach(slot => {
+                    const option = document.createElement('option');
+                    // Assuming slot.start_time and slot.end_time are full ISO strings
+                    const displayStartTime = slot.start_time.substring(11, 16);
+                    const displayEndTime = slot.end_time.substring(11, 16);
+                    option.textContent = `${displayStartTime} - ${displayEndTime}`;
+                    option.value = slot.start_time; // Store full start ISO string
+                    option.dataset.endTime = slot.end_time; // Store full end ISO string
+
+                    if (initialStartTime && initialStartTime === slot.start_time) {
+                        option.selected = true;
+                    }
+                    modalAvailableSlotsSelect.appendChild(option);
+                });
+                modalAvailableSlotsSelect.disabled = false;
+            } else {
+                modalAvailableSlotsSelect.innerHTML = '<option value="">No slots available</option>';
+                modalAvailableSlotsSelect.disabled = true;
+            }
+        } catch (error) {
+            console.error('Error loading available slots:', error);
+            modalAvailableSlotsSelect.innerHTML = '<option value="">Error loading slots</option>';
+            modalAvailableSlotsSelect.disabled = true;
+            // Ensure apiCall itself shows the error in updateModalStatusDiv, or:
+            if (!updateModalStatusDiv.textContent || updateModalStatusDiv.style.display === 'none') {
+                 showModalStatus('Failed to load available time slots. ' + (error.message || ''), 'danger');
+            }
+        }
+    }
+
+    if (modalBookingDateInput) {
+        modalBookingDateInput.addEventListener('change', function() {
+            const resourceId = modalBookingIdInput.dataset.resourceId;
+            const newDateString = this.value;
+            if (resourceId && newDateString) {
+                // When date changes, we don't have an 'initialStartTime' to preselect for the new date.
+                loadAvailableSlotsForModal(resourceId, newDateString, null);
+            }
+        });
+    }
+
     document.addEventListener('click', async (event) => {
         const target = event.target;
         const bookingItem = target.closest('.booking-card'); // Changed from .booking-item to .booking-card
 
         if (target.classList.contains('edit-title-btn')) {
             event.stopPropagation(); // Prevent card click if any
-            const bookingId = target.closest('.booking-card').dataset.bookingId;
-            const titleValueElement = target.closest('.booking-card').querySelector('.booking-title-value'); // Corrected selector
+            const bookingCardDiv = target.closest('.booking-card');
+            if (!bookingCardDiv) return;
+
+            const bookingId = bookingCardDiv.dataset.bookingId;
+            const resourceId = bookingCardDiv.dataset.resourceId;
+            const currentStartTimeISO = bookingCardDiv.dataset.startTime;
+            const currentEndTimeISO = bookingCardDiv.dataset.endTime;
+
+            // Store original times for comparison on save
+            originalBookingStartTime = currentStartTimeISO;
+            originalBookingEndTime = currentEndTimeISO;
+
+            const titleValueElement = bookingCardDiv.querySelector('.booking-title-value');
             const currentTitle = titleValueElement ? titleValueElement.textContent : '';
+            const resourceName = bookingCardDiv.querySelector('.resource-name-value').textContent;
 
-            const resourceName = target.closest('.booking-card').querySelector('.resource-name-value').textContent; // Corrected selector
-
-            if (modalBookingIdInput) modalBookingIdInput.value = bookingId;
+            if (modalBookingIdInput) {
+                modalBookingIdInput.value = bookingId;
+                modalBookingIdInput.dataset.resourceId = resourceId; // For date change listener
+                // Storing original times on the modalBookingIdInput's dataset as well, for access in submit handler
+                modalBookingIdInput.dataset.originalStartTime = currentStartTimeISO;
+                modalBookingIdInput.dataset.originalEndTime = currentEndTimeISO;
+            }
             if (newBookingTitleInput) newBookingTitleInput.value = currentTitle;
             if (updateBookingModalLabel) updateBookingModalLabel.textContent = `Update Booking for: ${resourceName}`;
 
-            hideStatusMessage(updateModalStatusDiv);
+            if (modalBookingDateInput && currentStartTimeISO) {
+                modalBookingDateInput.value = currentStartTimeISO.split('T')[0]; // Format YYYY-MM-DD
+            }
+
+            hideStatusMessage(updateModalStatusDiv); // Clear previous modal messages
+
+            if (resourceId && currentStartTimeISO) {
+                // Pass full currentStartTimeISO for potential pre-selection
+                await loadAvailableSlotsForModal(resourceId, currentStartTimeISO.split('T')[0], currentStartTimeISO);
+            } else {
+                clearAndDisableSlotsSelect('Select date to see slots.'); // Or some other placeholder
+            }
+
+            lastFocusedButtonForModal = target; // Store the button that triggered the modal
             if (updateModal) updateModal.show();
             return; // Processed
         }
@@ -652,36 +747,79 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.getElementById('update-booking-title-form')) {
         document.getElementById('update-booking-title-form').addEventListener('submit', async function(event) {
             event.preventDefault();
-            const bookingId = document.getElementById('modal-booking-id').value;
-            const newTitle = document.getElementById('new-booking-title').value.trim();
+            const bookingId = modalBookingIdInput.value;
+            const newTitle = newBookingTitleInput.value.trim();
+            const newDateValue = modalBookingDateInput.value; // YYYY-MM-DD from date picker
+            const selectedSlotOption = modalAvailableSlotsSelect.options[modalAvailableSlotsSelect.selectedIndex];
+
+            // Retrieve original times from the modalBookingIdInput's dataset for reliable comparison
+            const originalStartTimeFromDataset = modalBookingIdInput.dataset.originalStartTime;
+            const originalEndTimeFromDataset = modalBookingIdInput.dataset.originalEndTime;
 
             if (!newTitle) {
                 showModalStatus('Title cannot be empty.', 'danger');
                 return;
             }
-            const originalButtonText = this.querySelector('button[type="submit"]').textContent;
-            this.querySelector('button[type="submit"]').textContent = 'Saving...';
-            this.querySelector('button[type="submit"]').disabled = true;
+
+            let payload = { title: newTitle };
+            let dateTimeChanged = false;
+
+            if (newDateValue && selectedSlotOption && selectedSlotOption.value) {
+                const selectedSlotStartTime = selectedSlotOption.value; // Full ISO string
+                const selectedSlotEndTime = selectedSlotOption.dataset.endTime; // Full ISO string
+
+                // Check if date or time actually changed
+                if (selectedSlotStartTime !== originalStartTimeFromDataset || selectedSlotEndTime !== originalEndTimeFromDataset) {
+                    payload.start_time = selectedSlotStartTime;
+                    payload.end_time = selectedSlotEndTime;
+                    dateTimeChanged = true;
+                }
+            } else if (newDateValue && (!selectedSlotOption || !selectedSlotOption.value)) {
+                // Date is present, but no slot selected. This is an issue if the date differs from original.
+                const originalDateFromDataset = originalStartTimeFromDataset.split('T')[0];
+                if (newDateValue !== originalDateFromDataset) {
+                    showModalStatus('Please select an available time slot for the new date.', 'danger');
+                    return;
+                }
+                // If date is same as original and no new slot selected, means time is not changing.
+            }
+
+
+            const submitButton = this.querySelector('button[type="submit"]'); // This is saveBookingTitleBtn
+            const originalButtonText = submitButton.textContent;
+            submitButton.textContent = 'Saving...';
+            submitButton.disabled = true;
+            hideStatusMessage(updateModalStatusDiv); // Clear previous specific modal status messages
 
             try {
-                const updatedBooking = await apiCall(`/api/bookings/${bookingId}`, {
+                const responseData = await apiCall(`/api/bookings/${bookingId}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ title: newTitle }) // Only sending title
-                }, updateModalStatusDiv);
+                    body: JSON.stringify(payload)
+                }, updateModalStatusDiv); // Pass status div for direct error display by apiCall
 
-                showSuccess(statusDiv, `Booking ${bookingId} title updated successfully.`);
-                if (updateModal) updateModal.hide();
-                // Refresh relevant section
-                // Determine if it was upcoming or past based on current state or re-fetch both
-                fetchUpcomingBookings();
-                fetchPastBookings();
-
+                if (responseData && responseData.success !== false) {
+                    showSuccess(statusDiv, `Booking ${bookingId} details updated successfully.`); // Global success message
+                    if (updateModal) updateModal.hide();
+                    fetchUpcomingBookings();
+                    fetchPastBookings();
+                } else {
+                    // Error message (e.g. validation from server) should have been displayed by apiCall in updateModalStatusDiv
+                    // If not, or if responseData is null/undefined but no exception, show a generic one.
+                    if (!updateModalStatusDiv.textContent || updateModalStatusDiv.style.display === 'none') {
+                        showModalStatus(responseData?.message || 'Failed to update booking. Please check details.', 'danger');
+                    }
+                }
             } catch (error) {
-                // Error is shown by apiCall in updateModalStatusDiv
+                // This catch is for network errors or if apiCall itself throws an unexpected error
+                console.error("Error submitting booking update form:", error);
+                // apiCall should have shown the error. If not, this is a fallback.
+                 if (!updateModalStatusDiv.textContent || updateModalStatusDiv.style.display === 'none') {
+                    showModalStatus(error.message || 'An unexpected error occurred while updating booking.', 'danger');
+                }
             } finally {
-                this.querySelector('button[type="submit"]').textContent = originalButtonText;
-                this.querySelector('button[type="submit"]').disabled = false;
+                submitButton.textContent = originalButtonText;
+                submitButton.disabled = false;
             }
         });
     }
@@ -726,4 +864,22 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeMyBookingsPerPageSelect('past_bk_pg_', pastPerPageSelect, (val) => pastItemsPerPage = val, (val) => pastCurrentPage = val, fetchPastBookings, pastItemsPerPage);
     
     handleFilterOrToggleChange(); // Initial fetch based on default filter and toggle states
+
+    // Accessibility: Handle aria-hidden and focus for the update modal
+    if (updateModalElement) {
+        updateModalElement.addEventListener('shown.bs.modal', () => {
+            updateModalElement.setAttribute('aria-hidden', 'false');
+            if (newBookingTitleInput) {
+                newBookingTitleInput.focus();
+            }
+        });
+
+        updateModalElement.addEventListener('hidden.bs.modal', () => {
+            updateModalElement.setAttribute('aria-hidden', 'true');
+            if (lastFocusedButtonForModal) {
+                lastFocusedButtonForModal.focus();
+                lastFocusedButtonForModal = null; // Clear the reference
+            }
+        });
+    }
 });
