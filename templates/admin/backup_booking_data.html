@@ -1,0 +1,566 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Admin - Booking Data Management') }}{% endblock %}
+
+{% block head_extra %}
+{{ super() }}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js" integrity="sha512-skuhu6jj+sQnhLq1Txsack8VfnIrX8wL+MTFilYlFFT/NuLJm7eya7zOROs39Jy5cjASMEWqxLzijRVmKhsqWQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<style>
+    .log-area {
+        max-height: 200px;
+        overflow-y: auto;
+        background: #f0f0f0;
+        border: 1px solid #ccc;
+        padding: 10px;
+        margin-top: 10px;
+        white-space: pre-wrap;
+        font-family: monospace;
+        font-size: 0.9em;
+    }
+    .log-entry {
+        padding: 2px 0;
+    }
+    .log-error {
+        color: red;
+        font-weight: bold;
+    }
+    .log-success {
+        color: green;
+        font-weight: bold;
+    }
+    .log-info {
+        color: #333;
+    }
+    /* Styles for DB Records View */
+    .db-table-container {
+        border: 1px solid #eee;
+        padding: 10px;
+        border-radius: 4px;
+    }
+    .db-records-content pre {
+        background-color: #f8f9fa; /* Light background for pre */
+        padding: 10px;
+        border-radius: 4px;
+        max-height: 300px; /* Max height for individual record lists */
+        overflow-y: auto;
+    }
+    /* Style for active (expanded) button */
+    #view-db-records-output .btn.active {
+        background-color: #007bff;
+        color: white;
+    }
+    .tab-content > .tab-pane {
+        padding-top: 1rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1>{{ _('Booking Data Management') }}</h1>
+    <hr>
+    <p>{{ _('Current UTC Time:') }} <span id="utc-clock">Loading...</span></p>
+    <hr>
+
+    <!-- Selective Booking Restore Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="card-title h5">{{ _('Selective Booking Restore (Advanced)') }}</h2>
+        </div>
+        <div class="card-body">
+            <p>{{_('These options allow restoring only booking data from different backup types, leaving other system configurations and media files untouched.')}}</p>
+            <!-- Restore Bookings from Full System Backup -->
+            <section id="restore-bookings-from-full-db-section" class="mb-3 p-3 border rounded">
+                <h5>{{ _('Restore Bookings from Full System Backup') }}</h5>
+                <div class="alert alert-warning" role="alert">
+                    <strong>{{ _('Warning:') }}</strong> {{ _('This will delete ALL current bookings and replace them with the bookings from the selected full system backup.') }}
+                </div>
+                <div class="form-group mb-2">
+                    <label for="selectFullBackupForBookingRestore">{{ _('Select Full Backup Timestamp:') }}</label>
+                    <select id="selectFullBackupForBookingRestore" class="form-control form-select"></select>
+                </div>
+                <button id="btnRestoreBookingsFromFullDb" class="btn btn-warning mt-2">{{ _('Restore Bookings from Full Backup') }}</button>
+                <div id="statusRestoreBookingsFromFullDb" class="mt-2"></div>
+            </section>
+            <hr>
+            <!-- Restore Bookings from CSV Backup (JS driven) -->
+            <section id="restore-bookings-from-csv-js-section" class="mb-3 p-3 border rounded">
+                <h5>{{ _('Restore Bookings from Specific CSV Backup') }}</h5>
+                <p>{{ _('Select a specific booking CSV export file to restore from. This typically adds or updates bookings based on the CSV content and system\'s import logic.') }}</p>
+                <div class="form-group mb-2">
+                    <label for="selectCsvBackupForBookingRestore">{{ _('Select CSV Backup:') }}</label>
+                    <select id="selectCsvBackupForBookingRestore" class="form-control form-select"></select>
+                </div>
+                <button id="btnRestoreBookingsFromCsv" class="btn btn-info mt-2">{{ _('Restore Bookings from Selected CSV') }}</button>
+                <div id="statusRestoreBookingsFromCsv" class="mt-2"></div>
+            </section>
+            <hr>
+            <!-- Restore Bookings from Incremental Backups -->
+            <section id="restore-bookings-from-incremental-section" class="mb-3 p-3 border rounded">
+                <h5>{{ _('Restore Bookings from Incremental Backups') }}</h5>
+                <p>{{ _('Applies all available incremental booking backups sequentially to update booking records.') }}</p>
+                <div class="form-group mb-2">
+                    <label>{{ _('Available Incremental Backups:') }}</label>
+                    <div id="incrementalBackupsList" class="log-area" style="max-height: 150px;"><em>{{ _('Loading incremental backups list...') }}</em></div>
+                </div>
+                <button id="btnRestoreBookingsFromIncremental" class="btn btn-success mt-2">{{ _('Apply Incremental Backups') }}</button>
+                <div id="statusRestoreBookingsFromIncremental" class="mt-2"></div>
+            </section>
+        </div>
+    </div> <!-- End Selective Booking Restore Card -->
+
+    <!-- Booking CSV Backups Card (Manual Operations) -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="card-title h5">{{ _('Manual Booking CSV Backups & Restore (Legacy)') }}</h2>
+        </div>
+        <div class="card-body">
+            <section id="booking-csv-restore-section">
+                <p>{{ _('Manually create a CSV export of bookings, or restore bookings from a previously generated CSV export. When restoring, this will add new bookings from the CSV, skipping any that appear to be duplicates based on resource, user, and time.') }}</p>
+                <form method="POST" action="{{ url_for('admin_ui.manual_backup_bookings_csv_route') }}" style="margin-bottom: 15px;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <div class="form-row align-items-center">
+                        <div class="col-auto">
+                            <label class="sr-only" for="booking_backup_range">{{ _('Select Backup Range') }}</label>
+                            <select class="custom-select mr-sm-2" id="booking_backup_range" name="backup_range_type">
+                                <option value="all" selected>{{ _('All Bookings') }}</option>
+                                <option value="1day">{{ _('Last 1 Day') }}</option>
+                                <option value="3days">{{ _('Last 3 Days') }}</option>
+                                <option value="7days">{{ _('Last 7 Days') }}</option>
+                            </select>
+                        </div>
+                        <div class="col-auto">
+                            <button type="submit" class="btn btn-primary" onclick="return confirm('{{ _('Are you sure you want to manually back up bookings for the selected range to a new CSV file?') }}');">
+                                <i class="fas fa-file-csv"></i> {{ _('Backup Bookings to CSV') }}
+                            </button>
+                        </div>
+                    </div>
+                </form>
+
+                {% if booking_csv_backups and booking_csv_backups|length > 0 %}
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>{{ _('Backup Details') }}</th>
+                            <th>{{ _('Actions') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for backup_item in booking_csv_backups %}
+                        <tr>
+                            <td>{{ backup_item.display_name }}</td>
+                            <td>
+                                <form method="POST" action="{{ url_for('admin_ui.restore_booking_csv_route', timestamp_str=backup_item.timestamp) }}" style="display: inline;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <button type="submit" class="btn btn-warning btn-sm" onclick="return confirm('{{ _('Are you sure you want to restore bookings from CSV backup') }} \'{{ backup_item.display_name }}\'? {{ _('This may add new bookings or skip duplicates based on existing data.') }}');">
+                                        {{ _('Restore Bookings from this CSV') }}
+                                    </button>
+                                </form>
+                                <form method="POST" action="{{ url_for('admin_ui.verify_booking_csv_backup_route', timestamp_str=backup_item.timestamp) }}" style="display: inline; margin-left: 5px;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <button type="submit" class="btn btn-info btn-sm"><i class="fas fa-check-circle"></i> {{ _('Verify') }}</button>
+                                </form>
+                                <form method="POST" action="{{ url_for('admin_ui.delete_booking_csv_backup_route', timestamp_str=backup_item.timestamp) }}" style="display: inline; margin-left: 5px;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('{{ _('Are you sure you want to permanently delete the booking CSV backup for file:') }} ' + '{{ backup_item.display_name | e }}');">
+                                        <i class="fas fa-trash-alt"></i> {{ _('Delete') }}
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p>{{ _('No booking CSV backups found.') }}</p>
+                {% endif %}
+                {% if booking_csv_total_pages > 1 %}
+                <nav aria-label="Booking CSV Backup Pagination" class="mt-3">
+                    <ul class="pagination justify-content-center">
+                        {% if booking_csv_has_prev %}<li class="page-item"><a class="page-link" href="{{ url_for('admin_ui.serve_backup_booking_data_page', page=booking_csv_page - 1) }}">{{ _('Previous') }}</a></li>{% else %}<li class="page-item disabled"><span class="page-link">{{ _('Previous') }}</span></li>{% endif %}
+                        <li class="page-item disabled"><span class="page-link">{{ _('Page %(page)s of %(total_pages)s', page=booking_csv_page, total_pages=booking_csv_total_pages) }}</span></li>
+                        {% if booking_csv_has_next %}<li class="page-item"><a class="page-link" href="{{ url_for('admin_ui.serve_backup_booking_data_page', page=booking_csv_page + 1) }}">{{ _('Next') }}</a></li>{% else %}<li class="page-item disabled"><span class="page-link">{{ _('Next') }}</span></li>{% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+            </section>
+        </div>
+    </div>
+
+    <!-- Scheduled Booking CSV Backups Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="card-title h5">{{ _('Scheduled Booking Data Backups') }}</h2>
+        </div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('admin_ui.save_booking_data_schedule_settings') }}" id="booking-csv-schedule-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="form-group mb-2">
+                    <div class="form-check">
+                        <input type="checkbox" class="form-check-input" id="booking_csv_backup_enabled" name="booking_csv_backup_enabled" value="true" {% if booking_csv_backup_settings.is_enabled %}checked{% endif %}>
+                        <label class="form-check-label" for="booking_csv_backup_enabled">{{ _('Enable Scheduled Booking Data Backups') }}</label>
+                    </div>
+                </div>
+                <div class="form-group mb-2">
+                    <label for="booking_csv_backup_interval_minutes">{{ _('Backup Interval (minutes)') }}</label>
+                    <input type="number" class="form-control" id="booking_csv_backup_interval_minutes" name="booking_csv_backup_interval_minutes" value="{{ booking_csv_backup_settings.interval_minutes | default(60) }}" min="1" required>
+                </div>
+                <div class="form-group mb-2">
+                    <label for="booking_backup_type_select">{{ _('Backup Type') }}</label>
+                    <select id="booking_backup_type_select" name="booking_backup_type" class="form-control form-select">
+                        <option value="full_export" {% if booking_csv_backup_settings.booking_backup_type == 'full_export' %}selected{% endif %}>{{ _('Full Export of Range (CSV)') }}</option>
+                        <option value="incremental" {% if booking_csv_backup_settings.booking_backup_type == 'incremental' %}selected{% endif %}>{{ _('Incremental Changes (JSON)') }}</option>
+                    </select>
+                </div>
+                <div class="form-group mb-2" id="booking_csv_backup_range_type_group">
+                    <label for="booking_csv_backup_range_type">{{ _('Backup Data Range (for Full Export)') }}</label>
+                    <select id="booking_csv_backup_range_type" name="booking_csv_backup_range_type" class="form-control form-select">
+                        <option value="all" {% if booking_csv_backup_settings.range == 'all' %}selected{% endif %}>{{ _('All Bookings') }}</option>
+                        <option value="1day" {% if booking_csv_backup_settings.range == '1day' %}selected{% endif %}>{{ _('Last 1 Day') }}</option>
+                        <option value="3days" {% if booking_csv_backup_settings.range == '3days' %}selected{% endif %}>{{ _('Last 3 Days') }}</option>
+                        <option value="7days" {% if booking_csv_backup_settings.range == '7days' %}selected{% endif %}>{{ _('Last 7 Days') }}</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-success"><i class="fas fa-save"></i> {{ _('Save Booking Data Schedule') }}</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Global Log Areas -->
+    <div class="mt-4">
+        <h5>{{ _('Operation Logs') }}</h5>
+        <pre id="backup-log-area" class="log-area" style="display: none;"></pre>
+        <pre id="restore-log-area" class="log-area" style="display: none;"></pre>
+    </div>
+
+    <!-- Selective Restore Modal (remains global) -->
+    <div id="selective-restore-modal" class="modal" style="display: none !important;">
+        <div class="modal-content">
+            <span class="close-modal-btn" id="close-selective-restore-modal">&times;</span>
+            <h3>{{ _('Selective Restore Options') }}</h3>
+            <p>{{ _('Select components to restore for backup:') }} <strong id="modal-backup-timestamp"></strong></p>
+            <form id="selective-restore-form">
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="database" id="component-database" name="components">
+                    <label class="form-check-label" for="component-database">{{ _('Database (Bookings, Users, Resources, etc.)') }}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="map_config" id="component-map_config" name="components">
+                    <label class="form-check-label" for="component-map_config">{{ _('Map Configuration (Floor map definitions & resource mappings on maps)') }}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="floor_maps" id="component-floor_maps" name="components">
+                    <label class="form-check-label" for="component-floor_maps">{{ _('Floor Map Images (in static/floor_map_uploads)') }}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="resource_uploads" id="component-resource_uploads" name="components">
+                    <label class="form-check-label" for="component-resource_uploads">{{ _('Resource Images (in static/resource_uploads)') }}</label>
+                </div>
+                <hr>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="all" id="component-all" name="components_all">
+                    <label class="form-check-label" for="component-all">{{ _('ALL COMPONENTS (Full Restore)') }}</label>
+                </div>
+                <button type="submit" id="confirm-selective-restore-btn" class="btn btn-primary mt-3">{{ _('Proceed with Selected Restore') }}</button>
+            </form>
+            <div id="selective-restore-modal-status" class="status-message mt-2"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
+    <script src="{{ url_for('static', filename='js/admin_backup_common.js') }}" defer></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+            // Elements for "Selective Booking Restore"
+            const selectFullBackupForBookingRestore = document.getElementById('selectFullBackupForBookingRestore');
+            const btnRestoreBookingsFromFullDb = document.getElementById('btnRestoreBookingsFromFullDb');
+            const statusRestoreBookingsFromFullDb = document.getElementById('statusRestoreBookingsFromFullDb');
+
+            const selectCsvBackupForBookingRestore = document.getElementById('selectCsvBackupForBookingRestore');
+            const btnRestoreBookingsFromCsv = document.getElementById('btnRestoreBookingsFromCsv');
+            const statusRestoreBookingsFromCsv = document.getElementById('statusRestoreBookingsFromCsv');
+
+            const incrementalBackupsListDiv = document.getElementById('incrementalBackupsList'); // Corrected: Was incrementalBackupsList
+            const btnRestoreBookingsFromIncremental = document.getElementById('btnRestoreBookingsFromIncremental');
+            const statusRestoreBookingsFromIncremental = document.getElementById('statusRestoreBookingsFromIncremental');
+
+            // Elements for "Scheduled Booking Data Backups"
+            const bookingBackupTypeSelect = document.getElementById('booking_backup_type_select');
+            const bookingRangeGroup = document.getElementById('booking_csv_backup_range_type_group');
+
+            // Log areas (though global, might be specifically targeted for messages from this page)
+            const backupLogAreaEl = document.getElementById('backup-log-area');
+            const restoreLogAreaEl = document.getElementById('restore-log-area');
+
+
+            // Task ID Variables
+            let currentBookingFullDbRestoreTaskId = null;
+            let currentBookingCsvRestoreTaskId = null;
+            let currentBookingIncrementalRestoreTaskId = null;
+            let currentBookingCsvBackupTaskId = null; // For manual CSV backup
+
+            // SocketIO Event Listeners (specific to booking data operations)
+            if (typeof socket !== 'undefined') {
+                socket.on('booking_db_restore_progress', function(data) {
+                    if (data.task_id !== currentBookingFullDbRestoreTaskId) return;
+                    appendLog('restore-log-area', `Full DB Restore: ${data.status}`, data.detail, data.level.toLowerCase(), statusRestoreBookingsFromFullDb);
+                    if (data.status.toLowerCase().includes("completed") || data.status.toLowerCase().includes("failed") || data.status.toLowerCase().includes("error") || data.status.toLowerCase().includes("critical")) {
+                        enablePageInteractions();
+                        currentBookingFullDbRestoreTaskId = null;
+                    }
+                });
+                socket.on('booking_csv_restore_progress', function(data) {
+                    if (data.task_id !== currentBookingCsvRestoreTaskId) return;
+                    appendLog('restore-log-area', `CSV Restore: ${data.status}`, data.detail, data.level.toLowerCase(), statusRestoreBookingsFromCsv);
+                     if (data.status.toLowerCase().includes("completed") || data.status.toLowerCase().includes("failed") || data.status.toLowerCase().includes("error") || data.status.toLowerCase().includes("critical")) {
+                        enablePageInteractions();
+                        currentBookingCsvRestoreTaskId = null;
+                    }
+                });
+                socket.on('incremental_booking_restore_progress', function(data) {
+                    if (data.task_id !== currentBookingIncrementalRestoreTaskId) return;
+                    appendLog('restore-log-area', `Incremental Restore: ${data.status}`, data.detail, data.level.toLowerCase(), statusRestoreBookingsFromIncremental);
+                    if (data.status.toLowerCase().includes("completed") || data.status.toLowerCase().includes("failed") || data.status.toLowerCase().includes("error") || data.status.toLowerCase().includes("critical")) {
+                        enablePageInteractions();
+                        currentBookingIncrementalRestoreTaskId = null;
+                        if (typeof loadIncrementalBackupsList === 'function') loadIncrementalBackupsList(); // Refresh list
+                    }
+                });
+                socket.on('booking_csv_backup_progress', function(data) {
+                    if (data.task_id !== currentBookingCsvBackupTaskId) return;
+                    // Assuming manual CSV backup logs to the general 'backup-log-area'
+                    // and might have a specific status element if one was designed for it.
+                    // For now, logging to general backup log area.
+                    appendLog('backup-log-area', `Manual CSV Backup: ${data.status}`, data.detail, data.level.toLowerCase());
+                    if (data.status.toLowerCase().includes("complete") || data.status.toLowerCase().includes("failed") || data.status.toLowerCase().includes("error")) {
+                        enablePageInteractions();
+                        currentBookingCsvBackupTaskId = null;
+                        // Optionally refresh CSV list if manual backup success implies a new file is available for restore
+                        if (data.level.toLowerCase() === 'success' && typeof loadCsvBackupsForBookingRestore === 'function') {
+                            loadCsvBackupsForBookingRestore();
+                        }
+                    }
+                });
+
+            } else {
+                console.error("Socket.IO instance not found. Ensure admin_backup_common.js is loaded and initializes 'socket'.");
+            }
+
+            // Helper Functions for populating selective restore lists
+            function loadFullBackupsForBookingRestore() {
+                if (!selectFullBackupForBookingRestore) return;
+                selectFullBackupForBookingRestore.innerHTML = '<option value="">{{ _("Loading...") }}</option>';
+                fetch('/api/admin/booking_restore/list_full_backups')
+                    .then(response => response.json())
+                    .then(data => {
+                        selectFullBackupForBookingRestore.innerHTML = '<option value="">{{ _("-- Select a Full Backup --") }}</option>';
+                        if (data.success && data.backups && data.backups.length > 0) {
+                            data.backups.forEach(timestamp => {
+                                const option = document.createElement('option');
+                                option.value = timestamp;
+                                let displayTimestamp = timestamp;
+                                 try {
+                                    const year = timestamp.substring(0,4); const month = timestamp.substring(4,6);
+                                    const day = timestamp.substring(6,8); const hour = timestamp.substring(9,11);
+                                    const minute = timestamp.substring(11,13); const second = timestamp.substring(13,15);
+                                    displayTimestamp = `${year}-${month}-${day} ${hour}:${minute}:${second} UTC`;
+                                } catch (e) { /* ignore parsing error */ }
+                                option.textContent = displayTimestamp;
+                                selectFullBackupForBookingRestore.appendChild(option);
+                            });
+                            selectFullBackupForBookingRestore.disabled = false;
+                            if(btnRestoreBookingsFromFullDb) btnRestoreBookingsFromFullDb.disabled = false;
+                        } else {
+                            selectFullBackupForBookingRestore.innerHTML = '<option value="">{{ _("No full backups found") }}</option>';
+                            selectFullBackupForBookingRestore.disabled = true;
+                            if(btnRestoreBookingsFromFullDb) btnRestoreBookingsFromFullDb.disabled = true;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error loading full backups for booking restore:', error);
+                        selectFullBackupForBookingRestore.innerHTML = '<option value="">{{ _("Error loading backups") }}</option>';
+                        selectFullBackupForBookingRestore.disabled = true;
+                        if(btnRestoreBookingsFromFullDb) btnRestoreBookingsFromFullDb.disabled = true;
+                    });
+            }
+
+            function loadCsvBackupsForBookingRestore() {
+                if (!selectCsvBackupForBookingRestore) return;
+                selectCsvBackupForBookingRestore.innerHTML = '<option value="">{{ _("Loading...") }}</option>';
+                fetch('/api/admin/booking_restore/list_csv')
+                    .then(response => response.json())
+                    .then(data => {
+                        selectCsvBackupForBookingRestore.innerHTML = '<option value="">{{ _("-- Select a CSV Backup --") }}</option>';
+                        if (data.success && data.backups && data.backups.length > 0) {
+                            data.backups.forEach(backup => {
+                                const option = new Option(backup.display_name, backup.timestamp);
+                                selectCsvBackupForBookingRestore.add(option);
+                            });
+                            selectCsvBackupForBookingRestore.disabled = false;
+                            if(btnRestoreBookingsFromCsv) btnRestoreBookingsFromCsv.disabled = false;
+                        } else {
+                            selectCsvBackupForBookingRestore.innerHTML = '<option value="">{{ _("No CSV backups found") }}</option>';
+                            selectCsvBackupForBookingRestore.disabled = true;
+                            if(btnRestoreBookingsFromCsv) btnRestoreBookingsFromCsv.disabled = true;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error loading CSV backups for booking restore:', error);
+                        selectCsvBackupForBookingRestore.innerHTML = '<option value="">{{ _("Error loading backups") }}</option>';
+                        selectCsvBackupForBookingRestore.disabled = true;
+                        if(btnRestoreBookingsFromCsv) btnRestoreBookingsFromCsv.disabled = true;
+                    });
+            }
+
+            function loadIncrementalBackupsList() {
+                if (!incrementalBackupsListDiv) return;
+                incrementalBackupsListDiv.innerHTML = '<em>{{ _("Loading incremental backups list...") }}</em>';
+                fetch('/api/admin/booking_restore/list_incremental')
+                    .then(response => response.json())
+                    .then(data => {
+                        incrementalBackupsListDiv.innerHTML = '';
+                        if (data.success && data.backups && data.backups.length > 0) {
+                            const ul = document.createElement('ul');
+                            ul.className = 'list-group';
+                            data.backups.forEach(backup => {
+                                const li = document.createElement('li');
+                                li.className = 'list-group-item list-group-item-sm py-1';
+                                li.textContent = backup.display_name;
+                                ul.appendChild(li);
+                            });
+                            incrementalBackupsListDiv.appendChild(ul);
+                            incrementalBackupsListDiv.style.maxHeight = '150px'; // Redundant if class handles it
+                            incrementalBackupsListDiv.style.overflowY = 'auto'; // Redundant if class handles it
+                            if(btnRestoreBookingsFromIncremental) btnRestoreBookingsFromIncremental.disabled = false;
+                        } else if (data.success) {
+                            incrementalBackupsListDiv.textContent = "{{ _('No incremental backups available to apply.') }}";
+                            if(btnRestoreBookingsFromIncremental) btnRestoreBookingsFromIncremental.disabled = true;
+                        } else {
+                            incrementalBackupsListDiv.textContent = "{{ _('Error loading incremental backups list.') }}";
+                            if(btnRestoreBookingsFromIncremental) btnRestoreBookingsFromIncremental.disabled = true;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error loading incremental backups list:', error);
+                        incrementalBackupsListDiv.textContent = "{{ _('Error loading list.') }}";
+                        if(btnRestoreBookingsFromIncremental) btnRestoreBookingsFromIncremental.disabled = true;
+                    });
+            }
+
+            // Event Handlers for Selective Booking Restore buttons
+            if (btnRestoreBookingsFromFullDb) {
+                btnRestoreBookingsFromFullDb.addEventListener('click', function() {
+                    const selectedTimestamp = selectFullBackupForBookingRestore.value;
+                    if (!selectedTimestamp) {
+                        appendLog('restore-log-area', "{{ _('Please select a full backup.') }}", '', 'error', statusRestoreBookingsFromFullDb);
+                        return;
+                    }
+                    if (!confirm("{{ _('WARNING: This will delete ALL current bookings and replace them with bookings from the selected full system backup. Are you sure you want to proceed?') }}")) return;
+
+                    currentBookingFullDbRestoreTaskId = null;
+                    appendLog('restore-log-area', `{{ _('Initiating booking restore from full DB backup:') }} ${selectedTimestamp}...`, '', 'info', statusRestoreBookingsFromFullDb);
+                    disablePageInteractions();
+                    fetch('/api/admin/booking_restore/from_full_db', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken, 'Accept': 'application/json' },
+                        body: JSON.stringify({ backup_timestamp: selectedTimestamp })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        currentBookingFullDbRestoreTaskId = data.task_id;
+                        const messageType = data.success ? 'info' : 'error';
+                        appendLog('restore-log-area', data.message || (data.success ? "{{ _('Booking restore from full DB process started.') }}" : "{{ _('Failed to start process.') }}"), `Task ID: ${data.task_id || 'N/A'}`, messageType, statusRestoreBookingsFromFullDb);
+                        if (!data.success || (data.summary && data.summary.status && (data.summary.status.includes('fail') || data.summary.status.includes('error')) )) {
+                            enablePageInteractions();
+                        }
+                    })
+                    .catch(error => {
+                        appendLog('restore-log-area', "{{ _('Request failed:') }}", error.message, 'error', statusRestoreBookingsFromFullDb);
+                        enablePageInteractions();
+                    });
+                });
+            }
+
+            if (btnRestoreBookingsFromCsv) {
+                btnRestoreBookingsFromCsv.addEventListener('click', function() {
+                    const selectedTimestamp = selectCsvBackupForBookingRestore.value;
+                    if (!selectedTimestamp) {
+                        appendLog('restore-log-area', "{{ _('Please select a CSV backup.') }}", '', 'error', statusRestoreBookingsFromCsv);
+                        return;
+                    }
+                    if (!confirm("{{ _('Are you sure you want to restore bookings from CSV backup:') }} '" + selectCsvBackupForBookingRestore.options[selectCsvBackupForBookingRestore.selectedIndex].text + "'?")) return;
+
+                    currentBookingCsvRestoreTaskId = null;
+                    appendLog('restore-log-area', `{{ _('Initiating booking restore from CSV:') }} ${selectedTimestamp}...`, '', 'info', statusRestoreBookingsFromCsv);
+                    disablePageInteractions();
+                    fetch('/api/admin/booking_restore/from_csv', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken, 'Accept': 'application/json' },
+                        body: JSON.stringify({ backup_timestamp: selectedTimestamp })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        currentBookingCsvRestoreTaskId = data.task_id;
+                        const messageType = data.success ? 'info' : 'error';
+                        appendLog('restore-log-area', data.message || (data.success ? "{{ _('Booking restore from CSV process started.') }}" : "{{ _('Failed to start process.') }}"), `Task ID: ${data.task_id || 'N/A'}`, messageType, statusRestoreBookingsFromCsv);
+                         if (!data.success || (data.summary && data.summary.status && (data.summary.status.includes('fail')|| data.summary.status.includes('error')))) {
+                            enablePageInteractions();
+                        }
+                    })
+                    .catch(error => {
+                        appendLog('restore-log-area', "{{ _('Request failed:') }}", error.message, 'error', statusRestoreBookingsFromCsv);
+                        enablePageInteractions();
+                    });
+                });
+            }
+
+            if (btnRestoreBookingsFromIncremental) {
+                btnRestoreBookingsFromIncremental.addEventListener('click', function() {
+                    if (!confirm("{{ _('Are you sure you want to apply all available incremental booking backups? This will update your current booking records.') }}")) return;
+
+                    currentBookingIncrementalRestoreTaskId = null;
+                    appendLog('restore-log-area', "{{ _('Initiating booking restore from incremental backups...') }}", '', 'info', statusRestoreBookingsFromIncremental);
+                    disablePageInteractions();
+                    fetch('/api/admin/booking_restore/from_incremental', {
+                        method: 'POST',
+                        headers: { 'X-CSRFToken': csrfToken, 'Accept': 'application/json' }
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        currentBookingIncrementalRestoreTaskId = data.task_id;
+                        const messageType = data.success ? 'info' : 'error';
+                        appendLog('restore-log-area', data.message || (data.success ? "{{ _('Booking restore from incremental backups process started.') }}" : "{{ _('Failed to start process.') }}"), `Task ID: ${data.task_id || 'N/A'}`, messageType, statusRestoreBookingsFromIncremental);
+                        if (!data.success || (data.summary && data.summary.status && (data.summary.status.includes('fail') || data.summary.status.includes('error')))) {
+                            enablePageInteractions();
+                        }
+                    })
+                    .catch(error => {
+                        appendLog('restore-log-area', "{{ _('Request failed:') }}", error.message, 'error', statusRestoreBookingsFromIncremental);
+                        enablePageInteractions();
+                    });
+                });
+            }
+
+            // Scheduled Booking Backups form
+            function toggleBookingRangeVisibility() {
+                if (bookingBackupTypeSelect && bookingRangeGroup) {
+                    bookingRangeGroup.style.display = (bookingBackupTypeSelect.value === 'full_export') ? 'block' : 'none';
+                }
+            }
+            if (bookingBackupTypeSelect) {
+                bookingBackupTypeSelect.addEventListener('change', toggleBookingRangeVisibility);
+                toggleBookingRangeVisibility(); // Initial call
+            }
+
+            // Initial data loading for dropdowns/lists
+            loadFullBackupsForBookingRestore();
+            loadCsvBackupsForBookingRestore();
+            loadIncrementalBackupsList();
+        });
+    </script>
+{% endblock %}

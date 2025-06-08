@@ -10,14 +10,24 @@ from extensions import db, socketio # Try to import socketio
 # Assuming permission_required is in auth.py
 from auth import permission_required # Corrected: auth.py is at root
 from datetime import datetime, timedelta # Add datetime imports
-from utils import load_scheduler_settings, save_scheduler_settings # Added for scheduler settings
+from utils import load_scheduler_settings, save_scheduler_settings
 
 # Import backup/restore functions
-# Note: backup_bookings_csv is added here
-from azure_backup import list_available_backups, restore_full_backup, \
-                         list_available_booking_csv_backups, restore_bookings_from_csv_backup, \
-                         backup_bookings_csv, verify_backup_set, delete_backup_set, \
-                         delete_booking_csv_backup, verify_booking_csv_backup
+from azure_backup import (
+    list_available_backups,
+    restore_full_backup,
+    list_available_booking_csv_backups,
+    restore_bookings_from_csv_backup,
+    backup_bookings_csv,
+    verify_backup_set,
+    delete_backup_set,
+    delete_booking_csv_backup,
+    verify_booking_csv_backup,
+    # New imports for selective booking restore
+    list_available_incremental_booking_backups,
+    restore_incremental_bookings,
+    restore_bookings_from_full_db_backup
+)
 # Removed duplicate model, db, auth, datetime imports that were already covered above or are standard
 import os
 import json
@@ -60,10 +70,7 @@ def serve_resource_management_page():
 def serve_admin_bookings_page():
     logger = current_app.logger
     status_filter = request.args.get('status_filter')
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
-
-    logger.info(f"User {current_user.username} accessed Admin Bookings page. Status filter: '{status_filter}', Page: {page}, Per Page: {per_page}")
+    logger.info(f"User {current_user.username} accessed Admin Bookings page. Status filter: '{status_filter}'")
 
     # Define the list of possible statuses for the dropdown
     possible_statuses = ['approved', 'checked_in', 'completed', 'cancelled', 'rejected', 'cancelled_by_admin']
@@ -84,12 +91,10 @@ def serve_admin_bookings_page():
         if status_filter:
             bookings_query = bookings_query.filter(Booking.status == status_filter)
 
-        bookings_query = bookings_query.order_by(Booking.start_time.desc())
-
-        bookings_page_obj = bookings_query.paginate(page=page, per_page=per_page, error_out=False)
+        all_bookings = bookings_query.order_by(Booking.start_time.desc()).all()
 
         bookings_list = []
-        for booking_row in bookings_page_obj.items:
+        for booking_row in all_bookings:
             bookings_list.append({
                 'id': booking_row.id,
                 'title': booking_row.title,
@@ -101,64 +106,82 @@ def serve_admin_bookings_page():
                 'admin_deleted_message': booking_row.admin_deleted_message
             })
         return render_template("admin_bookings.html",
-                               bookings_page_obj=bookings_page_obj, # Pass pagination object
-                               bookings=bookings_list, # Still pass the list of items for current page
+                               bookings=bookings_list,
                                all_statuses=possible_statuses,
-                               current_status_filter=status_filter,
-                               per_page=per_page) # Pass per_page for items-per-page dropdown
+                               current_status_filter=status_filter)
     except Exception as e:
         logger.error(f"Error fetching bookings for admin page: {e}", exc_info=True)
         return render_template("admin_bookings.html",
-                               bookings_page_obj=None, # Ensure it's passed in error case too
                                bookings=[],
                                error="Could not load bookings.",
                                all_statuses=possible_statuses,
-                               current_status_filter=status_filter,
-                               per_page=per_page) # Pass per_page here as well
+                               current_status_filter=status_filter)
 
 @admin_ui_bp.route('/backup_restore')
 @login_required
 @permission_required('manage_system')
 def serve_backup_restore_page():
-    current_app.logger.info(f"User {current_user.username} accessed Backup/Restore admin page.")
-    # Existing logic for full backups (if any, or add similarly)
-    full_backups = list_available_backups() # Assuming this lists full backup timestamps
+    current_app.logger.info(f"User {current_user.username} accessed legacy /admin/backup_restore, redirecting to /admin/backup/system.")
+    return redirect(url_for('admin_ui.serve_backup_system_page'))
 
-    # New logic for booking CSV backups
-    all_booking_csv_files = list_available_booking_csv_backups()
+@admin_ui_bp.route('/backup/system', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def serve_backup_system_page():
+    current_app.logger.info(f"User {current_user.username} accessed System Backup & Restore page.")
+    scheduler_settings = load_scheduler_settings()
+    full_backup_settings = scheduler_settings.get('full_backup', DEFAULT_FULL_BACKUP_SCHEDULE.copy())
+    # list_available_backups() is handled by JavaScript on the client-side now for this tab.
+    return render_template('admin/backup_system.html',
+                           full_backup_settings=full_backup_settings)
 
-    # Pagination for Booking CSV Backups
+@admin_ui_bp.route('/backup/booking_data', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def serve_backup_booking_data_page():
+    current_app.logger.info(f"User {current_user.username} accessed Booking Data Management page.")
+    scheduler_settings = load_scheduler_settings()
+    booking_csv_backup_settings = scheduler_settings.get('booking_csv_backup', DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy())
+
+    # Pagination logic for Booking CSV Backups (Flask-populated part)
+    all_booking_csv_files = list_available_booking_csv_backups() if list_available_booking_csv_backups else []
     page = request.args.get('page', 1, type=int)
-    per_page = 10 # Items per page
+    per_page = 10
     total_items = len(all_booking_csv_files)
-    total_pages = (total_items + per_page - 1) // per_page
+    total_pages = (total_items + per_page - 1) // per_page if per_page > 0 else 0
+    if total_pages == 0 and total_items > 0 : total_pages = 1 # if per_page is 0 but items exist
+    if page > total_pages and total_pages > 0: page = total_pages # cap page
+    if page < 1: page = 1 # ensure page is at least 1
+
     start_index = (page - 1) * per_page
     end_index = start_index + per_page
     paginated_booking_csv_backups = all_booking_csv_files[start_index:end_index]
     has_prev = page > 1
     has_next = page < total_pages
 
-    # Load scheduler settings
+    # Other lists (full system backups for selective booking restore, incremental backups)
+    # will be loaded client-side by JavaScript.
+
+    return render_template('admin/backup_booking_data.html',
+                           booking_csv_backup_settings=booking_csv_backup_settings,
+                           booking_csv_backups=paginated_booking_csv_backups,
+                           booking_csv_page=page,
+                           booking_csv_total_pages=total_pages,
+                           booking_csv_has_prev=has_prev,
+                           booking_csv_has_next=has_next)
+
+@admin_ui_bp.route('/backup/settings', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def serve_backup_settings_page():
+    current_app.logger.info(f"User {current_user.username} accessed Backup General Settings page.")
     scheduler_settings = load_scheduler_settings()
-    full_backup_settings = scheduler_settings.get('full_backup', {})
-    booking_csv_backup_settings = scheduler_settings.get('booking_csv_backup', {})
     auto_restore_booking_records_on_startup = scheduler_settings.get('auto_restore_booking_records_on_startup', False)
+    return render_template('admin/backup_settings.html',
+                           auto_restore_booking_records_on_startup=auto_restore_booking_records_on_startup)
 
 
-    return render_template(
-        'admin_backup_restore.html',
-        full_backups=full_backups,
-        booking_csv_backups=paginated_booking_csv_backups,
-        booking_csv_page=page,
-        booking_csv_total_pages=total_pages,
-        booking_csv_has_prev=has_prev,
-        booking_csv_has_next=has_next,
-        full_backup_settings=full_backup_settings,
-        booking_csv_backup_settings=booking_csv_backup_settings,
-        auto_restore_booking_records_on_startup=auto_restore_booking_records_on_startup # Pass new setting
-    )
-
-@admin_ui_bp.route('/admin/restore_booking_csv/<timestamp_str>', methods=['POST'])
+@admin_ui_bp.route('/admin/restore_booking_csv/<timestamp_str>', methods=['POST']) # This URL might need to be adjusted if it's not blueprint relative
 @login_required
 @permission_required('manage_system')
 def restore_booking_csv_route(timestamp_str):
@@ -192,9 +215,9 @@ def restore_booking_csv_route(timestamp_str):
         error_details = '; '.join(summary.get('errors', ['Unknown error']))
         flash(f"Booking CSV restore for {timestamp_str} failed. Status: {summary.get('status','unknown')}. Message: {summary.get('message','N/A')}. Details: {error_details}", 'danger')
 
-    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+    return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Redirect to the booking data tab
 
-@admin_ui_bp.route('/admin/manual_backup_bookings_csv', methods=['POST'])
+@admin_ui_bp.route('/admin/manual_backup_bookings_csv', methods=['POST']) # This URL might need to be adjusted
 @login_required
 @permission_required('manage_system')
 def manual_backup_bookings_csv_route():
@@ -252,9 +275,9 @@ def manual_backup_bookings_csv_route():
         app_instance.logger.error(f"Exception during manual booking CSV backup (range: {range_label}) initiation by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
         flash(_('An unexpected error occurred while starting the manual booking CSV backup for range "%(range)s". Check server logs.') % {'range': range_label}, 'danger')
 
-    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+    return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Redirect to the booking data tab
 
-@admin_ui_bp.route('/admin/delete_booking_csv/<timestamp_str>', methods=['POST'])
+@admin_ui_bp.route('/admin/delete_booking_csv/<timestamp_str>', methods=['POST']) # This URL might need to be adjusted
 @login_required
 @permission_required('manage_system')
 def delete_booking_csv_backup_route(timestamp_str):
@@ -278,13 +301,13 @@ def delete_booking_csv_backup_route(timestamp_str):
         app_instance.logger.error(f"Exception during booking CSV backup deletion for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
         flash(_('An unexpected error occurred while deleting the booking CSV backup for %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
 
-    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+    return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Redirect to the booking data tab
 
 
-@admin_ui_bp.route('/save_booking_csv_schedule', methods=['POST']) # Corrected path to be relative to blueprint
+@admin_ui_bp.route('/save_booking_csv_schedule', methods=['POST'])
 @login_required
 @permission_required('manage_system')
-def save_booking_csv_schedule_route():
+def save_booking_csv_schedule_settings(): # Renamed function to match new approach
     current_app.logger.info(f"User {current_user.username} attempting to save Booking CSV Backup schedule settings.")
 
     # Construct config file path within the route to use current_app context
@@ -388,7 +411,7 @@ def save_booking_csv_schedule_route():
         current_app.logger.error(f"Error saving Booking CSV backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
         flash(_('An error occurred while saving the schedule settings. Please check the logs.'), 'danger')
 
-    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+    return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Redirect to the booking data tab
 
 
 @admin_ui_bp.route('/settings/schedule/full_backup', methods=['POST'])
@@ -427,19 +450,19 @@ def save_full_backup_schedule_settings():
     except Exception as e:
         current_app.logger.error(f"Error saving Full Backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
         flash(_('An error occurred while saving the full backup schedule settings. Please check the logs.'), 'danger')
-    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+    return redirect(url_for('admin_ui.serve_backup_system_page')) # Redirect to system tab
 
 
-@admin_ui_bp.route('/settings/schedule/booking_csv', methods=['POST'])
+@admin_ui_bp.route('/settings/schedule/booking_csv', methods=['POST']) # This route is for saving the schedule for booking CSVs
 @login_required
 @permission_required('manage_system')
-def save_booking_csv_schedule_settings():
-    current_app.logger.info(f"User {current_user.username} attempting to save Booking CSV Backup schedule settings.")
+def save_booking_data_schedule_settings(): # Renamed to reflect it's for booking data schedules
+    current_app.logger.info(f"User {current_user.username} attempting to save Booking Data Backup schedule settings.")
     try:
         all_settings = load_scheduler_settings()
 
-        if 'booking_csv_backup' not in all_settings:
-            from utils import DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE # Import default for safety
+        if 'booking_csv_backup' not in all_settings: # Ensure this key matches what's used in load/save
+            from utils import DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE
             all_settings['booking_csv_backup'] = DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy()
 
         all_settings['booking_csv_backup']['is_enabled'] = request.form.get('booking_csv_backup_enabled') == 'true'
@@ -448,39 +471,32 @@ def save_booking_csv_schedule_settings():
         try:
             interval_minutes = int(interval_minutes_str)
             if interval_minutes < 1:
-                flash(_('Interval for Booking CSV backup must be at least 1 minute.'), 'danger')
-                return redirect(url_for('admin_ui.serve_backup_restore_page'))
+                flash(_('Interval for Booking Data backup must be at least 1 minute.'), 'danger')
+                return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
             all_settings['booking_csv_backup']['interval_minutes'] = interval_minutes
         except ValueError:
-            flash(_('Invalid interval value for Booking CSV backup. Please enter a number.'), 'danger')
-            return redirect(url_for('admin_ui.serve_backup_restore_page'))
+            flash(_('Invalid interval value for Booking Data backup. Please enter a number.'), 'danger')
+            return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
 
         all_settings['booking_csv_backup']['booking_backup_type'] = request.form.get('booking_backup_type', 'full_export')
 
-        # Only save 'range' if type is 'full_export', otherwise it's not applicable for 'incremental'
         if all_settings['booking_csv_backup']['booking_backup_type'] == 'full_export':
             all_settings['booking_csv_backup']['range'] = request.form.get('booking_csv_backup_range_type', 'all')
         else:
-            # For incremental, 'range' is not used in the same way.
-            # We can set it to a default or remove it, or keep the last known value.
-            # For simplicity, let's keep the last known value or the default 'all' if not present.
-            # The scheduler task for incremental will ignore it.
-            if 'range' not in all_settings['booking_csv_backup']: # Ensure key exists if it was never set
-                 all_settings['booking_csv_backup']['range'] = 'all'
-
+            if 'range' not in all_settings['booking_csv_backup']:
+                 all_settings['booking_csv_backup']['range'] = 'all' # Default if not present
 
         save_scheduler_settings(all_settings)
-        flash(_('Booking CSV backup schedule settings saved successfully.'), 'success')
-        current_app.logger.info(f"Booking CSV backup schedule settings saved by {current_user.username}: {all_settings['booking_csv_backup']}")
+        flash(_('Booking data backup schedule settings saved successfully.'), 'success')
+        current_app.logger.info(f"Booking Data backup schedule settings saved by {current_user.username}: {all_settings['booking_csv_backup']}")
 
-        # Here you might want to update APScheduler if it's running.
-        # This is a complex task involving removing the old job and adding a new one with the new interval.
-        # For this subtask, focusing on saving to JSON. APScheduler update is a separate concern.
+        # APScheduler update logic would go here - for now, changes apply on restart or next scheduled task load
+        # based on scheduler_tasks.py logic.
 
     except Exception as e:
-        current_app.logger.error(f"Error saving Booking CSV backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
-        flash(_('An error occurred while saving the Booking CSV backup schedule settings. Please check the logs.'), 'danger')
-    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+        current_app.logger.error(f"Error saving Booking Data backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
+        flash(_('An error occurred while saving the Booking Data backup schedule settings. Please check the logs.'), 'danger')
+    return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Redirect to booking data tab
 
 
 @admin_ui_bp.route('/settings/startup/auto_restore_bookings', methods=['POST'])
@@ -506,10 +522,10 @@ def save_auto_restore_booking_records_settings():
     except Exception as e:
         current_app.logger.error(f"Error saving 'Auto Restore Booking Records on Startup' setting by {current_user.username}: {str(e)}", exc_info=True)
         flash(_('An error occurred while saving the auto restore setting. Please check the logs.'), 'danger')
-    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+    return redirect(url_for('admin_ui.serve_backup_settings_page')) # Redirect to settings tab
 
 
-@admin_ui_bp.route('/admin/verify_booking_csv/<timestamp_str>', methods=['POST'])
+@admin_ui_bp.route('/admin/verify_booking_csv/<timestamp_str>', methods=['POST']) # This URL might need to be adjusted
 @login_required
 @permission_required('manage_system')
 def verify_booking_csv_backup_route(timestamp_str):
@@ -541,10 +557,10 @@ def verify_booking_csv_backup_route(timestamp_str):
         app_instance.logger.error(f"Exception during Booking CSV backup verification for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
         flash(_('An unexpected error occurred while verifying Booking CSV backup %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
 
-    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+    return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Redirect to booking data tab
 
 
-@admin_ui_bp.route('/verify_full_backup/<timestamp_str>', methods=['POST'])
+@admin_ui_bp.route('/verify_full_backup/<timestamp_str>', methods=['POST']) # This URL might need to be adjusted
 @login_required
 @permission_required('manage_system')
 def verify_full_backup_route(timestamp_str):
@@ -580,7 +596,7 @@ def verify_full_backup_route(timestamp_str):
         app_instance.logger.error(f"Exception during full backup verification for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
         flash(_('An unexpected error occurred while verifying backup set %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
 
-    return redirect(url_for('admin_ui.serve_backup_restore_page'))
+    return redirect(url_for('admin_ui.serve_backup_system_page')) # Redirect to system tab
 
 
 @admin_ui_bp.route('/troubleshooting', methods=['GET'])

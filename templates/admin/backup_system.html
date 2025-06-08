@@ -1,0 +1,643 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Admin - System Backup & Restore') }}{% endblock %}
+
+{% block head_extra %}
+{{ super() }}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js" integrity="sha512-skuhu6jj+sQnhLq1Txsack8VfnIrX8wL+MTFilYlFFT/NuLJm7eya7zOROs39Jy5cjASMEWqxLzijRVmKhsqWQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<style>
+    .log-area {
+        max-height: 200px;
+        overflow-y: auto;
+        background: #f0f0f0;
+        border: 1px solid #ccc;
+        padding: 10px;
+        margin-top: 10px;
+        white-space: pre-wrap;
+        font-family: monospace;
+        font-size: 0.9em;
+    }
+    .log-entry {
+        padding: 2px 0;
+    }
+    .log-error {
+        color: red;
+        font-weight: bold;
+    }
+    .log-success {
+        color: green;
+        font-weight: bold;
+    }
+    .log-info {
+        color: #333;
+    }
+    /* Styles for DB Records View */
+    .db-table-container {
+        border: 1px solid #eee;
+        padding: 10px;
+        border-radius: 4px;
+    }
+    .db-records-content pre {
+        background-color: #f8f9fa; /* Light background for pre */
+        padding: 10px;
+        border-radius: 4px;
+        max-height: 300px; /* Max height for individual record lists */
+        overflow-y: auto;
+    }
+    /* Style for active (expanded) button */
+    #view-db-records-output .btn.active {
+        background-color: #007bff;
+        color: white;
+    }
+    /* Ensure tab panes have some padding when active */
+    .tab-content > .tab-pane { /* This might be less relevant if not using tabs in this specific file */
+        padding-top: 1rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1>{{ _('System Backup & Restore') }}</h1>
+    <hr>
+    <p>{{ _('Current UTC Time:') }} <span id="utc-clock">Loading...</span></p>
+    <hr>
+
+    <!-- Full System Backup & Restore Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="card-title h5">{{ _('Full System Backup & Restore') }}</h2>
+        </div>
+        <div class="card-body">
+            <section id="backup-section" class="mb-4">
+                <h5>{{ _('One Click Backup') }}</h5>
+                <p>{{ _('Perform a full backup of the database, map configurations, and uploaded media files.') }}</p>
+                <button id="one-click-backup-btn" class="btn btn-primary"><i class="fas fa-cloud-upload-alt"></i> {{ _('Perform Full Backup Now') }}</button>
+                <div id="backup-status-message" class="mt-2"></div>
+            </section>
+            <hr>
+            <section id="restore-section">
+                <h5>{{ _('One Click Restore') }}</h5>
+                <p>{{ _('Restore the system from a previously created full backup. This will overwrite current data.') }}</p>
+                <button id="list-backups-btn" class="btn btn-info mb-3"><i class="fas fa-sync-alt"></i> {{ _('Refresh Available Backups') }}</button>
+                <div id="restore-status-message" class="mt-2 mb-3"></div>
+                <table id="available-backups-table" class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>{{ _('Backup Timestamp (UTC)') }}</th>
+                            <th>{{ _('Actions') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody id="available-backups-tbody"></tbody>
+                </table>
+                <nav aria-label="Backup pagination" id="backup-pagination-nav" style="display: none;">
+                    <ul class="pagination justify-content-center">
+                        <li class="page-item" id="backup-prev-page"><a class="page-link" href="#">{{ _('Previous') }}</a></li>
+                        <li class="page-item" id="backup-next-page"><a class="page-link" href="#">{{ _('Next') }}</a></li>
+                    </ul>
+                    <p class="text-center" id="backup-page-info"></p>
+                </nav>
+            </section>
+        </div>
+    </div>
+
+    <!-- Scheduled Full System Backups Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="card-title h5">{{ _('Scheduled Full System Backups') }}</h2>
+        </div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('admin_ui.save_full_backup_schedule_settings') }}" id="full-backup-schedule-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="form-group mb-2">
+                    <div class="form-check">
+                        <input type="checkbox" class="form-check-input" id="full_backup_enabled" name="full_backup_enabled" value="true" {% if full_backup_settings.is_enabled %}checked{% endif %}>
+                        <label class="form-check-label" for="full_backup_enabled">{{ _('Enable Scheduled Full Backups') }}</label>
+                    </div>
+                </div>
+                <div class="form-group mb-2">
+                    <label for="full_backup_schedule_type">{{ _('Schedule Type') }}</label>
+                    <select id="full_backup_schedule_type" name="full_backup_schedule_type" class="form-control form-select">
+                        <option value="daily" {% if full_backup_settings.schedule_type == 'daily' %}selected{% endif %}>{{ _('Daily') }}</option>
+                        <option value="weekly" {% if full_backup_settings.schedule_type == 'weekly' %}selected{% endif %}>{{ _('Weekly') }}</option>
+                    </select>
+                </div>
+                <div class="form-group mb-2" id="day-of-week-group" {% if full_backup_settings.schedule_type != 'weekly' %}style="display: none;"{% endif %}>
+                    <label for="full_backup_day_of_week">{{ _('Day of Week') }}</label>
+                    <select id="full_backup_day_of_week" name="full_backup_day_of_week" class="form-control form-select">
+                        <option value="0" {% if full_backup_settings.day_of_week == 0 %}selected{% endif %}>{{ _('Monday') }}</option>
+                        <option value="1" {% if full_backup_settings.day_of_week == 1 %}selected{% endif %}>{{ _('Tuesday') }}</option>
+                        <option value="2" {% if full_backup_settings.day_of_week == 2 %}selected{% endif %}>{{ _('Wednesday') }}</option>
+                        <option value="3" {% if full_backup_settings.day_of_week == 3 %}selected{% endif %}>{{ _('Thursday') }}</option>
+                        <option value="4" {% if full_backup_settings.day_of_week == 4 %}selected{% endif %}>{{ _('Friday') }}</option>
+                        <option value="5" {% if full_backup_settings.day_of_week == 5 %}selected{% endif %}>{{ _('Saturday') }}</option>
+                        <option value="6" {% if full_backup_settings.day_of_week == 6 %}selected{% endif %}>{{ _('Sunday') }}</option>
+                    </select>
+                </div>
+                <div class="form-group mb-2">
+                    <label for="full_backup_time_of_day">{{ _('Time of Day (UTC)') }}</label>
+                    <input type="time" id="full_backup_time_of_day" name="full_backup_time_of_day" class="form-control" value="{{ full_backup_settings.time_of_day | default('02:00') }}" required>
+                </div>
+                <button type="submit" class="btn btn-success"><i class="fas fa-save"></i> {{ _('Save Full Backup Schedule') }}</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Global Log Areas -->
+    <div class="mt-4">
+        <h5>{{ _('Operation Logs') }}</h5>
+        <pre id="backup-log-area" class="log-area" style="display: none;"></pre>
+        <pre id="restore-log-area" class="log-area" style="display: none;"></pre>
+    </div>
+
+    <!-- Selective Restore Modal (remains global as it's triggered from here) -->
+    <div id="selective-restore-modal" class="modal" style="display: none !important;">
+        <div class="modal-content">
+            <span class="close-modal-btn" id="close-selective-restore-modal">&times;</span>
+            <h3>{{ _('Selective Restore Options') }}</h3>
+            <p>{{ _('Select components to restore for backup:') }} <strong id="modal-backup-timestamp"></strong></p>
+            <form id="selective-restore-form">
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="database" id="component-database" name="components">
+                    <label class="form-check-label" for="component-database">{{ _('Database (Bookings, Users, Resources, etc.)') }}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="map_config" id="component-map_config" name="components">
+                    <label class="form-check-label" for="component-map_config">{{ _('Map Configuration (Floor map definitions & resource mappings on maps)') }}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="floor_maps" id="component-floor_maps" name="components">
+                    <label class="form-check-label" for="component-floor_maps">{{ _('Floor Map Images (in static/floor_map_uploads)') }}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="resource_uploads" id="component-resource_uploads" name="components">
+                    <label class="form-check-label" for="component-resource_uploads">{{ _('Resource Images (in static/resource_uploads)') }}</label>
+                </div>
+                <hr>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="all" id="component-all" name="components_all">
+                    <label class="form-check-label" for="component-all">{{ _('ALL COMPONENTS (Full Restore)') }}</label>
+                </div>
+                <button type="submit" id="confirm-selective-restore-btn" class="btn btn-primary mt-3">{{ _('Proceed with Selected Restore') }}</button>
+            </form>
+            <div id="selective-restore-modal-status" class="status-message mt-2"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
+    <script src="{{ url_for('static', filename='js/admin_backup_common.js') }}" defer></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+            // Element Variable Definitions for System Backup & Restore
+            const backupButton = document.getElementById('one-click-backup-btn');
+            const backupStatusMessageEl = document.getElementById('backup-status-message');
+            const backupLogAreaEl = document.getElementById('backup-log-area');
+            const listBackupsButton = document.getElementById('list-backups-btn');
+            const restoreStatusMessageEl = document.getElementById('restore-status-message');
+            const restoreLogAreaEl = document.getElementById('restore-log-area');
+            const availableBackupsTbody = document.getElementById('available-backups-tbody');
+            const availableBackupsTable = document.getElementById('available-backups-table');
+            const paginationNav = document.getElementById('backup-pagination-nav');
+            const pageInfoEl = document.getElementById('backup-page-info');
+            const prevPageBtn = document.getElementById('backup-prev-page');
+            const nextPageBtn = document.getElementById('backup-next-page');
+
+            // Selective Restore Modal Elements
+            const selectiveRestoreModal = document.getElementById('selective-restore-modal');
+            const closeModalBtn = document.getElementById('close-selective-restore-modal');
+            const modalBackupTimestampEl = document.getElementById('modal-backup-timestamp');
+            const selectiveRestoreForm = document.getElementById('selective-restore-form');
+            const confirmSelectiveRestoreBtn = document.getElementById('confirm-selective-restore-btn');
+            const selectiveRestoreModalStatusEl = document.getElementById('selective-restore-modal-status');
+            const componentCheckboxes = document.querySelectorAll('#selective-restore-form input[name="components"]');
+            const componentAllCheckbox = document.getElementById('component-all');
+
+            // Scheduled Full Backup Form Elements
+            // const fullBackupScheduleForm = document.getElementById('full-backup-schedule-form'); // Only needed if direct JS interaction beyond POST
+            const fullBackupScheduleTypeSelect = document.getElementById('full_backup_schedule_type');
+            const dayOfWeekGroup = document.getElementById('day-of-week-group');
+
+            // Task ID Variables
+            let currentBackupTaskId = null;
+            let currentRestoreTaskId = null;
+            let currentVerifyTaskId = null;
+            let currentDeleteTaskId = null;
+
+            // Pagination Variables
+            let currentPage = 1;
+            const backupsPerPage = 5;
+            let allBackups = [];
+
+            // SocketIO Event Listeners (specific to system operations)
+            // (socket is defined in admin_backup_common.js)
+            if (typeof socket !== 'undefined') {
+                socket.on('backup_progress', function(data) {
+                    console.log('Backup progress event:', data);
+                    if (data.task_id !== currentBackupTaskId) return;
+                    let messageType = data.level ? data.level.toLowerCase() : 'info';
+                    appendLog('backup-log-area', data.status, data.detail, messageType, backupStatusMessageEl);
+                    if (data.status === "Backup completed with overall success: True" || data.status.startsWith("Backup completed with overall success: False")) {
+                        enablePageInteractions();
+                        currentBackupTaskId = null;
+                        if (messageType === 'success' || (data.detail && data.detail.toUpperCase().includes("SUCCESS"))) {
+                            loadAvailableBackups();
+                        }
+                    }
+                });
+
+                socket.on('restore_progress', function(data) {
+                    console.log('Restore progress event specific to system page:', data);
+                    if (data.task_id === currentRestoreTaskId) { // Only handle full system restore/dry-run here
+                        let messageType = data.level ? data.level.toLowerCase() : 'info';
+                        appendLog('restore-log-area', data.status, data.detail, messageType, restoreStatusMessageEl);
+                        const lowerStatus = data.status.toLowerCase();
+                        if (lowerStatus.includes("completed") || lowerStatus.includes("finished") || lowerStatus.includes("failed") || lowerStatus.includes("error") || lowerStatus.includes("critical")) {
+                            enablePageInteractions();
+                            currentRestoreTaskId = null;
+                        }
+                        // Display dry run actions if present
+                        if (data.actions && Array.isArray(data.actions) && data.actions.length > 0 && lowerStatus.includes("dry run")) {
+                            appendLog('restore-log-area', "DRY RUN ACTIONS (from HTTP response):", '', 'info', restoreStatusMessageEl);
+                            data.actions.forEach(action => appendLog('restore-log-area', `  - ${action}`, '', 'info', restoreStatusMessageEl));
+                        }
+                    }
+                });
+
+                socket.on('backup_verification_progress', function(data) {
+                    console.log('System Verify backup progress event:', data);
+                    if (data.task_id !== currentVerifyTaskId) return;
+                    let messageType = data.level ? data.level.toLowerCase() : 'info';
+                    appendLog('restore-log-area', `VERIFY: ${data.status}`, data.detail, messageType, restoreStatusMessageEl);
+
+                    if (data.results) {
+                        if (data.results.checks && data.results.checks.length > 0) {
+                            appendLog('restore-log-area', "Verification Details:", '', 'info', restoreStatusMessageEl);
+                            data.results.checks.forEach(check => {
+                                appendLog('restore-log-area', `  Item: ${check.item} (Type: ${check.type}) - Status: ${check.status}`, check.actual_count !== undefined ? `Expected: ${check.expected_count}, Actual: ${check.actual_count}` : '', 'info', restoreStatusMessageEl);
+                            });
+                        }
+                        if (data.results.errors && data.results.errors.length > 0) {
+                            appendLog('restore-log-area', "Verification Errors:", '', 'error', restoreStatusMessageEl);
+                            data.results.errors.forEach(error => appendLog('restore-log-area', `  - ${error}`, '', 'error', restoreStatusMessageEl));
+                        }
+                        if (data.results.status) {
+                             appendLog('restore-log-area', `Overall Verification Status: ${data.results.status}`, '', data.results.status.includes('fail') || data.results.status.includes('error') ? 'error' : 'success', restoreStatusMessageEl);
+                        }
+                         enablePageInteractions(); currentVerifyTaskId = null;
+                    } else if (data.status && (data.status.toLowerCase().includes("failed") || data.status.toLowerCase().includes("error") || data.status.toLowerCase().includes("missing") || data.status.toLowerCase().includes("critical") )) {
+                        enablePageInteractions(); currentVerifyTaskId = null;
+                    }
+                });
+
+                socket.on('backup_delete_progress', function(data) {
+                    console.log('Backup delete progress event:', data);
+                    if (data.task_id !== currentDeleteTaskId) return;
+                    let messageType = data.level ? data.level.toLowerCase() : 'info';
+                    appendLog('restore-log-area', data.status, data.detail, messageType, restoreStatusMessageEl);
+                    const lowerStatus = data.status.toLowerCase();
+                    const lowerDetail = data.detail ? data.detail.toLowerCase() : "";
+
+                    if (lowerStatus.includes("finished") || lowerStatus.includes("failed") || lowerStatus.includes("error") || lowerDetail.includes("success") || lowerDetail.includes("failure") || lowerDetail.includes("critical_error")) {
+                        enablePageInteractions(); currentDeleteTaskId = null;
+                        if (messageType === 'success' || (data.detail && data.detail.toUpperCase().includes("SUCCESS"))) {
+                            loadAvailableBackups();
+                        }
+                    }
+                });
+            } else {
+                console.error("Socket.IO instance not found. Ensure admin_backup_common.js is loaded and initializes 'socket'.");
+            }
+
+            // Event Handlers & Functions
+            if (backupButton) {
+                backupButton.addEventListener('click', function () {
+                    currentBackupTaskId = null;
+                    if (backupLogAreaEl) { backupLogAreaEl.innerHTML = ''; backupLogAreaEl.style.display = 'block'; }
+                    if (restoreLogAreaEl) { restoreLogAreaEl.style.display = 'none'; }
+                    appendLog('backup-log-area', "{{ _('Initiating backup request...') }}", '', 'info', backupStatusMessageEl);
+                    disablePageInteractions();
+                    fetch('/api/admin/one_click_backup', {
+                        method: 'POST',
+                        headers: { 'X-CSRFToken': csrfToken, 'Accept': 'application/json' }
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        currentBackupTaskId = data.task_id;
+                        const messageType = data.success ? 'info' : 'error';
+                        appendLog('backup-log-area', data.message || (data.success ? "{{ _('Backup process started on server.') }}" : "{{ _('Failed to start backup process.') }}"), `Task ID: ${data.task_id || 'N/A'}`, messageType, backupStatusMessageEl);
+                        if (!data.success) {
+                            enablePageInteractions();
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Backup error:', error);
+                        appendLog('backup-log-area', "{{ _('Backup request failed:') }}", error.message, 'error', backupStatusMessageEl);
+                        enablePageInteractions();
+                    });
+                });
+            }
+
+            if (selectiveRestoreForm) {
+                selectiveRestoreForm.addEventListener('submit', function(event) {
+                    event.preventDefault();
+                    const backupTimestamp = this.dataset.timestamp;
+                    const selectedComponents = Array.from(document.querySelectorAll('#selective-restore-form input[name="components"]:checked'))
+                                                 .map(cb => cb.value);
+                    if (selectedComponents.length === 0) {
+                        selectiveRestoreModalStatusEl.textContent = "{{ _('Please select at least one component to restore.') }}";
+                        selectiveRestoreModalStatusEl.className = 'alert alert-warning';
+                        return;
+                    }
+                    currentRestoreTaskId = null;
+                    if(restoreLogAreaEl) { restoreLogAreaEl.innerHTML = ''; restoreLogAreaEl.style.display = 'block'; }
+                    if(backupLogAreaEl) { backupLogAreaEl.style.display = 'none'; }
+                    appendLog('restore-log-area', `{{ _('Initiating selective restore for') }} ${backupTimestamp}...`, `Components: ${selectedComponents.join(', ')}`, 'info', restoreStatusMessageEl);
+                    disablePageInteractions();
+                    selectiveRestoreModalStatusEl.textContent = "{{ _('Processing...') }}";
+                    selectiveRestoreModalStatusEl.className = 'alert alert-info';
+
+                    fetch('/api/admin/selective_restore', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken, 'Accept': 'application/json' },
+                        body: JSON.stringify({ backup_timestamp: backupTimestamp, components: selectedComponents })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        currentRestoreTaskId = data.task_id; // Ensure this task ID is for selective restore
+                        const messageType = data.success ? 'info' : 'error';
+                        appendLog('restore-log-area', data.message || (data.success ? `{{ _('Selective restore for ${backupTimestamp} process started.') }}` : `{{ _('Failed to start selective restore for ${backupTimestamp}.') }}`), `Task ID: ${data.task_id || 'N/A'}`, messageType, restoreStatusMessageEl);
+                        selectiveRestoreModalStatusEl.textContent = data.message;
+                        selectiveRestoreModalStatusEl.className = `alert alert-${messageType}`;
+                        if (data.success) {
+                            if(selectiveRestoreModal) selectiveRestoreModal.style.display = 'none';
+                        } else {
+                            enablePageInteractions();
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Selective restore error:', error);
+                        const errorMsg = `{{ _('Selective restore request for ${backupTimestamp} failed:') }} ${error.toString()}`;
+                        appendLog('restore-log-area', errorMsg, '', 'error', restoreStatusMessageEl);
+                        selectiveRestoreModalStatusEl.textContent = errorMsg;
+                        selectiveRestoreModalStatusEl.className = 'alert alert-danger';
+                        enablePageInteractions();
+                    });
+                });
+            }
+
+            function loadAvailableBackups() {
+                disablePageInteractions();
+                appendLog('restore-log-area', "{{ _('Fetching available full system backups...') }}", '', 'info', restoreStatusMessageEl);
+                if(availableBackupsTbody) availableBackupsTbody.innerHTML = '<tr><td colspan="2">{{ _("Loading...") }}</td></tr>';
+                if(paginationNav) paginationNav.style.display = 'none';
+
+                fetch('/api/admin/list_backups', {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.backups) {
+                        allBackups = data.backups;
+                        currentPage = 1;
+                        displayBackupsPage();
+                        if (allBackups.length > 0) {
+                            appendLog('restore-log-area', "{{ _('Available full system backups loaded.') }}", '', 'success', restoreStatusMessageEl);
+                        } else {
+                             appendLog('restore-log-area', "{{ _('No full system backups found.') }}", '', 'info', restoreStatusMessageEl);
+                        }
+                    } else {
+                        allBackups = [];
+                        if(availableBackupsTbody) availableBackupsTbody.innerHTML = '<tr><td colspan="2">{{ _("Failed to load backups.") }}</td></tr>';
+                        appendLog('restore-log-area', "{{ _('Failed to load full system backups:') }}", data.message || "{{ _('Unknown error.') }}", 'error', restoreStatusMessageEl);
+                        if(paginationNav) paginationNav.style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    allBackups = [];
+                    console.error('List backups error:', error);
+                    if(availableBackupsTbody) availableBackupsTbody.innerHTML = '<tr><td colspan="2">{{ _("Error loading backups.") }}</td></tr>';
+                    appendLog('restore-log-area', "{{ _('Error fetching full system backups:') }}", error.toString(), 'error', restoreStatusMessageEl);
+                    if(paginationNav) paginationNav.style.display = 'none';
+                })
+                .finally(() => {
+                    enablePageInteractions();
+                });
+            }
+
+            function displayBackupsPage() {
+                if (!availableBackupsTbody) return;
+                availableBackupsTbody.innerHTML = '';
+
+                if (allBackups.length === 0) {
+                    availableBackupsTbody.innerHTML = '<tr><td colspan="2">{{ _("No backups available.") }}</td></tr>';
+                    if(paginationNav) paginationNav.style.display = 'none';
+                    return;
+                }
+
+                const startIndex = (currentPage - 1) * backupsPerPage;
+                const endIndex = startIndex + backupsPerPage;
+                const pageBackups = allBackups.slice(startIndex, endIndex);
+
+                pageBackups.forEach(timestamp => {
+                    const row = availableBackupsTbody.insertRow();
+                    const cellTimestamp = row.insertCell();
+                    const cellAction = row.insertCell();
+                    let displayTimestamp = timestamp;
+                    try {
+                        const year = timestamp.substring(0,4); const month = timestamp.substring(4,6);
+                        const day = timestamp.substring(6,8); const hour = timestamp.substring(9,11);
+                        const minute = timestamp.substring(11,13); const second = timestamp.substring(13,15);
+                        displayTimestamp = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+                    } catch (e) { /* ignore */ }
+
+                    cellTimestamp.textContent = displayTimestamp;
+                    const restoreBtn = document.createElement('button');
+                    restoreBtn.textContent = "{{ _('Restore') }}"; // This button now opens the selective restore modal
+                    restoreBtn.className = 'btn btn-sm btn-warning restore-btn me-2'; // Keep class for delegation
+                    restoreBtn.setAttribute('data-timestamp', timestamp);
+                    cellAction.appendChild(restoreBtn);
+
+                    const dryRunBtn = document.createElement('button');
+                    dryRunBtn.textContent = "{{ _('Dry Run') }}";
+                    dryRunBtn.className = 'btn btn-sm btn-info restore-dry-run-btn me-2';
+                    dryRunBtn.setAttribute('data-timestamp', timestamp);
+                    cellAction.appendChild(dryRunBtn);
+
+                    const verifyBtnJs = document.createElement('button');
+                    verifyBtnJs.type = 'button';
+                    verifyBtnJs.className = 'btn btn-info btn-sm verify-backup-btn-js';
+                    verifyBtnJs.innerHTML = '<i class="fas fa-check-circle"></i> {{ _("Verify") }}';
+                    verifyBtnJs.setAttribute('data-timestamp', timestamp);
+                    verifyBtnJs.style.marginLeft = '5px';
+                    cellAction.appendChild(verifyBtnJs);
+
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.textContent = "{{ _('Delete') }}";
+                    deleteBtn.className = 'btn btn-sm btn-danger delete-backup-btn';
+                    deleteBtn.style.marginLeft = '5px';
+                    deleteBtn.setAttribute('data-timestamp', timestamp);
+                    cellAction.appendChild(deleteBtn);
+                });
+
+                const totalPages = Math.ceil(allBackups.length / backupsPerPage);
+                if (totalPages > 1) {
+                    if(paginationNav) paginationNav.style.display = 'block';
+                    if(pageInfoEl) pageInfoEl.textContent = `{{ _('Page') }} ${currentPage} {{ _('of') }} ${totalPages}`;
+                    if(prevPageBtn) prevPageBtn.classList.toggle('disabled', currentPage === 1);
+                    if(nextPageBtn) nextPageBtn.classList.toggle('disabled', endIndex >= allBackups.length);
+                } else {
+                    if(paginationNav) paginationNav.style.display = 'none';
+                }
+            }
+
+            if(listBackupsButton) listBackupsButton.addEventListener('click', loadAvailableBackups);
+            if(prevPageBtn) prevPageBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                if (currentPage > 1) { currentPage--; displayBackupsPage(); }
+            });
+            if(nextPageBtn) nextPageBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                if ((currentPage * backupsPerPage) < allBackups.length) { currentPage++; displayBackupsPage(); }
+            });
+
+            if(availableBackupsTable) {
+                availableBackupsTable.addEventListener('click', function (event) {
+                    const targetButton = event.target.closest('button');
+                    if (!targetButton) return;
+
+                    const timestamp = targetButton.getAttribute('data-timestamp');
+                    let displayTimestamp = timestamp;
+                     try {
+                        const year = timestamp.substring(0,4); const month = timestamp.substring(4,6);
+                        const day = timestamp.substring(6,8); const hour = timestamp.substring(9,11);
+                        const minute = timestamp.substring(11,13); const second = timestamp.substring(13,15);
+                        displayTimestamp = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+                    } catch (e) { /* ignore */ }
+
+                    if (targetButton.classList.contains('restore-btn')) { // Opens selective restore modal
+                        if(modalBackupTimestampEl) modalBackupTimestampEl.textContent = displayTimestamp;
+                        if(selectiveRestoreForm) selectiveRestoreForm.dataset.timestamp = timestamp;
+                        if(componentCheckboxes) componentCheckboxes.forEach(cb => cb.checked = true); // Default to all selected
+                        if(componentAllCheckbox) componentAllCheckbox.checked = true;
+                        if(selectiveRestoreModalStatusEl) selectiveRestoreModalStatusEl.textContent = '';
+                        if(selectiveRestoreModalStatusEl) selectiveRestoreModalStatusEl.className = 'status-message mt-2';
+                        if(selectiveRestoreModal) selectiveRestoreModal.style.display = 'block';
+                        return;
+                    }
+
+                    let endpoint = '';
+                    let confirmationMessage = '';
+                    let actionVerb = '';
+                    let method = 'POST';
+                    let body = null;
+                    let isDryRun = targetButton.classList.contains('restore-dry-run-btn');
+                    let isDelete = targetButton.classList.contains('delete-backup-btn');
+                    let isVerifyJs = targetButton.classList.contains('verify-backup-btn-js');
+
+
+                    if (isDryRun) {
+                        endpoint = `/api/admin/restore_dry_run/${timestamp}`;
+                        confirmationMessage = `{{ _('Are you sure you want to perform a dry run for restoring backup') }} ${displayTimestamp}?`;
+                        actionVerb = "{{ _('dry run restore from') }}";
+                        method = 'POST';
+                        body = JSON.stringify({});
+                        currentRestoreTaskId = null; // Reset for this new operation
+                    } else if (isDelete) {
+                        endpoint = `/api/admin/delete_backup/${timestamp}`;
+                        confirmationMessage = `{{ _('Are you sure you want to delete backup') }} '${displayTimestamp}'? {{ _('This action cannot be undone.') }}`;
+                        actionVerb = "{{ _('delete') }}";
+                        method = 'POST';
+                        currentDeleteTaskId = null;
+                    } else if (isVerifyJs) {
+                        endpoint = '/api/admin/verify_backup';
+                        confirmationMessage = `{{ _('Are you sure you want to verify backup') }} ${displayTimestamp}?`;
+                        actionVerb = "{{ _('verify') }}";
+                        method = 'POST';
+                        body = JSON.stringify({ backup_timestamp: timestamp });
+                        currentVerifyTaskId = null;
+                    } else {
+                        return;
+                    }
+
+                    if (!confirm(confirmationMessage)) return;
+
+                    // Reset other task IDs
+                    if (!isDryRun) currentRestoreTaskId = null;
+                    if (!isDelete) currentDeleteTaskId = null;
+                    if (!isVerifyJs) currentVerifyTaskId = null;
+                    currentBackupTaskId = null;
+
+
+                    if(restoreLogAreaEl) { restoreLogAreaEl.innerHTML = ''; restoreLogAreaEl.style.display = 'block'; }
+                    if(backupLogAreaEl) { backupLogAreaEl.style.display = 'none'; }
+                    appendLog('restore-log-area', `{{ _('Initiating') }} ${actionVerb} ${displayTimestamp}...`, '', 'info', restoreStatusMessageEl);
+                    disablePageInteractions();
+
+                    let fetchOptions = {
+                        method: method,
+                        headers: { 'X-CSRFToken': csrfToken, 'Accept': 'application/json' }
+                    };
+                    if (body) {
+                        fetchOptions.headers['Content-Type'] = 'application/json';
+                        fetchOptions.body = body;
+                    }
+
+                    fetch(endpoint, fetchOptions)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (isDryRun) currentRestoreTaskId = data.task_id; // Dry run uses restore_progress
+                        if (isDelete) currentDeleteTaskId = data.task_id;
+                        if (isVerifyJs) currentVerifyTaskId = data.task_id;
+
+                        const messageType = data.success ? 'info' : 'error';
+                        appendLog('restore-log-area', data.message || (data.success ? `{{ _('Process for ${displayTimestamp} started.') }}` : `{{ _('Failed to start process for ${displayTimestamp}.') }}`), `Task ID: ${data.task_id || 'N/A'}`, messageType, restoreStatusMessageEl);
+                        if (!data.success) {
+                            enablePageInteractions();
+                        }
+                    })
+                    .catch(error => {
+                        appendLog('restore-log-area', `{{ _('Request for ${actionVerb} ${displayTimestamp} failed:') }}`, error.message, 'error', restoreStatusMessageEl);
+                        enablePageInteractions();
+                    });
+                });
+            }
+
+            // Modal Interaction Logic
+            if(closeModalBtn) closeModalBtn.addEventListener('click', function() { if(selectiveRestoreModal) selectiveRestoreModal.style.display = 'none'; });
+            window.addEventListener('click', function(event) { if (event.target == selectiveRestoreModal) selectiveRestoreModal.style.display = 'none'; });
+
+            if(componentAllCheckbox) componentAllCheckbox.addEventListener('change', function() {
+                if(componentCheckboxes) componentCheckboxes.forEach(cb => cb.checked = this.checked);
+            });
+            if(componentCheckboxes) componentCheckboxes.forEach(cb => {
+                cb.addEventListener('change', function() {
+                    if (!this.checked && componentAllCheckbox) componentAllCheckbox.checked = false;
+                    else {
+                        const allChecked = Array.from(componentCheckboxes).every(indCb => indCb.checked);
+                        if (allChecked && componentAllCheckbox) componentAllCheckbox.checked = true;
+                    }
+                });
+            });
+
+            // Scheduled Full Backup form
+            function toggleDayOfWeekVisibility() {
+                if (fullBackupScheduleTypeSelect && dayOfWeekGroup) {
+                    dayOfWeekGroup.style.display = (fullBackupScheduleTypeSelect.value === 'weekly') ? 'block' : 'none';
+                }
+            }
+            if (fullBackupScheduleTypeSelect) {
+                fullBackupScheduleTypeSelect.addEventListener('change', toggleDayOfWeekVisibility);
+                toggleDayOfWeekVisibility(); // Initial call
+            }
+
+            // Initial Calls
+            if(typeof loadAvailableBackups === "function") loadAvailableBackups();
+        });
+    </script>
+{% endblock %}

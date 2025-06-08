@@ -1534,7 +1534,4 @@ a.fc-daygrid-event.fc-event {
 }
 */
 
-/* Ensure Bootstrap pagination items are displayed inline-flex */
-.pagination > .page-item {
-    display: inline-flex;
-}
+[end of static/style.css]

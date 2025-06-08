@@ -92,7 +92,7 @@ document.addEventListener('DOMContentLoaded', function () {
         currentPage: 1,
         currentFilters: [],
         columns: [],
-        perPage: 10, // Changed from 30
+        perPage: 30, // Default per page
         sortBy: null,
         sortOrder: 'asc'
     };
@@ -300,204 +300,59 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function renderPagination(paginationData) {
-        const controlsContainer = document.getElementById('db-pagination-controls'); // Ensure this is the correct ID
-        if (!controlsContainer) {
-            console.error('DB Pagination controls container not found!');
-            return;
-        }
-        controlsContainer.innerHTML = ''; // Clear previous controls
-
+        dbPaginationControls.innerHTML = '';
         if (!paginationData || paginationData.total_pages <= 0) {
-            controlsContainer.style.display = 'none';
+            dbPaginationControls.style.display = 'none';
             return;
         }
-        controlsContainer.style.display = 'block';
+        dbPaginationControls.style.display = 'block';
 
-        const navElement = document.createElement('nav');
-        navElement.className = 'mt-4';
-        navElement.setAttribute('aria-label', 'Database records pagination');
+        let html = `<nav aria-label="Table navigation"><ul class="pagination pagination-sm justify-content-center">`;
 
-        const ulElement = document.createElement('ul');
-        ulElement.className = 'pagination justify-content-center';
+        // Previous button
+        html += `<li class="page-item ${paginationData.page === 1 ? 'disabled' : ''}">
+                    <a class="page-link" href="#" data-page="${paginationData.page - 1}">${("{{ _('Previous') }}")}</a>
+                 </li>`;
 
-        // A. Items Per Page Selector
-        const itemsPerPageLi = document.createElement('li');
-        itemsPerPageLi.className = 'page-item disabled';
-        const form = document.createElement('form');
-        form.className = 'd-flex align-items-center';
-        const label = document.createElement('label');
-        label.className = 'visually-hidden me-2';
-        label.setAttribute('for', 'per_page_select_db_pagination');
-        label.textContent = "{{ _('Items per page:') }}";
-        form.appendChild(label);
-        const select = document.createElement('select');
-        select.className = 'form-select form-select-sm me-2';
-        select.name = 'per_page';
-        select.id = 'per_page_select_db_pagination';
-        select.style.width = 'auto';
-        const perPageOptions = [10, 25, 50, 100];
-        perPageOptions.forEach(num => {
-            const option = document.createElement('option');
-            option.value = num;
-            option.textContent = num;
-            if (num === dbViewState.perPage) {
-                option.selected = true;
-            }
-            select.appendChild(option);
-        });
-        select.addEventListener('change', function() {
-            dbViewState.perPage = parseInt(this.value, 10);
-            dbViewState.currentPage = 1;
-            fetchAndDisplayTableData();
-        });
-        form.appendChild(select);
-        itemsPerPageLi.appendChild(form);
-        ulElement.appendChild(itemsPerPageLi);
-
-        // If only one page, but we want to show "items per page"
-        if (paginationData.total_pages <= 1) {
-             // Optional: Add total records display here if desired even for single page
-            const p = document.createElement('p');
-            p.className = 'text-center text-muted small mt-2'; // Added mt-2 for spacing
-            p.textContent = `${("{{ _('Total records:') }}")} ${paginationData.total_records}`;
-            navElement.appendChild(ulElement);
-            navElement.appendChild(p); // Append paragraph after ul
-            controlsContainer.appendChild(navElement);
-            return;
+        // Page numbers (simplified: first, current, last if far apart)
+        // This can be expanded to show more page numbers like typical pagination.
+        if (paginationData.page > 2) {
+             html += `<li class="page-item"><a class="page-link" href="#" data-page="1">1</a></li>`;
+             if (paginationData.page > 3) html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
         }
-
-
-        // B. Blank Separator
-        const liSep1 = document.createElement('li');
-        liSep1.className = 'page-item disabled';
-        const spanSep1 = document.createElement('span');
-        spanSep1.className = 'page-link';
-        spanSep1.style.paddingLeft = '1em';
-        liSep1.appendChild(spanSep1);
-        ulElement.appendChild(liSep1);
-
-        // C. Previous Icon Link
-        const liPrev = document.createElement('li');
-        liPrev.className = 'page-item';
-        if (paginationData.page === 1) liPrev.classList.add('disabled');
-        const aPrev = document.createElement('a');
-        aPrev.className = 'page-link';
-        aPrev.href = '#';
-        aPrev.innerHTML = '&laquo;';
         if (paginationData.page > 1) {
-            aPrev.addEventListener('click', (e) => { e.preventDefault(); handlePaginationClick(paginationData.page - 1); });
+            html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.page - 1}">${paginationData.page - 1}</a></li>`;
         }
-        liPrev.appendChild(aPrev);
-        ulElement.appendChild(liPrev);
-
-        // D. Opening Bracket
-        const liOpenBracket = document.createElement('li');
-        liOpenBracket.className = 'page-item disabled';
-        const spanOpenBracket = document.createElement('span');
-        spanOpenBracket.className = 'page-link';
-        spanOpenBracket.textContent = '[';
-        liOpenBracket.appendChild(spanOpenBracket);
-        ulElement.appendChild(liOpenBracket);
-
-        // E. Page Numbers and Commas Loop
-        function createCommaLi() {
-            const li = document.createElement('li');
-            li.className = 'page-item disabled';
-            const span = document.createElement('span');
-            span.className = 'page-link';
-            span.textContent = ',';
-            li.appendChild(span);
-            return li;
+        html += `<li class="page-item active"><span class="page-link">${paginationData.page}</span></li>`;
+        if (paginationData.page < paginationData.total_pages) {
+             html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.page + 1}">${paginationData.page + 1}</a></li>`;
+        }
+         if (paginationData.page < paginationData.total_pages - 2) {
+            if (paginationData.page < paginationData.total_pages - 3) html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.total_pages}">${paginationData.total_pages}</a></li>`;
+        } else if (paginationData.page === paginationData.total_pages - 2 && paginationData.total_pages > 2) {
+             html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.total_pages}">${paginationData.total_pages}</a></li>`;
         }
 
-        let isFirstElementInSequence = true;
-        const totalPages = paginationData.total_pages;
-        const currentPage = paginationData.page;
-        // Simplified iter_pages: show 1st, current-1, current, current+1, last. With ellipses.
-        const pagesToShow = new Set();
-        pagesToShow.add(1);
-        pagesToShow.add(totalPages);
-        if (currentPage > 1) pagesToShow.add(currentPage - 1);
-        pagesToShow.add(currentPage);
-        if (currentPage < totalPages) pagesToShow.add(currentPage + 1);
 
-        const sortedPages = Array.from(pagesToShow).sort((a, b) => a - b);
-        let lastPageShown = 0;
+        // Next button
+        html += `<li class="page-item ${paginationData.page === paginationData.total_pages ? 'disabled' : ''}">
+                    <a class="page-link" href="#" data-page="${paginationData.page + 1}">${("{{ _('Next') }}")}</a>
+                 </li>`;
+        html += `</ul></nav>`;
+        html += `<p class="text-center text-muted small">${("{{ _('Page') }}")} ${paginationData.page} ${("{{ _('of') }}")} ${paginationData.total_pages}. ${("{{ _('Total records:') }}")} ${paginationData.total_records}</p>`;
 
-        sortedPages.forEach(p => {
-            if (p < 1 || p > totalPages) return; // Only valid pages
+        dbPaginationControls.innerHTML = html;
 
-            if (p > lastPageShown + 1 && p !== 1 && lastPageShown !== 0) { // Ellipsis needed
-                 if (!isFirstElementInSequence) ulElement.appendChild(createCommaLi());
-                 const liEllipsis = document.createElement('li');
-                 liEllipsis.className = 'page-item disabled';
-                 const spanEllipsis = document.createElement('span');
-                 spanEllipsis.className = 'page-link';
-                 spanEllipsis.textContent = '...';
-                 liEllipsis.appendChild(spanEllipsis);
-                 ulElement.appendChild(liEllipsis);
-                 isFirstElementInSequence = false;
-            }
-
-            if (p > lastPageShown) { // Ensure we don't duplicate if current+/-1 is edge
-                if (!isFirstElementInSequence) ulElement.appendChild(createCommaLi());
-                const liPage = document.createElement('li');
-                liPage.className = 'page-item';
-                if (p === currentPage) liPage.classList.add('active');
-                const aPage = document.createElement('a');
-                aPage.className = 'page-link';
-                aPage.href = '#';
-                aPage.textContent = p;
-                aPage.addEventListener('click', (e) => { e.preventDefault(); handlePaginationClick(p); });
-                liPage.appendChild(aPage);
-                ulElement.appendChild(liPage);
-                isFirstElementInSequence = false;
-                lastPageShown = p;
-            }
+        dbPaginationControls.querySelectorAll('.page-link').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const pageNum = parseInt(this.dataset.page);
+                if (pageNum && pageNum !== dbViewState.currentPage) {
+                    handlePaginationClick(pageNum);
+                }
+            });
         });
-
-
-        // F. Closing Bracket
-        const liCloseBracket = document.createElement('li');
-        liCloseBracket.className = 'page-item disabled';
-        const spanCloseBracket = document.createElement('span');
-        spanCloseBracket.className = 'page-link';
-        spanCloseBracket.textContent = ']';
-        liCloseBracket.appendChild(spanCloseBracket);
-        ulElement.appendChild(liCloseBracket);
-
-        // G. Next Icon Link
-        const liNext = document.createElement('li');
-        liNext.className = 'page-item';
-        if (paginationData.page === totalPages) liNext.classList.add('disabled');
-        const aNext = document.createElement('a');
-        aNext.className = 'page-link';
-        aNext.href = '#';
-        aNext.innerHTML = '&raquo;';
-        if (paginationData.page < totalPages) {
-            aNext.addEventListener('click', (e) => { e.preventDefault(); handlePaginationClick(paginationData.page + 1); });
-        }
-        liNext.appendChild(aNext);
-        ulElement.appendChild(liNext);
-
-        // H. Final Blank Separator
-        const liSep2 = document.createElement('li');
-        liSep2.className = 'page-item disabled';
-        const spanSep2 = document.createElement('span');
-        spanSep2.className = 'page-link';
-        spanSep2.style.paddingLeft = '1em';
-        liSep2.appendChild(spanSep2);
-        ulElement.appendChild(liSep2);
-
-        navElement.appendChild(ulElement);
-
-        // Total records display
-        const pTotal = document.createElement('p');
-        pTotal.className = 'text-center text-muted small mt-2';
-        pTotal.textContent = `${("{{ _('Page') }}")} ${currentPage} ${("{{ _('of') }}")} ${totalPages}. ${("{{ _('Total records:') }}")} ${paginationData.total_records}`;
-        navElement.appendChild(pTotal);
-
-        controlsContainer.appendChild(navElement);
     }
 
     async function handlePaginationClick(newPage) {
