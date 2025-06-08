@@ -53,6 +53,19 @@
     </div>
 
     <div id="my-bookings-list">
+        <!-- Items Per Page Selector -->
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <label for="items-per-page-select" class="form-label">{{ _('Show entries:') }}</label>
+                <select id="items-per-page-select" class="form-select form-select-sm" style="width: auto; display: inline-block;">
+                    <option value="5">5</option>
+                    <option value="10" selected>10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                </select>
+            </div>
+        </div>
+
         <div id="upcoming-bookings-section">
             <h2>{{ _('Upcoming Bookings') }}</h2>
 			<div class="form-check form-switch mb-2">
@@ -64,6 +77,7 @@
                 <!-- Upcoming bookings will be loaded here by JavaScript -->
                 <p class="loading-message">{{ _('Loading upcoming bookings...') }}</p>
             </div>
+            <div id="upcoming-bookings-pagination-controls" class="pagination-controls d-flex justify-content-center mt-3"></div>
         </div>
 
         <hr class="my-4"> <!-- Optional separator -->
@@ -78,6 +92,7 @@
                 <!-- Past bookings will be loaded here by JavaScript -->
                 <p class="loading-message">{{ _('Loading past bookings...') }}</p>
             </div>
+            <div id="past-bookings-pagination-controls" class="pagination-controls d-flex justify-content-center mt-3"></div>
         </div>
     </div>
 

@@ -29,6 +29,23 @@
         {# <button type="submit" class="button" style="margin-left: 10px; padding: 5px 10px;">Filter</button> #}
     </form>
 
+    <!-- Items per page selector - TOP -->
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <form method="GET" action="{{ url_for('admin_ui.serve_admin_bookings_page') }}" class="form-inline">
+                {% if current_status_filter %}
+                    <input type="hidden" name="status_filter" value="{{ current_status_filter }}">
+                {% endif %}
+                <label for="per_page_select_top" class="mr-2">{{ _('Items per page:') }}</label>
+                <select name="per_page" id="per_page_select_top" class="form-control form-control-sm mr-2" style="width: auto;" onchange="this.form.submit()">
+                    {% for val in [10, 25, 50, 100] %}
+                        <option value="{{ val }}" {% if val == per_page %}selected{% endif %}>{{ val }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+        </div>
+    </div>
+
     {% if bookings %}
     <div class="table-responsive">
         <table id="admin-bookings-table" class="table bookings-table"> {# Added id #}
@@ -70,7 +87,7 @@
                           </button>
                         {% elif booking.status and booking.status.lower() not in ['cancelled', 'rejected', 'completed', 'checked_out', 'cancelled_by_admin'] %}
                         {# Delete button for active bookings might still be relevant for hard deletion #}
-                        <button class="button button-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel') }}</button>
+                        <button class="button button-danger btn-sm delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel') }}</button>
                         {% else %}
                         {# For completed, cancelled, rejected bookings, show a dash or specific info #}
                         <span class="text-muted">-</span>
@@ -84,6 +101,53 @@
     {% else %}
     <p>{{ _('No bookings found.') }}</p>
     {% endif %}
+
+    <!-- Items per page selector - BOTTOM -->
+    <div class="row mt-3">
+        <div class="col-md-6">
+            <form method="GET" action="{{ url_for('admin_ui.serve_admin_bookings_page') }}" class="form-inline">
+                {% if current_status_filter %}
+                    <input type="hidden" name="status_filter" value="{{ current_status_filter }}">
+                {% endif %}
+                <label for="per_page_select_bottom" class="mr-2">{{ _('Items per page:') }}</label>
+                <select name="per_page" id="per_page_select_bottom" class="form-control form-control-sm mr-2" style="width: auto;" onchange="this.form.submit()">
+                    {% for val in [10, 25, 50, 100] %}
+                        <option value="{{ val }}" {% if val == per_page %}selected{% endif %}>{{ val }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+        </div>
+    </div>
+
+    <!-- Pagination Controls -->
+    {% if bookings_page_obj and (bookings_page_obj.has_prev or bookings_page_obj.has_next) %}
+    <nav aria-label="Bookings pagination" class="mt-4">
+        <ul class="pagination justify-content-center">
+            {# Previous Page Link #}
+            <li class="page-item {% if not bookings_page_obj.has_prev %}disabled{% endif %}">
+                <a class="page-link" href="{% if bookings_page_obj.has_prev %}{{ url_for('admin_ui.serve_admin_bookings_page', page=bookings_page_obj.prev_num, per_page=per_page, status_filter=current_status_filter if current_status_filter else None) }}{% else %}#__{% endif %}">{{ _('Previous') }}</a>
+            </li>
+
+            {# Page Numbers #}
+            {% for page_num in bookings_page_obj.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+                {% if page_num %}
+                    <li class="page-item {% if page_num == bookings_page_obj.page %}active{% endif %}">
+                        <a class="page-link" href="{{ url_for('admin_ui.serve_admin_bookings_page', page=page_num, per_page=per_page, status_filter=current_status_filter if current_status_filter else None) }}">{{ page_num }}</a>
+                    </li>
+                {% else %}
+                    <li class="page-item disabled"><span class="page-link">...</span></li>
+                {% endif %}
+            {% endfor %}
+
+            {# Next Page Link #}
+            <li class="page-item {% if not bookings_page_obj.has_next %}disabled{% endif %}">
+                <a class="page-link" href="{% if bookings_page_obj.has_next %}{{ url_for('admin_ui.serve_admin_bookings_page', page=bookings_page_obj.next_num, per_page=per_page, status_filter=current_status_filter if current_status_filter else None) }}{% else %}#__{% endif %}">{{ _('Next') }}</a>
+            </li>
+        </ul>
+    </nav>
+    <p class="text-center">{{ _('Page %(page_num)s of %(total_pages)s.', page_num=bookings_page_obj.page, total_pages=bookings_page_obj.pages) }}</p>
+    {% endif %}
+
 </div>
 
 <script>

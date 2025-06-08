@@ -30,10 +30,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (updateModal && typeof updateModal.hide === 'function') {
         updateModal.hide(); // For Bootstrap modal object
     } else if (updateModalElement) {
-        // This is the primary fallback if Bootstrap's JS isn't loaded or `new bootstrap.Modal` failed silently.
-        // It also covers the custom fallback object's hide method if it were more complex.
         updateModalElement.style.display = 'none'; 
     }
+
+    // Pagination State
+    let currentUpcomingPage = 1;
+    let currentPastPage = 1;
+    let itemsPerPage = 10; // Default, will be updated by selector
+    let totalUpcomingPages = 1;
+    let totalPastPages = 1;
+
+    // Pagination Control Elements (assuming these IDs in HTML)
+    const upcomingPaginationControls = document.getElementById('upcoming-bookings-pagination-controls');
+    const pastPaginationControls = document.getElementById('past-bookings-pagination-controls');
+    const itemsPerPageSelect = document.getElementById('items-per-page-select'); // Assuming one selector for both
 
     const updateBookingModalLabel = document.getElementById('updateBookingModalLabel');
     const modalBookingIdInput = document.getElementById('modal-booking-id');
@@ -193,90 +203,184 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function fetchAndDisplayBookings() {
-        // const upcomingBookingsContainer = document.getElementById('upcoming-bookings-container'); // Now global
-        // const pastBookingsContainer = document.getElementById('past-bookings-container'); // Now global
-        const myBookingsStatusDiv = document.getElementById('my-bookings-status'); // Uses the global statusDiv
+        const myBookingsStatusDiv = document.getElementById('my-bookings-status');
 
         if (!upcomingBookingsContainer || !pastBookingsContainer) {
             console.error('My Bookings page structure is missing essential container elements.');
-            if (myBookingsStatusDiv) {
-                myBookingsStatusDiv.className = 'alert alert-danger';
-                myBookingsStatusDiv.textContent = 'Error: Could not load booking display components.';
-                myBookingsStatusDiv.style.display = 'block';
-            }
+            if (myBookingsStatusDiv) showStatusMessage(myBookingsStatusDiv, 'Error: Could not load booking display components.', 'danger');
             return;
         }
 
-        upcomingBookingsContainer.innerHTML = '<p class="loading-message">Loading upcoming bookings...</p>';
-        pastBookingsContainer.innerHTML = '<p class="loading-message">Loading past bookings...</p>';
-        if (myBookingsStatusDiv) {
-            myBookingsStatusDiv.style.display = 'none';
-        }
+        // Show loading messages
+        upcomingBookingsContainer.innerHTML = '<p class="loading-message">{{ _("Loading upcoming bookings...") }}</p>';
+        pastBookingsContainer.innerHTML = '<p class="loading-message">{{ _("Loading past bookings...") }}</p>';
+        if (upcomingPaginationControls) upcomingPaginationControls.innerHTML = ''; // Clear old controls
+        if (pastPaginationControls) pastPaginationControls.innerHTML = ''; // Clear old controls
+        if (myBookingsStatusDiv) hideStatusMessage(myBookingsStatusDiv);
+
 
         let apiUrl = '/api/bookings/my_bookings';
         const params = new URLSearchParams();
 
+        // Append pagination parameters
+        params.append('upcoming_page', currentUpcomingPage);
+        params.append('upcoming_per_page', itemsPerPage);
+        params.append('past_page', currentPastPage);
+        params.append('past_per_page', itemsPerPage);
+
         if (statusFilterSelect && statusFilterSelect.value !== 'all') {
             params.append('status_filter', statusFilterSelect.value);
         }
-
         if (dateFilterTypeSelect && dateFilterTypeSelect.value === 'specific' && datePickerInput && datePickerInput.value) {
             params.append('date_filter_value', datePickerInput.value);
         }
 
-        const queryString = params.toString();
-        if (queryString) {
-            apiUrl += `?${queryString}`;
-        }
+        apiUrl += `?${params.toString()}`;
 
         try {
-            const apiResponse = await apiCall(apiUrl, {}, myBookingsStatusDiv);
-            const upcomingBookings = apiResponse.upcoming_bookings;
-            const pastBookings = apiResponse.past_bookings;
+            // Disable controls during fetch
+            if (itemsPerPageSelect) itemsPerPageSelect.disabled = true;
+            // (Pagination controls will be rebuilt, so disabling existing ones isn't strictly necessary if cleared)
+
+            const apiResponse = await apiCall(apiUrl, {}, myBookingsStatusDiv); // myBookingsStatusDiv for errors
+
+            // Update global pagination state from response
+            currentUpcomingPage = apiResponse.upcoming_bookings.page;
+            totalUpcomingPages = apiResponse.upcoming_bookings.total_pages;
+            currentPastPage = apiResponse.past_bookings.page;
+            totalPastPages = apiResponse.past_bookings.total_pages;
+            // itemsPerPage is already known globally, but response might confirm it:
+            // itemsPerPage = apiResponse.upcoming_bookings.per_page; // if server can override
+
+            const upcomingBookingItems = apiResponse.upcoming_bookings.items;
+            const pastBookingItems = apiResponse.past_bookings.items;
             const checkInOutEnabled = apiResponse.check_in_out_enabled;
 
-            upcomingBookingsContainer.innerHTML = ''; // Clear loading message
-            pastBookingsContainer.innerHTML = '';   // Clear loading message
+            upcomingBookingsContainer.innerHTML = '';
+            pastBookingsContainer.innerHTML = '';
 
-            if ((!upcomingBookings || upcomingBookings.length === 0) && (!pastBookings || pastBookings.length === 0)) {
-                if (myBookingsStatusDiv) showStatusMessage(myBookingsStatusDiv, 'You have no bookings matching the current filters.', 'info');
-                upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings found.</p>';
-                pastBookingsContainer.innerHTML = '<p>No past booking history found.</p>';
-                return;
-            }
-
-            if (upcomingBookings && upcomingBookings.length > 0) {
-                upcomingBookings.forEach(booking => {
-                    const bookingCard = createBookingCardElement(booking, checkInOutEnabled);
-                    upcomingBookingsContainer.appendChild(bookingCard);
-                });
+            if ((!upcomingBookingItems || upcomingBookingItems.length === 0) && (!pastBookingItems || pastBookingItems.length === 0)) {
+                if (myBookingsStatusDiv) showStatusMessage(myBookingsStatusDiv, '{{ _("You have no bookings matching the current filters.") }}', 'info');
+                upcomingBookingsContainer.innerHTML = '<p>{{ _("No upcoming bookings found.") }}</p>';
+                pastBookingsContainer.innerHTML = '<p>{{ _("No past booking history found.") }}</p>';
             } else {
-                upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings found matching your filters.</p>';
+                if (upcomingBookingItems && upcomingBookingItems.length > 0) {
+                    upcomingBookingItems.forEach(booking => {
+                        const bookingCard = createBookingCardElement(booking, checkInOutEnabled);
+                        upcomingBookingsContainer.appendChild(bookingCard);
+                    });
+                } else {
+                    upcomingBookingsContainer.innerHTML = '<p>{{ _("No upcoming bookings found matching your filters.") }}</p>';
+                }
+
+                if (pastBookingItems && pastBookingItems.length > 0) {
+                    pastBookingItems.forEach(booking => {
+                        const bookingCard = createBookingCardElement(booking, checkInOutEnabled);
+                        pastBookingsContainer.appendChild(bookingCard);
+                    });
+                } else {
+                    pastBookingsContainer.innerHTML = '<p>{{ _("No past booking history found matching your filters.") }}</p>';
+                }
             }
 
-            if (pastBookings && pastBookings.length > 0) {
-                pastBookings.forEach(booking => {
-                    const bookingCard = createBookingCardElement(booking, checkInOutEnabled);
-                    pastBookingsContainer.appendChild(bookingCard);
-                });
-            } else {
-                pastBookingsContainer.innerHTML = '<p>No past booking history found matching your filters.</p>';
-            }
+            renderPaginationControls('upcoming', apiResponse.upcoming_bookings);
+            renderPaginationControls('past', apiResponse.past_bookings);
 
-            // Only hide global status if it was showing a general loading message and not an error from apiCall
-            if (myBookingsStatusDiv && myBookingsStatusDiv.textContent === 'Loading your bookings...' && !myBookingsStatusDiv.classList.contains('alert-danger')) {
+            if (myBookingsStatusDiv && myBookingsStatusDiv.textContent === '{{ _("Loading your bookings...") }}' && !myBookingsStatusDiv.classList.contains('alert-danger')) {
                  hideStatusMessage(myBookingsStatusDiv);
             }
         } catch (error) {
             console.error('Error fetching bookings:', error);
+            upcomingBookingsContainer.innerHTML = '<p>{{ _("Could not load upcoming bookings.") }}</p>';
+            pastBookingsContainer.innerHTML = '<p>{{ _("Could not load past bookings.") }}</p>';
             // apiCall likely already showed an error in myBookingsStatusDiv
-            // Set specific messages for containers
-            upcomingBookingsContainer.innerHTML = '<p>Could not load upcoming bookings.</p>';
-            pastBookingsContainer.innerHTML = '<p>Could not load past bookings.</p>';
+        } finally {
+            // Re-enable controls
+            if (itemsPerPageSelect) itemsPerPageSelect.disabled = false;
         }
     }
 
-    // Event listener for dynamically created buttons (needs to be on a static parent)
+    function renderPaginationControls(section, paginationData) {
+        const container = section === 'upcoming' ? upcomingPaginationControls : pastPaginationControls;
+        if (!container) return;
+        container.innerHTML = ''; // Clear previous controls
+
+        if (paginationData.total_pages <= 1) return;
+
+        const nav = document.createElement('nav');
+        nav.setAttribute('aria-label', `${section} bookings navigation`);
+        const ul = document.createElement('ul');
+        ul.className = 'pagination pagination-sm justify-content-center';
+
+        // Previous button
+        const prevLi = document.createElement('li');
+        prevLi.className = `page-item ${paginationData.page === 1 ? 'disabled' : ''}`;
+        const prevLink = document.createElement('a');
+        prevLink.className = 'page-link';
+        prevLink.href = '#';
+        prevLink.textContent = '{{ _("Previous") }}';
+        prevLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (paginationData.page > 1) {
+                if (section === 'upcoming') {
+                    currentUpcomingPage--;
+                } else {
+                    currentPastPage--;
+                }
+                fetchAndDisplayBookings();
+            }
+        });
+        prevLi.appendChild(prevLink);
+        ul.appendChild(prevLi);
+
+        // Page numbers (simplified for now, can be extended with ellipsis)
+        for (let i = 1; i <= paginationData.total_pages; i++) {
+            const pageLi = document.createElement('li');
+            pageLi.className = `page-item ${i === paginationData.page ? 'active' : ''}`;
+            const pageLink = document.createElement('a');
+            pageLink.className = 'page-link';
+            pageLink.href = '#';
+            pageLink.textContent = i;
+            pageLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (section === 'upcoming') {
+                    currentUpcomingPage = i;
+                } else {
+                    currentPastPage = i;
+                }
+                fetchAndDisplayBookings();
+            });
+            pageLi.appendChild(pageLink);
+            ul.appendChild(pageLi);
+        }
+
+        // Next button
+        const nextLi = document.createElement('li');
+        nextLi.className = `page-item ${paginationData.page === paginationData.total_pages ? 'disabled' : ''}`;
+        const nextLink = document.createElement('a');
+        nextLink.className = 'page-link';
+        nextLink.href = '#';
+        nextLink.textContent = '{{ _("Next") }}';
+        nextLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (paginationData.page < paginationData.total_pages) {
+                if (section === 'upcoming') {
+                    currentUpcomingPage++;
+                } else {
+                    currentPastPage++;
+                }
+                fetchAndDisplayBookings();
+            }
+        });
+        nextLi.appendChild(nextLink);
+        ul.appendChild(nextLi);
+
+        nav.appendChild(ul);
+        container.appendChild(nav);
+    }
+
+
+    // Event listener for dynamically created buttons
     // Using document as the closest static parent, can be refined if #my-bookings-list is always present
     document.addEventListener('click', async (event) => {
         const target = event.target;
@@ -755,6 +859,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Event Listeners for filters
     function handleFilterChange() {
+        currentUpcomingPage = 1; // Reset to first page on filter change
+        currentPastPage = 1;     // Reset to first page on filter change
         fetchAndDisplayBookings();
     }
 
