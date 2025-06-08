@@ -194,14 +194,45 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    async function loadMapDetails(mapId, dateString) {
-        // Get opacity from global window object, with validation and fallback
-        let mapResourceOpacity = 0.7; // Default fallback
-        if (typeof window.MAP_RESOURCE_OPACITY === 'number' && window.MAP_RESOURCE_OPACITY >= 0.0 && window.MAP_RESOURCE_OPACITY <= 1.0) {
-            mapResourceOpacity = window.MAP_RESOURCE_OPACITY;
-        } else if (typeof window.MAP_RESOURCE_OPACITY !== 'undefined') {
-            console.warn('MAP_RESOURCE_OPACITY from backend is invalid. Using default 0.7. Value received:', window.MAP_RESOURCE_OPACITY);
+    async function getEffectiveMapResourceOpacity() {
+        const defaultOpacity = 0.7;
+        let uiOpacity;
+
+        try {
+            const response = await fetch('/api/admin/system-settings/map-opacity'); // Use the correct API endpoint path
+            if (response.ok) {
+                const data = await response.json();
+                if (data.opacity !== undefined && typeof data.opacity === 'number' && data.opacity >= 0.0 && data.opacity <= 1.0) {
+                    uiOpacity = data.opacity;
+                    // console.log('Using UI configured opacity:', uiOpacity); // Optional: for debugging
+                    return uiOpacity;
+                } else {
+                    // console.warn('UI configured opacity is invalid or not found, falling back. Data:', data); // Optional: for debugging
+                }
+            } else {
+                // console.warn('Failed to fetch UI configured opacity, status:', response.status); // Optional: for debugging
+            }
+        } catch (error) {
+            // console.error('Error fetching UI configured opacity:', error); // Optional: for debugging
         }
+
+        // Fallback to environment variable if UI opacity is not valid or fetch failed
+        if (typeof window.MAP_RESOURCE_OPACITY === 'number' && window.MAP_RESOURCE_OPACITY >= 0.0 && window.MAP_RESOURCE_OPACITY <= 1.0) {
+            // console.log('Falling back to environment variable opacity:', window.MAP_RESOURCE_OPACITY); // Optional: for debugging
+            return window.MAP_RESOURCE_OPACITY;
+        } else if (typeof window.MAP_RESOURCE_OPACITY !== 'undefined') {
+            // console.warn('Environment MAP_RESOURCE_OPACITY is invalid. Using default. Value:', window.MAP_RESOURCE_OPACITY); // Optional: for debugging
+        }
+
+        // console.log('Falling back to default opacity:', defaultOpacity); // Optional: for debugging
+        return defaultOpacity;
+    }
+
+    // Make loadMapDetails async
+    async function loadMapDetails(mapId, dateString) {
+        // Get opacity using the new async function
+        const mapResourceOpacity = await getEffectiveMapResourceOpacity();
+        // console.log('Effective mapResourceOpacity to be used:', mapResourceOpacity); // Optional: for debugging
 
         if (!mapId) {
             if (mapContainer) {

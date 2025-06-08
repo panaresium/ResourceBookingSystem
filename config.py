@@ -50,6 +50,10 @@ DEFAULT_SCHEDULE_DATA = {
     "time_of_day": "02:00"     # HH:MM format (24-hour)
 }
 
+# --- UI Controlled Settings ---
+# Path to the JSON file storing UI-configurable map settings
+MAP_OPACITY_CONFIG_FILE = DATA_DIR / 'map_settings.json'
+
 # --- Google OAuth Configuration ---
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', 'YOUR_GOOGLE_CLIENT_ID_PLACEHOLDER_config.py')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', 'YOUR_GOOGLE_CLIENT_SECRET_PLACEHOLDER_config.py')

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% from "macros.html" import render_field, render_submit_button, render_flash_messages %}
+
+{% block title %}{{ _('System Settings') }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    {{ render_flash_messages(get_flashed_messages(with_categories=true)) }}
+    <h2>{{ _('System Settings') }}</h2>
+    <hr>
+
+    <div class="card mt-3">
+        <div class="card-header">
+            {{ _('Map Settings') }}
+        </div>
+        <div class="card-body">
+            <form id="map-opacity-form">
+                <div class="form-group row">
+                    <label for="map_resource_opacity" class="col-sm-4 col-form-label">{{ _('Map Resource Opacity') }}</label>
+                    <div class="col-sm-6">
+                        <input type="number" class="form-control" id="map_resource_opacity"
+                               name="map_resource_opacity" min="0.0" max="1.0" step="0.05" value="">
+                        <small class="form-text text-muted">
+                            {{ _('Set the opacity for resources displayed on the map (0.0 for fully transparent, 1.0 for fully opaque).') }}
+                            {{ _('This setting can be overridden by the MAP_RESOURCE_OPACITY environment variable if that is set to a valid value after an application restart.') }}
+                        </small>
+                    </div>
+                     <div class="col-sm-2">
+                        <button type="submit" class="btn btn-primary">{{ _('Save Opacity') }}</button>
+                    </div>
+                </div>
+            </form>
+            <p id="opacity-status-message" class="mt-2"></p>
+        </div>
+    </div>
+
+    <!-- Other system settings can be added here in future -->
+
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const opacityInput = document.getElementById('map_resource_opacity');
+    const opacityForm = document.getElementById('map-opacity-form');
+    const statusMessage = document.getElementById('opacity-status-message');
+
+    // Fetch current opacity and populate the input
+    fetch('{{ url_for("admin_api_system_settings.manage_map_opacity") }}')
+        .then(response => response.json())
+        .then(data => {
+            if (data.opacity !== undefined) {
+                opacityInput.value = data.opacity.toFixed(2);
+            } else {
+                showStatusMessage('Could not load current opacity.', true);
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching opacity:', error);
+            showStatusMessage('Error fetching current opacity.', true);
+        });
+
+    opacityForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        const newOpacity = parseFloat(opacityInput.value);
+
+        if (isNaN(newOpacity) || newOpacity < 0.0 || newOpacity > 1.0) {
+            showStatusMessage('Please enter a valid opacity value between 0.0 and 1.0.', true);
+            return;
+        }
+
+        statusMessage.textContent = 'Saving...';
+        statusMessage.className = 'text-info mt-2'; // Added mt-2 for consistency
+
+        fetch('{{ url_for("admin_api_system_settings.manage_map_opacity") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}' // If CSRF is used for API POSTs
+            },
+            body: JSON.stringify({ opacity: newOpacity })
+        })
+        .then(response => response.json().then(data => ({ status: response.status, body: data })))
+        .then(({ status, body }) => {
+            if (status === 200) {
+                showStatusMessage(body.message || 'Opacity saved successfully!', false);
+                if (body.opacity !== undefined) { // Ensure opacity is in response
+                    opacityInput.value = body.opacity.toFixed(2);
+                }
+            } else {
+                showStatusMessage(body.error || 'Failed to save opacity.', true);
+            }
+        })
+        .catch(error => {
+            console.error('Error saving opacity:', error);
+            showStatusMessage('An error occurred while saving opacity.', true);
+        });
+    });
+
+    function showStatusMessage(message, isError) {
+        statusMessage.textContent = message;
+        if (isError) {
+            statusMessage.className = 'text-danger mt-2';
+        } else {
+            statusMessage.className = 'text-success mt-2';
+        }
+    }
+});
+</script>
+{% endblock %}
