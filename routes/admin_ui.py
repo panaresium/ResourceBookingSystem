@@ -1,6 +1,9 @@
-from flask import Blueprint, render_template, current_app, jsonify, flash, redirect, url_for, request # Added request
+from flask import Blueprint, render_template, current_app, jsonify, flash, redirect, url_for, request, Response # Added request and Response
 from flask_login import login_required, current_user
 from sqlalchemy import func, cast, Date, Time, extract # For analytics_bookings_data if merged here, or general use
+import io # For CSV export/import
+import csv # For CSV export/import
+from werkzeug.utils import secure_filename # For CSV import
 import uuid # For task_id generation
 
 # Assuming Booking, Resource, User models are in models.py
@@ -891,3 +894,139 @@ def analytics_bookings_data():
 # Function to register this blueprint in the app factory
 def init_admin_ui_routes(app):
     app.register_blueprint(admin_ui_bp)
+
+@admin_ui_bp.route('/export_bookings_csv')
+@login_required
+@permission_required('manage_system')
+def export_bookings_csv():
+    current_app.logger.info(f"User {current_user.username} initiated CSV export of bookings.")
+    try:
+        bookings = Booking.query.all()
+
+        csv_output = io.StringIO()
+        csv_writer = csv.writer(csv_output)
+
+        # Write header row
+        header = ['id', 'resource_id', 'user_name', 'start_time', 'end_time', 'title', 'status']
+        csv_writer.writerow(header)
+
+        for booking in bookings:
+            row = [
+                booking.id,
+                booking.resource_id,
+                booking.user_name,
+                booking.start_time.strftime('%Y-%m-%d %H:%M:%S') if booking.start_time else '',
+                booking.end_time.strftime('%Y-%m-%d %H:%M:%S') if booking.end_time else '',
+                booking.title,
+                booking.status
+            ]
+            csv_writer.writerow(row)
+
+        csv_output.seek(0)
+
+        return Response(
+            csv_output,
+            mimetype="text/csv",
+            headers={"Content-Disposition": "attachment;filename=bookings_export.csv"}
+        )
+    except Exception as e:
+        current_app.logger.error(f"Error exporting bookings to CSV: {e}", exc_info=True)
+        flash(_('An error occurred while exporting bookings to CSV. Please check the logs.'), 'danger')
+        return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+@admin_ui_bp.route('/import_bookings_csv', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def import_bookings_csv():
+    current_app.logger.info(f"User {current_user.username} initiated CSV import of bookings.")
+    if 'file' not in request.files:
+        flash(_('No file part in the request.'), 'danger')
+        return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+    file = request.files['file']
+    if file.filename == '':
+        flash(_('No selected file.'), 'danger')
+        return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+    if file and file.filename.endswith('.csv'):
+        filename = secure_filename(file.filename)
+        current_app.logger.info(f"Processing uploaded CSV file: {filename}")
+        try:
+            # Read the file content as a string
+            file_content = file.stream.read().decode("UTF-8")
+            csv_file = io.StringIO(file_content)
+            csv_reader = csv.reader(csv_file)
+
+            header = next(csv_reader, None) # Skip header row
+            if not header or header != ['id', 'resource_id', 'user_name', 'start_time', 'end_time', 'title', 'status']:
+                flash(_('Invalid CSV header. Please ensure the header matches the export format.'), 'danger')
+                return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+            bookings_to_add = []
+            for row_number, row in enumerate(csv_reader, start=2): # Start row count from 2 (after header)
+                try:
+                    # Basic validation: ensure correct number of columns
+                    if len(row) != 7:
+                        flash(_(f"Skipping row {row_number}: Incorrect number of columns. Expected 7, got {len(row)}."), 'warning')
+                        current_app.logger.warning(f"CSV Import: Skipping row {row_number} due to incorrect column count. Data: {row}")
+                        continue
+
+                    resource_id_str = row[1]
+                    user_name = row[2]
+                    start_time_str = row[3]
+                    end_time_str = row[4]
+                    title = row[5] if row[5] else None # Handle optional title
+                    status = row[6]
+
+                    # Data validation and type conversion
+                    try:
+                        resource_id = int(resource_id_str)
+                    except ValueError:
+                        flash(_(f"Skipping row {row_number}: Invalid resource_id '{resource_id_str}'. Must be an integer."), 'warning')
+                        current_app.logger.warning(f"CSV Import: Skipping row {row_number} due to invalid resource_id. Data: {row}")
+                        continue
+
+                    try:
+                        start_time = datetime.strptime(start_time_str, '%Y-%m-%d %H:%M:%S') if start_time_str else None
+                        end_time = datetime.strptime(end_time_str, '%Y-%m-%d %H:%M:%S') if end_time_str else None
+                    except ValueError as ve:
+                        flash(_(f"Skipping row {row_number}: Invalid date format for start_time or end_time. Expected 'YYYY-MM-DD HH:MM:SS'. Error: {ve}"), 'warning')
+                        current_app.logger.warning(f"CSV Import: Skipping row {row_number} due to date parsing error. Data: {row}. Error: {ve}")
+                        continue
+
+                    # Optional: Add more validation (e.g., check if user_name and resource_id exist)
+                    # For now, we assume they exist or allow DB constraints to handle it.
+
+                    new_booking = Booking(
+                        resource_id=resource_id,
+                        user_name=user_name,
+                        start_time=start_time,
+                        end_time=end_time,
+                        title=title,
+                        status=status
+                        # id is auto-generated, so we don't set it from the CSV's first column.
+                        # If you need to preserve IDs, you'd need to handle potential conflicts.
+                    )
+                    bookings_to_add.append(new_booking)
+                except Exception as e_row:
+                    flash(_(f"Error processing row {row_number}: {str(e_row)}. Skipping this row."), 'warning')
+                    current_app.logger.error(f"CSV Import: Error processing row {row_number}. Data: {row}. Error: {e_row}", exc_info=True)
+                    continue # Skip to the next row
+
+            if bookings_to_add:
+                db.session.add_all(bookings_to_add)
+                db.session.commit()
+                flash(_(f'Successfully imported {len(bookings_to_add)} bookings from {filename}.'), 'success')
+                current_app.logger.info(f"Successfully imported {len(bookings_to_add)} bookings from {filename}.")
+            else:
+                flash(_('No new bookings were imported. The file might have been empty or all rows had errors.'), 'info')
+                current_app.logger.info(f"No new bookings imported from {filename}. File might be empty or all rows had errors.")
+
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"Error importing bookings from CSV file {filename}: {e}", exc_info=True)
+            flash(_(f'An error occurred while importing bookings from {filename}. Error: {str(e)}'), 'danger')
+    else:
+        flash(_('Invalid file type. Please upload a CSV file.'), 'danger')
+
+    return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
