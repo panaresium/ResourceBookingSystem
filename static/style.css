@@ -1558,3 +1558,9 @@ div.responsive-table-container > table#admin-bookings-table { /* Admin Bookings 
     width: 100%;
 }
 
+/* Custom styling for pagination controls spacer */
+.pagination-controls-spacer {
+    /* me-3 provides margin-right: 1rem. Let's make it slightly more. */
+    /* This will override Bootstrap's me-3 if it's also present due to specificity or order. */
+    margin-right: 1.5rem !important; /* Ensuring it overrides me-3 if both are present */
+}

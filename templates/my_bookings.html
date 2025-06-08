@@ -65,15 +65,16 @@
                 <p class="loading-message">{{ _('Loading upcoming bookings...') }}</p>
             </div>
             <div class="pagination-controls-wrapper mt-3" id="upcoming_bk_pg_pagination_controls_container" style="display: none;">
-                <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex justify-content-start align-items-center flex-wrap">
                     <div>
                         <label for="upcoming_bk_pg_per_page_select" class="form-label me-2">{{ _('Per Page:') }}</label>
                         <select id="upcoming_bk_pg_per_page_select" class="form-select form-select-sm d-inline-block" style="width: auto;"></select>
                     </div>
+                    <span class="me-3 pagination-controls-spacer"></span>
                     <ul class="pagination pagination-sm mb-0" id="upcoming_bk_pg_pagination_ul">
                         <!-- Pagination links will be built by JavaScript -->
                     </ul>
-                    <div id="upcoming_bk_pg_total_results_display" class="text-muted">
+                    <div id="upcoming_bk_pg_total_results_display" class="text-muted ms-auto">
                         <!-- Total results will be shown by JavaScript -->
                     </div>
                 </div>
@@ -93,15 +94,16 @@
                 <p class="loading-message">{{ _('Loading past bookings...') }}</p>
             </div>
             <div class="pagination-controls-wrapper mt-3" id="past_bk_pg_pagination_controls_container" style="display: none;">
-                <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex justify-content-start align-items-center flex-wrap">
                     <div>
                         <label for="past_bk_pg_per_page_select" class="form-label me-2">{{ _('Per Page:') }}</label>
                         <select id="past_bk_pg_per_page_select" class="form-select form-select-sm d-inline-block" style="width: auto;"></select>
                     </div>
+                    <span class="me-3 pagination-controls-spacer"></span>
                     <ul class="pagination pagination-sm mb-0" id="past_bk_pg_pagination_ul">
                         <!-- Pagination links will be built by JavaScript -->
                     </ul>
-                    <div id="past_bk_pg_total_results_display" class="text-muted">
+                    <div id="past_bk_pg_total_results_display" class="text-muted ms-auto">
                         <!-- Total results will be shown by JavaScript -->
                     </div>
                 </div>
