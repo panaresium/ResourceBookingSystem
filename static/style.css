@@ -1558,11 +1558,11 @@ div.responsive-table-container > table#admin-bookings-table { /* Admin Bookings 
     width: 100%;
 }
 
-/* Custom styling for pagination controls spacer */
+/* Custom styling for pagination controls spacer - relying on me-3 for margin now */
 .pagination-controls-spacer {
-    /* me-3 provides margin-right: 1rem. Let's make it slightly more. */
-    /* This will override Bootstrap's me-3 if it's also present due to specificity or order. */
-    margin-right: 1.5rem !important; /* Ensuring it overrides me-3 if both are present */
+    display: inline-block;
+    vertical-align: baseline;
+    /* margin-right is handled by .me-3 (1rem) on the span itself */
 }
 
 /* Styling for the active page link within the new pagination format */
@@ -1574,8 +1574,11 @@ div.responsive-table-container > table#admin-bookings-table { /* Admin Bookings 
 }
 
 /* Neutralize styles for the span wrapping page numbers */
+/* This rule had padding: 0.375rem 0.75rem; which is being changed by user request */
 .page-item .page-link.page-numbers-span-container {
-    padding: 0.375rem 0.75rem; /* Match default .page-link padding to keep height consistent */
+    /* padding: 0.375rem 0.75rem; /* Match default .page-link padding to keep height consistent */
+    padding: 0 !important; /* User request: Disable padding */
+    line-height: normal; /* Reset line-height if it was affected by .page-link defaults */
     cursor: default;
     background-color: transparent; /* No background */
     border-color: transparent; /* No border */
@@ -1610,40 +1613,31 @@ div.responsive-table-container > table#admin-bookings-table { /* Admin Bookings 
 }
 */
 
-/* --- New Pagination Styling Adjustments --- */
+/* --- Previous Pagination Styling Adjustments (Review/Remove/Modify) --- */
 
-/* 1. Disable Padding for Page Numbers Span per user request */
-/*    Overriding the previous .page-item .page-link.page-numbers-span-container rule's padding. */
-.page-link.page-numbers-span-container {
-    padding: 0 !important;
-    line-height: normal; /* Reset line-height if it was affected by .page-link defaults */
-    /* Note: Vertical alignment will primarily be handled by align-items-baseline on the parent UL.
-       If this causes issues, further targeted adjustments for this span might be needed. */
+/* Remove width: 100% from ul.pagination as ms-auto is no longer used for full-width push */
+ul.pagination.d-flex {
+    /* width: 100%; /* REMOVED */
 }
 
-/* 2. Style for Non-Interactive li.page-item Elements */
-/* For the "Per Page" LI (assumed to be the first child LI in the pagination UL) */
+/* Old positional selectors for non-interactive items - REMOVE these */
+/*
 ul.pagination > li.page-item:first-child {
-    border: 1px solid transparent; /* Remove default page-item border if any from Bootstrap */
+    border: 1px solid transparent;
     background-color: transparent !important;
     cursor: default;
-    padding-top: 0.1rem; /* Minor adjustment for baseline if needed */
-    padding-bottom: 0.1rem; /* Minor adjustment for baseline if needed */
+    padding-top: 0.1rem;
+    padding-bottom: 0.1rem;
 }
 ul.pagination > li.page-item:first-child:hover {
     background-color: transparent !important;
     border-color: transparent !important;
 }
-/* The span wrapper inside the "Per Page" LI */
 ul.pagination > li.page-item:first-child > span {
-    padding: 0.375rem 0.25rem; /* Provide some padding for height, less horizontal than typical page-link */
-                               /* Adjust as needed for vertical alignment with other items */
+    padding: 0.375rem 0.25rem;
 }
-
-
-/* For the "Total Results" LI (assumed to be the last child LI with ms-auto) */
 ul.pagination > li.page-item.ms-auto {
-    border: 1px solid transparent; /* Remove default page-item border if any */
+    border: 1px solid transparent;
     background-color: transparent !important;
     cursor: default;
 }
@@ -1651,32 +1645,62 @@ ul.pagination > li.page-item.ms-auto:hover {
     background-color: transparent !important;
     border-color: transparent !important;
 }
-/* The div inside "Total Results" LI already has p-2 from JS, which provides padding.
-   If its baseline needs adjustment, it can be targeted: */
 ul.pagination > li.page-item.ms-auto > div[id$="_total_results_display"] {
-   /* Example: padding-bottom: 0.1rem; to slightly shift baseline */
+}
+*/
+
+/* --- New Styles for specific LI items (total-results-li, per-page-li) --- */
+/* Assuming JS adds these classes: 'total-results-li' and 'per-page-li' */
+
+.total-results-li,
+.per-page-li {
+    border: 1px solid transparent !important; /* Override potential .page-item border */
+    background-color: transparent !important;
+    cursor: default;
+    padding: 0 !important; /* Reset padding on the li itself */
+    margin: 0 !important;  /* Reset margin on the li itself */
 }
 
-/* 4. Overall Vertical Alignment:
-   ul.pagination already has align-items-baseline.
-   The form-select-sm inside the "Per Page" li might need slight adjustment
-   if its baseline doesn't match perfectly with surrounding text/links.
-*/
+.total-results-li:hover,
+.per-page-li:hover {
+    background-color: transparent !important;
+    border-color: transparent !important;
+}
+
+/* Inner content of total-results-li */
+.total-results-li > div[id$="_total_results_display"] { /* The div holding the text */
+    padding: 0.375rem 0.75rem; /* Match typical page-link padding for vertical alignment */
+    display: inline-block; /* Allow spacer to sit beside it */
+}
+.total-results-li > .pagination-controls-spacer {
+    display: inline-block;
+    vertical-align: baseline;
+    /* me-3 class handles margin */
+}
+
+/* Inner content of per-page-li */
+.per-page-li > span { /* The span wrapping label, select, spacer */
+    padding: 0.375rem 0.25rem;
+    display: inline-block;
+}
+.per-page-li .pagination-controls-spacer {
+    /* This spacer is INSIDE the span within per-page-li */
+    display: inline-block;
+    vertical-align: baseline;
+    /* me-3 class handles margin */
+}
+
+
+/* 4. Overall Vertical Alignment: (ul.pagination has align-items-baseline from JS) */
 ul.pagination select.form-select-sm {
     /* Example of a potential adjustment if select baseline is off: */
-    /* vertical-align: baseline; /* Might not work directly on select, often needs wrapper */
+    /* vertical-align: baseline; */
     /* margin-bottom: -2px; /* Small nudge, highly dependent on font/bootstrap version */
 }
 
 /* Ensure all direct children LIs of the pagination UL are baseline aligned correctly as flex items */
 ul.pagination.align-items-baseline > li.page-item {
-    /* No specific override needed here usually, as align-items-baseline on UL should handle it.
-       However, if some LIs have different internal box structures, this can be a place for tweaks.
-       For example, ensuring they all have a consistent top/bottom reference.
-    */
-}
-
-/* Ensure ul.pagination spans full width for ms-auto to work on children */
-ul.pagination.d-flex {
-    width: 100%;
+   /* Ensure consistent baseline behavior. Bootstrap's default for page-item under display:flex on pagination should be fine.
+      The key is `align-items-baseline` on the `ul` and consistent padding/line-height of content within `li`s.
+   */
 }
