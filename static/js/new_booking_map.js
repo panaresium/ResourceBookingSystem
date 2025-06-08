@@ -256,7 +256,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         areaDiv.style.top = `${coords.y + offsetY}px`;
                         areaDiv.style.width = `${coords.width}px`;
                         areaDiv.style.height = `${coords.height}px`;
-                        areaDiv.textContent = resource.name;
+                        areaDiv.innerHTML = `<b>${resource.name}</b>`;
                         areaDiv.dataset.resourceId = resource.id;
 
                         const primarySlots = [
