@@ -129,11 +129,11 @@ document.addEventListener('DOMContentLoaded', () => {
         bookingCardDiv.dataset.startTime = booking.start_time;
         bookingCardDiv.dataset.endTime = booking.end_time;
 
-        const titleTextSpan = bookingCardDiv.querySelector('.booking-title-text');
+        const titleTextSpan = bookingCardDiv.querySelector('.booking-title-value');
         if (titleTextSpan) titleTextSpan.textContent = booking.title || 'N/A';
         const bookingIdDisplay = bookingCardDiv.querySelector('.booking-id-display');
         if (bookingIdDisplay) bookingIdDisplay.textContent = `ID: #${booking.id}`;
-        const resourceSpan = bookingCardDiv.querySelector('.booking-resource');
+        const resourceSpan = bookingCardDiv.querySelector('.resource-name-value');
         if (resourceSpan) resourceSpan.textContent = booking.resource_name || 'N/A';
 
         const startDate = new Date(booking.start_time);
@@ -144,18 +144,33 @@ document.addEventListener('DOMContentLoaded', () => {
         const formattedStartTime = startDate.toLocaleTimeString(undefined, optionsTime);
         const formattedEndTime = endDate.toLocaleTimeString(undefined, optionsTime);
 
-        const dateSpan = bookingCardDiv.querySelector('.booking-date');
+        const dateSpan = bookingCardDiv.querySelector('.booking-date-value');
         if (dateSpan) dateSpan.textContent = formattedDate;
-        const startTimeSpan = bookingCardDiv.querySelector('.booking-start-time');
+        const startTimeSpan = bookingCardDiv.querySelector('.booking-start-time-value');
         if (startTimeSpan) startTimeSpan.textContent = formattedStartTime;
-        const endTimeSpan = bookingCardDiv.querySelector('.booking-end-time');
+        const endTimeSpan = bookingCardDiv.querySelector('.booking-end-time-value');
         if (endTimeSpan) endTimeSpan.textContent = formattedEndTime;
 
-        const statusBadge = bookingCardDiv.querySelector('.booking-status');
+        const statusBadge = bookingCardDiv.querySelector('.booking-status-value');
         if (statusBadge) {
             statusBadge.textContent = booking.status ? booking.status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Unknown';
-            statusBadge.className = `booking-status badge bg-${getBootstrapStatusColor(booking.status)}`;
+            // Note: The class name for styling the badge itself (e.g., 'booking-status') might be different from the value span.
+            // Assuming 'booking-status-value' is for the text content and it might also have general badge styling.
+            // If 'booking-status' was also meant for styling the badge container, that might need to be preserved or handled differently.
+            // For now, aligning with the pattern of other ".xxxx-value" selectors for text content.
+            // The original line for class name was: statusBadge.className = `booking-status badge bg-${getBootstrapStatusColor(booking.status)}`;
+            // This might need to be:
+            // statusBadge.className = `booking-status-value badge bg-${getBootstrapStatusColor(booking.status)}`;
+            // or the template might have a separate element for the badge background and this span is just for text.
+            // Based on template structure, booking-status-value is likely just for text.
+            // The template has: <strong>Status:</strong> <span class="booking-status-value"></span>
+            // So, the badge color/background should be applied to this span or its parent if needed.
+            // Let's assume for now that `booking-status-value` is the target for text and styling.
+            statusBadge.className = `booking-status-value badge bg-${getBootstrapStatusColor(booking.status)}`;
         }
+
+        const recurrenceRuleSpan = bookingCardDiv.querySelector('.recurrence-rule-value');
+        if (recurrenceRuleSpan) recurrenceRuleSpan.textContent = booking.recurrence_rule || 'N/A';
 
         const pinSection = bookingCardDiv.querySelector('.booking-pin-section');
         const pinSpan = bookingCardDiv.querySelector('.booking-pin');
@@ -450,10 +465,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (target.classList.contains('edit-title-btn')) {
             event.stopPropagation(); // Prevent card click if any
             const bookingId = target.closest('.booking-card').dataset.bookingId;
-            const titleValueElement = target.closest('.booking-card').querySelector('.booking-title-text');
+            const titleValueElement = target.closest('.booking-card').querySelector('.booking-title-value'); // Corrected selector
             const currentTitle = titleValueElement ? titleValueElement.textContent : '';
 
-            const resourceName = target.closest('.booking-card').querySelector('.booking-resource').textContent;
+            const resourceName = target.closest('.booking-card').querySelector('.resource-name-value').textContent; // Corrected selector
 
             if (modalBookingIdInput) modalBookingIdInput.value = bookingId;
             if (newBookingTitleInput) newBookingTitleInput.value = currentTitle;
