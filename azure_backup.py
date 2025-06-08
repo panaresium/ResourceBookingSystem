@@ -7,6 +7,8 @@ from datetime import datetime
 import tempfile # Added for temporary file
 import re # Added for regex parsing of CSV filenames
 import time
+import csv # Added for CSV export from DB
+import shutil # Added for temporary directory cleanup
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError, ServiceRequestError # Added HttpResponseError
 
 # Assuming models.py is in the same directory or accessible via PYTHONPATH
@@ -773,6 +775,78 @@ def restore_bookings_from_csv_backup(app, timestamp_str, socketio_instance=None,
                 # actions_summary['errors'].append(f"Cleanup error: Failed to delete temp file {temp_csv_path}: {e_remove}")
 
     return actions_summary
+
+
+def list_available_incremental_booking_backups():
+    """
+    Lists available incremental booking backup files from Azure File Share.
+
+    Returns:
+        list: A sorted list of dictionaries, each representing an incremental backup file.
+              Each dictionary contains 'filename', 'since_timestamp', 'to_timestamp', 'display_name'.
+              Returns an empty list if no backups are found or if there's an error.
+    """
+    logger.info("Attempting to list available incremental booking backups.")
+    backup_items = []
+    try:
+        service_client = _get_service_client()
+        share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
+        share_client = service_client.get_share_client(share_name)
+
+        if not _client_exists(share_client):
+            logger.warning(f"Incremental booking backup share '{share_name}' does not exist. No backups to list.")
+            return []
+
+        backup_dir_client = share_client.get_directory_client(BOOKING_INCREMENTAL_BACKUPS_DIR)
+        if not _client_exists(backup_dir_client):
+            logger.warning(f"Incremental booking backup directory '{BOOKING_INCREMENTAL_BACKUPS_DIR}' does not exist on share '{share_name}'. No backups to list.")
+            return []
+
+        # Filename format: bookings_incremental_{since_ts_str}_to_{current_ts_str}.json
+        # Example: bookings_incremental_20230101_100000_to_20230101_110000.json
+        pattern = re.compile(
+            r"^bookings_incremental_(?P<since_timestamp>\d{8}_\d{6})_to_(?P<to_timestamp>\d{8}_\d{6})\.json$"
+        )
+
+        for item in backup_dir_client.list_directories_and_files():
+            if item['is_directory']:
+                continue
+
+            filename = item['name']
+            match = pattern.match(filename)
+            if not match:
+                logger.warning(f"Skipping file with unexpected name format: {filename} in incremental backups.")
+                continue
+
+            since_ts_str = match.group('since_timestamp')
+            to_ts_str = match.group('to_timestamp')
+
+            try:
+                # Validate timestamps by attempting to parse them
+                since_dt = datetime.strptime(since_ts_str, '%Y%m%d_%H%M%S')
+                to_dt = datetime.strptime(to_ts_str, '%Y%m%d_%H%M%S')
+
+                display_name = f"Incremental: {since_dt.strftime('%Y-%m-%d %H:%M:%S')} to {to_dt.strftime('%Y-%m-%d %H:%M:%S')} UTC"
+
+                backup_items.append({
+                    'filename': filename,
+                    'since_timestamp': since_ts_str,
+                    'to_timestamp': to_ts_str,
+                    'display_name': display_name
+                })
+            except ValueError:
+                logger.warning(f"Skipping file with invalid timestamp format in name: {filename}")
+                continue
+
+        # Sort by 'to_timestamp' (oldest first for sequential application)
+        backup_items.sort(key=lambda x: x['to_timestamp'])
+
+        logger.info(f"Found {len(backup_items)} available incremental booking backup items.")
+        return backup_items
+
+    except Exception as e:
+        logger.error(f"Error listing available incremental booking backups: {e}", exc_info=True)
+        return []
 
 
 def verify_booking_csv_backup(timestamp_str, socketio_instance=None, task_id=None):
@@ -2853,6 +2927,193 @@ def restore_incremental_bookings(app, socketio_instance=None, task_id=None) -> d
 
 
     return summary
+
+
+def _export_bookings_from_db_file_to_csv(backup_db_path: str, temp_csv_path: str, socketio_instance=None, task_id=None) -> bool:
+    """
+    Exports all bookings from a given SQLite database file to a CSV file.
+
+    Args:
+        backup_db_path (str): Path to the SQLite database file.
+        temp_csv_path (str): Path to write the CSV output.
+        socketio_instance: Optional SocketIO instance for progress.
+        task_id: Optional task ID for SocketIO.
+
+    Returns:
+        bool: True if export was successful, False otherwise.
+    """
+    event_name = 'restore_progress' # Assuming a generic restore progress event
+    _emit_progress(socketio_instance, task_id, event_name, "Exporting bookings from backup DB to CSV...", detail=f"DB: {os.path.basename(backup_db_path)}", level='INFO')
+    logger.info(f"Exporting bookings from SQLite DB '{backup_db_path}' to CSV '{temp_csv_path}'.")
+    conn = None # Ensure conn is defined for finally block
+    try:
+        conn = sqlite3.connect(backup_db_path)
+        cursor = conn.cursor()
+
+        # Check if Booking table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='Booking';")
+        if cursor.fetchone() is None:
+            logger.error(f"Booking table not found in backup database: {backup_db_path}")
+            _emit_progress(socketio_instance, task_id, event_name, "Booking table not found in backup DB.", detail=backup_db_path, level='ERROR')
+            return False # conn.close() will be handled in finally
+
+        cursor.execute("SELECT * FROM Booking")
+        rows = cursor.fetchall()
+
+        if not rows:
+            logger.info(f"No bookings found in table 'Booking' in backup database: {backup_db_path}. Creating empty CSV.")
+            with open(temp_csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                if cursor.description: # Write headers even if no data
+                    header = [description[0] for description in cursor.description]
+                    csv_writer = csv.writer(csvfile)
+                    csv_writer.writerow(header)
+            _emit_progress(socketio_instance, task_id, event_name, "No bookings found in backup DB. Empty CSV created.", detail=backup_db_path, level='INFO')
+            return True # Success, but no data to export
+
+        header = [description[0] for description in cursor.description]
+
+        with open(temp_csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+            csv_writer = csv.writer(csvfile)
+            csv_writer.writerow(header)
+            csv_writer.writerows(rows)
+
+        logger.info(f"Successfully exported {len(rows)} bookings to CSV: {temp_csv_path}")
+        _emit_progress(socketio_instance, task_id, event_name, "Bookings exported to CSV successfully.", detail=f"{len(rows)} bookings.", level='INFO')
+        return True
+
+    except sqlite3.Error as e_sqlite:
+        logger.error(f"SQLite error during export from {backup_db_path}: {e_sqlite}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, "SQLite error during DB export.", detail=str(e_sqlite), level='ERROR')
+        return False
+    except IOError as e_io:
+        logger.error(f"IOError writing CSV to {temp_csv_path}: {e_io}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, "IOError writing CSV.", detail=str(e_io), level='ERROR')
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error exporting bookings from {backup_db_path} to {temp_csv_path}: {e}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, "Unexpected error during booking export.", detail=str(e), level='ERROR')
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def restore_bookings_from_full_db_backup(app, timestamp_str: str, socketio_instance=None, task_id=None) -> dict:
+    """
+    Restores bookings by extracting them from a full database backup file,
+    converting to CSV, and then importing via import_bookings_from_csv_file.
+    This process will clear existing bookings before import.
+    """
+    event_name = 'booking_db_restore_progress'
+    actions_summary = {
+        'status': 'started',
+        'message': f'Starting restore of bookings from DB backup for timestamp {timestamp_str}.',
+        'processed': 0,
+        'created': 0,
+        'skipped_duplicates': 0,
+        'errors': []
+    }
+    logger.info(actions_summary['message'])
+    _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], level='INFO')
+
+    temp_backup_dir = None
+
+    try:
+        service_client = _get_service_client()
+        db_share_name = os.environ.get('AZURE_DB_SHARE', 'db-backups')
+        db_share_client = service_client.get_share_client(db_share_name)
+
+        if not _client_exists(db_share_client):
+            actions_summary['status'] = 'failed'
+            actions_summary['message'] = f"Azure DB share '{db_share_name}' not found."
+            actions_summary['errors'].append(actions_summary['message'])
+            logger.error(actions_summary['message'])
+            _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], detail=f"Share '{db_share_name}' not found.", level='ERROR')
+            return actions_summary
+
+        remote_db_filename = f"{DB_FILENAME_PREFIX}{timestamp_str}.db"
+        azure_db_path = f"{DB_BACKUPS_DIR}/{remote_db_filename}"
+        db_file_client = db_share_client.get_file_client(azure_db_path)
+
+        if not _client_exists(db_file_client):
+            actions_summary['status'] = 'failed'
+            actions_summary['message'] = f"DB backup file '{azure_db_path}' not found on share '{db_share_name}'."
+            actions_summary['errors'].append(actions_summary['message'])
+            logger.error(actions_summary['message'])
+            _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], detail=azure_db_path, level='ERROR')
+            return actions_summary
+
+        temp_backup_dir = tempfile.mkdtemp()
+        logger.info(f"Created temporary directory for DB restore: {temp_backup_dir}")
+
+        downloaded_db_path = os.path.join(temp_backup_dir, f"backup_{timestamp_str}.db")
+        _emit_progress(socketio_instance, task_id, event_name, f"Downloading DB backup: {remote_db_filename}", detail=azure_db_path, level='INFO')
+
+        if not download_file(db_share_client, azure_db_path, downloaded_db_path):
+            actions_summary['status'] = 'failed'
+            actions_summary['message'] = f"Failed to download DB backup '{azure_db_path}'."
+            actions_summary['errors'].append(actions_summary['message'])
+            logger.error(actions_summary['message'])
+            _emit_progress(socketio_instance, task_id, event_name, actions_summary['message'], detail=f"Download failed for '{azure_db_path}'.", level='ERROR')
+            return actions_summary
+
+        logger.info(f"DB backup '{remote_db_filename}' downloaded to '{downloaded_db_path}'.")
+        _emit_progress(socketio_instance, task_id, event_name, "DB backup downloaded. Exporting bookings to CSV...", level='INFO')
+
+        temp_csv_path = os.path.join(temp_backup_dir, f"bookings_from_db_{timestamp_str}.csv")
+        if not _export_bookings_from_db_file_to_csv(downloaded_db_path, temp_csv_path, socketio_instance, task_id):
+            actions_summary['status'] = 'failed'
+            actions_summary['message'] = "Failed to export bookings from downloaded DB to CSV."
+            # Specific error already logged and emitted by helper
+            if not actions_summary['errors']: # Add a generic one if helper didn't
+                 actions_summary['errors'].append(actions_summary['message'])
+            logger.error(actions_summary['message'])
+            return actions_summary
+
+        logger.info(f"Bookings exported to temporary CSV: {temp_csv_path}. Starting import.")
+        _emit_progress(socketio_instance, task_id, event_name, "Bookings exported to CSV. Starting import to live DB (existing bookings will be cleared).", level='INFO')
+
+        import_summary = import_bookings_from_csv_file(
+            temp_csv_path,
+            app,
+            clear_existing=True,
+            socketio_instance=socketio_instance,
+            task_id=task_id,
+            import_context_message_prefix=f"Restored from DB Backup ({timestamp_str}):"
+        )
+
+        actions_summary.update(import_summary)
+
+        if import_summary.get('errors'):
+            actions_summary['status'] = 'completed_with_errors'
+            actions_summary['message'] = f"Booking restore from DB backup ({timestamp_str}) completed with errors during CSV import."
+            logger.warning(f"{actions_summary['message']} Summary: {import_summary}")
+            _emit_progress(socketio_instance, task_id, event_name, "Booking import from DB backup CSV completed with errors.", detail=f"Errors: {len(import_summary['errors'])}", level='WARNING')
+        else:
+            actions_summary['status'] = 'completed_successfully'
+            actions_summary['message'] = f"Booking restore from DB backup ({timestamp_str}) completed successfully."
+            logger.info(f"{actions_summary['message']} Summary: {import_summary}")
+            _emit_progress(socketio_instance, task_id, event_name, "Booking import from DB backup CSV completed successfully.", detail="All records processed.", level='SUCCESS')
+
+    except Exception as e:
+        error_message = f"An unexpected error occurred during booking restore from DB backup: {str(e)}"
+        logger.error(error_message, exc_info=True)
+        actions_summary['status'] = 'failed'
+        actions_summary['message'] = error_message
+        if str(e) not in actions_summary['errors']:
+            actions_summary['errors'].append(str(e))
+        _emit_progress(socketio_instance, task_id, event_name, error_message, detail=str(e), level='CRITICAL_ERROR')
+    finally:
+        if temp_backup_dir and os.path.isdir(temp_backup_dir):
+            try:
+                shutil.rmtree(temp_backup_dir)
+                logger.info(f"Temporary backup directory '{temp_backup_dir}' deleted.")
+            except Exception as e_remove:
+                logger.error(f"Failed to delete temporary backup directory '{temp_backup_dir}': {e_remove}", exc_info=True)
+                if 'errors' in actions_summary and isinstance(actions_summary['errors'], list):
+                     actions_summary['errors'].append(f"Cleanup error: Failed to delete temp directory {temp_backup_dir}: {e_remove}")
+
+    return actions_summary
 # The new function download_scheduler_settings_component should be placed before restore_full_backup
 # or at least before if __name__ == '__main__' if it exists.
 # For simplicity, appending here. If __main__ block is present, it should be manually moved before it.
