@@ -342,8 +342,11 @@ def _get_paginated_bookings(base_query, page_arg_name, per_page_arg_name,
     now_utc = datetime.now(timezone.utc) # For can_check_in logic
 
     for booking in pagination_obj.items:
-        # Gracefully handle if booking.resource or booking.user is None
-        resource_name = booking.resource.name if booking.resource else "Unknown Resource"
+        resource = Resource.query.get(booking.resource_id) if booking.resource_id else None
+
+        resource_name = resource.name if resource else "Unknown Resource"
+        resource_allows_check_in = resource.allow_check_in if resource and hasattr(resource, 'allow_check_in') else False
+        resource_check_in_url = url_for('ui.check_in_at_resource', resource_id=resource.id, _external=True) if resource else None
         # user_username = booking.user.username if booking.user else "Unknown User" # Not strictly needed for booking_to_dict if user_name is stored directly
 
         booking_start_time_aware = booking.start_time
@@ -352,6 +355,7 @@ def _get_paginated_bookings(base_query, page_arg_name, per_page_arg_name,
 
         can_check_in = (
             enable_check_in_out and
+            resource_allows_check_in and # Check if the resource itself allows check-in
             booking.checked_in_at is None and
             booking.status == 'approved' and
             booking_start_time_aware - timedelta(minutes=check_in_minutes_before) <= now_utc <= \
@@ -375,6 +379,8 @@ def _get_paginated_bookings(base_query, page_arg_name, per_page_arg_name,
             'id': booking.id,
             'resource_id': booking.resource_id,
             'resource_name': resource_name,
+            'resource_allows_check_in': resource_allows_check_in,
+            'resource_check_in_url': resource_check_in_url,
             'user_name': booking.user_name, # user_name is directly on Booking model
             'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
             'end_time': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
