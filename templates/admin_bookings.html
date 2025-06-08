@@ -30,7 +30,7 @@
     </form>
 
     {% if bookings %}
-    <div class="table-responsive">
+    <div class="table-responsive {% if bookings_page_obj and bookings_page_obj.pages > 1 %}scrollable-when-paginated{% endif %}">
         <table id="admin-bookings-table" class="table bookings-table"> {# Added id #}
             <thead>
                 <tr>

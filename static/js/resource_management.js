@@ -90,6 +90,15 @@ document.addEventListener('DOMContentLoaded', function() {
             const resourcesToShow = data.resources;
             const paginationData = data.pagination;
 
+            const tableWrapper = document.querySelector('.admin-table-scroll-wrapper');
+            if (tableWrapper) {
+                if (paginationData && paginationData.total_pages > 1) {
+                    tableWrapper.classList.add('scrollable-when-paginated');
+                } else {
+                    tableWrapper.classList.remove('scrollable-when-paginated');
+                }
+            }
+
             const mapsById = {}; // Populate this if needed for grouping, or fetch maps separately
             // If maps are needed for display and not fetched globally, fetch them here or pass from a global store.
             // For simplicity, assuming map name isn't displayed in the resource row directly or is part of resource_to_dict if needed.

@@ -103,6 +103,16 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await apiCall(`/api/admin/users?${params.toString()}`);
 
             localUsersCache = data.users || []; // Update cache with current page's users
+
+            const usersTable = document.getElementById('users-table');
+            const tableWrapper = usersTable ? usersTable.closest('.responsive-table-container') : null;
+            if (tableWrapper) {
+                if (data.pagination && data.pagination.total_pages > 1) {
+                    tableWrapper.classList.add('scrollable-when-paginated');
+                } else {
+                    tableWrapper.classList.remove('scrollable-when-paginated');
+                }
+            }
             
             usersTableBody.innerHTML = ''; // Clear existing rows
             if (data.users && data.users.length > 0) {
