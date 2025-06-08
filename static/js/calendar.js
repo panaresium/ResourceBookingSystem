@@ -471,6 +471,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         eventHtml += `<br>${displayTime}`;
                     }
                 }
+
+                const resourceName = arg.event.extendedProps.resource_name;
+                if (resourceName) {
+                    eventHtml += `<br><b>${resourceName}</b>`;
+                }
+
                 return { html: eventHtml };
             }
             // For other views, retain original behavior (bold title, FC handles time)
