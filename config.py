@@ -105,6 +105,25 @@ MIN_BOOKING_DURATION_MINUTES = int(os.environ.get('MIN_BOOKING_DURATION_MINUTES'
 BOOKING_LEAD_TIME_DAYS = int(os.environ.get('BOOKING_LEAD_TIME_DAYS', 90)) # How far in advance users can book
 DEFAULT_ITEMS_PER_PAGE = int(os.environ.get('DEFAULT_ITEMS_PER_PAGE', 10)) # For pagination
 
+# --- Map View Settings ---
+try:
+    raw_opacity = os.environ.get('MAP_RESOURCE_OPACITY')
+    if raw_opacity is not None:
+        MAP_RESOURCE_OPACITY_VALUE = float(raw_opacity)
+        if not (0.0 <= MAP_RESOURCE_OPACITY_VALUE <= 1.0):
+            print(f"Warning: MAP_RESOURCE_OPACITY environment variable value '{raw_opacity}' is out of range (0.0-1.0). Using default 0.7.")
+            MAP_RESOURCE_OPACITY_VALUE = 0.7
+    else:
+        MAP_RESOURCE_OPACITY_VALUE = 0.7 # Default if env var is not set
+except ValueError:
+    MAP_RESOURCE_OPACITY_VALUE = 0.7 # Default if conversion to float fails
+    # It's tricky to access raw_opacity here if os.environ.get already failed or returned None then float() failed.
+    # So, the warning message might need to be more generic or we assume raw_opacity was the problematic value.
+    print(f"Warning: MAP_RESOURCE_OPACITY environment variable is not a valid float. Using default 0.7.")
+
+# Ensure the final variable name matches what the app will use, e.g., MAP_RESOURCE_OPACITY
+MAP_RESOURCE_OPACITY = MAP_RESOURCE_OPACITY_VALUE
+
 # --- SocketIO Configuration ---
 # Example: For using a message queue like Redis in production for SocketIO
 SOCKETIO_MESSAGE_QUEUE = os.environ.get('SOCKETIO_MESSAGE_QUEUE') # e.g., 'redis://localhost:6379/0'
