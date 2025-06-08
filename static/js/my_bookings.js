@@ -282,35 +282,55 @@ document.addEventListener('DOMContentLoaded', () => {
              // No totalResultsDisplay element to clear text from directly here anymore
              return;
         }
-        paginationContainer.style.display = 'block'; // Or 'flex' if paginationContainer itself needs flex properties, but UL is the primary flex now. Let's use block.
+        paginationContainer.style.display = 'block';
+
+        // --- Create "Total Results" Element (as an <li>) ---
+        const totalResultsLi = document.createElement('li');
+        // Assuming 'total-results-li' class might be used for specific styling of this non-interactive item.
+        // Not using ms-auto here as it's the first element now.
+        totalResultsLi.className = 'page-item total-results-li';
+
+        const totalDiv = document.createElement('div');
+        totalDiv.id = `${prefix}total_results_display`;
+        totalDiv.className = 'text-muted p-2';
+        totalDiv.textContent = totalItems > 0 ? `Total: ${totalItems} results` : 'No results for current filter.';
+        // TODO: Add localization for "Total: X results" and "No results for current filter."
+
+        totalResultsLi.appendChild(totalDiv);
+
+        // New spacer inside totalResultsLi, after the text div
+        const totalResultsSpacer = document.createElement('span');
+        totalResultsSpacer.className = 'pagination-controls-spacer me-3';
+        totalResultsLi.appendChild(totalResultsSpacer);
+
+        paginationUl.appendChild(totalResultsLi);
 
         // --- Create "Per Page" Element (as an <li>) ---
         const perPageLi = document.createElement('li');
-        perPageLi.className = 'page-item'; // Or custom class like 'pagination-per-page-item'
+        perPageLi.className = 'page-item per-page-li'; // Added hypothetical class for styling
 
         const perPageWrapperSpan = document.createElement('span');
-        // perPageWrapperSpan.className = 'page-link'; // Avoid .page-link styling for the wrapper if it's not desired
+        // This span does not get 'page-link' to avoid link-like styling for the whole per-page block
 
         const label = document.createElement('label');
         label.htmlFor = `${prefix}per_page_select`;
-        label.className = 'form-label me-2'; // Bootstrap classes for label
-        label.textContent = 'Per Page:'; // TODO: Add localization if needed: gettext('Per Page:')
+        label.className = 'form-label me-2';
+        label.textContent = 'Per Page:'; // TODO: Add localization if needed
 
         const select = document.createElement('select');
         select.id = `${prefix}per_page_select`;
         select.className = 'form-select form-select-sm d-inline-block';
         select.style.width = 'auto';
 
-        // Call initializeMyBookingsPerPageSelect - this function populates the select and adds event listener
-        // itemsPerPageVarSetter is now passed to renderMyBookingsPaginationControls
         initializeMyBookingsPerPageSelect(prefix, select, itemsPerPageVarSetter, currentPageSetter, fetchDataFunction, itemsPerPage);
 
-        const spacerSpan = document.createElement('span');
-        spacerSpan.className = 'me-3 pagination-controls-spacer'; // Use existing spacer class
+        // This is the original spacer for "Per Page" that was inside perPageWrapperSpan
+        const perPageOriginalSpacer = document.createElement('span');
+        perPageOriginalSpacer.className = 'me-3 pagination-controls-spacer';
 
         perPageWrapperSpan.appendChild(label);
         perPageWrapperSpan.appendChild(select);
-        perPageWrapperSpan.appendChild(spacerSpan); // Spacer after select, inside the wrapper span
+        perPageWrapperSpan.appendChild(perPageOriginalSpacer);
         perPageLi.appendChild(perPageWrapperSpan);
         paginationUl.appendChild(perPageLi);
 
@@ -412,18 +432,8 @@ document.addEventListener('DOMContentLoaded', () => {
             paginationUl.appendChild(createOuterPageLink(currentPage + 1, 'Next &gt;', currentPage >= totalPages));
         }
 
-        // --- Create "Total Results" Element (as an <li>) ---
-        const totalResultsLi = document.createElement('li');
-        totalResultsLi.className = 'page-item ms-auto'; // ms-auto to push to the right
-
-        const totalDiv = document.createElement('div');
-        totalDiv.id = `${prefix}total_results_display`; // Recreate the ID for potential other JS interactions
-        totalDiv.className = 'text-muted p-2'; // p-2 for padding similar to page-links
-        totalDiv.textContent = totalItems > 0 ? `Total: ${totalItems} results` : 'No results for current filter.';
-        // TODO: Add localization for "Total: X results" and "No results for current filter."
-
-        totalResultsLi.appendChild(totalDiv);
-        paginationUl.appendChild(totalResultsLi);
+        // "Previous", Page Numbers, and "Next" are appended after "Per Page"
+        // and only if totalPages > 1
     }
 
 
