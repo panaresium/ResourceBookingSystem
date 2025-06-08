@@ -263,110 +263,139 @@ def get_my_bookings():
     Accepts 'status_filter' and 'date_filter_value' query parameters.
     Also includes a global setting `check_in_out_enabled`.
     """
+    status_filter = request.args.get('status_filter')
+    date_filter_value_str = request.args.get('date_filter_value')
+
+    booking_settings = BookingSettings.query.first()
+    enable_check_in_out = booking_settings.enable_check_in_out if booking_settings else False
+    check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings else 15
+    check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings else 15
+    if not booking_settings:
+            current_app.logger.warning("BookingSettings not found in DB, using default check-in window (15/15 mins) for get_my_bookings.")
+
+    # Base query for the current user
+    base_user_bookings_query = Booking.query.filter_by(user_name=current_user.username)
+
+    # Apply Status Filter
+    if status_filter and status_filter.lower() != 'all':
+        base_user_bookings_query = base_user_bookings_query.filter(
+            sqlfunc.trim(sqlfunc.lower(Booking.status)) == status_filter.lower()
+        )
+
+    # Apply Date Filter
+    if date_filter_value_str:
+        try:
+            target_date_obj = datetime.strptime(date_filter_value_str, '%Y-%m-%d').date()
+            base_user_bookings_query = base_user_bookings_query.filter(
+                sqlfunc.date(Booking.start_time) == target_date_obj
+            )
+        except ValueError:
+            current_app.logger.warning(f"Invalid date_filter_value format: {date_filter_value_str}. Ignoring date filter.")
+
+    now_utc_for_filtering = datetime.now(timezone.utc) # Use this for splitting past/upcoming
+
+    # Upcoming bookings query
+    upcoming_query = base_user_bookings_query.filter(Booking.start_time >= now_utc_for_filtering)\
+                                             .order_by(Booking.start_time.asc())
+
+    # Past bookings query
+    past_query = base_user_bookings_query.filter(Booking.start_time < now_utc_for_filtering)\
+                                         .order_by(Booking.start_time.desc())
+
     try:
-        status_filter = request.args.get('status_filter')
-        date_filter_value_str = request.args.get('date_filter_value')
+        paginated_upcoming_bookings = _get_paginated_bookings(
+            upcoming_query, 'upcoming_page', 'upcoming_per_page',
+            enable_check_in_out, check_in_minutes_before, check_in_minutes_after
+        )
+        paginated_past_bookings = _get_paginated_bookings(
+            past_query, 'past_page', 'past_per_page',
+            enable_check_in_out, check_in_minutes_before, check_in_minutes_after
+        )
 
-        booking_settings = BookingSettings.query.first()
-        enable_check_in_out = booking_settings.enable_check_in_out if booking_settings else False
-        check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings else 15
-        check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings else 15
-        if not booking_settings:
-             current_app.logger.warning("BookingSettings not found in DB, using default check-in window (15/15 mins) for get_my_bookings.")
-
-        # Base query
-        user_bookings_query = Booking.query.filter_by(user_name=current_user.username)
-
-        # Apply Status Filter
-        if status_filter and status_filter.lower() != 'all':
-            user_bookings_query = user_bookings_query.filter(
-                sqlfunc.trim(sqlfunc.lower(Booking.status)) == status_filter.lower()
-            )
-
-        # Apply Date Filter
-        if date_filter_value_str:
-            try:
-                target_date_obj = datetime.strptime(date_filter_value_str, '%Y-%m-%d').date()
-                user_bookings_query = user_bookings_query.filter(
-                    sqlfunc.date(Booking.start_time) == target_date_obj
-                )
-            except ValueError:
-                current_app.logger.warning(f"Invalid date_filter_value format: {date_filter_value_str}. Ignoring date filter.")
-
-        user_all_bookings = user_bookings_query.all() # Execute the query
-
-        upcoming_bookings_data = []
-        past_bookings_data = []
-        now_utc = datetime.now(timezone.utc)
-
-        for booking in user_all_bookings:
-            resource = Resource.query.get(booking.resource_id)
-            resource_name = resource.name if resource else "Unknown Resource"
-
-            booking_start_time_aware = booking.start_time
-            if booking_start_time_aware.tzinfo is None: # Assuming DB stores naive UTC
-                booking_start_time_aware = booking_start_time_aware.replace(tzinfo=timezone.utc)
-
-            can_check_in = (
-                enable_check_in_out and # Only if feature is enabled
-                booking.checked_in_at is None and
-                booking.status == 'approved' and # Only for approved bookings
-                booking_start_time_aware - timedelta(minutes=check_in_minutes_before) <= now_utc <= \
-                booking_start_time_aware + timedelta(minutes=check_in_minutes_after)
-            )
-
-            display_check_in_token = None
-            if booking.check_in_token and booking.checked_in_at is None and booking.status == 'approved':
-                token_expires_at_aware = booking.check_in_token_expires_at
-                if token_expires_at_aware and token_expires_at_aware.tzinfo is None:
-                    token_expires_at_aware = token_expires_at_aware.replace(tzinfo=timezone.utc)
-
-                booking_end_time_aware = booking.end_time
-                if booking_end_time_aware.tzinfo is None:
-                    booking_end_time_aware = booking_end_time_aware.replace(tzinfo=timezone.utc)
-
-                if token_expires_at_aware and token_expires_at_aware > now_utc and booking_end_time_aware > now_utc:
-                    display_check_in_token = booking.check_in_token
-
-            booking_dict = {
-                'id': booking.id,
-                'resource_id': booking.resource_id,
-                'resource_name': resource_name,
-                'user_name': booking.user_name,
-                'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(), # Ensure ISO format with Z
-                'end_time': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),   # Ensure ISO format with Z
-                'title': booking.title,
-                'status': booking.status,
-                'recurrence_rule': booking.recurrence_rule,
-                'admin_deleted_message': booking.admin_deleted_message, # Keep for potential internal use, JS should hide it
-                'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else None,
-                'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else None,
-                'can_check_in': can_check_in,
-                'check_in_token': display_check_in_token
-            }
-
-            if booking_start_time_aware >= now_utc:
-                upcoming_bookings_data.append(booking_dict)
-            else:
-                past_bookings_data.append(booking_dict)
-
-        # Sort upcoming bookings chronologically (nearest first)
-        upcoming_bookings_data.sort(key=lambda b: b['start_time'])
-        # Sort past bookings reverse chronologically (most recent past first)
-        past_bookings_data.sort(key=lambda b: b['start_time'], reverse=True)
-
-        current_app.logger.info(f"User '{current_user.username}' fetched their bookings. Upcoming: {len(upcoming_bookings_data)}, Past: {len(past_bookings_data)}. Check-in/out enabled: {enable_check_in_out}")
+        current_app.logger.info(f"User '{current_user.username}' fetched their bookings. "
+                                f"Upcoming: {paginated_upcoming_bookings['total_items']} (Page {paginated_upcoming_bookings['page']}/{paginated_upcoming_bookings['total_pages']}), "
+                                f"Past: {paginated_past_bookings['total_items']} (Page {paginated_past_bookings['page']}/{paginated_past_bookings['total_pages']}). "
+                                f"Check-in/out enabled: {enable_check_in_out}")
 
         return jsonify({
-            'upcoming_bookings': upcoming_bookings_data,
-            'past_bookings': past_bookings_data,
-            'check_in_out_enabled': enable_check_in_out
+            'upcoming_bookings': paginated_upcoming_bookings,
+            'past_bookings': paginated_past_bookings,
+            'check_in_out_enabled': enable_check_in_out # Keep this global setting in response
         }), 200
 
     except Exception as e:
         current_app.logger.exception(f"Error fetching bookings for user '{current_user.username}':")
         return jsonify({'error': 'Failed to fetch your bookings due to a server error.'}), 500
 
+def _get_paginated_bookings(base_query, page_arg_name, per_page_arg_name,
+                            enable_check_in_out, check_in_minutes_before, check_in_minutes_after,
+                            default_per_page=10):
+    """
+    Helper function to paginate bookings and serialize them.
+    """
+    page = request.args.get(page_arg_name, 1, type=int)
+    per_page = request.args.get(per_page_arg_name, default_per_page, type=int)
+
+    pagination_obj = base_query.paginate(page=page, per_page=per_page, error_out=False)
+
+    serialized_items = []
+    now_utc = datetime.now(timezone.utc) # For can_check_in logic
+
+    for booking in pagination_obj.items:
+        # Gracefully handle if booking.resource or booking.user is None
+        resource_name = booking.resource.name if booking.resource else "Unknown Resource"
+        # user_username = booking.user.username if booking.user else "Unknown User" # Not strictly needed for booking_to_dict if user_name is stored directly
+
+        booking_start_time_aware = booking.start_time
+        if booking_start_time_aware.tzinfo is None: # Assuming DB stores naive UTC
+            booking_start_time_aware = booking_start_time_aware.replace(tzinfo=timezone.utc)
+
+        can_check_in = (
+            enable_check_in_out and
+            booking.checked_in_at is None and
+            booking.status == 'approved' and
+            booking_start_time_aware - timedelta(minutes=check_in_minutes_before) <= now_utc <= \
+            booking_start_time_aware + timedelta(minutes=check_in_minutes_after)
+        )
+
+        display_check_in_token = None
+        if booking.check_in_token and booking.checked_in_at is None and booking.status == 'approved':
+            token_expires_at_aware = booking.check_in_token_expires_at
+            if token_expires_at_aware and token_expires_at_aware.tzinfo is None:
+                token_expires_at_aware = token_expires_at_aware.replace(tzinfo=timezone.utc)
+
+            booking_end_time_aware = booking.end_time
+            if booking_end_time_aware.tzinfo is None:
+                booking_end_time_aware = booking_end_time_aware.replace(tzinfo=timezone.utc)
+
+            if token_expires_at_aware and token_expires_at_aware > now_utc and booking_end_time_aware > now_utc:
+                display_check_in_token = booking.check_in_token
+
+        booking_dict = {
+            'id': booking.id,
+            'resource_id': booking.resource_id,
+            'resource_name': resource_name,
+            'user_name': booking.user_name, # user_name is directly on Booking model
+            'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
+            'end_time': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
+            'title': booking.title,
+            'status': booking.status,
+            'recurrence_rule': booking.recurrence_rule,
+            'admin_deleted_message': booking.admin_deleted_message,
+            'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else None,
+            'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else None,
+            'can_check_in': can_check_in,
+            'check_in_token': display_check_in_token
+        }
+        serialized_items.append(booking_dict)
+
+    return {
+        "items": serialized_items,
+        "page": page,
+        "per_page": per_page,
+        "total_items": pagination_obj.total,
+        "total_pages": pagination_obj.pages
+    }
 
 @api_bookings_bp.route('/bookings/my_bookings_for_date', methods=['GET'])
 @login_required
