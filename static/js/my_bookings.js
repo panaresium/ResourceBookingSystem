@@ -857,4 +857,4 @@ initializeMyBookingsPerPageSelect('past_bk_pg_', pastPerPageSelect, (val) => pas
 
 // Initial fetch based on default filter and toggle states
 handleFilterOrToggleChange();
-});
+
