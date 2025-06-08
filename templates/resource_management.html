@@ -51,10 +51,11 @@
 
     <div id="resource-management-status" class="status-message" style="margin-top: 15px;"></div>
 
-    <table id="resources-table" class="styled-table" style="margin-top: 15px;">
-        <thead>
-            <tr>
-                <th><input type="checkbox" id="select-all-resources"></th>
+    <div class="admin-table-scroll-wrapper">
+        <table id="resources-table" class="styled-table" style="margin-top: 15px;">
+            <thead>
+                <tr>
+                    <th><input type="checkbox" id="select-all-resources"></th>
                 <th>{{ _('ID') }}</th>
                 <th>{{ _('Name') }}</th>
                 <th>{{ _('Status') }}</th>
@@ -66,7 +67,8 @@
         <tbody>
             <!-- Resource rows will be populated by JavaScript -->
         </tbody>
-    </table>
+        </table>
+    </div>
 
     <div id="resource-pagination-controls" class="mt-3">
         <!-- Pagination controls will be rendered here by JavaScript -->
