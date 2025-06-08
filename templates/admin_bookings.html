@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% import '_pagination_controls.html' as pagination_macros with context %} {# IMPORT ADDED HERE #}
 
 {% block title %}{{ _('Admin - Bookings - Smart Resource Booking') }}{% endblock %}
 
@@ -27,102 +26,228 @@
                 </option>
             {% endfor %}
         </select>
-        {# The results per page select is now part of the pagination macro, so no need for a separate submit button here for status filter alone if macro handles form submission #}
+        {# <button type="submit" class="button" style="margin-left: 10px; padding: 5px 10px;">Filter</button> #}
     </form>
 
-    {# PAGINATION CONTROLS ADDED HERE #}
-    {% if pagination_data and pagination_data.total_items > 0 %} {# Check total_items to show even for one page #}
-        {{ pagination_macros.render_pagination_controls(
-            pagination_data,
-            'admin_ui.serve_admin_bookings_page',
-            params={'status_filter': current_status_filter if current_status_filter else ''}
-        ) }}
-    {% elif pagination_data and pagination_data.total_items == 0 and not error %}
-        {# Still show per_page if there are no items due to filter, allowing user to change it #}
-         {{ pagination_macros.render_pagination_controls(
-            pagination_data,
-            'admin_ui.serve_admin_bookings_page',
-            params={'status_filter': current_status_filter if current_status_filter else ''}
-        ) }}
-    {% endif %}
-
     {% if bookings %}
-    {# SCROLLABLE CONTAINER ADDED HERE #}
-    <div class="scrollable-table-container">
-        <div class="table-responsive">
-            <table id="admin-bookings-table" class="table bookings-table"> {# Added id #}
-                <thead>
-                    <tr>
-                        <th>{{ _('ID') }}</th>
-                        <th>{{ _('User') }}</th>
-                        <th>{{ _('Resource') }}</th>
-                        <th>{{ _('Title') }}</th>
-                        <th>{{ _('Start Time') }}</th>
-                        <th>{{ _('End Time') }}</th>
-                        <th>{{ _('Status') }}</th>
-                        <th>{{ _('Actions') }}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for booking in bookings %}
-                    {# Added dynamic class for row styling based on status, and improved condition for table-warning #}
-                    <tr class="booking-row-{{ booking.status | lower | replace('_', '-') }} {{ 'table-warning' if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message else '' }}">
-                        <td>{{ booking.id }}</td>
-                        <td>{{ booking.user_username }}</td>
-                        <td>{{ booking.resource_name }}</td>
-                        <td>
-                            {{ booking.title if booking.title else '-' }}
-                            {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
-                              <div class="alert alert-warning p-1 my-1">
-                                <small><strong>{{ _('Admin Cancellation:') }}</strong> {{ booking.admin_deleted_message }}</small>
-                              </div>
-                            {% endif %}
-                        </td>
-                        <td>{{ booking.start_time.strftime('%Y-%m-%d %H:%M') if booking.start_time else '-' }}</td>
-                        <td>{{ booking.end_time.strftime('%Y-%m-%d %H:%M') if booking.end_time else '-' }}</td>
-                        {# Updated status display to be more readable and use new CSS class convention #}
-                        <td><span class="status-badge status-{{ booking.status | lower | replace('_', '-') }}">{{ booking.status.replace('_', ' ').capitalize() }}</span></td>
-                        <td>
-                            {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
-                              <button class="btn btn-sm btn-outline-secondary dismiss-admin-message-btn" data-booking-id="{{ booking.id }}">
-                                {{ _('Dismiss Message') }}
-                              </button>
-                            {% elif booking.status and booking.status.lower() not in ['cancelled', 'rejected', 'completed', 'checked_out', 'cancelled_by_admin'] %}
-                            {# Delete button for active bookings might still be relevant for hard deletion #}
-                            <button class="button button-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel') }}</button>
-                            {% else %}
-                            {# For completed, cancelled, rejected bookings, show a dash or specific info #}
-                            <span class="text-muted">-</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div> {# END SCROLLABLE CONTAINER #}
+    <div class="table-responsive">
+        <table id="admin-bookings-table" class="table bookings-table"> {# Added id #}
+            <thead>
+                <tr>
+                    <th>{{ _('ID') }}</th>
+                    <th>{{ _('User') }}</th>
+                    <th>{{ _('Resource') }}</th>
+                    <th>{{ _('Title') }}</th>
+                    <th>{{ _('Start Time') }}</th>
+                    <th>{{ _('End Time') }}</th>
+                    <th>{{ _('Status') }}</th>
+                    <th>{{ _('Actions') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for booking in bookings %}
+                {# Added dynamic class for row styling based on status, and improved condition for table-warning #}
+                <tr class="booking-row-{{ booking.status | lower | replace('_', '-') }} {{ 'table-warning' if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message else '' }}">
+                    <td>{{ booking.id }}</td>
+                    <td>{{ booking.user_username }}</td>
+                    <td>{{ booking.resource_name }}</td>
+                    <td>
+                        {{ booking.title if booking.title else '-' }}
+                        {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
+                          <div class="alert alert-warning p-1 my-1">
+                            <small><strong>{{ _('Admin Cancellation:') }}</strong> {{ booking.admin_deleted_message }}</small>
+                          </div>
+                        {% endif %}
+                    </td>
+                    <td>{{ booking.start_time.strftime('%Y-%m-%d %H:%M') if booking.start_time else '-' }}</td>
+                    <td>{{ booking.end_time.strftime('%Y-%m-%d %H:%M') if booking.end_time else '-' }}</td>
+                    {# Updated status display to be more readable and use new CSS class convention #}
+                    <td><span class="status-badge status-{{ booking.status | lower | replace('_', '-') }}">{{ booking.status.replace('_', ' ').capitalize() }}</span></td>
+                    <td>
+                        {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
+                          <button class="btn btn-sm btn-outline-secondary dismiss-admin-message-btn" data-booking-id="{{ booking.id }}">
+                            {{ _('Dismiss Message') }}
+                          </button>
+                        {% elif booking.status and booking.status.lower() not in ['cancelled', 'rejected', 'completed', 'checked_out', 'cancelled_by_admin'] %}
+                        {# Delete button for active bookings might still be relevant for hard deletion #}
+                        <button class="button button-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel') }}</button>
+                        {% else %}
+                        {# For completed, cancelled, rejected bookings, show a dash or specific info #}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
     {% else %}
-        <p>{{ _('No bookings found.') }}</p>
-        {# Consider if pagination controls (just the per_page selector) should show if error is not present #}
+    <p>{{ _('No bookings found.') }}</p>
     {% endif %}
-
-    {# Optional: Add pagination controls below the table as well #}
-    {#
-    {% if pagination_data and pagination_data.total_items > 0 %}
-        <div class="mt-3"> {# Add some margin if placing below #}
-            {{ pagination_macros.render_pagination_controls(
-                pagination_data,
-                'admin_ui.serve_admin_bookings_page',
-                params={'status_filter': current_status_filter if current_status_filter else ''}
-            ) }}
-        </div>
-    {% endif %}
-    #}
 </div>
 
 <script>
-// Existing JavaScript for this page...
-// ...
+document.addEventListener('DOMContentLoaded', function() {
+    const statusDiv = document.getElementById('admin-booking-status');
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+    document.querySelectorAll('.delete-booking-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const bookingId = this.dataset.bookingId;
+            const row = this.closest('tr'); // Get the table row
+
+            // Updated confirmation message
+            if (!confirm("{{ _('Are you sure you want to CANCEL this booking? The booking status will be updated to cancelled and the resource will be released.') }}")) {
+                return;
+            }
+            this.disabled = true;
+            this.textContent = "{{ _('Processing...') }}";
+
+            // Updated fetch URL
+            fetch(`/api/admin/bookings/${bookingId}/cancel_by_admin`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+            })
+            .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, data })))
+            .then(({ ok, status, data }) => {
+                if (ok) {
+                    // Updated success logic
+                    statusDiv.textContent = data.message || "{{ _('Booking cancelled successfully.') }}"; // Use message from response
+                    statusDiv.className = 'alert alert-success';
+
+                    // Update row content instead of removing
+                    const statusCell = row.cells[6]; // 7th cell for status
+                    const actionCell = row.cells[7]; // 8th cell for actions
+
+                    if (statusCell && data.new_status) {
+                        statusCell.innerHTML = `<span class="status-badge status-${data.new_status.toLowerCase().replace(/_/g, '-')}">${data.new_status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>`;
+                    }
+
+                    if (actionCell) {
+                        actionCell.innerHTML = ''; // Clear existing buttons
+                        // Check if admin_message is present and not an empty string
+                        if (data.admin_message && data.admin_message.trim() !== "") {
+                            // Dynamically add the cancellation message to the title cell (e.g., row.cells[3])
+                            const titleCell = row.cells[3]; // Assuming title is the 4th cell
+                            if (titleCell) {
+                                // Remove any existing message div first
+                                const existingMessageDiv = titleCell.querySelector('.admin-cancel-message-display');
+                                if (existingMessageDiv) {
+                                    existingMessageDiv.remove();
+                                }
+                                const messageDiv = document.createElement('div');
+                                messageDiv.className = 'alert alert-warning p-1 my-1 admin-cancel-message-display'; // Added specific class
+                                messageDiv.innerHTML = `<small><strong>{{ _('Admin Cancellation:') }}</strong> ${data.admin_message}</small>`;
+                                // Prepend or append as appropriate. Appending to keep it similar to Jinja.
+                                titleCell.appendChild(messageDiv);
+                            }
+
+                            const dismissButton = document.createElement('button');
+                            dismissButton.className = 'btn btn-sm btn-outline-secondary dismiss-admin-message-btn';
+                            dismissButton.dataset.bookingId = bookingId;
+                            dismissButton.textContent = "{{ _('Dismiss Message') }}";
+                            actionCell.appendChild(dismissButton);
+                            dismissButton.addEventListener('click', dismissAdminMessageHandler);
+                        } else {
+                            actionCell.innerHTML = '<span class="text-muted">-</span>';
+                        }
+                    }
+
+                    // Update row class
+                    // The base class should always be set based on the new status.
+                    row.className = `booking-row-${data.new_status.toLowerCase().replace(/_/g, '-')}`;
+                    // Add table-warning class only if there's an actual admin_message.
+                    if (data.admin_message && data.admin_message.trim() !== "") {
+                        row.classList.add('table-warning');
+                    } else {
+                        // Ensure table-warning is removed if no message, in case it was there before for some reason
+                        row.classList.remove('table-warning');
+                    }
+
+                } else {
+                    // Error handling remains largely the same
+                    throw new Error(data.error || `{{ _('Error cancelling booking (Status: ${status}).') }}`);
+                }
+            })
+            .catch(error => {
+                statusDiv.textContent = `{{ _('Error') }}: ${error.message}`;
+                statusDiv.className = 'alert alert-danger';
+                this.disabled = false;
+                this.textContent = "{{ _('Cancel') }}"; // Ensure button text reverts correctly
+            });
+        });
+    });
+
+    // Centralized function to handle dismissing admin messages
+    function dismissAdminMessageHandler(event) { // event object is implicitly passed
+        const button = event.currentTarget; // Use event.currentTarget to get the button
+        const bookingId = button.dataset.bookingId;
+        const row = button.closest('tr');
+        // const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content'); // Already available globally
+
+        button.disabled = true;
+        button.textContent = "{{ _('Processing...') }}";
+
+        fetch(`/api/admin/bookings/${bookingId}/clear_admin_message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        })
+        .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, data })))
+        .then(({ ok, status, data }) => {
+            if (ok) {
+                statusDiv.textContent = data.message || "{{ _('Admin message cleared and booking acknowledged.') }}";
+                statusDiv.className = 'alert alert-success';
+
+                // Remove the specific alert message div within the title cell if it exists
+                // This was targeting a div that might not be the one we want.
+                // The original HTML has the message in the title cell (booking.title)
+                const titleCell = Array.from(row.cells).find(cell => cell.querySelector('.alert.alert-warning.p-1.my-1'));
+                if (titleCell) {
+                    const adminMessageDiv = titleCell.querySelector('.alert.alert-warning.p-1.my-1');
+                    if (adminMessageDiv) adminMessageDiv.remove();
+                }
+
+                button.remove(); // Remove the dismiss button
+
+                // Update status display if new_status is provided (e.g. 'acknowledged')
+                const statusCell = row.cells[6];
+                if (statusCell && data.new_status) {
+                     statusCell.innerHTML = `<span class="status-badge status-${data.new_status.toLowerCase().replace(/_/g, '-')}">${data.new_status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>`;
+                     // Update row class based on new status
+                     row.className = `booking-row-${data.new_status.toLowerCase().replace(/_/g, '-')}`;
+                } else {
+                    // If no new_status, just ensure the warning class is removed if the message was the cause
+                     row.classList.remove('table-warning');
+                }
+                 // If new_status was 'cancelled_by_admin' and message is now cleared, it should not have table-warning unless another condition applies
+                if (data.new_status !== 'cancelled_by_admin' || !data.admin_message) { // Simplified logic
+                    row.classList.remove('table-warning');
+                }
+
+
+            } else {
+                throw new Error(data.error || `{{ _('Failed to clear admin message (Status: ${status}).') }}`);
+            }
+        })
+        .catch(error => {
+            statusDiv.textContent = `{{ _('Error') }}: ${error.message}`;
+            statusDiv.className = 'alert alert-danger';
+            button.disabled = false;
+            button.textContent = "{{ _('Dismiss Message') }}";
+        });
+    }
+
+    // Attach the handler to all existing and dynamically added dismiss buttons
+    document.querySelectorAll('.dismiss-admin-message-btn').forEach(button => {
+        button.removeEventListener('click', dismissAdminMessageHandler); // Remove if any old one attached
+        button.addEventListener('click', dismissAdminMessageHandler);
+    });
+
+    // If new dismiss buttons are added dynamically (e.g. after cancelling a booking),
+    // ensure their event listeners are also attached.
+    // This is handled by the cancel success logic which calls:
+    // dismissButton.addEventListener('click', dismissAdminMessageHandler);
+});
 </script>
 
 {% endblock %}

@@ -1558,34 +1558,3 @@ div.responsive-table-container > table#admin-bookings-table { /* Admin Bookings 
     width: 100%;
 }
 
-/* Scrollable Table Styles */
-.scrollable-table-container {
-    max-height: 500px; /* Default max height, can be overridden if needed */
-    overflow-y: auto;
-    position: relative; /* For potential sticky headers if added later */
-}
-
-/* Optional: Basic styling for tables within the scrollable container if not already styled */
-.scrollable-table-container table {
-    width: 100%;
-    border-collapse: collapse; /* Ensures borders are clean */
-}
-
-/* Optional: Sticky header for better UX on scrolled tables */
-/* This might require specific table structure (thead, tbody) and might not work perfectly in all browsers or with all table layouts without JavaScript adjustments */
-.scrollable-table-container thead th {
-    position: -webkit-sticky; /* For Safari */
-    position: sticky;
-    top: 0;
-    z-index: 1; /* Ensures header stays above table content */
-    background-color: #f8f9fa; /* Matches common Bootstrap table header background or use theme's header color */
-    box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.1); /* Optional shadow to indicate scrolling under header */
-}
-
-/* Ensure the table-responsive class from Bootstrap also gets a max-height if we want to standardize */
-/* This might be too broad a change, so it's commented out. We'll apply .scrollable-table-container specifically.
-.table-responsive {
-    max-height: 500px;
-    overflow-y: auto;
-}
-*/

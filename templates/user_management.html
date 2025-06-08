@@ -1,72 +1,66 @@
 {% extends "base.html" %}
-{% import '_pagination_controls.html' as pagination_macros with context %} {# IMPORT ADDED HERE #}
 
 {% block title %}{{ _('User Management - Smart Resource Booking') }}{% endblock %}
 
 {% block content %}
     <h1>{{ _('User Management') }}</h1>
-
     <button id="add-new-user-btn" class="button">{{ _('Add New User') }}</button>
-    <button id="bulk-user-actions-btn" class="button" style="margin-left:5px;">{{ _('Bulk Actions') }}</button>
-    <button id="export-users-btn" class="button" style="margin-left:5px;">{{ _('Export Users') }}</button>
-    <input type="file" id="import-users-file-input" accept=".csv, .json" style="display:none;">
-    <button id="import-users-btn" class="button" style="margin-left:5px;">{{ _('Import Users') }}</button>
-
-
-    <div class="filters-section" style="margin-top:15px; margin-bottom: 15px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;">
+    <button id="bulk-add-users-btn" class="button">{{ _('Bulk Add Users') }}</button> {# New Button #}
+    <button id="export-users-btn" class="button">{{ _('Export Users (JSON)') }}</button> {# Clarified existing button #}
+    <button id="export-users-csv-btn" class="button">{{ _('Export Users to CSV') }}</button> {# New CSV Export Button #}
+    <button id="import-users-btn" class="button">{{ _('Import Users (JSON)') }}</button> {# Clarified existing button #}
+    <input type="file" id="import-users-file" accept="application/json" style="display:none;">
+    <button id="import-users-csv-btn" class="button">{{ _('Import Users from CSV') }}</button> {# New CSV Import Button #}
+    <input type="file" id="import-users-csv-file" accept=".csv,text/csv" style="display:none;">
+    <button id="bulk-add-pattern-btn" class="button">{{ _('Bulk Add with Pattern') }}</button> {# New Button #}
+    <button id="delete-selected-users-btn" class="button danger">{{ _('Delete Selected') }}</button>
+    <button id="bulk-edit-selected-users-btn" class="button action">{{ _('Bulk Edit Selected') }}</button> {# New Button #}
+    <div class="filters-section" style="margin-top:15px;">
         <h3>{{ _('Filters') }}</h3>
         <label for="user-filter-username">{{ _('Username:') }}</label>
-        <input type="text" id="user-filter-username" placeholder="{{ _('Filter by Username') }}" style="margin-right: 10px;">
+        <input type="text" id="user-filter-username" placeholder="{{ _('Filter by Username') }}">
 
-        <label for="user-filter-email">{{ _('Email:') }}</label>
-        <input type="text" id="user-filter-email" placeholder="{{ _('Filter by Email') }}" style="margin-right: 10px;">
-
-        <label for="user-filter-role">{{ _('Role:') }}</label>
-        <select id="user-filter-role" style="margin-right: 10px;">
-            <option value="">{{ _('-- Any Role --') }}</option>
-            {# Roles will be populated by JavaScript or could be hardcoded if static #}
+        <label for="user-filter-admin">{{ _('Admin Status:') }}</label>
+        <select id="user-filter-admin">
+            <option value="">{{ _('-- Any --') }}</option>
+            <option value="true">{{ _('Admin') }}</option>
+            <option value="false">{{ _('Non-Admin') }}</option>
         </select>
 
-        <button id="user-apply-filters-btn" class="button primary">{{ _('Apply Filters') }}</button>
+        <button id="user-apply-filters-btn" class="button">{{ _('Apply Filters') }}</button>
         <button id="user-clear-filters-btn" class="button">{{ _('Clear Filters') }}</button>
     </div>
 
     <div id="user-management-status" class="status-message" style="margin-top: 15px;"></div>
 
-    {# JS PAGINATION CONTROLS ADDED HERE #}
-    {{ pagination_macros.render_js_pagination_controls('user_pg_') }}
+    <div class="responsive-table-container">
+    <table id="users-table" class="styled-table" style="margin-top: 15px;">
+        <thead>
+            <tr>
+                <th><input type="checkbox" id="select-all-users"></th>
+                <th>{{ _('ID') }}</th>
+                <th>{{ _('Username') }}</th>
+                <th>{{ _('Email') }}</th>
+                <th>{{ _('Admin Status') }}</th>
+                <th>{{ _('Roles') }}</th>
+                <th>{{ _('Google Connected') }}</th>
+                <th>{{ _('Actions') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- User rows will be populated by JavaScript -->
+        </tbody>
+    </table>
+    </div>
 
-    {# SCROLLABLE CONTAINER ADDED HERE, WRAPPING existing responsive-table-container #}
-    <div class="scrollable-table-container">
-        <div class="responsive-table-container">
-            <table id="users-table" class="styled-table">
-                <thead>
-                    <tr>
-                        <th><input type="checkbox" id="select-all-users"></th>
-                        <th>{{ _('ID') }}</th>
-                        <th>{{ _('Username') }}</th>
-                        <th>{{ _('Email') }}</th>
-                        <th>{{ _('Admin Status') }}</th>
-                        <th>{{ _('Roles') }}</th>
-                        <th>{{ _('Google Connected') }}</th>
-                        <th>{{ _('Actions') }}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <!-- User rows will be populated by JavaScript -->
-                </tbody>
-            </table>
-        </div>
-    </div> {# END SCROLLABLE CONTAINER #}
-
-    <!-- User Form Modal -->
+    <!-- Modal for Add/Edit User -->
     <div id="user-form-modal" class="modal" style="display: none;">
         <div class="modal-content">
             <span class="close-modal-btn" data-modal-id="user-form-modal">&times;</span>
-            <h2 id="user-form-modal-title">{{ _('Add New User') }}</h2>
-            <div id="user-form-modal-status" class="status-message"></div>
+            <h3 id="user-form-modal-title">{{ _('Add New User') }}</h3> {# Title will be changed by JS for edit #}
             <form id="user-form">
-                <input type="hidden" id="user-id" name="id">
+                <input type="hidden" id="user-id" name="user_id">
+
                 <div>
                     <label for="username">{{ _('Username:') }}</label>
                     <input type="text" id="username" name="username" required>
@@ -78,56 +72,206 @@
                 <div>
                     <label for="password">{{ _('Password:') }}</label>
                     <input type="password" id="password" name="password">
-                    <small id="password-hint">{{ _('Leave blank to keep current password (for edit). Required for new user.') }}</small>
+                    <small> {{ _('(Leave blank if not changing for an existing user)') }}</small>
                 </div>
                 <div>
-                    <label for="is_admin">{{ _('Admin Status:') }}</label>
-                    <input type="checkbox" id="is_admin" name="is_admin"> {{ _('Grant Admin Privileges') }}
+                    <label for="confirm-password">{{ _('Confirm Password:') }}</label>
+                    <input type="password" id="confirm-password" name="confirm_password">
                 </div>
                 <div>
-                    <label for="roles">{{ _('Roles (comma-separated):') }}</label>
-                    <input type="text" id="roles" name="roles" placeholder="{{ _('e.g., booking_manager,user_viewer') }}">
+                    <input type="checkbox" id="is-admin" name="is_admin" value="true">
+                    <label for="is-admin">{{ _('Is Admin') }}</label>
                 </div>
-                 <div>
-                    <label for="google_id_status">{{ _('Google Account Status:') }}</label>
-                    <p id="google_id_status" style="font-weight: normal;">{{ _('Not connected') }}</p>
-                    <button type="button" id="disconnect-google-btn" class="button danger" style="display:none;">{{ _('Disconnect Google Account') }}</button>
+
+                <div style="margin-top: 15px;">
+                    <h4>{{ _('Assign Roles:') }}</h4>
+                    <div id="user-roles-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding:5px;">
+                        <!-- Role checkboxes will be populated here by JavaScript -->
+                        <small>{{ _('Loading roles...') }}</small>
+                    </div>
                 </div>
-                <button type="submit" class="button primary">{{ _('Save User') }}</button>
+
+                <button type="submit" class="button" style="margin-top: 15px;">{{ _('Save User') }}</button>
+                <div id="user-form-modal-status" class="status-message" style="margin-top: 10px;"></div>
             </form>
         </div>
     </div>
 
-    <!-- Bulk User Actions Modal -->
-    <div id="bulk-user-actions-modal" class="modal" style="display: none;">
+    <!-- Modal for Bulk Add Users -->
+    <div id="bulk-add-users-modal" class="modal" style="display: none;">
         <div class="modal-content">
-            <span class="close-modal-btn" data-modal-id="bulk-user-actions-modal">&times;</span>
-            <h2>{{ _('Bulk User Actions') }}</h2>
-            <div id="bulk-user-actions-status" class="status-message"></div>
-            <form id="bulk-user-actions-form">
+            <span class="close-modal-btn" data-modal-id="bulk-add-users-modal">&times;</span>
+            <h3>{{ _('Bulk Add Users') }}</h3>
+            <form id="bulk-add-users-form">
                 <div>
-                    <label for="bulk-action-type">{{ _('Action:') }}</label>
-                    <select id="bulk-action-type" name="action_type">
-                        <option value="">{{ _('-- Select Action --') }}</option>
-                        <option value="set_admin">{{ _('Set as Admin') }}</option>
-                        <option value="unset_admin">{{ _('Remove Admin') }}</option>
-                        <option value="add_roles">{{ _('Add Roles') }}</option>
-                        <option value="remove_roles">{{ _('Remove Roles') }}</option>
-                        <option value="delete_users">{{ _('Delete Users') }}</option>
+                    <label for="bulk-add-data">{{ _('User Data (CSV Format):') }}</label>
+                    <textarea id="bulk-add-data" name="bulk-add-data" rows="10" style="width: 95%;" placeholder="username,email,password,isAdmin (true/false),role_ids (comma-separated)"></textarea>
+                    <small>
+                        {{ _('Instructions: Each line should be in the format: username,email,password,isAdmin (true/false),role_ids (e.g., 1,2,3)') }}<br>
+                        {{ _('isAdmin and role_ids are optional. Default for isAdmin is false. Example:') }}<br>
+                        <code>newuser1,user1@example.com,Pass123,false,1,2</code><br>
+                        <code>newuser2,user2@example.com,Pass456,true</code><br>
+                        <code>newuser3,user3@example.com,Pass789</code>
+                    </small>
+                </div>
+                <button type="submit" class="button" style="margin-top: 15px;">{{ _('Submit Bulk Add') }}</button>
+                <div id="bulk-add-status" class="status-message" style="margin-top: 10px;"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal for Bulk Edit Users -->
+    <div id="bulk-edit-users-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close-modal-btn" data-modal-id="bulk-edit-users-modal">&times;</span>
+            <h3>{{ _('Bulk Edit Selected Users') }}</h3>
+            <p> {{ _('Editing') }} <span id="bulk-edit-selected-count">0</span> {{ _('user(s).') }} {{ _('Only fill fields you want to change for all selected users.') }}</p>
+            <form id="bulk-edit-users-form">
+                <div>
+                    <label for="bulk-edit-password">{{ _('New Password:') }}</label>
+                    <input type="password" id="bulk-edit-password" name="bulk_edit_password">
+                    <small>{{ _('(Leave blank to keep current passwords)') }}</small>
+                </div>
+                <div>
+                    <label for="bulk-edit-confirm-password">{{ _('Confirm New Password:') }}</label>
+                    <input type="password" id="bulk-edit-confirm-password" name="bulk_edit_confirm_password">
+                </div>
+                <div style="margin-top: 10px;">
+                    <input type="checkbox" id="bulk-edit-is-admin-enable" name="bulk_edit_is_admin_enable">
+                    <label for="bulk-edit-is-admin-enable" style="font-weight: normal;">{{ _('Change Admin Status?') }}</label>
+                    <select id="bulk-edit-is-admin" name="bulk_edit_is_admin" disabled style="display: inline-block; width: auto; margin-left: 5px;">
+                        <option value="true">{{ _('Set as Admin') }}</option>
+                        <option value="false">{{ _('Set as Non-Admin') }}</option>
                     </select>
                 </div>
-                <div id="bulk-roles-input-container" style="display:none;">
-                    <label for="bulk-roles-input">{{ _('Roles (comma-separated):') }}</label>
-                    <input type="text" id="bulk-roles-input" name="roles_to_modify" placeholder="{{ _('e.g., role1,role2') }}">
+
+                <div style="margin-top: 15px;">
+                    <h4>{{ _('Set Roles (Replaces existing roles for selected users):') }}</h4>
+                     <input type="checkbox" id="bulk-edit-roles-enable" name="bulk_edit_roles_enable">
+                    <label for="bulk-edit-roles-enable" style="font-weight: normal;">{{ _('Change Roles?') }}</label>
+                    <div id="bulk-edit-roles-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding:5px; margin-top: 5px;">
+                        <!-- Role checkboxes will be populated here by JavaScript -->
+                        <small>{{ _('Loading roles...') }}</small>
+                    </div>
                 </div>
-                <button type="submit" class="button primary">{{ _('Apply Bulk Action') }}</button>
+
+                <button type="submit" class="button" style="margin-top: 15px;">{{ _('Submit Bulk Edit') }}</button>
+                <div id="bulk-edit-status" class="status-message" style="margin-top: 10px;"></div>
             </form>
         </div>
     </div>
 
+    <!-- Modal for Bulk Add Users with Pattern -->
+    <div id="bulk-add-pattern-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close-modal-btn" data-modal-id="bulk-add-pattern-modal">&times;</span>
+            <h3>{{ _('Bulk Add Users with Pattern') }}</h3>
+            <form id="bulk-add-pattern-form">
+                <div>
+                    <label for="pattern-username-prefix">{{ _('Username Prefix:') }}</label>
+                    <input type="text" id="pattern-username-prefix" name="pattern_username_prefix" required>
+                </div>
+                <div>
+                    <label for="pattern-username-suffix">{{ _('Username Suffix (Optional):') }}</label>
+                    <input type="text" id="pattern-username-suffix" name="pattern_username_suffix">
+                </div>
+                <div>
+                    <label for="pattern-start-number">{{ _('Start Number:') }}</label>
+                    <input type="number" id="pattern-start-number" name="pattern_start_number" value="1" min="0" required>
+                </div>
+                <div>
+                    <label for="pattern-count">{{ _('Number of Users to Create:') }}</label>
+                    <input type="number" id="pattern-count" name="pattern_count" value="10" min="1" max="100" required>
+                </div>
+                <div>
+                    <label for="pattern-email-domain">{{ _('Email Domain (e.g., example.com):') }}</label>
+                    <input type="text" id="pattern-email-domain" name="pattern_email_domain" placeholder="example.com">
+                    <small>{{ _('OR use Email Pattern below.') }}</small>
+                </div>
+                 <div>
+                    <label for="pattern-email-pattern">{{ _('Email Pattern (e.g., {username}@custom.com):') }}</label>
+                    <input type="text" id="pattern-email-pattern" name="pattern_email_pattern" placeholder="{username}@custom.com">
+                    <small>{{ _('Use {username} as placeholder for the generated username.') }}</small>
+                </div>
+                <div>
+                    <label for="pattern-default-password">{{ _('Default Password:') }}</label>
+                    <input type="password" id="pattern-default-password" name="pattern_default_password" required>
+                </div>
+                <div>
+                    <label for="pattern-confirm-password">{{ _('Confirm Default Password:') }}</label>
+                    <input type="password" id="pattern-confirm-password" name="pattern_confirm_password" required>
+                </div>
+                <div>
+                    <input type="checkbox" id="pattern-is-admin" name="pattern_is_admin" value="true">
+                    <label for="pattern-is-admin">{{ _('Set as Admin') }}</label>
+                </div>
+                <div style="margin-top: 15px;">
+                    <h4>{{ _('Assign Roles (Optional):') }}</h4>
+                    <div id="pattern-roles-checkbox-container" class="checkbox-container" style="height: 100px; overflow-y: auto; border: 1px solid #ccc; padding:5px;">
+                        <small>{{ _('Loading roles...') }}</small>
+                    </div>
+                </div>
+                <button type="submit" class="button" style="margin-top: 15px;">{{ _('Submit Bulk Add Pattern') }}</button>
+                <div id="bulk-add-pattern-status" class="status-message" style="margin-top: 10px;"></div>
+            </form>
+        </div>
+    </div>
+
+    <hr style="margin-top: 30px; margin-bottom: 30px;">
+
+    <section id="role-management-section">
+        <h2>{{ _('Role Management') }}</h2>
+        <button id="add-new-role-btn" class="button">{{ _('Add New Role') }}</button>
+        <div id="role-management-status" class="status-message" style="margin-top: 15px;"></div>
+
+        <div class="responsive-table-container">
+        <table id="roles-table" class="styled-table" style="margin-top: 15px;">
+            <thead>
+                <tr>
+                    <th>{{ _('ID') }}</th>
+                    <th>{{ _('Name') }}</th>
+                    <th>{{ _('Description') }}</th>
+                    <th>{{ _('Permissions') }}</th>
+                    <th>{{ _('Actions') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Role rows will be populated by JavaScript -->
+            </tbody>
+        </table>
+        </div>
+    </section>
+
+    <!-- Modal for Add/Edit Role -->
+    <div id="role-form-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close-modal-btn" data-modal-id="role-form-modal">&times;</span>
+            <h3 id="role-form-modal-title">{{ _('Add New Role') }}</h3> {# Title will be changed by JS for edit #}
+            <form id="role-form">
+                <input type="hidden" id="role-id" name="role_id">
+
+                <div>
+                    <label for="role-name">{{ _('Role Name:') }}</label>
+                    <input type="text" id="role-name" name="role_name" required>
+                </div>
+                <div>
+                    <label for="role-description">{{ _('Description:') }}</label>
+                    <textarea id="role-description" name="role_description" rows="3"></textarea>
+                </div>
+                <div>
+                    <label>{{ _('Permissions:') }}</label>
+                    <div id="role-permissions-container" class="checkbox-container" style="max-height: 120px; overflow-y: auto; border: 1px solid #ccc; padding: 5px;"></div>
+                </div>
+
+                <button type="submit" class="button">{{ _('Save Role') }}</button>
+                <div id="role-form-modal-status" class="status-message" style="margin-top: 10px;"></div>
+            </form>
+        </div>
+    </div>
 {% endblock %}
 
 {% block scripts %}
     {{ super() }}
     <script src="{{ url_for('static', filename='js/user_management.js') }}" defer></script>
 {% endblock %}
+

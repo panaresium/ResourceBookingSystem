@@ -1,11 +1,9 @@
 {% extends "base.html" %}
-{% import '_pagination_controls.html' as pagination_macros with context %} {# IMPORT ADDED HERE #}
 
 {% block title %}{{ _('Resource Management - Smart Resource Booking') }}{% endblock %}
 
 {% block content %}
     <h1>{{ _('Resource Management') }}</h1>
-    {# ... buttons ... #}
     <button id="add-new-resource-btn" class="button">{{ _('Add New Resource') }}</button>
     <button id="add-bulk-resource-btn" class="button" style="margin-left:5px;">{{ _('Bulk Add Resources') }}</button>
     <button id="bulk-edit-btn" class="button" style="margin-left:5px;">{{ _('Bulk Edit') }}</button>
@@ -13,9 +11,7 @@
     <button id="export-all-resources-btn" class="button" style="margin-left:5px;">{{ _('Export All Resources') }}</button>
     <input type="file" id="import-resources-file" accept=".json" style="margin-left: 10px; display: none;">
     <button id="import-resources-btn" class="button" style="margin-left:5px;">{{ _('Import Resources from JSON') }}</button>
-
     <div class="filters-section" style="margin-top:15px;">
-        {# ... filter inputs ... #}
         <h3>{{ _('Filters') }}</h3>
         <label for="resource-filter-name">{{ _('Name:') }}</label>
         <input type="text" id="resource-filter-name" placeholder="{{ _('Filter by Name') }}">
@@ -41,46 +37,207 @@
     </div>
 
     <div id="bulk-pin-actions-area" style="margin-top: 10px; margin-bottom: 10px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; display: none;">
-        {# ... bulk pin actions ... #}
+        <h4>{{ _('Bulk PIN Actions for Selected Resources') }}</h4>
+        <select id="bulk-pin-action-select" class="form-control" style="width: auto; display: inline-block; margin-right: 10px;">
+            <option value="">-- {{ _('Select Action') }} --</option>
+            <option value="auto_generate_new_pin">{{ _('Auto-generate New PIN for Each') }}</option>
+            <option value="deactivate_all_pins">{{ _('Deactivate All PINs for Each') }}</option>
+            <option value="activate_all_pins">{{ _('Activate All PINs for Each') }}</option>
+            <!-- Add more actions here if needed in future -->
+        </select>
+        <button id="btn-execute-bulk-pin-action" class="button primary-button" disabled>{{ _('Execute Action') }}</button>
+        <div id="bulk-pin-action-status" class="status-message" style="margin-top: 5px; margin-left: 10px; display: inline-block;"></div>
     </div>
 
     <div id="resource-management-status" class="status-message" style="margin-top: 15px;"></div>
 
-    {# JS PAGINATION CONTROLS ADDED HERE #}
-    {{ pagination_macros.render_js_pagination_controls('resource_pg_') }}
+    <table id="resources-table" class="styled-table" style="margin-top: 15px;">
+        <thead>
+            <tr>
+                <th><input type="checkbox" id="select-all-resources"></th>
+                <th>{{ _('ID') }}</th>
+                <th>{{ _('Name') }}</th>
+                <th>{{ _('Status') }}</th>
+                <th>{{ _('Capacity') }}</th>
+                <th>{{ _('Tags') }}</th>
+                <th>{{ _('Actions') }}</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Resource rows will be populated by JavaScript -->
+        </tbody>
+    </table>
 
-    {# SCROLLABLE CONTAINER ADDED HERE #}
-    <div class="scrollable-table-container">
-        <table id="resources-table" class="styled-table">
-            <thead>
-                <tr>
-                    <th><input type="checkbox" id="select-all-resources"></th>
-                    <th>{{ _('ID') }}</th>
-                    <th>{{ _('Name') }}</th>
-                    <th>{{ _('Status') }}</th>
-                    <th>{{ _('Capacity') }}</th>
-                    <th>{{ _('Tags') }}</th>
-                    <th>{{ _('Actions') }}</th>
-                </tr>
-            </thead>
-            <tbody>
-                <!-- Resource rows will be populated by JavaScript -->
-            </tbody>
-        </table>
-    </div> {# END SCROLLABLE CONTAINER #}
-
-    {# ... modals ... #}
     <div id="resource-form-modal" class="modal" style="display: none;">
-        {# ... #}
+        <div class="modal-content">
+            <span class="close-modal-btn" data-modal-id="resource-form-modal">&times;</span>
+            <h3 id="resource-form-modal-title">{{ _('Add New Resource') }}</h3>
+            <form id="resource-form">
+                <input type="hidden" id="resource-id" name="resource_id">
+                <div>
+                    <label for="resource-name">{{ _('Name:') }}</label>
+                    <input type="text" id="resource-name" name="name" required>
+                </div>
+                <div>
+                    <label for="resource-capacity">{{ _('Capacity:') }}</label>
+                    <input type="number" id="resource-capacity" name="capacity" min="0">
+                </div>
+                <div>
+                    <label for="resource-equipment">{{ _('Equipment:') }}</label>
+                    <input type="text" id="resource-equipment" name="equipment">
+                </div>
+                <div>
+                    <label for="resource-tags">{{ _('Group/Tags:') }}</label>
+                    <input type="text" id="resource-tags" name="tags">
+                </div>
+                <div>
+                    <label for="resource-status-modal">{{ _('Status:') }}</label>
+                    <select id="resource-status-modal" name="status" class="form-control">
+                        <option value="draft">{{ _('Draft') }}</option>
+                        <option value="published">{{ _('Published') }}</option>
+                        <option value="archived">{{ _('Archived') }}</option>
+                    </select>
+                </div>
+
+                <!-- Resource PINs Management Area -->
+                <div id="resource-pins-management-area" style="margin-top: 20px; border-top: 1px solid #ccc; padding-top: 15px; display: none;">
+                    <h4>{{ _('Manage Resource PINs') }}</h4>
+
+                    <div id="resource-current-pin-display" style="margin-bottom: 10px;">
+                        <strong>{{ _('Current Active PIN:') }}</strong> <span id="current-pin-value">{{ _('N/A') }}</span>
+                    </div>
+
+                    <table id="resource-pins-table" class="styled-table" style="margin-bottom: 15px;">
+                        <thead>
+                            <tr>
+                                <th>{{ _('PIN Value') }}</th>
+                                <th>{{ _('Active') }}</th>
+                                <th>{{ _('Notes') }}</th>
+                                <th>{{ _('Created At') }}</th>
+                                <th>{{ _('Actions') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- PIN rows will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+
+                    <h5>{{ _('Add New PIN') }}</h5>
+                    <div id="add-pin-form-area">
+                        <div class="form-group">
+                            <label for="manual_pin_value">{{ _('Manual PIN (leave blank to auto-generate if enabled):') }}</label>
+                            <input type="text" id="manual_pin_value" class="form-control" style="width: auto; display: inline-block; margin-right: 10px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="pin_notes">{{ _('Notes:') }}</label>
+                            <input type="text" id="pin_notes" class="form-control" style="width: auto; display: inline-block; margin-right: 10px;">
+                        </div>
+                        <button type="button" id="btn-add-manual-pin" class="button" title="{{ _('Add/Set Manual PIN') }}">{{ _('Add PIN') }}</button>
+                        <button type="button" id="btn-auto-generate-pin" class="button" title="{{ _('Auto-generate New PIN') }}">{{ _('Generate PIN') }}</button>
+                    </div>
+                     <div id="resource-pin-form-status" class="status-message" style="margin-top: 10px;"></div>
+                </div>
+                <!-- End Resource PINs Management Area -->
+
+                <button type="submit" class="button" style="margin-top: 10px;" title="{{ _('Save Resource') }}"><span aria-hidden="true">💾</span></button>
+                <div id="resource-form-modal-status" class="status-message" style="margin-top: 10px;"></div>
+            </form>
+        </div>
     </div>
+
     <div id="bulk-resource-modal" class="modal" style="display: none;">
-        {# ... #}
+        <div class="modal-content">
+            <span class="close-modal-btn" data-modal-id="bulk-resource-modal">&times;</span>
+            <h3>{{ _('Bulk Add Resources') }}</h3>
+            <form id="bulk-resource-form">
+                <div>
+                    <label for="bulk-prefix">{{ _('Prefix:') }}</label>
+                    <input type="text" id="bulk-prefix" name="prefix">
+                </div>
+                <div>
+                    <label for="bulk-start">{{ _('Start Number:') }}</label>
+                    <input type="number" id="bulk-start" name="start" value="1">
+                </div>
+                <div>
+                    <label for="bulk-count">{{ _('Count:') }}</label>
+                    <input type="number" id="bulk-count" name="count" value="1" min="1">
+                </div>
+                <div>
+                    <label for="bulk-padding">{{ _('Number Padding:') }}</label>
+                    <input type="number" id="bulk-padding" name="padding" value="0" min="0">
+                </div>
+                <div>
+                    <label for="bulk-suffix">{{ _('Suffix:') }}</label>
+                    <input type="text" id="bulk-suffix" name="suffix">
+                </div>
+                <div>
+                    <label for="bulk-capacity">{{ _('Capacity:') }}</label>
+                    <input type="number" id="bulk-capacity" name="capacity" min="0">
+                </div>
+                <div>
+                    <label for="bulk-equipment">{{ _('Equipment:') }}</label>
+                    <input type="text" id="bulk-equipment" name="equipment">
+                </div>
+                <div>
+                    <label for="bulk-tags">{{ _('Group/Tags:') }}</label>
+                    <input type="text" id="bulk-tags" name="tags">
+                </div>
+                <div>
+                    <label for="bulk-status">{{ _('Status:') }}</label>
+                    <select id="bulk-status" name="status" class="form-control">
+                        <option value="draft">{{ _('Draft') }}</option>
+                        <option value="published">{{ _('Published') }}</option>
+                        <option value="archived">{{ _('Archived') }}</option>
+                    </select>
+                </div>
+                <button type="submit" class="button" style="margin-top: 10px;">{{ _('Create Resources') }}</button>
+                <div id="bulk-resource-form-status" class="status-message" style="margin-top: 10px;"></div>
+            </form>
+        </div>
     </div>
+
     <div id="bulk-edit-modal" class="modal" style="display: none;">
-        {# ... #}
+        <div class="modal-content">
+            <span class="close-modal-btn" data-modal-id="bulk-edit-modal">&times;</span>
+            <h3>{{ _('Bulk Edit Resources') }}</h3>
+            <form id="bulk-edit-form">
+                <div>
+                    <label for="bulk-edit-status">{{ _('Status:') }}</label>
+                    <select id="bulk-edit-status" name="status" class="form-control">
+                        <option value="">{{ _('-- Unchanged --') }}</option>
+                        <option value="draft">{{ _('Draft') }}</option>
+                        <option value="published">{{ _('Published') }}</option>
+                        <option value="archived">{{ _('Archived') }}</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="bulk-edit-capacity">{{ _('Capacity:') }}</label>
+                    <input type="number" id="bulk-edit-capacity" name="capacity" min="0">
+                </div>
+                <div>
+                    <label for="bulk-edit-equipment">{{ _('Equipment:') }}</label>
+                    <input type="text" id="bulk-edit-equipment" name="equipment">
+                </div>
+                <div>
+                    <label for="bulk-edit-tags">{{ _('Group/Tags:') }}</label>
+                    <input type="text" id="bulk-edit-tags" name="tags">
+                </div>
+                <button type="submit" class="button" style="margin-top: 10px;">{{ _('Apply Changes') }}</button>
+                <div id="bulk-edit-form-status" class="status-message" style="margin-top: 10px;"></div>
+            </form>
+        </div>
     </div>
+
+    <!-- QR Code Modal -->
     <div id="qr-code-modal" class="modal" style="display: none; text-align: center;">
-        {# ... #}
+        <div class="modal-content" style="display: inline-block; padding: 20px;">
+            <span class="close-modal-btn" data-modal-id="qr-code-modal" style="position: absolute; top: 10px; right: 15px;">&times;</span>
+            <h4 id="qr-code-modal-title">{{ _('Check-in QR Code') }}</h4>
+            <div id="qr-code-display" style="margin-top: 15px; margin-bottom: 15px;">
+                <!-- QR Code will be rendered here by JavaScript -->
+            </div>
+            <p id="qr-code-url-text" style="font-size: 0.9em; word-break: break-all;"></p>
+        </div>
     </div>
 {% endblock %}
 

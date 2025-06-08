@@ -137,62 +137,23 @@ def get_resource_available_slots(resource_id):
 def get_all_resources_admin():
     logger = current_app.logger
     try:
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 10, type=int)
-        per_page_options = [10, 25, 50, 100] # Should match JS options
-
-        if per_page not in per_page_options:
-            per_page = per_page_options[0]
-
-        # Filters from request arguments
-        name_filter = request.args.get('name')
-        status_filter = request.args.get('status')
-        map_id_filter = request.args.get('map_id') # Already present
-        tags_filter = request.args.get('tags')
-
+        map_id_str = request.args.get('map_id')
         query = Resource.query
 
-        if name_filter:
-            query = query.filter(Resource.name.ilike(f'%{name_filter}%'))
-        if status_filter:
-            query = query.filter(Resource.status == status_filter)
-        if map_id_filter:
+        if map_id_str:
             try:
-                map_id = int(map_id_filter)
+                map_id = int(map_id_str)
                 query = query.filter(Resource.floor_map_id == map_id)
             except ValueError:
-                logger.warning(f"Invalid map_id format: {map_id_filter}. Must be an integer.")
-                return jsonify({'success': False, 'error': f"Invalid map_id format: '{map_id_filter}'. Must be an integer."}), 400
-        if tags_filter:
-            # Assuming tags_filter is a single string, potentially comma-separated for OR logic,
-            # or we expect an exact match for a single tag if that's how JS sends it.
-            # For simple "contains this tag" in a comma-separated list:
-            query = query.filter(Resource.tags.ilike(f'%{tags_filter}%'))
+                logger.warning(f"Invalid map_id format: {map_id_str}. Must be an integer.")
+                return jsonify({'error': f"Invalid map_id format: '{map_id_str}'. Must be an integer."}), 400
 
-
-        # Order by resource name for consistent results (optional, but good for pagination)
-        query = query.order_by(Resource.name.asc())
-
-        pagination_obj = query.paginate(page=page, per_page=per_page, error_out=False)
-
-        resources_list = [resource_to_dict(r) for r in pagination_obj.items]
-
-        response_data = {
-            'success': True,
-            'resources': resources_list,
-            'pagination': {
-                'current_page': pagination_obj.page,
-                'per_page': pagination_obj.per_page,
-                'total_items': pagination_obj.total,
-                'total_pages': pagination_obj.pages
-            }
-        }
-        logger.info(f"Admin fetch resources: page={page}, per_page={per_page}, total_items={pagination_obj.total}")
-        return jsonify(response_data), 200
+        resources = query.all()
+        resources_list = [resource_to_dict(r) for r in resources]
+        return jsonify(resources_list), 200
     except Exception as e:
         logger.exception("Error fetching all resources for admin:")
-        # Ensure a consistent error response structure if possible
-        return jsonify({'success': False, 'error': 'Failed to fetch resources due to a server error.', 'pagination': None}), 500
+        return jsonify({'error': 'Failed to fetch resources due to a server error.'}), 500
 
 @api_resources_bp.route('/admin/resources', methods=['POST'])
 @login_required
