@@ -1899,7 +1899,7 @@ def download_map_config_component(timestamp_str, config_share_client, dry_run=Fa
         _emit_progress(socketio_instance, task_id, 'restore_progress', f'Downloading {component_name}...', detail=f'{azure_config_path} to {local_config_target_path}', level='INFO')
         logger.info(f"Downloading {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'.")
         if download_file(config_share_client, azure_config_path, local_config_target_path):
-            success_msg = f"{component_name} JSON downloaded successfully."
+            success_msg = f"{component_name} JSON downloaded successfully to {local_config_target_path}."
             logger.info(success_msg)
             _emit_progress(socketio_instance, task_id, 'restore_progress', f'{component_name} download complete.', detail=local_config_target_path, level='SUCCESS')
             downloaded_config_path = local_config_target_path
@@ -2171,7 +2171,7 @@ def download_scheduler_settings_component(timestamp_str, config_share_client, dr
             return True, success_msg, actions, downloaded_config_path
         else:
             # Log as warning because scheduler settings might be optional for some restore scenarios.
-            warn_msg = f"{component_name} JSON download failed from '{azure_config_path}'."
+            warn_msg = f"{component_name} JSON download failed from '{azure_config_path}'. This might not be critical."
             logger.warning(warn_msg)
             _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, detail=azure_config_path, level='WARNING')
             return True, warn_msg, actions, None # Non-critical failure, return True

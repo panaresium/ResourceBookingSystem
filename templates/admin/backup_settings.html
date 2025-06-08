@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('Admin - Backup & Restore Settings') }}{% endblock %}
+
+{% block head_extra %}
+{{ super() }}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js" integrity="sha512-skuhu6jj+sQnhLq1Txsack8VfnIrX8wL+MTFilYlFFT/NuLJm7eya7zOROs39Jy5cjASMEWqxLzijRVmKhsqWQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<style>
+    .log-area {
+        max-height: 200px;
+        overflow-y: auto;
+        background: #f0f0f0;
+        border: 1px solid #ccc;
+        padding: 10px;
+        margin-top: 10px;
+        white-space: pre-wrap;
+        font-family: monospace;
+        font-size: 0.9em;
+    }
+    .log-entry {
+        padding: 2px 0;
+    }
+    .log-error {
+        color: red;
+        font-weight: bold;
+    }
+    .log-success {
+        color: green;
+        font-weight: bold;
+    }
+    .log-info {
+        color: #333;
+    }
+    /* Styles for DB Records View */
+    .db-table-container {
+        border: 1px solid #eee;
+        padding: 10px;
+        border-radius: 4px;
+    }
+    .db-records-content pre {
+        background-color: #f8f9fa; /* Light background for pre */
+        padding: 10px;
+        border-radius: 4px;
+        max-height: 300px; /* Max height for individual record lists */
+        overflow-y: auto;
+    }
+    /* Style for active (expanded) button */
+    #view-db-records-output .btn.active {
+        background-color: #007bff;
+        color: white;
+    }
+    .tab-content > .tab-pane {
+        padding-top: 1rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1>{{ _('Backup & Restore - General Settings') }}</h1>
+    <hr>
+    <p>{{ _('Current UTC Time:') }} <span id="utc-clock">Loading...</span></p>
+    <hr>
+
+    <!-- Startup Behavior Settings Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="card-title h5">{{ _('Startup Behavior Settings') }}</h2>
+        </div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('admin_ui.save_auto_restore_booking_records_settings') }}" id="startup-settings-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="form-group mb-2">
+                    <div class="form-check">
+                        <input type="checkbox" class="form-check-input" id="auto_restore_booking_records_enabled" name="auto_restore_booking_records_enabled" value="true" {% if auto_restore_booking_records_on_startup %}checked{% endif %}>
+                        <label class="form-check-label" for="auto_restore_booking_records_enabled">
+                            {{ _('Enable Automatic Restore of Booking Records on Application Startup') }}
+                            <small class="form-text text-muted">{{ _('(Applies incremental booking backups if available)') }}</small>
+                        </label>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-success"><i class="fas fa-save"></i> {{ _('Save Startup Settings') }}</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Global Log Areas -->
+    <div class="mt-4">
+        <h5>{{ _('Operation Logs') }}</h5>
+        <pre id="backup-log-area" class="log-area" style="display: none;"></pre>
+        <pre id="restore-log-area" class="log-area" style="display: none;"></pre>
+    </div>
+
+    <!-- Selective Restore Modal (remains global in case it's ever triggered from a general settings context, though unlikely) -->
+    <div id="selective-restore-modal" class="modal" style="display: none !important;">
+        <div class="modal-content">
+            <span class="close-modal-btn" id="close-selective-restore-modal">&times;</span>
+            <h3>{{ _('Selective Restore Options') }}</h3>
+            <p>{{ _('Select components to restore for backup:') }} <strong id="modal-backup-timestamp"></strong></p>
+            <form id="selective-restore-form">
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="database" id="component-database" name="components">
+                    <label class="form-check-label" for="component-database">{{ _('Database (Bookings, Users, Resources, etc.)') }}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="map_config" id="component-map_config" name="components">
+                    <label class="form-check-label" for="component-map_config">{{ _('Map Configuration (Floor map definitions & resource mappings on maps)') }}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="floor_maps" id="component-floor_maps" name="components">
+                    <label class="form-check-label" for="component-floor_maps">{{ _('Floor Map Images (in static/floor_map_uploads)') }}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="resource_uploads" id="component-resource_uploads" name="components">
+                    <label class="form-check-label" for="component-resource_uploads">{{ _('Resource Images (in static/resource_uploads)') }}</label>
+                </div>
+                <hr>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="all" id="component-all" name="components_all">
+                    <label class="form-check-label" for="component-all">{{ _('ALL COMPONENTS (Full Restore)') }}</label>
+                </div>
+                <button type="submit" id="confirm-selective-restore-btn" class="btn btn-primary mt-3">{{ _('Proceed with Selected Restore') }}</button>
+            </form>
+            <div id="selective-restore-modal-status" class="status-message mt-2"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
+    <script src="{{ url_for('static', filename='js/admin_backup_common.js') }}" defer></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // Define csrfToken, though standard form submissions handle it via hidden input.
+            // Good practice if any AJAX calls were to be added here later.
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+            // No other page-specific JavaScript is currently needed for backup_settings.html.
+            // Forms on this page use standard POST submissions.
+            // Common utilities (like UTC clock, appendLog, disablePageInteractions) are in admin_backup_common.js.
+
+            // Example: If there were a dynamic element specific to this page:
+            // const someSettingSpecificButton = document.getElementById('some-setting-specific-btn');
+            // if (someSettingSpecificButton) {
+            //     someSettingSpecificButton.addEventListener('click', function() {
+            //         console.log('Setting specific button clicked. CSRF Token:', csrfToken);
+            //         // Use socket or fetch as needed...
+            //     });
+            // }
+        });
+    </script>
+{% endblock %}

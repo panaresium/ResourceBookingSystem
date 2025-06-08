@@ -104,8 +104,6 @@ def update_profile():
 @permission_required('manage_users')
 def get_all_users():
     try:
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 10, type=int)
         username_filter = request.args.get('username_filter')
         is_admin_filter = request.args.get('is_admin')
         role_id_filter = request.args.get('role_id', type=int)
@@ -127,33 +125,18 @@ def get_all_users():
         if role_id_filter:
             query = query.join(User.roles).filter(Role.id == role_id_filter)
 
-        # Default sorting
-        query = query.order_by(User.username.asc())
-
-        pagination_obj = query.paginate(page=page, per_page=per_page, error_out=False)
-        users_on_page = pagination_obj.items
+        users = query.all()
 
         users_list = [{
             'id': u.id,
             'username': u.username,
             'email': u.email,
             'is_admin': u.is_admin,
-            'google_id': u.google_id, # Ensure this is included
+            'google_id': u.google_id,
             'roles': [{'id': role.id, 'name': role.name} for role in u.roles]
-        } for u in users_on_page]
-
-        current_app.logger.info(f"Admin user {current_user.username} fetched users list with pagination and filters.")
-        return jsonify({
-            "users": users_list,
-            "pagination": {
-                "page": pagination_obj.page,
-                "per_page": pagination_obj.per_page,
-                "total_pages": pagination_obj.pages,
-                "total_items": pagination_obj.total,
-                "has_next": pagination_obj.has_next,
-                "has_prev": pagination_obj.has_prev
-            }
-        }), 200
+        } for u in users]
+        current_app.logger.info(f"Admin user {current_user.username} fetched users list with filters.")
+        return jsonify(users_list), 200
     except Exception as e:
         current_app.logger.exception("Error fetching all users:")
         return jsonify({'error': 'Failed to fetch users due to a server error.'}), 500

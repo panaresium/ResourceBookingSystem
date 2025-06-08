@@ -23,15 +23,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const filterTagsInput = document.getElementById('resource-filter-tags');
     const applyFiltersBtn = document.getElementById('resource-apply-filters-btn');
     const clearFiltersBtn = document.getElementById('resource-clear-filters-btn');
-
-    let currentFilters = {
-        name: '',
-        status: '',
-        mapId: '',
-        tags: ''
-    };
-    let currentPage = 1;
-    let itemsPerPage = 10; // Default items per page
+    let currentFilters = {};
 
     let currentResourceIdForPins = null; // For PIN Management
 
@@ -58,28 +50,70 @@ document.addEventListener('DOMContentLoaded', function() {
     const importResourcesFile = document.getElementById('import-resources-file');
     const importResourcesBtn = document.getElementById('import-resources-btn');
 
-    async function fetchAndDisplayResources() { // Filter argument removed, uses global currentFilters
+    async function fetchAndDisplayResources(filters = {}) {
         showLoading(statusDiv, 'Fetching resources...');
-
-        const params = new URLSearchParams();
-        params.append('page', currentPage);
-        params.append('per_page', itemsPerPage);
-
-        if (currentFilters.name) params.append('name', currentFilters.name);
-        if (currentFilters.status) params.append('status', currentFilters.status);
-        if (currentFilters.tags) params.append('tags', currentFilters.tags);
-        if (currentFilters.mapId) params.append('map_id', currentFilters.mapId);
-
         try {
-            // Fetch maps only once or if not already populated
-            if (filterMapSelect && filterMapSelect.options.length <= 1) { // Assuming default "-- Any --" option
-                const maps = await apiCall('/api/admin/maps');
-                if (maps) {
-                    maps.forEach(m => {
-                        const opt = document.createElement('option');
-                        opt.value = m.id;
-                        opt.textContent = m.name;
-                        filterMapSelect.appendChild(opt);
+            const [resources, maps] = await Promise.all([
+                apiCall('/api/admin/resources'),
+                apiCall('/api/admin/maps')
+            ]);
+            tableBody.innerHTML = '';
+            const mapsById = {};
+            if (maps) maps.forEach(m => { mapsById[m.id] = m; });
+
+            if (filterMapSelect && filterMapSelect.options.length === 1 && maps) {
+                maps.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m.id;
+                    opt.textContent = m.name;
+                    filterMapSelect.appendChild(opt);
+                });
+            }
+
+            let filtered = resources || [];
+            if (filters.name) {
+                filtered = filtered.filter(r => r.name.toLowerCase().includes(filters.name.toLowerCase()));
+            }
+            if (filters.status) {
+                filtered = filtered.filter(r => r.status === filters.status);
+            }
+            if (filters.mapId) {
+                filtered = filtered.filter(r => String(r.floor_map_id || '') === String(filters.mapId));
+            }
+            if (filters.tags) {
+                filtered = filtered.filter(r => r.tags && r.tags.toLowerCase().includes(filters.tags.toLowerCase()));
+            }
+
+            const grouped = {};
+            filtered.forEach(r => {
+                const key = r.floor_map_id ? String(r.floor_map_id) : 'none';
+                if (!grouped[key]) grouped[key] = [];
+                grouped[key].push(r);
+            });
+
+            const mapIdsInOrder = Object.keys(grouped);
+            if (mapIdsInOrder.length > 0) {
+                mapIdsInOrder.forEach(mid => {
+                    const headingRow = tableBody.insertRow();
+                    const headingCell = headingRow.insertCell();
+                    headingCell.colSpan = 7;
+                    const mapName = mid === 'none' ? 'Unassigned' : (mapsById[mid] ? mapsById[mid].name : 'Map ' + mid);
+                    headingCell.textContent = `Map: ${mapName}`;
+
+                    grouped[mid].forEach(r => {
+                        const row = tableBody.insertRow();
+                        const selectCell = row.insertCell();
+                        selectCell.innerHTML = `<input type="checkbox" class="select-resource-checkbox" data-id="${r.id}">`;
+                        row.insertCell().textContent = r.id;
+                        row.insertCell().textContent = r.name;
+                        row.insertCell().textContent = r.status || 'draft';
+                        row.insertCell().textContent = r.capacity !== null && r.capacity !== undefined ? r.capacity : '';
+                        row.insertCell().textContent = r.tags || '';
+                        const actionsCell = row.insertCell();
+                        actionsCell.innerHTML = `
+                            <button class="button edit-resource-btn" data-id="${r.id}">Edit</button>
+                            <button class="button danger delete-resource-btn" data-id="${r.id}" data-name="${r.name}">Delete</button>
+                        `;
                     });
                 }
             }
@@ -124,218 +158,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 hideMessage(statusDiv);
             } else {
-                tableBody.innerHTML = '<tr><td colspan="7">No resources found matching your criteria.</td></tr>'; // Colspan updated
-                showSuccess(statusDiv, 'No resources to display for the current page/filters.');
+                tableBody.innerHTML = '<tr><td colspan="6">No resources found.</td></tr>';
+                showSuccess(statusDiv, 'No resources to display.');
             }
-
-            renderResourcePagination(paginationData);
             if (selectAllCheckbox) selectAllCheckbox.checked = false;
-
         } catch (error) {
             showError(statusDiv, `Error fetching resources: ${error.message}`);
-            renderResourcePagination(null); // Clear pagination on error
         }
     }
-
-    function renderResourcePagination(paginationData) {
-        const controlsContainer = document.getElementById('resource-pagination-controls');
-        if (!controlsContainer) return;
-        controlsContainer.innerHTML = '';
-
-        if (!paginationData || paginationData.total_pages <= 0) {
-            controlsContainer.style.display = 'none';
-            return;
-        }
-        controlsContainer.style.display = 'block';
-
-        const navElement = document.createElement('nav');
-        navElement.className = 'mt-4';
-        navElement.setAttribute('aria-label', 'Resources pagination');
-
-        const ulElement = document.createElement('ul');
-        ulElement.className = 'pagination justify-content-center';
-
-        // Items Per Page Selector
-        const itemsPerPageLi = document.createElement('li');
-        itemsPerPageLi.className = 'page-item disabled';
-        const form = document.createElement('form');
-        form.className = 'd-flex align-items-center';
-        const label = document.createElement('label');
-        label.className = 'visually-hidden me-2';
-        label.setAttribute('for', 'per_page_select_resource_pagination');
-        label.textContent = 'Items per page:';
-        form.appendChild(label);
-        const select = document.createElement('select');
-        select.className = 'form-select form-select-sm me-2';
-        select.name = 'per_page';
-        select.id = 'per_page_select_resource_pagination';
-        select.style.width = 'auto';
-        const perPageOptions = [10, 25, 50, 100];
-        perPageOptions.forEach(num => {
-            const option = document.createElement('option');
-            option.value = num;
-            option.textContent = num;
-            if (num === itemsPerPage) option.selected = true;
-            select.appendChild(option);
-        });
-        select.addEventListener('change', function() {
-            itemsPerPage = parseInt(this.value, 10);
-            currentPage = 1;
-            fetchAndDisplayResources();
-        });
-        form.appendChild(select);
-        itemsPerPageLi.appendChild(form);
-        ulElement.appendChild(itemsPerPageLi);
-
-        if (paginationData.total_pages <= 1 && paginationData.total_items > 0) {
-            const p = document.createElement('p');
-            p.className = 'text-center text-muted small mt-2';
-            p.textContent = `Total items: ${paginationData.total_items}`;
-            navElement.appendChild(ulElement);
-            navElement.appendChild(p);
-            controlsContainer.appendChild(navElement);
-            return;
-        }
-        if (paginationData.total_pages <= 1) { // No items or only one page of items
-             navElement.appendChild(ulElement); // Show selector only
-             controlsContainer.appendChild(navElement);
-             return;
-        }
-
-
-        // Blank Separator
-        const liSep1 = document.createElement('li');
-        liSep1.className = 'page-item disabled';
-        const spanSep1 = document.createElement('span');
-        spanSep1.className = 'page-link';
-        spanSep1.style.paddingLeft = '1em';
-        liSep1.appendChild(spanSep1);
-        ulElement.appendChild(liSep1);
-
-        // Previous Icon Link
-        const liPrev = document.createElement('li');
-        liPrev.className = 'page-item' + (paginationData.page === 1 ? ' disabled' : '');
-        const aPrev = document.createElement('a');
-        aPrev.className = 'page-link';
-        aPrev.href = '#';
-        aPrev.innerHTML = '&laquo;';
-        if (paginationData.page > 1) {
-            aPrev.addEventListener('click', (e) => { e.preventDefault(); handleResourcePageClick(paginationData.page - 1); });
-        }
-        liPrev.appendChild(aPrev);
-        ulElement.appendChild(liPrev);
-
-        // Opening Bracket
-        const liOpenBracket = document.createElement('li');
-        liOpenBracket.className = 'page-item disabled';
-        const spanOpenBracket = document.createElement('span');
-        spanOpenBracket.className = 'page-link';
-        spanOpenBracket.textContent = '[';
-        liOpenBracket.appendChild(spanOpenBracket);
-        ulElement.appendChild(liOpenBracket);
-
-        // Page Numbers and Commas
-        function createCommaLi() {
-            const li = document.createElement('li');
-            li.className = 'page-item disabled';
-            const span = document.createElement('span');
-            span.className = 'page-link';
-            span.textContent = ',';
-            li.appendChild(span);
-            return li;
-        }
-
-        let isFirstElementInSequence = true;
-        const totalPages = paginationData.total_pages;
-        const currentDisplayPage = paginationData.page;
-
-        const pagesToShow = new Set();
-        pagesToShow.add(1);
-        pagesToShow.add(totalPages);
-        if (currentDisplayPage > 1) pagesToShow.add(currentDisplayPage - 1);
-        pagesToShow.add(currentDisplayPage);
-        if (currentDisplayPage < totalPages) pagesToShow.add(currentDisplayPage + 1);
-
-        const sortedPages = Array.from(pagesToShow).sort((a, b) => a - b);
-        let lastPageShown = 0;
-
-        sortedPages.forEach(p => {
-            if (p < 1 || p > totalPages) return;
-
-            if (p > lastPageShown + 1 && p !== 1 && lastPageShown !== 0) {
-                 if (!isFirstElementInSequence) ulElement.appendChild(createCommaLi());
-                 const liEllipsis = document.createElement('li');
-                 liEllipsis.className = 'page-item disabled';
-                 const spanEllipsis = document.createElement('span');
-                 spanEllipsis.className = 'page-link';
-                 spanEllipsis.textContent = '...';
-                 liEllipsis.appendChild(spanEllipsis);
-                 ulElement.appendChild(liEllipsis);
-                 isFirstElementInSequence = false;
-            }
-
-            if (p > lastPageShown) {
-                if (!isFirstElementInSequence) ulElement.appendChild(createCommaLi());
-                const liPage = document.createElement('li');
-                liPage.className = 'page-item' + (p === currentDisplayPage ? ' active' : '');
-                const aPage = document.createElement('a');
-                aPage.className = 'page-link';
-                aPage.href = '#';
-                aPage.textContent = p;
-                aPage.addEventListener('click', (e) => { e.preventDefault(); handleResourcePageClick(p); });
-                liPage.appendChild(aPage);
-                ulElement.appendChild(liPage);
-                isFirstElementInSequence = false;
-                lastPageShown = p;
-            }
-        });
-
-        // Closing Bracket
-        const liCloseBracket = document.createElement('li');
-        liCloseBracket.className = 'page-item disabled';
-        const spanCloseBracket = document.createElement('span');
-        spanCloseBracket.className = 'page-link';
-        spanCloseBracket.textContent = ']';
-        liCloseBracket.appendChild(spanCloseBracket);
-        ulElement.appendChild(liCloseBracket);
-
-        // Next Icon Link
-        const liNext = document.createElement('li');
-        liNext.className = 'page-item' + (paginationData.page === totalPages ? ' disabled' : '');
-        const aNext = document.createElement('a');
-        aNext.className = 'page-link';
-        aNext.href = '#';
-        aNext.innerHTML = '&raquo;';
-        if (paginationData.page < totalPages) {
-            aNext.addEventListener('click', (e) => { e.preventDefault(); handleResourcePageClick(paginationData.page + 1); });
-        }
-        liNext.appendChild(aNext);
-        ulElement.appendChild(liNext);
-
-        // Final Blank Separator
-        const liSep2 = document.createElement('li');
-        liSep2.className = 'page-item disabled';
-        const spanSep2 = document.createElement('span');
-        spanSep2.className = 'page-link';
-        spanSep2.style.paddingLeft = '1em';
-        liSep2.appendChild(spanSep2);
-        ulElement.appendChild(liSep2);
-
-        navElement.appendChild(ulElement);
-
-        const pTotal = document.createElement('p');
-        pTotal.className = 'text-center text-muted small mt-2';
-        pTotal.textContent = `Page ${currentDisplayPage} of ${totalPages}. Total items: ${paginationData.total_items}`;
-        navElement.appendChild(pTotal);
-
-        controlsContainer.appendChild(navElement);
-    }
-
-    function handleResourcePageClick(newPageNum) {
-        currentPage = newPageNum;
-        fetchAndDisplayResources();
-    }
-
 
     addBtn.addEventListener('click', function() {
         resourceForm.reset();
@@ -651,8 +481,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 mapId: filterMapSelect.value,
                 tags: filterTagsInput.value.trim()
             };
-            currentPage = 1; // Reset to first page on filter change
-            fetchAndDisplayResources();
+            fetchAndDisplayResources(currentFilters);
         });
     }
 
@@ -662,9 +491,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (filterStatusSelect) filterStatusSelect.value = '';
             if (filterMapSelect) filterMapSelect.value = '';
             if (filterTagsInput) filterTagsInput.value = '';
-            currentFilters = { name: '', status: '', mapId: '', tags: '' }; // Reset to empty strings
-            currentPage = 1; // Reset to first page
-            fetchAndDisplayResources();
+            currentFilters = {};
+            fetchAndDisplayResources(currentFilters);
         });
     }
 

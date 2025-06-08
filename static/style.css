@@ -1176,9 +1176,9 @@ body.high-contrast footer {
     box-sizing: border-box; display: flex; align-items: center; justify-content: center;
     text-align: center; overflow: hidden; color: #000; font-size: 12px;
 }
-.resource-area-available { background-color: rgba(0, 255, 0, 0.15); border-color: rgba(0, 200, 0, 0.6); }
-.resource-area-partially-booked { background-color: rgba(255, 140, 0, 0.3); border-color: rgba(204, 112, 0, 0.7); }
-.resource-area-fully-booked { background-color: rgba(255, 0, 0, 0.3); border-color: rgba(200, 0, 0, 0.7); }
+.resource-area-available { background-color: rgba(0, 255, 0, 0.2); border-color: darkgreen; }
+.resource-area-partially-booked { background-color: rgba(255, 255, 0, 0.5); border-color: #cca300; }
+.resource-area-fully-booked { background-color: rgba(255, 0, 0, 0.2); border-color: darkred; }
 .resource-area-unknown { background-color: rgba(128, 128, 128, 0.3); border-color: #555; }
 .map-area-clickable:hover { cursor: pointer; filter: brightness(110%); }
 
@@ -1562,3 +1562,4 @@ div.responsive-table-container > table#users-table, /* User Management */
 div.responsive-table-container > table#admin-bookings-table { /* Admin Bookings */
     width: 100%;
 }
+

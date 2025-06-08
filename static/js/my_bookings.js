@@ -30,20 +30,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (updateModal && typeof updateModal.hide === 'function') {
         updateModal.hide(); // For Bootstrap modal object
     } else if (updateModalElement) {
+        // This is the primary fallback if Bootstrap's JS isn't loaded or `new bootstrap.Modal` failed silently.
+        // It also covers the custom fallback object's hide method if it were more complex.
         updateModalElement.style.display = 'none'; 
     }
-
-    // Pagination State
-    let currentUpcomingPage = 1;
-    let currentPastPage = 1;
-    let itemsPerPage = 10; // Default, will be updated by selector
-    let totalUpcomingPages = 1;
-    let totalPastPages = 1;
-
-    // Pagination Control Elements (assuming these IDs in HTML)
-    const upcomingPaginationControls = document.getElementById('upcoming-bookings-pagination-controls');
-    const pastPaginationControls = document.getElementById('past-bookings-pagination-controls');
-    const itemsPerPageSelect = document.getElementById('items-per-page-select'); // Assuming one selector for both
 
     const updateBookingModalLabel = document.getElementById('updateBookingModalLabel');
     const modalBookingIdInput = document.getElementById('modal-booking-id');
@@ -203,57 +193,46 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function fetchAndDisplayBookings() {
-        const myBookingsStatusDiv = document.getElementById('my-bookings-status');
+        // const upcomingBookingsContainer = document.getElementById('upcoming-bookings-container'); // Now global
+        // const pastBookingsContainer = document.getElementById('past-bookings-container'); // Now global
+        const myBookingsStatusDiv = document.getElementById('my-bookings-status'); // Uses the global statusDiv
 
         if (!upcomingBookingsContainer || !pastBookingsContainer) {
             console.error('My Bookings page structure is missing essential container elements.');
-            if (myBookingsStatusDiv) showStatusMessage(myBookingsStatusDiv, 'Error: Could not load booking display components.', 'danger');
+            if (myBookingsStatusDiv) {
+                myBookingsStatusDiv.className = 'alert alert-danger';
+                myBookingsStatusDiv.textContent = 'Error: Could not load booking display components.';
+                myBookingsStatusDiv.style.display = 'block';
+            }
             return;
         }
 
-        // Show loading messages
-        upcomingBookingsContainer.innerHTML = '<p class="loading-message">{{ _("Loading upcoming bookings...") }}</p>';
-        pastBookingsContainer.innerHTML = '<p class="loading-message">{{ _("Loading past bookings...") }}</p>';
-        if (upcomingPaginationControls) upcomingPaginationControls.innerHTML = ''; // Clear old controls
-        if (pastPaginationControls) pastPaginationControls.innerHTML = ''; // Clear old controls
-        if (myBookingsStatusDiv) hideStatusMessage(myBookingsStatusDiv);
-
+        upcomingBookingsContainer.innerHTML = '<p class="loading-message">Loading upcoming bookings...</p>';
+        pastBookingsContainer.innerHTML = '<p class="loading-message">Loading past bookings...</p>';
+        if (myBookingsStatusDiv) {
+            myBookingsStatusDiv.style.display = 'none';
+        }
 
         let apiUrl = '/api/bookings/my_bookings';
         const params = new URLSearchParams();
 
-        // Append pagination parameters
-        params.append('upcoming_page', currentUpcomingPage);
-        params.append('upcoming_per_page', itemsPerPage);
-        params.append('past_page', currentPastPage);
-        params.append('past_per_page', itemsPerPage);
-
         if (statusFilterSelect && statusFilterSelect.value !== 'all') {
             params.append('status_filter', statusFilterSelect.value);
         }
+
         if (dateFilterTypeSelect && dateFilterTypeSelect.value === 'specific' && datePickerInput && datePickerInput.value) {
             params.append('date_filter_value', datePickerInput.value);
         }
 
-        apiUrl += `?${params.toString()}`;
+        const queryString = params.toString();
+        if (queryString) {
+            apiUrl += `?${queryString}`;
+        }
 
         try {
-            // Disable controls during fetch
-            if (itemsPerPageSelect) itemsPerPageSelect.disabled = true;
-            // (Pagination controls will be rebuilt, so disabling existing ones isn't strictly necessary if cleared)
-
-            const apiResponse = await apiCall(apiUrl, {}, myBookingsStatusDiv); // myBookingsStatusDiv for errors
-
-            // Update global pagination state from response
-            currentUpcomingPage = apiResponse.upcoming_bookings.page;
-            totalUpcomingPages = apiResponse.upcoming_bookings.total_pages;
-            currentPastPage = apiResponse.past_bookings.page;
-            totalPastPages = apiResponse.past_bookings.total_pages;
-            // itemsPerPage is already known globally, but response might confirm it:
-            // itemsPerPage = apiResponse.upcoming_bookings.per_page; // if server can override
-
-            const upcomingBookingItems = apiResponse.upcoming_bookings.items;
-            const pastBookingItems = apiResponse.past_bookings.items;
+            const apiResponse = await apiCall(apiUrl, {}, myBookingsStatusDiv);
+            const upcomingBookings = apiResponse.upcoming_bookings;
+            const pastBookings = apiResponse.past_bookings;
             const checkInOutEnabled = apiResponse.check_in_out_enabled;
 
             // Conditionally apply scrollable class based on pagination data
@@ -275,292 +254,45 @@ document.addEventListener('DOMContentLoaded', () => {
             upcomingBookingsContainer.innerHTML = '';
             pastBookingsContainer.innerHTML = '';
 
-            if ((!upcomingBookingItems || upcomingBookingItems.length === 0) && (!pastBookingItems || pastBookingItems.length === 0)) {
-                if (myBookingsStatusDiv) showStatusMessage(myBookingsStatusDiv, '{{ _("You have no bookings matching the current filters.") }}', 'info');
-                upcomingBookingsContainer.innerHTML = '<p>{{ _("No upcoming bookings found.") }}</p>';
-                pastBookingsContainer.innerHTML = '<p>{{ _("No past booking history found.") }}</p>';
-            } else {
-                if (upcomingBookingItems && upcomingBookingItems.length > 0) {
-                    upcomingBookingItems.forEach(booking => {
-                        const bookingCard = createBookingCardElement(booking, checkInOutEnabled);
-                        upcomingBookingsContainer.appendChild(bookingCard);
-                    });
-                } else {
-                    upcomingBookingsContainer.innerHTML = '<p>{{ _("No upcoming bookings found matching your filters.") }}</p>';
-                }
-
-                if (pastBookingItems && pastBookingItems.length > 0) {
-                    pastBookingItems.forEach(booking => {
-                        const bookingCard = createBookingCardElement(booking, checkInOutEnabled);
-                        pastBookingsContainer.appendChild(bookingCard);
-                    });
-                } else {
-                    pastBookingsContainer.innerHTML = '<p>{{ _("No past booking history found matching your filters.") }}</p>';
-                }
+            if ((!upcomingBookings || upcomingBookings.length === 0) && (!pastBookings || pastBookings.length === 0)) {
+                if (myBookingsStatusDiv) showStatusMessage(myBookingsStatusDiv, 'You have no bookings matching the current filters.', 'info');
+                upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings found.</p>';
+                pastBookingsContainer.innerHTML = '<p>No past booking history found.</p>';
+                return;
             }
 
-            renderPaginationControls('upcoming', apiResponse.upcoming_bookings);
-            renderPaginationControls('past', apiResponse.past_bookings);
+            if (upcomingBookings && upcomingBookings.length > 0) {
+                upcomingBookings.forEach(booking => {
+                    const bookingCard = createBookingCardElement(booking, checkInOutEnabled);
+                    upcomingBookingsContainer.appendChild(bookingCard);
+                });
+            } else {
+                upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings found matching your filters.</p>';
+            }
 
-            if (myBookingsStatusDiv && myBookingsStatusDiv.textContent === '{{ _("Loading your bookings...") }}' && !myBookingsStatusDiv.classList.contains('alert-danger')) {
+            if (pastBookings && pastBookings.length > 0) {
+                pastBookings.forEach(booking => {
+                    const bookingCard = createBookingCardElement(booking, checkInOutEnabled);
+                    pastBookingsContainer.appendChild(bookingCard);
+                });
+            } else {
+                pastBookingsContainer.innerHTML = '<p>No past booking history found matching your filters.</p>';
+            }
+
+            // Only hide global status if it was showing a general loading message and not an error from apiCall
+            if (myBookingsStatusDiv && myBookingsStatusDiv.textContent === 'Loading your bookings...' && !myBookingsStatusDiv.classList.contains('alert-danger')) {
                  hideStatusMessage(myBookingsStatusDiv);
             }
         } catch (error) {
             console.error('Error fetching bookings:', error);
-            upcomingBookingsContainer.innerHTML = '<p>{{ _("Could not load upcoming bookings.") }}</p>';
-            pastBookingsContainer.innerHTML = '<p>{{ _("Could not load past bookings.") }}</p>';
             // apiCall likely already showed an error in myBookingsStatusDiv
-        } finally {
-            // Re-enable controls
-            if (itemsPerPageSelect) itemsPerPageSelect.disabled = false;
+            // Set specific messages for containers
+            upcomingBookingsContainer.innerHTML = '<p>Could not load upcoming bookings.</p>';
+            pastBookingsContainer.innerHTML = '<p>Could not load past bookings.</p>';
         }
     }
 
-    function renderPaginationControls(section, paginationData) {
-        const container = section === 'upcoming' ? upcomingPaginationControls : pastPaginationControls;
-        if (!container) {
-            console.error(`Pagination container for section '${section}' not found.`);
-            return;
-        }
-        container.innerHTML = ''; // Clear previous controls
-
-        // If there are no pages (e.g., no items at all), don't render pagination.
-        if (paginationData.total_pages <= 0) {
-            return;
-        }
-
-        const navElement = document.createElement('nav');
-        navElement.className = 'mt-4';
-        navElement.setAttribute('aria-label', 'Bookings pagination');
-
-        const ulElement = document.createElement('ul');
-        ulElement.className = 'pagination justify-content-center';
-
-        // 1. Items Per Page Selector
-        const itemsPerPageLi = document.createElement('li');
-        itemsPerPageLi.className = 'page-item disabled'; // Disabled as it's not a clickable link
-
-        const form = document.createElement('form');
-        form.className = 'd-flex align-items-center';
-        form.method = 'GET'; // Or 'POST', though not submitting to server
-        form.action = '#'; // Prevent page reload
-
-        const label = document.createElement('label');
-        label.className = 'visually-hidden me-2'; // visually-hidden for accessibility, me-2 for spacing
-        label.setAttribute('for', `per_page_select_${section}_pagination`);
-        label.textContent = 'Items per page:';
-        form.appendChild(label);
-
-        const select = document.createElement('select');
-        select.className = 'form-select form-select-sm me-2';
-        select.name = 'per_page';
-        select.id = `per_page_select_${section}_pagination`;
-        select.style.width = 'auto';
-
-        const perPageOptions = [10, 25, 50, 100];
-        perPageOptions.forEach(num => {
-            const option = document.createElement('option');
-            option.value = num;
-            option.textContent = num;
-            if (num === itemsPerPage) {
-                option.selected = true;
-            }
-            select.appendChild(option);
-        });
-
-        select.addEventListener('change', function() {
-            itemsPerPage = parseInt(this.value, 10);
-            currentUpcomingPage = 1;
-            currentPastPage = 1;
-            fetchAndDisplayBookings();
-            const myBookingsListElement = document.getElementById('my-bookings-list');
-            if (myBookingsListElement) {
-                myBookingsListElement.scrollIntoView({ behavior: 'smooth' });
-            }
-        });
-        form.appendChild(select);
-        itemsPerPageLi.appendChild(form);
-        ulElement.appendChild(itemsPerPageLi);
-
-        // If total_pages is 1 or less, only show the items per page selector
-        // The prompt says: "If total_pages <=1, only render the 'Items Per Page Selector' part of the nav."
-        // This means we append the navElement with just the itemsPerPageLi inside ulElement.
-        if (paginationData.total_pages <= 1) {
-            navElement.appendChild(ulElement);
-            container.appendChild(navElement);
-            return; // Stop here, no further pagination controls needed
-        }
-
-        // 2. Blank Separator
-        const blankSeparator1Li = document.createElement('li');
-        blankSeparator1Li.className = 'page-item disabled';
-        const blankSeparator1Span = document.createElement('span');
-        blankSeparator1Span.className = 'page-link';
-        blankSeparator1Span.style.paddingLeft = '1em';
-        blankSeparator1Li.appendChild(blankSeparator1Span);
-        ulElement.appendChild(blankSeparator1Li);
-
-        // 3. Previous Icon Link
-        const prevIconLi = document.createElement('li');
-        prevIconLi.className = `page-item ${paginationData.page === 1 ? 'disabled' : ''}`;
-        const prevIconLink = document.createElement('a');
-        prevIconLink.className = 'page-link';
-        prevIconLink.href = '#';
-        prevIconLink.textContent = '«';
-        prevIconLink.addEventListener('click', (e) => {
-            e.preventDefault();
-            if (paginationData.page > 1) {
-                if (section === 'upcoming') {
-                    currentUpcomingPage--;
-                } else {
-                    currentPastPage--;
-                }
-                fetchAndDisplayBookings();
-                const myBookingsListElement = document.getElementById('my-bookings-list');
-                if (myBookingsListElement) {
-                    myBookingsListElement.scrollIntoView({ behavior: 'smooth' });
-                }
-            }
-        });
-        prevIconLi.appendChild(prevIconLink);
-        ulElement.appendChild(prevIconLi);
-
-        // 4. Opening Bracket
-        const openingBracketLi = document.createElement('li');
-        openingBracketLi.className = 'page-item disabled';
-        const openingBracketSpan = document.createElement('span');
-        openingBracketSpan.className = 'page-link';
-        openingBracketSpan.textContent = '[';
-        openingBracketLi.appendChild(openingBracketSpan);
-        ulElement.appendChild(openingBracketLi);
-
-        // Helper function to create a comma separator LI
-        function createCommaLI() {
-            const li = document.createElement('li');
-            li.className = 'page-item disabled';
-            const span = document.createElement('span');
-            span.className = 'page-link';
-            span.textContent = ',';
-            li.appendChild(span);
-            return li;
-        }
-
-        // 5. Page Numbers (with commas and ellipses)
-        const currentPage = paginationData.page;
-        const totalPages = paginationData.total_pages;
-        const leftEdge = 1;
-        const rightEdge = 1;
-        const leftCurrent = 2;
-        const rightCurrent = 2;
-        let lastPagePrinted = 0;
-        let firstPageElementInSequence = true; // Flag to manage comma insertion
-
-        for (let p = 1; p <= totalPages; p++) {
-            const showPage = (p <= leftEdge) ||
-                             (p > totalPages - rightEdge) ||
-                             (p >= currentPage - leftCurrent && p <= currentPage + rightCurrent);
-
-            if (showPage) {
-                if (p > lastPagePrinted + 1) { // Ellipsis needed
-                    if (!firstPageElementInSequence) {
-                        ulElement.appendChild(createCommaLI());
-                    }
-                    const ellipsisLi = document.createElement('li');
-                    ellipsisLi.className = 'page-item disabled';
-                    const ellipsisSpan = document.createElement('span');
-                    ellipsisSpan.className = 'page-link';
-                    ellipsisSpan.textContent = '...';
-                    ellipsisLi.appendChild(ellipsisSpan);
-                    ulElement.appendChild(ellipsisLi);
-                    firstPageElementInSequence = false;
-                }
-
-                // Add comma before the page number if it's not the first element
-                if (!firstPageElementInSequence) {
-                    ulElement.appendChild(createCommaLI());
-                }
-
-                const pageLi = document.createElement('li');
-                pageLi.className = `page-item ${p === currentPage ? 'active' : ''}`;
-                const pageLink = document.createElement('a');
-                pageLink.className = 'page-link';
-                pageLink.href = '#';
-                pageLink.textContent = p;
-                pageLink.addEventListener('click', ((pageNum) => (e) => {
-                    e.preventDefault();
-                    if (section === 'upcoming') {
-                        currentUpcomingPage = pageNum;
-                    } else {
-                        currentPastPage = pageNum;
-                    }
-                    fetchAndDisplayBookings();
-                    const myBookingsListElement = document.getElementById('my-bookings-list');
-                    if (myBookingsListElement) {
-                        myBookingsListElement.scrollIntoView({ behavior: 'smooth' });
-                    }
-                })(p));
-                pageLi.appendChild(pageLink);
-                ulElement.appendChild(pageLi);
-                lastPagePrinted = p;
-                firstPageElementInSequence = false; // Reset flag after adding the first page element
-            }
-        }
-        // This check for a final ellipsis might be redundant if the loop structure is correct.
-        // The original had a more complex ellipsis logic. Let's simplify based on typical pagination.
-        // If lastPagePrinted is less than totalPages AND not adjacent to totalPages-rightEdge, an ellipsis might be needed.
-        // However, the loop covers `p > totalPages - rightEdge` already.
-        // The condition `if (p > lastPagePrinted + 1)` should handle all necessary ellipses.
-
-        // 6. Closing Bracket
-        const closingBracketLi = document.createElement('li');
-        closingBracketLi.className = 'page-item disabled';
-        const closingBracketSpan = document.createElement('span');
-        closingBracketSpan.className = 'page-link';
-        closingBracketSpan.textContent = ']';
-        closingBracketLi.appendChild(closingBracketSpan);
-        ulElement.appendChild(closingBracketLi);
-
-        // 7. Next Icon Link
-        const nextIconLi = document.createElement('li');
-        nextIconLi.className = `page-item ${paginationData.page === totalPages ? 'disabled' : ''}`;
-        const nextIconLink = document.createElement('a');
-        nextIconLink.className = 'page-link';
-        nextIconLink.href = '#';
-        nextIconLink.textContent = '»';
-        nextIconLink.addEventListener('click', (e) => {
-            e.preventDefault();
-            if (paginationData.page < totalPages) {
-                if (section === 'upcoming') {
-                    currentUpcomingPage++;
-                } else {
-                    currentPastPage++;
-                }
-                fetchAndDisplayBookings();
-                const myBookingsListElement = document.getElementById('my-bookings-list');
-                if (myBookingsListElement) {
-                    myBookingsListElement.scrollIntoView({ behavior: 'smooth' });
-                }
-            }
-        });
-        nextIconLi.appendChild(nextIconLink);
-        ulElement.appendChild(nextIconLi);
-
-        // 8. Final Blank Separator
-        const blankSeparator2Li = document.createElement('li');
-        blankSeparator2Li.className = 'page-item disabled';
-        const blankSeparator2Span = document.createElement('span');
-        blankSeparator2Span.className = 'page-link';
-        blankSeparator2Span.style.paddingLeft = '1em'; // Or other suitable spacing
-        blankSeparator2Li.appendChild(blankSeparator2Span);
-        ulElement.appendChild(blankSeparator2Li);
-
-
-        navElement.appendChild(ulElement);
-        container.appendChild(navElement);
-    }
-
-
-    // Event listener for dynamically created buttons
+    // Event listener for dynamically created buttons (needs to be on a static parent)
     // Using document as the closest static parent, can be refined if #my-bookings-list is always present
     document.addEventListener('click', async (event) => {
         const target = event.target;
@@ -1039,8 +771,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Event Listeners for filters
     function handleFilterChange() {
-        currentUpcomingPage = 1; // Reset to first page on filter change
-        currentPastPage = 1;     // Reset to first page on filter change
         fetchAndDisplayBookings();
     }
 
@@ -1076,23 +806,6 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn("Flatpickr not available or datePickerInput not found. Date picker will not be initialized.");
     }
 
-    // Items per page selector
-    if (itemsPerPageSelect) {
-        itemsPerPageSelect.addEventListener('change', function() {
-            itemsPerPage = parseInt(this.value, 10);
-            currentUpcomingPage = 1;
-            currentPastPage = 1;
-            fetchAndDisplayBookings();
-            const myBookingsListElement = document.getElementById('my-bookings-list');
-            if (myBookingsListElement) {
-                myBookingsListElement.scrollIntoView({ behavior: 'smooth' });
-            }
-        });
-        // Set initial itemsPerPage from the select, in case HTML has a default selected
-        itemsPerPage = parseInt(itemsPerPageSelect.value, 10);
-    }
-
-
     // Set default status filter before the initial fetch
     if (statusFilterSelect) {
         statusFilterSelect.value = 'approved';
@@ -1123,4 +836,3 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn("Visibility toggle checkboxes not found. Section visibility control will not be active.");
     }
 });
-
