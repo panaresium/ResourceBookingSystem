@@ -9,12 +9,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const resourceNameFilterInput = document.getElementById('resource-name-filter'); // New filter
     const applyFiltersBtn = document.getElementById('apply-my-bookings-filters-btn');
     const clearFiltersBtn = document.getElementById('clear-my-bookings-filters-btn');
-    // Date filter elements are assumed to be removed or handled differently if not in HTML
-    // const dateFilterTypeSelect = document.getElementById('my-bookings-date-filter-type');
-    // const datePickerContainer = document.getElementById('my-bookings-date-picker-container');
-    // const datePickerInput = document.getElementById('my-bookings-date-picker');
-    // let flatpickrInstance = null;
-
     // Visibility Toggles
     const toggleUpcomingCheckbox = document.getElementById('toggle-upcoming-bookings');
     const togglePastCheckbox = document.getElementById('toggle-past-bookings');
@@ -91,12 +85,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const updateModalStatusDiv = document.getElementById('update-modal-status');
-
-    const predefinedSlots = [
-        { name: "Morning (08:00 - 12:00 UTC)", start: "08:00", end: "12:00" },
-        { name: "Afternoon (13:00 - 17:00 UTC)", start: "13:00", end: "17:00" },
-        { name: "Full Day (08:00 - 17:00 UTC)", start: "08:00", end: "17:00" }
-    ];
 
     // Helper to display status messages (could be moved to script.js if used globally)
     function showStatusMessage(element, message, type = 'info') {
@@ -530,8 +518,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.getElementById('update-booking-title-form')) {
         document.getElementById('update-booking-title-form').addEventListener('submit', async function(event) {
             event.preventDefault();
-            const bookingId = document.getElementById('update-booking-id-input').value;
-            const newTitle = document.getElementById('new-booking-title-input').value.trim();
+            const bookingId = document.getElementById('modal-booking-id').value;
+            const newTitle = document.getElementById('new-booking-title').value.trim();
 
             if (!newTitle) {
                 showModalStatus('Title cannot be empty.', 'danger');
@@ -588,11 +576,6 @@ document.addEventListener('DOMContentLoaded', () => {
         clearFiltersBtn.addEventListener('click', () => {
             if(statusFilterSelect) statusFilterSelect.value = '';
             if(resourceNameFilterInput) resourceNameFilterInput.value = '';
-            // Clear date filters if they were re-added
-            // if(dateFilterTypeSelect) dateFilterTypeSelect.value = 'all';
-            // if(datePickerContainer) datePickerContainer.style.display = 'none';
-            // if(datePickerInput) datePickerInput.value = '';
-            // if(flatpickrInstance) flatpickrInstance.clear();
             handleFilterOrToggleChange();
         });
     }
@@ -610,251 +593,3 @@ document.addEventListener('DOMContentLoaded', () => {
     
     handleFilterOrToggleChange(); // Initial fetch based on default filter and toggle states
 });
-// This is where the functions for upcoming and past bookings will be,
-// after being modified for pagination.
-// For now, the old combined fetchAndDisplayBookings is removed.
-// New fetchUpcomingBookings and fetchPastBookings will be added.
-
-// Placeholder for the content of fetchUpcomingBookings
-async function fetchUpcomingBookings() {
-    if (!upcomingBookingsContainer) return;
-    if (toggleUpcomingCheckbox && !toggleUpcomingCheckbox.checked) {
-        upcomingBookingsContainer.innerHTML = '<p class="list-group-item">Upcoming bookings hidden.</p>';
-        if(upcomingPaginationContainer) upcomingPaginationContainer.style.display = 'none';
-        return;
-    }
-    showLoading(upcomingBookingsContainer, 'Loading upcoming bookings...');
-
-    let url = `/api/bookings/upcoming?page=${upcomingCurrentPage}&per_page=${upcomingItemsPerPage}`;
-    const statusVal = statusFilterSelect ? statusFilterSelect.value : '';
-    const resourceNameVal = resourceNameFilterInput ? resourceNameFilterInput.value.trim() : '';
-    if (statusVal) url += `&status_filter=${encodeURIComponent(statusVal)}`;
-    if (resourceNameVal) url += `&resource_name_filter=${encodeURIComponent(resourceNameVal)}`;
-
-    try {
-        const data = await apiCall(url, {}, statusDiv);
-        if (data.success === false) {
-            showError(upcomingBookingsContainer, data.message || 'Failed to fetch upcoming bookings.');
-            if (upcomingPaginationContainer) upcomingPaginationContainer.style.display = 'none';
-            return;
-        }
-
-        upcomingTotalItems = data.pagination.total_items;
-        upcomingTotalPages = data.pagination.total_pages;
-        upcomingCurrentPage = data.pagination.current_page;
-
-        renderMyBookingsPaginationControls('upcoming_bk_pg_', upcomingPaginationUl, upcomingPaginationContainer, upcomingTotalResultsDisplay, upcomingCurrentPage, upcomingTotalPages, upcomingTotalItems, upcomingItemsPerPage, fetchUpcomingBookings, (val) => upcomingCurrentPage = val);
-
-        upcomingBookingsContainer.innerHTML = '';
-        if (data.bookings && data.bookings.length > 0) {
-            data.bookings.forEach(booking => {
-                const bookingCard = createBookingCardElement(booking, data.check_in_out_enabled);
-                upcomingBookingsContainer.appendChild(bookingCard);
-            });
-        } else {
-            upcomingBookingsContainer.innerHTML = '<p class="list-group-item">No upcoming bookings found.</p>';
-        }
-    } catch (error) {
-        showError(upcomingBookingsContainer, `Error: ${error.message}`);
-        if (upcomingPaginationContainer) upcomingPaginationContainer.style.display = 'none';
-    }
-}
-
-// Placeholder for the content of fetchPastBookings
-async function fetchPastBookings() {
-    if (!pastBookingsContainer) return;
-    if (togglePastCheckbox && !togglePastCheckbox.checked) {
-        pastBookingsContainer.innerHTML = '<p class="list-group-item">Past bookings hidden.</p>';
-        if(pastPaginationContainer) pastPaginationContainer.style.display = 'none';
-        return;
-    }
-    showLoading(pastBookingsContainer, 'Loading past bookings...');
-
-    let url = `/api/bookings/past?page=${pastCurrentPage}&per_page=${pastItemsPerPage}`;
-    const statusVal = statusFilterSelect ? statusFilterSelect.value : '';
-    const resourceNameVal = resourceNameFilterInput ? resourceNameFilterInput.value.trim() : '';
-    if (statusVal) url += `&status_filter=${encodeURIComponent(statusVal)}`;
-    if (resourceNameVal) url += `&resource_name_filter=${encodeURIComponent(resourceNameVal)}`;
-
-    try {
-        const data = await apiCall(url, {}, statusDiv);
-         if (data.success === false) {
-            showError(pastBookingsContainer, data.message || 'Failed to fetch past bookings.');
-            if (pastPaginationContainer) pastPaginationContainer.style.display = 'none';
-            return;
-        }
-
-        pastTotalItems = data.pagination.total_items;
-        pastTotalPages = data.pagination.total_pages;
-        pastCurrentPage = data.pagination.current_page;
-
-        renderMyBookingsPaginationControls('past_bk_pg_', pastPaginationUl, pastPaginationContainer, pastTotalResultsDisplay, pastCurrentPage, pastTotalPages, pastTotalItems, pastItemsPerPage, fetchPastBookings, (val) => pastCurrentPage = val);
-
-        pastBookingsContainer.innerHTML = '';
-        if (data.bookings && data.bookings.length > 0) {
-            data.bookings.forEach(booking => {
-                const bookingCard = createBookingCardElement(booking, data.check_in_out_enabled);
-                pastBookingsContainer.appendChild(bookingCard);
-            });
-        } else {
-            pastBookingsContainer.innerHTML = '<p class="list-group-item">No past bookings found.</p>';
-        }
-    } catch (error) {
-        showError(pastBookingsContainer, `Error: ${error.message}`);
-        if (pastPaginationContainer) pastPaginationContainer.style.display = 'none';
-    }
-}
-
-
-// Event listener for dynamically created buttons (needs to be on a static parent)
-document.addEventListener('click', async (event) => {
-    const target = event.target;
-    const bookingCard = target.closest('.booking-card');
-
-    if (target.classList.contains('edit-title-btn')) {
-        event.stopPropagation(); // Prevent card click if any
-        if (!bookingCard) return;
-        const bookingId = bookingCard.dataset.bookingId;
-        const titleValueElement = bookingCard.querySelector('.booking-title-text'); // Adjusted selector
-        const currentTitle = titleValueElement ? titleValueElement.textContent : '';
-
-        const resourceName = bookingCard.querySelector('.booking-resource').textContent;
-
-        if (document.getElementById('update-booking-id-input')) document.getElementById('update-booking-id-input').value = bookingId;
-        if (document.getElementById('new-booking-title-input')) document.getElementById('new-booking-title-input').value = currentTitle;
-        if (updateBookingModalLabel) updateBookingModalLabel.textContent = `Update Booking Title for: ${resourceName}`;
-
-        hideStatusMessage(updateModalStatusDiv);
-        if (updateModal) updateModal.show();
-        return;
-    }
-
-    if (target.classList.contains('cancel-booking-btn')) {
-        if (!bookingCard) return;
-        const bookingId = bookingCard.dataset.bookingId;
-        if (confirm(`Are you sure you want to cancel booking ID ${bookingId}?`)) {
-            showLoading(statusDiv, `Cancelling booking ${bookingId}...`);
-            try {
-                await apiCall(`/api/bookings/${bookingId}`, { method: 'DELETE' });
-                showSuccess(statusDiv, `Booking ${bookingId} cancelled successfully.`);
-                handleFilterOrToggleChange(); // Re-fetch both to update counts and lists
-            } catch (error) {
-                showError(statusDiv, error.message || `Failed to cancel booking ${bookingId}.`);
-            }
-        }
-    }
-
-    if (target.classList.contains('check-in-btn')) {
-        if (!bookingCard) return;
-        const bookingId = bookingCard.dataset.bookingId;
-        // PIN input is not part of the card in this version. Assume PIN-less or handled by backend if required.
-        showLoading(statusDiv, 'Checking in...');
-        try {
-            await apiCall(`/api/bookings/${bookingId}/check_in`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({}) // Empty payload if no PIN
-            });
-            showSuccess(statusDiv, 'Checked in successfully.');
-            fetchUpcomingBookings();
-        } catch (error) {
-            showError(statusDiv, error.message || 'Check in failed.');
-        }
-    }
-
-    if (target.classList.contains('check-out-btn')) {
-        if (!bookingCard) return;
-        const bookingId = bookingCard.dataset.bookingId;
-        showLoading(statusDiv, 'Checking out...');
-        try {
-            await apiCall(`/api/bookings/${bookingId}/check_out`, { method: 'POST' });
-            showSuccess(statusDiv, 'Checked out successfully.');
-            fetchUpcomingBookings();
-        } catch (error) {
-            showError(statusDiv, error.message || 'Check out failed.');
-        }
-    }
-});
-
-// Handle modal form submission for updating booking title (only title)
-if (document.getElementById('update-booking-title-form')) {
-    document.getElementById('update-booking-title-form').addEventListener('submit', async function(event) {
-        event.preventDefault();
-        const bookingId = document.getElementById('update-booking-id-input').value;
-        const newTitle = document.getElementById('new-booking-title-input').value.trim();
-
-        if (!newTitle) {
-            showModalStatus('Title cannot be empty.', 'danger');
-            return;
-        }
-        const submitButton = this.querySelector('button[type="submit"]');
-        const originalButtonText = submitButton.textContent;
-        submitButton.textContent = 'Saving...';
-        submitButton.disabled = true;
-
-        try {
-            await apiCall(`/api/bookings/${bookingId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title: newTitle })
-            }, updateModalStatusDiv);
-
-            showSuccess(statusDiv, `Booking ${bookingId} title updated successfully.`);
-            if (updateModal) updateModal.hide();
-            handleFilterOrToggleChange(); // Re-fetch both lists
-        } catch (error) {
-            // Error is shown by apiCall in updateModalStatusDiv
-        } finally {
-            submitButton.textContent = originalButtonText;
-            submitButton.disabled = false;
-        }
-    });
-}
-
-
-// Event Listeners for filters and toggles
-function handleFilterOrToggleChange() {
-    upcomingCurrentPage = 1;
-    pastCurrentPage = 1;
-    // Fetch upcoming if visible
-    if (toggleUpcomingCheckbox && toggleUpcomingCheckbox.checked) {
-        fetchUpcomingBookings();
-    } else if (upcomingPaginationContainer) { // If not checked, hide its pagination and clear content
-        upcomingPaginationContainer.style.display = 'none';
-        if(upcomingBookingsContainer) upcomingBookingsContainer.innerHTML = '<p class="list-group-item">Upcoming bookings hidden.</p>';
-    }
-    // Fetch past if visible
-    if (togglePastCheckbox && togglePastCheckbox.checked) {
-        fetchPastBookings();
-    } else if (pastPaginationContainer) { // If not checked, hide its pagination and clear content
-        pastPaginationContainer.style.display = 'none';
-        if(pastBookingsContainer) pastBookingsContainer.innerHTML = '<p class="list-group-item">Past bookings hidden.</p>';
-    }
-}
-
-if (applyFiltersBtn) {
-    applyFiltersBtn.addEventListener('click', handleFilterOrToggleChange);
-}
-if (clearFiltersBtn) {
-    clearFiltersBtn.addEventListener('click', () => {
-        if(statusFilterSelect) statusFilterSelect.value = '';
-        if(resourceNameFilterInput) resourceNameFilterInput.value = '';
-        // Removed date filter logic for now
-        handleFilterOrToggleChange();
-    });
-}
-
-if (toggleUpcomingCheckbox) {
-    toggleUpcomingCheckbox.addEventListener('change', handleFilterOrToggleChange);
-}
-if (togglePastCheckbox) {
-    togglePastCheckbox.addEventListener('change', handleFilterOrToggleChange);
-}
-
-// Initial Load
-initializeMyBookingsPerPageSelect('upcoming_bk_pg_', upcomingPerPageSelect, (val) => upcomingItemsPerPage = val, (val) => upcomingCurrentPage = val, fetchUpcomingBookings, upcomingItemsPerPage);
-initializeMyBookingsPerPageSelect('past_bk_pg_', pastPerPageSelect, (val) => pastItemsPerPage = val, (val) => pastCurrentPage = val, fetchPastBookings, pastItemsPerPage);
-
-// Initial fetch based on default filter and toggle states
-handleFilterOrToggleChange();
-
