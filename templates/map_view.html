@@ -112,6 +112,9 @@
 {% endblock %}
 
 {% block content %}
+<script>
+  window.MAP_RESOURCE_OPACITY = {{ map_resource_opacity|tojson|safe }};
+</script>
     <h1 id="map-view-title">{{ _('Map View') }}</h1>
     <div>
         <label for="map-availability-date">{{ _('View Availability for Date:') }}</label>

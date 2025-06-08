@@ -195,6 +195,14 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     async function loadMapDetails(mapId, dateString) {
+        // Get opacity from global window object, with validation and fallback
+        let mapResourceOpacity = 0.7; // Default fallback
+        if (typeof window.MAP_RESOURCE_OPACITY === 'number' && window.MAP_RESOURCE_OPACITY >= 0.0 && window.MAP_RESOURCE_OPACITY <= 1.0) {
+            mapResourceOpacity = window.MAP_RESOURCE_OPACITY;
+        } else if (typeof window.MAP_RESOURCE_OPACITY !== 'undefined') {
+            console.warn('MAP_RESOURCE_OPACITY from backend is invalid. Using default 0.7. Value received:', window.MAP_RESOURCE_OPACITY);
+        }
+
         if (!mapId) {
             if (mapContainer) {
                  mapContainer.innerHTML = '';
@@ -241,6 +249,16 @@ document.addEventListener('DOMContentLoaded', function () {
             if (mapContainer) {
                 mapContainer.style.backgroundImage = `url(${mapDetails.image_url})`;
             }
+
+            // Define colorMap before the loop
+            const colorMap = {
+                'map-area-green': '212, 237, 218',        // #d4edda
+                'map-area-yellow': '255, 243, 205',       // #fff3cd
+                'map-area-light-blue': '209, 236, 241',   // #d1ecf1
+                'map-area-red': '248, 215, 218',          // #f8d7da
+                'map-area-dark-orange': '255, 232, 204'   // #ffe8cc
+                // Add other map-area-* classes if they are used for backgrounds and need translucency
+            };
 
             if (data.mapped_resources && data.mapped_resources.length > 0) {
                 data.mapped_resources.forEach(resource => {
@@ -373,6 +391,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
                         areaDiv.className = 'resource-area';
                         areaDiv.classList.add(finalClass);
+
+                        // Apply translucent background color
+                        const rgbString = colorMap[finalClass];
+                        if (rgbString) {
+                            areaDiv.style.backgroundColor = `rgba(${rgbString}, ${mapResourceOpacity})`;
+                        }
+
                         areaDiv.title = finalTitle;
 
                         let isMapAreaClickable = false;

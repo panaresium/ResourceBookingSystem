@@ -98,7 +98,8 @@ def serve_calendar():
 
 @ui_bp.route('/map_view/<int:map_id>')
 def serve_map_view(map_id):
-    return render_template("map_view.html", map_id_from_flask=map_id)
+    map_opacity = current_app.config.get('MAP_RESOURCE_OPACITY', 0.7) # Default here is a fallback
+    return render_template("map_view.html", map_id_from_flask=map_id, map_resource_opacity=map_opacity)
 
 @ui_bp.route('/check-in/resource/<int:resource_id>', methods=['GET', 'POST'])
 def check_in_at_resource(resource_id):
