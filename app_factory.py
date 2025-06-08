@@ -166,36 +166,40 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     # 2. Initialize Logging (this block is now only for non-testing)
     # Full logging setup for production/development
     default_log_level_str = 'INFO'
-        log_level_str = os.environ.get('APP_GLOBAL_LOG_LEVEL', default_log_level_str).upper()
-        log_level_map = {
-            'DEBUG': logging.DEBUG, 'INFO': logging.INFO, 'WARNING': logging.WARNING,
-            'ERROR': logging.ERROR, 'CRITICAL': logging.CRITICAL
-        }
-        effective_log_level = log_level_map.get(log_level_str, logging.INFO)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(effective_log_level)
-        if not root_logger.hasHandlers():
-            stream_handler = logging.StreamHandler()
-            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-            stream_handler.setFormatter(formatter)
-            root_logger.addHandler(stream_handler)
-            logging.info(f"Root logger configured with level {log_level_str} and a default StreamHandler.")
-        else:
-            logging.info(f"Root logger level set to {log_level_str}. Existing handlers detected.")
-
-        app_log_level_config = app.config.get('LOG_LEVEL', default_log_level_str).upper()
-        app_effective_log_level = log_level_map.get(app_log_level_config, logging.INFO)
-        app.logger.setLevel(app_effective_log_level)
-        logging.info(f"Flask app.logger level set to {app_log_level_config}.")
-        # Log settings after logger is configured
-        app.logger.info(f"Loaded Booking CSV Schedule Settings: {app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS')}")
+    log_level_str = os.environ.get('APP_GLOBAL_LOG_LEVEL', default_log_level_str).upper()
+    log_level_map = {
+        'DEBUG': logging.DEBUG, 'INFO': logging.INFO, 'WARNING': logging.WARNING,
+        'ERROR': logging.ERROR, 'CRITICAL': logging.CRITICAL
+    }
+    effective_log_level = log_level_map.get(log_level_str, logging.INFO)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(effective_log_level)
+    if not root_logger.hasHandlers():
+        stream_handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        stream_handler.setFormatter(formatter)
+        root_logger.addHandler(stream_handler)
+        logging.info(f"Root logger configured with level {log_level_str} and a default StreamHandler.")
     else:
+        logging.info(f"Root logger level set to {log_level_str}. Existing handlers detected.")
+
+    app_log_level_config = app.config.get('LOG_LEVEL', default_log_level_str).upper()
+    app_effective_log_level = log_level_map.get(app_log_level_config, logging.INFO)
+    app.logger.setLevel(app_effective_log_level)
+    logging.info(f"Flask app.logger level set to {app_log_level_config}.")
+    # Log settings after logger is configured
+    app.logger.info(f"Loaded Booking CSV Schedule Settings: {app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS')}")
+    # This else block was associated with the `if not testing:` block for logging.
+    # However, the `if testing: return app` statement higher up makes this else unreachable.
+    # I'm removing it to avoid confusion. If minimal logging for testing is desired
+    # and the early return is removed, this structure would need revisiting.
+    # else:
         # Minimal logging for testing
-        app.logger.setLevel(logging.DEBUG) # Or WARNING to reduce noise if DEBUG is too verbose
+        # app.logger.setLevel(logging.DEBUG) # Or WARNING to reduce noise if DEBUG is too verbose
         if not app.logger.hasHandlers(): # Ensure app.logger has a handler for tests
             app.logger.addHandler(logging.StreamHandler())
-        app.logger.info("Logging configured for TESTING mode.")
-        app.logger.info(f"Testing Booking CSV Schedule Settings: {app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS')}")
+        # app.logger.info("Logging configured for TESTING mode.")
+        # app.logger.info(f"Testing Booking CSV Schedule Settings: {app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS')}")
 
     # New logic for startup restore - SKIP IF TESTING
     if not testing and azure_backup_available and callable(restore_latest_backup_set_on_startup):
