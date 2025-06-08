@@ -108,9 +108,6 @@
                 <div class="booking-line3">
                     <strong>{{ _('Status') }}:</strong> <span class="booking-status-value"></span>
                 </div>
-                <div class="booking-line4">
-                    <strong>{{ _('Recurrence') }}:</strong> <span class="recurrence-rule-value"></span>
-                </div>
 
                 <!-- Existing buttons and check-in controls -->
                 <div class="booking-actions mt-2">
@@ -124,41 +121,6 @@
             </div>
         </div>
     </template>
-
-    <!-- Modal for Updating Booking Title -->
-    <div class="modal fade" id="update-booking-modal" tabindex="-1" aria-labelledby="updateBookingModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="updateBookingModalLabel">{{ _('Update Booking') }}</h5>
-                </div>
-                <div class="modal-body">
-                    <form id="update-booking-form">
-                        <input type="hidden" id="modal-booking-id" value="">
-                        <div class="mb-3">
-                            <label for="new-booking-title" class="form-label">{{ _('New Title') }}:</label>
-                            <input type="text" class="form-control" id="new-booking-title" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="modal-booking-date" class="form-label">{{ _('New Date') }}:</label>
-                            <input type="date" class="form-control" id="modal-booking-date">
-                        </div>
-                        <div class="mb-3">
-                            <label for="modal-available-slots-select" class="form-label">{{ _('Available Time Slots') }}:</label>
-                            <select class="form-control" id="modal-available-slots-select">
-                                <!-- Options will be populated by JavaScript -->
-                            </select>
-                        </div>
-                        <div id="update-modal-status" class="alert" style="display:none;"></div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Close') }}</button>
-                    <button type="button" class="btn btn-primary" id="save-booking-title-btn">{{ _('Save Changes') }}</button>
-                </div>
-            </div>
-        </div>
-    </div>
 
 </main>
 {% endblock %}
