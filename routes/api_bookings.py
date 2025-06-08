@@ -257,6 +257,12 @@ def create_booking():
 @api_bookings_bp.route('/bookings/my_bookings', methods=['GET'])
 @login_required
 def get_my_bookings():
+    """
+    Fetches all bookings for the currently authenticated user, categorized into
+    upcoming and past bookings, and sorted accordingly.
+    Accepts 'status_filter' and 'date_filter_value' query parameters.
+    Also includes a global setting `check_in_out_enabled`.
+    """
     logger = current_app.logger
     try:
         # Pagination parameters for upcoming bookings
@@ -275,7 +281,7 @@ def get_my_bookings():
             per_page_past = my_bookings_per_page_options[0]
 
         status_filter = request.args.get('status_filter')
-        # date_filter_value_str = request.args.get('date_filter_value') # This seems to be from an older version, new JS uses resource_name_filter
+        date_filter_value_str = request.args.get('date_filter_value') # This seems to be from an older version, new JS uses resource_name_filter
         resource_name_filter = request.args.get('resource_name_filter') # Added for new filter
 
         booking_settings = BookingSettings.query.first()
@@ -296,6 +302,7 @@ def get_my_bookings():
             user_bookings_query = user_bookings_query.join(Resource).filter(Resource.name.ilike(f"%{resource_name_filter}%"))
 
         # Note: date_filter_value_str is not used by current JS, but kept for compatibility if needed.
+        # If it were to be used, it would be applied here.
         # if date_filter_value_str:
         #     try:
         #         target_date_obj = datetime.strptime(date_filter_value_str, '%Y-%m-%d').date()
@@ -362,7 +369,7 @@ def get_my_bookings():
                 upcoming_bookings_data.append(booking_dict)
                 all_upcoming_bookings_dicts.append(booking_dict)
             else:
-                past_bookings_data.append(booking_dict)
+                all_past_bookings_dicts.append(booking_dict)
 
         # Sort before pagination
         all_upcoming_bookings_dicts.sort(key=lambda b: b['start_time'])
