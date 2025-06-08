@@ -9,6 +9,11 @@ document.addEventListener('DOMContentLoaded', function () {
         return `${yyyy}-${mm}-${dd}`;
     }
 
+    function isPastFivePM() {
+        const now = new Date();
+        return now.getHours() >= 17; // 17 is 5 PM in 24-hour format
+    }
+
     // const mapAvailabilityDateInput = document.getElementById('new-booking-map-availability-date'); // Old input field, now removed from HTML
     const calendarContainer = document.getElementById('inline-calendar-container'); // New container for inline flatpickr
     const mapLocationButtonsContainer = document.getElementById('new-booking-map-location-buttons-container'); // Will be used for combined buttons
@@ -69,11 +74,31 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // const today = getTodayDateString(); // currentSelectedDateStr is initialized with this
     if (calendarContainer) {
+        let initialDate = getTodayDateString();
+        if (isPastFivePM()) {
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const yyyy = tomorrow.getFullYear();
+            const mm = String(tomorrow.getMonth() + 1).padStart(2, '0');
+            const dd = String(tomorrow.getDate()).padStart(2, '0');
+            initialDate = `${yyyy}-${mm}-${dd}`;
+        }
+        currentSelectedDateStr = initialDate; // Initialize with today or tomorrow
+
         flatpickr(calendarContainer, {
             inline: true, // Render the calendar inline
             static: true, // Added this line
             dateFormat: "Y-m-d",
-            defaultDate: currentSelectedDateStr, // Use the global variable
+            minDate: "today",
+            disable: [
+                function(date) {
+                    // Disable today if it's past 5 PM
+                    const todayStr = getTodayDateString();
+                    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                    return dateStr === todayStr && isPastFivePM();
+                }
+            ],
+            defaultDate: currentSelectedDateStr, // Use the global variable, now potentially tomorrow
             onChange: function(selectedDates, dateStr, instance) {
                 currentSelectedDateStr = dateStr; // Update global date string
                 // When date changes, update location/floor buttons (colors), then try to load map if one is selected
@@ -90,7 +115,8 @@ document.addEventListener('DOMContentLoaded', function () {
         console.error('Inline calendar container not found.');
     }
     if (mainBookingFormDateInput) {
-        mainBookingFormDateInput.value = today;
+        // Set main form date input to match the calendar's initial date
+        mainBookingFormDateInput.value = currentSelectedDateStr;
     }
 
     // function updateFloorSelectOptions() { // Removed }
