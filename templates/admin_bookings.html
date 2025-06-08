@@ -16,17 +16,40 @@
     </div>
     {% endif %}
 
-    <form method="GET" action="{{ url_for('admin_ui.serve_admin_bookings_page') }}" style="margin-bottom: 15px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;">
-        <label for="status_filter" style="margin-right: 5px; font-weight: bold;">{{ _('Filter by Status:') }}</label>
-        <select name="status_filter" id="status_filter" onchange="this.form.submit()" style="padding: 5px; border-radius: 3px; border: 1px solid #ced4da;">
-            <option value="">{{ _('-- All Statuses --') }}</option>
-            {% for stat in all_statuses %}
-                <option value="{{ stat }}" {% if stat == current_status_filter %}selected{% endif %}>
-                    {{ stat.replace('_', ' ').capitalize() }}
-                </option>
-            {% endfor %}
-        </select>
-        {# <button type="submit" class="button" style="margin-left: 10px; padding: 5px 10px;">Filter</button> #}
+    <form method="GET" action="{{ url_for('admin_ui.serve_admin_bookings_page') }}" style="margin-bottom: 15px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; display: flex; align-items: center; gap: 15px;">
+        <div>
+            <label for="status_filter" style="margin-right: 5px; font-weight: bold;">{{ _('Filter by Status:') }}</label>
+            <select name="status_filter" id="status_filter" onchange="this.form.submit()" style="padding: 5px; border-radius: 3px; border: 1px solid #ced4da;">
+                <option value="">{{ _('-- All Statuses --') }}</option>
+                {% for stat in all_statuses %}
+                    <option value="{{ stat }}" {% if stat == current_status_filter %}selected{% endif %}>
+                        {{ stat.replace('_', ' ').capitalize() }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div>
+            <label for="user_filter" style="margin-right: 5px; font-weight: bold;">{{ _('Filter by User:') }}</label>
+            <select name="user_filter" id="user_filter" onchange="this.form.submit()" style="padding: 5px; border-radius: 3px; border: 1px solid #ced4da;">
+                <option value="">{{ _('-- All Users --') }}</option>
+                {% if all_users %}
+                    {% for user in all_users %}
+                        <option value="{{ user.username }}" {% if user.username == current_user_filter %}selected{% endif %}>
+                            {{ user.username }}
+                        </option>
+                    {% endfor %}
+                {% endif %}
+            </select>
+        </div>
+
+        <div>
+            <label for="date_filter_input" style="margin-right: 5px; font-weight: bold;">{{ _('Filter by Date:') }}</label>
+            <input type="text" name="date_filter" id="date_filter_input" value="{{ current_date_filter if current_date_filter else '' }}" placeholder="YYYY-MM-DD" style="padding: 5px; border-radius: 3px; border: 1px solid #ced4da;">
+        </div>
+
+        {# Optional: A submit button if onchange is not desired for all fields, or as a fallback #}
+        {# <button type="submit" class="button" style="padding: 5px 10px;">{{ _('Apply Filters') }}</button> #}
     </form>
 
     {% if bookings %}
@@ -90,6 +113,25 @@
 document.addEventListener('DOMContentLoaded', function() {
     const statusDiv = document.getElementById('admin-booking-status');
     const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+    // Initialize Flatpickr for the date filter input
+    const dateFilterInput = document.getElementById('date_filter_input');
+    if (dateFilterInput) {
+        flatpickr(dateFilterInput, {
+            dateFormat: "Y-m-d", // Backend format
+            altInput: true,      // Show user-friendly format
+            altFormat: "F j, Y", // User-friendly format (e.g., March 10, 2024)
+            allowInput: true,    // Allow manual typing
+            enableTime: false,   // Date only, no time
+            onChange: function(selectedDates, dateStr, instance) {
+                // Trigger form submission when a date is picked
+                // Ensure the original input (hidden by altInput) has the correct value
+                if (instance.input.form) {
+                    instance.input.form.submit();
+                }
+            }
+        });
+    }
 
     document.querySelectorAll('.delete-booking-btn').forEach(button => {
         button.addEventListener('click', function() {
@@ -247,6 +289,17 @@ document.addEventListener('DOMContentLoaded', function() {
     // ensure their event listeners are also attached.
     // This is handled by the cancel success logic which calls:
     // dismissButton.addEventListener('click', dismissAdminMessageHandler);
+
+    // Clear Flatpickr input if the value is empty, to prevent "Invalid Date" if form submitted with empty current_date_filter
+    // This is a bit of a workaround if flatpickr shows "Invalid Date" on empty initial value with altInput
+    // However, flatpickr usually handles empty initial value gracefully.
+    // This might be more relevant if we were clearing the filter via JS.
+    // For now, the default value handling in the input field should be sufficient.
+    // if (dateFilterInput && !dateFilterInput.value) {
+    //    if (dateFilterInput._flatpickr) { // Check if flatpickr is initialized
+    //        dateFilterInput._flatpickr.clear();
+    //    }
+    // }
 });
 </script>
 

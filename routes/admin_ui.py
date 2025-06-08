@@ -70,10 +70,15 @@ def serve_resource_management_page():
 def serve_admin_bookings_page():
     logger = current_app.logger
     status_filter = request.args.get('status_filter')
-    logger.info(f"User {current_user.username} accessed Admin Bookings page. Status filter: '{status_filter}'")
+    user_filter = request.args.get('user_filter')
+    date_filter_str = request.args.get('date_filter')
+
+    logger.info(f"User {current_user.username} accessed Admin Bookings page. Status filter: '{status_filter}', User filter: '{user_filter}', Date filter: '{date_filter_str}'")
 
     # Define the list of possible statuses for the dropdown
     possible_statuses = ['approved', 'checked_in', 'completed', 'cancelled', 'rejected', 'cancelled_by_admin']
+
+    all_users = User.query.order_by(User.username).all() # Fetch all users
 
     try:
         bookings_query = db.session.query(
@@ -90,6 +95,20 @@ def serve_admin_bookings_page():
 
         if status_filter:
             bookings_query = bookings_query.filter(Booking.status == status_filter)
+
+        if user_filter:
+            bookings_query = bookings_query.filter(User.username == user_filter)
+
+        if date_filter_str:
+            try:
+                # Convert string to date object for comparison
+                date_filter_obj = datetime.strptime(date_filter_str, '%Y-%m-%d').date()
+                bookings_query = bookings_query.filter(func.date(Booking.start_time) == date_filter_obj)
+            except ValueError:
+                logger.warning(f"Invalid date format for date_filter: '{date_filter_str}'. Ignoring filter.")
+                # Optionally, flash a message to the user
+                # flash('Invalid date format. Please use YYYY-MM-DD.', 'warning')
+
 
         all_bookings = bookings_query.order_by(Booking.start_time.desc()).all()
 
@@ -108,14 +127,20 @@ def serve_admin_bookings_page():
         return render_template("admin_bookings.html",
                                bookings=bookings_list,
                                all_statuses=possible_statuses,
-                               current_status_filter=status_filter)
+                               current_status_filter=status_filter,
+                               all_users=all_users,
+                               current_user_filter=user_filter,
+                               current_date_filter=date_filter_str)
     except Exception as e:
         logger.error(f"Error fetching bookings for admin page: {e}", exc_info=True)
         return render_template("admin_bookings.html",
                                bookings=[],
                                error="Could not load bookings.",
                                all_statuses=possible_statuses,
-                               current_status_filter=status_filter)
+                               current_status_filter=status_filter,
+                               all_users=all_users, # Pass even in case of error for consistency
+                               current_user_filter=user_filter,
+                               current_date_filter=date_filter_str)
 
 @admin_ui_bp.route('/backup_restore')
 @login_required
