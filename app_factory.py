@@ -191,15 +191,13 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     app.logger.info(f"Loaded Booking CSV Schedule Settings: {app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS')}")
     # This else block was associated with the `if not testing:` block for logging.
     # However, the `if testing: return app` statement higher up makes this else unreachable.
-    # I'm removing it to avoid confusion. If minimal logging for testing is desired
-    # and the early return is removed, this structure would need revisiting.
-    # else:
-        # Minimal logging for testing
-        # app.logger.setLevel(logging.DEBUG) # Or WARNING to reduce noise if DEBUG is too verbose
-        if not app.logger.hasHandlers(): # Ensure app.logger has a handler for tests
-            app.logger.addHandler(logging.StreamHandler())
-        # app.logger.info("Logging configured for TESTING mode.")
-        # app.logger.info(f"Testing Booking CSV Schedule Settings: {app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS')}")
+    # The following lines were causing an IndentationError because they were part of this
+    # effectively commented-out (or unreachable) else block.
+    # They are now removed entirely as the logic for testing logging is handled
+    # within the `if testing: return app` block or not at all if minimal logging is sufficient there.
+    # Previous problematic lines:
+    #    if not app.logger.hasHandlers(): # Ensure app.logger has a handler for tests
+    #        app.logger.addHandler(logging.StreamHandler())
 
     # New logic for startup restore - SKIP IF TESTING
     if not testing and azure_backup_available and callable(restore_latest_backup_set_on_startup):
