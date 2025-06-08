@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import '_pagination_controls.html' as pagination_macros with context %} {# IMPORT ADDED HERE #}
 
 {% block title %}{{ _('My Bookings') }} - {{ super() }}{% endblock %}
 
@@ -11,144 +12,131 @@
     <h2>{{ _('My Bookings') }}</h2>
     <hr>
 
-    <div id="my-bookings-status" class="alert" style="display:none;"></div>
+    <div id="my-bookings-status" class="alert" style="display:none;" role="alert"></div>
 
-    <div class="row mb-3 align-items-end" id="my-bookings-filters">
-        <!-- Status Filter Column -->
+    <div class="row mb-3">
         <div class="col-md-4">
-            <label for="my-bookings-status-filter" class="form-label">{{ _('Filter by Status:') }}</label>
-            <select id="my-bookings-status-filter" class="form-select">
-                <option value="all" selected>{{ _('All Statuses') }}</option>
+            <label for="status-filter-my-bookings" class="form-label">{{ _('Filter by Status:') }}</label>
+            <select id="status-filter-my-bookings" class="form-select form-select-sm">
+                <option value="">{{ _('All Statuses') }}</option>
                 <option value="approved">{{ _('Approved') }}</option>
-                <option value="pending">{{ _('Pending') }}</option>
+                <option value="pending_approval">{{ _('Pending Approval') }}</option>
+                <option value="checked_in">{{ _('Checked In') }}</option>
                 <option value="completed">{{ _('Completed') }}</option>
-                <option value="cancelled_by_admin">{{ _('Cancelled by Admin') }}</option>
-                <option value="cancelled_admin_acknowledged">{{ _('Cancelled (Admin Acknowledged)') }}</option>
-                <option value="cancelled">{{ _('Cancelled (by User)') }}</option>
+                <option value="cancelled">{{ _('Cancelled') }}</option>
                 <option value="rejected">{{ _('Rejected') }}</option>
-                <!-- Add other relevant statuses like 'checked_in' if needed -->
             </select>
         </div>
-
-        <!-- Date Filter Type Column -->
-        <div class="col-md-3">
-            <label for="my-bookings-date-filter-type" class="form-label">{{ _('Filter by Date:') }}</label>
-            <select id="my-bookings-date-filter-type" class="form-select">
-                <option value="any" selected>{{ _('Any Date') }}</option>
-                <option value="specific">{{ _('Specific Date') }}</option>
-                <!-- Potentially add "date_range" in the future -->
-            </select>
+        <div class="col-md-4">
+            <label for="resource-name-filter" class="form-label">{{ _('Filter by Resource Name:') }}</label>
+            <input type="text" id="resource-name-filter" class="form-control form-control-sm" placeholder="{{ _('Enter resource name...') }}">
         </div>
-
-        <!-- Date Picker Column (initially hidden) -->
-        <div class="col-md-3" id="my-bookings-date-picker-container" style="display: none;">
-            <label for="my-bookings-date-picker" class="form-label">{{ _('Select Date:') }}</label>
-            <input type="text" id="my-bookings-date-picker" class="form-control">
+        <div class="col-md-4 d-flex align-items-end">
+            <button id="apply-my-bookings-filters-btn" class="btn btn-primary btn-sm me-2">{{ _('Apply Filters') }}</button>
+            <button id="clear-my-bookings-filters-btn" class="btn btn-secondary btn-sm">{{ _('Clear Filters') }}</button>
         </div>
-
-        <!-- Optional: Apply Filters Button Column -->
-        <!-- <div class="col-md-2 d-flex align-items-end">
-            <button id="apply-my-bookings-filters-btn" class="btn btn-primary w-100">{{ _('Apply') }}</button>
-        </div> -->
     </div>
+
 
     <div id="my-bookings-list">
         <div id="upcoming-bookings-section">
-            <h2>{{ _('Upcoming Bookings') }}</h2>
-			<div class="form-check form-switch mb-2">
-                <input class="form-check-input" type="checkbox" role="switch" id="toggle-upcoming-bookings" checked>
-                <label class="form-check-label" for="toggle-upcoming-bookings">{{ _('Show Upcoming Bookings') }}</label>
+            <div class="d-flex justify-content-between align-items-center">
+                <h3>{{ _('Upcoming Bookings') }}</h3>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" role="switch" id="toggle-upcoming-bookings" checked>
+                    <label class="form-check-label" for="toggle-upcoming-bookings">{{ _('Show') }}</label>
+                </div>
             </div>
             
-            <div id="upcoming-bookings-container">
+            {# UPCOMING BOOKINGS PAGINATION CONTROLS ADDED HERE #}
+            {{ pagination_macros.render_js_pagination_controls('upcoming_bk_pg_') }}
+
+            {# SCROLLABLE CLASS ADDED TO CONTAINER #}
+            <div id="upcoming-bookings-container" class="list-group scrollable-table-container">
                 <!-- Upcoming bookings will be loaded here by JavaScript -->
-                <p class="loading-message">{{ _('Loading upcoming bookings...') }}</p>
+                <p class="loading-message list-group-item">{{ _('Loading upcoming bookings...') }}</p>
             </div>
         </div>
 
-        <hr class="my-4"> <!-- Optional separator -->
+        <hr class="my-4">
 
-        <div id="past-bookings-section" class="mt-4">
-            <h2>{{ _('Past Bookings') }}</h2>
-			<div class="form-check form-switch mb-2">
-                <input class="form-check-input" type="checkbox" role="switch" id="toggle-past-bookings">
-                <label class="form-check-label" for="toggle-past-bookings">{{ _('Show Past Bookings') }}</label>
+        <div id="past-bookings-section" class="mt-3">
+             <div class="d-flex justify-content-between align-items-center">
+                <h3>{{ _('Past Bookings') }}</h3>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" role="switch" id="toggle-past-bookings" checked>
+                    <label class="form-check-label" for="toggle-past-bookings">{{ _('Show') }}</label>
+                </div>
             </div>
-            <div id="past-bookings-container">
+
+            {# PAST BOOKINGS PAGINATION CONTROLS ADDED HERE #}
+            {{ pagination_macros.render_js_pagination_controls('past_bk_pg_') }}
+
+            {# SCROLLABLE CLASS ADDED TO CONTAINER #}
+            <div id="past-bookings-container" class="list-group scrollable-table-container">
                 <!-- Past bookings will be loaded here by JavaScript -->
-                <p class="loading-message">{{ _('Loading past bookings...') }}</p>
+                <p class="loading-message list-group-item">{{ _('Loading past bookings...') }}</p>
             </div>
         </div>
     </div>
 
     <!-- Template for a single booking item (hidden, used by JS) -->
-    <template id="booking-item-template">
-        <div class="card mb-3 booking-item">
-            <div class="card-body">
-                <div class="booking-line1">
-                    <span><strong>{{ _('Title') }}:</strong> <span class="booking-title-value"></span></span>
-                    <span class="mx-2">|</span>
-                    <span><span class="resource-name-value"></span></span>
-                </div>
-                <div class="booking-line2">
-                    <strong>{{ _('Time') }}:</strong>
-                    <span class="booking-date-value"></span>
-                    <span class="booking-start-time-value"></span> - <span class="booking-end-time-value"></span>
-                </div>
-                <div class="booking-line3">
-                    <strong>{{ _('Status') }}:</strong> <span class="booking-status-value"></span>
-                </div>
-                <div class="booking-line4">
-                    <strong>{{ _('Recurrence') }}:</strong> <span class="recurrence-rule-value"></span>
-                </div>
-
-                <!-- Existing buttons and check-in controls -->
-                <div class="booking-actions mt-2">
-                    <button class="btn btn-sm btn-primary update-booking-btn" data-booking-id="">{{ _('Update Booking') }}</button>
-                    <button class="btn btn-sm btn-danger cancel-booking-btn" data-booking-id="">{{ _('Cancel Booking') }}</button>
-                    <span class="check-in-controls" style="display:none;">
-                        <input type="text" class="form-control form-control-sm d-inline-block booking-pin-input" style="width: 100px; margin-right: 5px; vertical-align: middle;" placeholder="{{ _('PIN') }}" data-booking-id="">
-                        <button class="btn btn-sm btn-success check-in-btn" data-booking-id="">{{ _('Check In') }}</button>
-                    </span>
-                    <button class="btn btn-sm btn-secondary check-out-btn" data-booking-id="" style="display:none;">{{ _('Check Out') }}</button>
-                </div>
+    <div id="booking-item-template" style="display: none;" class="list-group-item list-group-item-action booking-card">
+        <div class="d-flex w-100 justify-content-between">
+            <h5 class="mb-1 booking-title-display">
+                <span class="booking-title-text"></span>
+                <button class="btn btn-sm btn-link edit-title-btn p-0 ms-1" aria-label="{{ _('Edit Title') }}">✏️</button>
+            </h5>
+            <small class="booking-id-display">ID: #</small>
+        </div>
+        <p class="mb-1">
+            <strong class="booking-resource-label">{{ _('Resource:') }}</strong> <span class="booking-resource"></span>
+        </p>
+        <p class="mb-1">
+            <strong class="booking-time-label">{{ _('Time:') }}</strong>
+            <span class="booking-start-time"></span> - <span class="booking-end-time"></span>
+            (<span class="booking-date"></span>)
+        </p>
+        <p class="mb-1">
+            <strong class="booking-status-label">{{ _('Status:') }}</strong> <span class="booking-status badge"></span>
+        </p>
+        <div class="booking-pin-section" style="display: none;">
+             <p class="mb-1">
+                <strong class="booking-pin-label">{{ _('PIN:') }}</strong> <span class="booking-pin"></span>
+            </p>
+        </div>
+        <div class="booking-actions mt-2">
+            <!-- Buttons will be dynamically added here by JS -->
+        </div>
+        <div class="admin-deleted-message-section mt-2" style="display:none;">
+            <div class="alert alert-warning p-2 small" role="alert">
+                <strong>{{ _('Admin Cancellation Reason:') }}</strong>
+                <p class="admin-deleted-message-text mb-0"></p>
             </div>
         </div>
-    </template>
+    </div>
 
     <!-- Modal for Updating Booking Title -->
     <div class="modal fade" id="update-booking-modal" tabindex="-1" aria-labelledby="updateBookingModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="updateBookingModalLabel">{{ _('Update Booking') }}</h5>
-                </div>
-                <div class="modal-body">
-                    <form id="update-booking-form">
-                        <input type="hidden" id="modal-booking-id" value="">
-                        <div class="mb-3">
-                            <label for="new-booking-title" class="form-label">{{ _('New Title') }}:</label>
-                            <input type="text" class="form-control" id="new-booking-title" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="modal-booking-date" class="form-label">{{ _('New Date') }}:</label>
-                            <input type="date" class="form-control" id="modal-booking-date">
-                        </div>
-                        <div class="mb-3">
-                            <label for="modal-available-slots-select" class="form-label">{{ _('Available Time Slots') }}:</label>
-                            <select class="form-control" id="modal-available-slots-select">
-                                <!-- Options will be populated by JavaScript -->
-                            </select>
-                        </div>
-                        <div id="update-modal-status" class="alert" style="display:none;"></div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{{ _('Close') }}</button>
-                    <button type="button" class="btn btn-primary" id="save-booking-title-btn">{{ _('Save Changes') }}</button>
-                </div>
-            </div>
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="updateBookingModalLabel">{{ _('Update Booking Title') }}</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="{{ _('Close') }}"></button>
+          </div>
+          <div class="modal-body">
+            <form id="update-booking-title-form">
+              <input type="hidden" id="update-booking-id-input">
+              <div class="mb-3">
+                <label for="new-booking-title-input" class="form-label">{{ _('New Title:') }}</label>
+                <input type="text" class="form-control" id="new-booking-title-input" required>
+              </div>
+              <button type="submit" class="btn btn-primary">{{ _('Save Changes') }}</button>
+            </form>
+            <div id="update-booking-modal-status" class="mt-2"></div>
+          </div>
         </div>
+      </div>
     </div>
 
 </main>

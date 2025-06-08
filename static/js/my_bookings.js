@@ -2,19 +2,45 @@ document.addEventListener('DOMContentLoaded', () => {
     const upcomingBookingsContainer = document.getElementById('upcoming-bookings-container');
     const pastBookingsContainer = document.getElementById('past-bookings-container');
     const bookingItemTemplate = document.getElementById('booking-item-template');
-    const statusDiv = document.getElementById('my-bookings-status'); // Used by multiple functions in this scope
+    const statusDiv = document.getElementById('my-bookings-status');
 
     // Filter Elements
-    const statusFilterSelect = document.getElementById('my-bookings-status-filter');
-    const dateFilterTypeSelect = document.getElementById('my-bookings-date-filter-type');
-    const datePickerContainer = document.getElementById('my-bookings-date-picker-container');
-    const datePickerInput = document.getElementById('my-bookings-date-picker');
-    let flatpickrInstance = null;
+    const statusFilterSelect = document.getElementById('status-filter-my-bookings'); // Corrected ID
+    const resourceNameFilterInput = document.getElementById('resource-name-filter'); // New filter
+    const applyFiltersBtn = document.getElementById('apply-my-bookings-filters-btn');
+    const clearFiltersBtn = document.getElementById('clear-my-bookings-filters-btn');
+    // Date filter elements are assumed to be removed or handled differently if not in HTML
+    // const dateFilterTypeSelect = document.getElementById('my-bookings-date-filter-type');
+    // const datePickerContainer = document.getElementById('my-bookings-date-picker-container');
+    // const datePickerInput = document.getElementById('my-bookings-date-picker');
+    // let flatpickrInstance = null;
 
     // Visibility Toggles
     const toggleUpcomingCheckbox = document.getElementById('toggle-upcoming-bookings');
     const togglePastCheckbox = document.getElementById('toggle-past-bookings');
 
+    // --- Pagination State (Common) ---
+    const myBookingsItemsPerPageOptions = [5, 10, 25, 50];
+
+    // --- Upcoming Bookings Pagination State & Elements ---
+    let upcomingCurrentPage = 1;
+    let upcomingItemsPerPage = myBookingsItemsPerPageOptions[0];
+    let upcomingTotalItems = 0;
+    let upcomingTotalPages = 0;
+    const upcomingPaginationContainer = document.getElementById('upcoming_bk_pg_pagination_controls_container');
+    const upcomingPerPageSelect = document.getElementById('upcoming_bk_pg_per_page_select');
+    const upcomingPaginationUl = document.getElementById('upcoming_bk_pg_pagination_ul');
+    const upcomingTotalResultsDisplay = document.getElementById('upcoming_bk_pg_total_results_display');
+
+    // --- Past Bookings Pagination State & Elements ---
+    let pastCurrentPage = 1;
+    let pastItemsPerPage = myBookingsItemsPerPageOptions[0];
+    let pastTotalItems = 0;
+    let pastTotalPages = 0;
+    const pastPaginationContainer = document.getElementById('past_bk_pg_pagination_controls_container');
+    const pastPerPageSelect = document.getElementById('past_bk_pg_per_page_select');
+    const pastPaginationUl = document.getElementById('past_bk_pg_pagination_ul');
+    const pastTotalResultsDisplay = document.getElementById('past_bk_pg_total_results_display');
     const updateModalElement = document.getElementById('update-booking-modal');
     let updateModal;
     if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
@@ -74,224 +100,382 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Helper to display status messages (could be moved to script.js if used globally)
     function showStatusMessage(element, message, type = 'info') {
+        if (!element) return;
         element.textContent = message;
         element.className = `alert alert-${type}`;
         element.style.display = 'block';
     }
 
     function hideStatusMessage(element) {
+        if (!element) return;
         element.style.display = 'none';
     }
 
-    function showModalStatus(message, type = 'info') { // Renaming for clarity as per plan, or use showStatusMessage directly
+    function showModalStatus(message, type = 'info') {
         showStatusMessage(updateModalStatusDiv, message, type);
     }
 
     function clearAndDisableSlotsSelect(message) {
         const slotsSelect = document.getElementById('modal-available-slots-select');
+        if (!slotsSelect) return;
         slotsSelect.innerHTML = `<option value="">${message}</option>`;
         slotsSelect.disabled = true;
     }
 
+
     function createBookingCardElement(booking, checkInOutEnabled) {
+        if (!bookingItemTemplate) {
+            console.error("Booking item template not found!");
+            return document.createElement('div'); // Return an empty div or handle error appropriately
+        }
         const bookingItemClone = bookingItemTemplate.content.cloneNode(true);
-        const bookingItemDiv = bookingItemClone.querySelector('.booking-item');
+        const bookingCardDiv = bookingItemClone.querySelector('.booking-card'); // Use the main card div
 
         // Apply conditional classes for status
-        bookingItemDiv.classList.remove('booking-completed', 'booking-cancelled', 'booking-rejected', 'booking-cancelled-by-admin', 'booking-cancelled-admin-acknowledged');
+        bookingCardDiv.classList.remove('booking-completed', 'booking-cancelled', 'booking-rejected', 'booking-cancelled-by-admin', 'booking-cancelled-admin-acknowledged');
         const statusClass = `booking-${booking.status.toLowerCase().replace(/_/g, '-')}`;
-        bookingItemDiv.classList.add(statusClass);
+        bookingCardDiv.classList.add(statusClass);
 
-        bookingItemDiv.dataset.bookingId = booking.id;
-        bookingItemDiv.dataset.resourceId = booking.resource_id;
-        bookingItemDiv.dataset.startTime = booking.start_time;
-        bookingItemDiv.dataset.endTime = booking.end_time;
+        bookingCardDiv.dataset.bookingId = booking.id;
+        bookingCardDiv.dataset.resourceId = booking.resource_id;
+        bookingCardDiv.dataset.startTime = booking.start_time;
+        bookingCardDiv.dataset.endTime = booking.end_time;
 
-        // Populate new structure
-        bookingItemClone.querySelector('.booking-title-value').textContent = booking.title || 'N/A';
-        bookingItemClone.querySelector('.resource-name-value').textContent = booking.resource_name || 'N/A';
+        const titleTextSpan = bookingCardDiv.querySelector('.booking-title-text');
+        if (titleTextSpan) titleTextSpan.textContent = booking.title || 'N/A';
+        const bookingIdDisplay = bookingCardDiv.querySelector('.booking-id-display');
+        if (bookingIdDisplay) bookingIdDisplay.textContent = `ID: #${booking.id}`;
+        const resourceSpan = bookingCardDiv.querySelector('.booking-resource');
+        if (resourceSpan) resourceSpan.textContent = booking.resource_name || 'N/A';
 
         const startDate = new Date(booking.start_time);
         const endDate = new Date(booking.end_time);
-
-        // Date formatting
         const optionsDate = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' };
-        const formattedDate = startDate.toLocaleDateString(undefined, optionsDate); // Uses browser locale but with UTC interpretation
-
-        // Time formatting (24-hour format)
+        const formattedDate = startDate.toLocaleDateString(undefined, optionsDate);
         const optionsTime = { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' };
         const formattedStartTime = startDate.toLocaleTimeString(undefined, optionsTime);
         const formattedEndTime = endDate.toLocaleTimeString(undefined, optionsTime);
 
-        bookingItemClone.querySelector('.booking-date-value').textContent = formattedDate;
-        bookingItemClone.querySelector('.booking-start-time-value').textContent = formattedStartTime;
-        bookingItemClone.querySelector('.booking-end-time-value').textContent = formattedEndTime;
+        const dateSpan = bookingCardDiv.querySelector('.booking-date');
+        if (dateSpan) dateSpan.textContent = formattedDate;
+        const startTimeSpan = bookingCardDiv.querySelector('.booking-start-time');
+        if (startTimeSpan) startTimeSpan.textContent = formattedStartTime;
+        const endTimeSpan = bookingCardDiv.querySelector('.booking-end-time');
+        if (endTimeSpan) endTimeSpan.textContent = formattedEndTime;
 
-        const recurrenceRuleValueSpan = bookingItemClone.querySelector('.recurrence-rule-value');
-        if (recurrenceRuleValueSpan) {
-            recurrenceRuleValueSpan.textContent = booking.recurrence_rule || 'None';
+        const statusBadge = bookingCardDiv.querySelector('.booking-status');
+        if (statusBadge) {
+            statusBadge.textContent = booking.status ? booking.status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Unknown';
+            statusBadge.className = `booking-status badge bg-${getBootstrapStatusColor(booking.status)}`;
         }
 
-        // Store original title and ISO times for update modal, if still needed elsewhere.
-        // The dataset attributes on bookingItemDiv for start/end time are already ISO.
-        // If the update modal relies on specific elements having original values, that needs checking.
-        // For now, assume the main display is the priority.
-        const titleSpan = bookingItemClone.querySelector('.booking-title-value'); // Already populated
-        titleSpan.dataset.originalTitle = booking.title || ''; // Set original title for comparison later
-
-        const updateBtn = bookingItemClone.querySelector('.update-booking-btn');
-        updateBtn.dataset.bookingId = booking.id;
-
-        const cancelBtn = bookingItemClone.querySelector('.cancel-booking-btn');
-        cancelBtn.dataset.bookingId = booking.id;
-
-        const checkInBtn = bookingItemClone.querySelector('.check-in-btn');
-        const checkOutBtn = bookingItemClone.querySelector('.check-out-btn');
-        const checkInControls = bookingItemClone.querySelector('.check-in-controls');
-        const pinInput = bookingItemClone.querySelector('.booking-pin-input');
-
-        const bookingStatusValueSpan = bookingItemClone.querySelector('.booking-status-value');
-        if (bookingStatusValueSpan) {
-            let statusText = booking.status ? booking.status.charAt(0).toUpperCase() + booking.status.slice(1).replace(/_/g, ' ') : 'Unknown';
-            if (booking.status === 'cancelled_by_admin' || booking.status === 'cancelled_admin_acknowledged') {
-                statusText = 'Cancelled by Administrator';
-            }
-            // Add more user-friendly status text as needed, e.g., for 'approved':
-            // else if (booking.status === 'approved') { statusText = 'Approved'; }
-            bookingStatusValueSpan.textContent = statusText;
+        const pinSection = bookingCardDiv.querySelector('.booking-pin-section');
+        const pinSpan = bookingCardDiv.querySelector('.booking-pin');
+        if (booking.pin && pinSection && pinSpan) {
+            pinSpan.textContent = booking.pin;
+            pinSection.style.display = 'block';
+        } else if (pinSection) {
+            pinSection.style.display = 'none';
         }
 
-        if (checkInControls) checkInControls.style.display = 'none';
-        if (checkOutBtn) checkOutBtn.style.display = 'none';
-        if (cancelBtn) cancelBtn.style.display = 'inline-block';
-        if (updateBtn) updateBtn.style.display = 'inline-block';
+        const adminDeletedMessageSection = bookingCardDiv.querySelector('.admin-deleted-message-section');
+        const adminDeletedMessageText = bookingCardDiv.querySelector('.admin-deleted-message-text');
+        if (booking.admin_deleted_message && adminDeletedMessageSection && adminDeletedMessageText) {
+            adminDeletedMessageText.textContent = booking.admin_deleted_message;
+            adminDeletedMessageSection.style.display = 'block';
+        } else if (adminDeletedMessageSection) {
+            adminDeletedMessageSection.style.display = 'none';
+        }
+
+        // Actions (buttons)
+        const actionsContainer = bookingCardDiv.querySelector('.booking-actions');
+        actionsContainer.innerHTML = ''; // Clear any default/template buttons
 
         const terminalStatuses = ['completed', 'cancelled', 'rejected', 'cancelled_by_admin', 'cancelled_admin_acknowledged'];
-        if (terminalStatuses.includes(booking.status)) {
-            if (checkInControls) checkInControls.style.display = 'none';
-            if (checkOutBtn) checkOutBtn.style.display = 'none';
-            if (cancelBtn) cancelBtn.style.display = 'none';
-            if (updateBtn) updateBtn.style.display = 'none';
-        } else if (checkInOutEnabled) {
-            if (booking.can_check_in && !booking.checked_in_at) {
-                if (checkInControls) checkInControls.style.display = 'inline-block';
+        if (!terminalStatuses.includes(booking.status)) {
+            if (checkInOutEnabled) {
+                if (booking.can_check_in && !booking.checked_in_at) {
+                    const checkInBtn = document.createElement('button');
+                    checkInBtn.className = 'btn btn-sm btn-success me-1 check-in-btn';
+                    checkInBtn.textContent = 'Check In';
+                    checkInBtn.dataset.bookingId = booking.id;
+                    actionsContainer.appendChild(checkInBtn);
+                    // PIN input could be added here if needed for check-in
+                }
+                if (booking.checked_in_at && !booking.checked_out_at) {
+                    const checkOutBtn = document.createElement('button');
+                    checkOutBtn.className = 'btn btn-sm btn-warning me-1 check-out-btn';
+                    checkOutBtn.textContent = 'Check Out';
+                    checkOutBtn.dataset.bookingId = booking.id;
+                    actionsContainer.appendChild(checkOutBtn);
+                }
             }
-            if (booking.checked_in_at && !booking.checked_out_at) {
-                if (checkOutBtn) checkOutBtn.style.display = 'inline-block';
-                if (checkInControls) checkInControls.style.display = 'none';
-            }
-        } else {
-            if (checkInControls) checkInControls.style.display = 'none';
-            if (checkOutBtn) checkOutBtn.style.display = 'none';
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'btn btn-sm btn-danger cancel-booking-btn';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.dataset.bookingId = booking.id;
+            actionsContainer.appendChild(cancelBtn);
         }
+         // Edit title button (already in template, just ensure it has dataset.bookingId)
+        const editTitleBtn = bookingCardDiv.querySelector('.edit-title-btn');
+        if(editTitleBtn) editTitleBtn.dataset.bookingId = booking.id;
 
-        if (checkInBtn) checkInBtn.dataset.bookingId = booking.id;
-        if (pinInput) pinInput.dataset.bookingId = booking.id;
-        if (checkOutBtn) checkOutBtn.dataset.bookingId = booking.id;
 
-        return bookingItemDiv;
+        return bookingCardDiv;
     }
 
-    async function fetchAndDisplayBookings() {
-        // const upcomingBookingsContainer = document.getElementById('upcoming-bookings-container'); // Now global
-        // const pastBookingsContainer = document.getElementById('past-bookings-container'); // Now global
-        const myBookingsStatusDiv = document.getElementById('my-bookings-status'); // Uses the global statusDiv
+    function getBootstrapStatusColor(status) {
+        switch (status) {
+            case 'approved': return 'primary';
+            case 'pending_approval': return 'info';
+            case 'checked_in': return 'success';
+            case 'completed': return 'secondary';
+            case 'cancelled': return 'warning';
+            case 'rejected': return 'danger';
+            case 'cancelled_by_admin': return 'dark';
+            default: return 'light';
+        }
+    }
 
-        if (!upcomingBookingsContainer || !pastBookingsContainer) {
-            console.error('My Bookings page structure is missing essential container elements.');
-            if (myBookingsStatusDiv) {
-                myBookingsStatusDiv.className = 'alert alert-danger';
-                myBookingsStatusDiv.textContent = 'Error: Could not load booking display components.';
-                myBookingsStatusDiv.style.display = 'block';
+    // Generic initializePerPageSelect
+    function initializeMyBookingsPerPageSelect(prefix, selectElement, itemsPerPageVarSetter, currentPageSetter, fetchDataFunction, currentItemsPerPage) {
+        if (!selectElement) return;
+        selectElement.innerHTML = ''; // Clear existing
+        myBookingsItemsPerPageOptions.forEach(optionValue => {
+            const option = new Option(optionValue, optionValue);
+            if (optionValue === currentItemsPerPage) { // Use passed currentItemsPerPage
+                option.selected = true;
             }
+            selectElement.add(option);
+        });
+        // Remove existing listener to prevent duplicates
+        const changeHandlerKey = `${prefix}_perPageChangeHandler`;
+        if (selectElement[changeHandlerKey]) {
+            selectElement.removeEventListener('change', selectElement[changeHandlerKey]);
+        }
+        selectElement[changeHandlerKey] = function() {
+            itemsPerPageVarSetter(parseInt(this.value));
+            currentPageSetter(1);
+            fetchDataFunction();
+        };
+        selectElement.addEventListener('change', selectElement[changeHandlerKey]);
+    }
+
+    // Generic renderMyBookingsPaginationControls
+    function renderMyBookingsPaginationControls(prefix, paginationUl, paginationContainer, totalResultsDisplay, currentPage, totalPages, totalItems, itemsPerPage, fetchDataFunction, currentPageSetter) {
+        if (!paginationUl || !paginationContainer || !totalResultsDisplay) {
+            console.warn(`Pagination elements for prefix ${prefix} not found.`);
             return;
         }
+        paginationUl.innerHTML = '';
 
-        upcomingBookingsContainer.innerHTML = '<p class="loading-message">Loading upcoming bookings...</p>';
-        pastBookingsContainer.innerHTML = '<p class="loading-message">Loading past bookings...</p>';
-        if (myBookingsStatusDiv) {
-            myBookingsStatusDiv.style.display = 'none';
+        const currentStatusFilter = statusFilterSelect ? statusFilterSelect.value : '';
+        const currentResourceFilter = resourceNameFilterInput ? resourceNameFilterInput.value : '';
+
+        if (totalItems === 0 && !currentStatusFilter && !currentResourceFilter) {
+             paginationContainer.style.display = 'none';
+             totalResultsDisplay.textContent = '';
+             return;
         }
 
-        let apiUrl = '/api/bookings/my_bookings';
-        const params = new URLSearchParams();
+        paginationContainer.style.display = 'flex';
+        totalResultsDisplay.textContent = totalItems > 0 ? `Total: ${totalItems} results` : 'No results for current filter.';
 
-        if (statusFilterSelect && statusFilterSelect.value !== 'all') {
-            params.append('status_filter', statusFilterSelect.value);
+        if (totalPages === 0 || totalPages === 1 && totalItems <= itemsPerPage) {
+            paginationUl.style.display = 'none';
+            return;
+        }
+        paginationUl.style.display = 'flex';
+
+        const createPageLink = (page, text, isDisabled = false, isActive = false) => {
+            const li = document.createElement('li');
+            li.className = `page-item ${isDisabled ? 'disabled' : ''} ${isActive ? 'active' : ''}`;
+            const a = document.createElement('a');
+            a.className = 'page-link';
+            a.href = '#';
+            a.innerHTML = text;
+            if (!isDisabled) {
+                a.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    currentPageSetter(page);
+                    fetchDataFunction();
+                });
+            }
+            li.appendChild(a);
+            return li;
+        };
+
+        paginationUl.appendChild(createPageLink(currentPage - 1, '&lt; Previous', currentPage <= 1));
+
+        const showPages = 3;
+        let startPage = Math.max(1, currentPage - Math.floor(showPages / 2));
+        let endPage = Math.min(totalPages, startPage + showPages - 1);
+        if (endPage - startPage + 1 < showPages && totalPages >= showPages) {
+            startPage = Math.max(1, endPage - showPages + 1);
+        } else if (totalPages < showPages) {
+            startPage = 1;
+            endPage = totalPages;
         }
 
-        if (dateFilterTypeSelect && dateFilterTypeSelect.value === 'specific' && datePickerInput && datePickerInput.value) {
-            params.append('date_filter_value', datePickerInput.value);
+        if (startPage > 1) {
+            paginationUl.appendChild(createPageLink(1, '1'));
+            if (startPage > 2) {
+                const ellipsisLi = document.createElement('li');
+                ellipsisLi.className = 'page-item disabled';
+                ellipsisLi.innerHTML = `<span class="page-link">&hellip;</span>`;
+                paginationUl.appendChild(ellipsisLi);
+            }
         }
 
-        const queryString = params.toString();
-        if (queryString) {
-            apiUrl += `?${queryString}`;
+        for (let i = startPage; i <= endPage; i++) {
+            paginationUl.appendChild(createPageLink(i, i, false, i === currentPage));
         }
+
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) {
+                const ellipsisLi = document.createElement('li');
+                ellipsisLi.className = 'page-item disabled';
+                ellipsisLi.innerHTML = `<span class="page-link">&hellip;</span>`;
+                paginationUl.appendChild(ellipsisLi);
+            }
+            paginationUl.appendChild(createPageLink(totalPages, totalPages));
+        }
+        paginationUl.appendChild(createPageLink(currentPage + 1, 'Next &gt;', currentPage >= totalPages));
+    }
+
+
+    async function fetchUpcomingBookings() {
+        if (!upcomingBookingsContainer) return;
+        if (!toggleUpcomingCheckbox.checked) {
+            upcomingBookingsContainer.innerHTML = '<p>Upcoming bookings hidden.</p>';
+            if(upcomingPaginationContainer) upcomingPaginationContainer.style.display = 'none';
+            return;
+        }
+        showLoading(upcomingBookingsContainer, 'Loading upcoming bookings...');
+
+        let url = `/api/bookings/upcoming?page=${upcomingCurrentPage}&per_page=${upcomingItemsPerPage}`;
+        const status = statusFilterSelect ? statusFilterSelect.value : '';
+        const resourceName = resourceNameFilterInput ? resourceNameFilterInput.value.trim() : '';
+        if (status) url += `&status_filter=${encodeURIComponent(status)}`;
+        if (resourceName) url += `&resource_name_filter=${encodeURIComponent(resourceName)}`;
 
         try {
-            const apiResponse = await apiCall(apiUrl, {}, myBookingsStatusDiv);
-            const upcomingBookings = apiResponse.upcoming_bookings;
-            const pastBookings = apiResponse.past_bookings;
-            const checkInOutEnabled = apiResponse.check_in_out_enabled;
-
-            upcomingBookingsContainer.innerHTML = ''; // Clear loading message
-            pastBookingsContainer.innerHTML = '';   // Clear loading message
-
-            if ((!upcomingBookings || upcomingBookings.length === 0) && (!pastBookings || pastBookings.length === 0)) {
-                if (myBookingsStatusDiv) showStatusMessage(myBookingsStatusDiv, 'You have no bookings matching the current filters.', 'info');
-                upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings found.</p>';
-                pastBookingsContainer.innerHTML = '<p>No past booking history found.</p>';
+            const data = await apiCall(url, {}, statusDiv); // Use global statusDiv for general API errors
+            if (data.success === false) {
+                showError(upcomingBookingsContainer, data.message || 'Failed to fetch upcoming bookings.');
+                if (upcomingPaginationContainer) upcomingPaginationContainer.style.display = 'none';
                 return;
             }
 
-            if (upcomingBookings && upcomingBookings.length > 0) {
-                upcomingBookings.forEach(booking => {
-                    const bookingCard = createBookingCardElement(booking, checkInOutEnabled);
+            upcomingTotalItems = data.pagination.total_items;
+            upcomingTotalPages = data.pagination.total_pages;
+            upcomingCurrentPage = data.pagination.current_page; // Sync with server response
+
+            renderMyBookingsPaginationControls('upcoming_bk_pg_', upcomingPaginationUl, upcomingPaginationContainer, upcomingTotalResultsDisplay, upcomingCurrentPage, upcomingTotalPages, upcomingTotalItems, upcomingItemsPerPage, fetchUpcomingBookings, (val) => upcomingCurrentPage = val);
+
+            upcomingBookingsContainer.innerHTML = ''; // Clear loading
+            if (data.bookings && data.bookings.length > 0) {
+                data.bookings.forEach(booking => {
+                    const bookingCard = createBookingCardElement(booking, data.check_in_out_enabled);
                     upcomingBookingsContainer.appendChild(bookingCard);
                 });
             } else {
-                upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings found matching your filters.</p>';
-            }
-
-            if (pastBookings && pastBookings.length > 0) {
-                pastBookings.forEach(booking => {
-                    const bookingCard = createBookingCardElement(booking, checkInOutEnabled);
-                    pastBookingsContainer.appendChild(bookingCard);
-                });
-            } else {
-                pastBookingsContainer.innerHTML = '<p>No past booking history found matching your filters.</p>';
-            }
-
-            // Only hide global status if it was showing a general loading message and not an error from apiCall
-            if (myBookingsStatusDiv && myBookingsStatusDiv.textContent === 'Loading your bookings...' && !myBookingsStatusDiv.classList.contains('alert-danger')) {
-                 hideStatusMessage(myBookingsStatusDiv);
+                upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings found matching your criteria.</p>';
             }
         } catch (error) {
-            console.error('Error fetching bookings:', error);
-            // apiCall likely already showed an error in myBookingsStatusDiv
-            // Set specific messages for containers
-            upcomingBookingsContainer.innerHTML = '<p>Could not load upcoming bookings.</p>';
-            pastBookingsContainer.innerHTML = '<p>Could not load past bookings.</p>';
+            showError(upcomingBookingsContainer, `Error fetching upcoming bookings: ${error.message}`);
+            if (upcomingPaginationContainer) upcomingPaginationContainer.style.display = 'none';
         }
     }
 
-    // Event listener for dynamically created buttons (needs to be on a static parent)
-    // Using document as the closest static parent, can be refined if #my-bookings-list is always present
+    async function fetchPastBookings() {
+        if (!pastBookingsContainer) return;
+         if (!togglePastCheckbox.checked) {
+            pastBookingsContainer.innerHTML = '<p>Past bookings hidden.</p>';
+            if(pastPaginationContainer) pastPaginationContainer.style.display = 'none';
+            return;
+        }
+        showLoading(pastBookingsContainer, 'Loading past bookings...');
+
+        let url = `/api/bookings/past?page=${pastCurrentPage}&per_page=${pastItemsPerPage}`;
+        const status = statusFilterSelect ? statusFilterSelect.value : '';
+        const resourceName = resourceNameFilterInput ? resourceNameFilterInput.value.trim() : '';
+        if (status) url += `&status_filter=${encodeURIComponent(status)}`;
+        if (resourceName) url += `&resource_name_filter=${encodeURIComponent(resourceName)}`;
+
+        try {
+            const data = await apiCall(url, {}, statusDiv);
+             if (data.success === false) {
+                showError(pastBookingsContainer, data.message || 'Failed to fetch past bookings.');
+                if (pastPaginationContainer) pastPaginationContainer.style.display = 'none';
+                return;
+            }
+
+            pastTotalItems = data.pagination.total_items;
+            pastTotalPages = data.pagination.total_pages;
+            pastCurrentPage = data.pagination.current_page;
+
+            renderMyBookingsPaginationControls('past_bk_pg_', pastPaginationUl, pastPaginationContainer, pastTotalResultsDisplay, pastCurrentPage, pastTotalPages, pastTotalItems, pastItemsPerPage, fetchPastBookings, (val) => pastCurrentPage = val);
+
+            pastBookingsContainer.innerHTML = ''; // Clear loading
+            if (data.bookings && data.bookings.length > 0) {
+                data.bookings.forEach(booking => {
+                    const bookingCard = createBookingCardElement(booking, data.check_in_out_enabled);
+                    pastBookingsContainer.appendChild(bookingCard);
+                });
+            } else {
+                pastBookingsContainer.innerHTML = '<p>No past bookings found matching your criteria.</p>';
+            }
+        } catch (error) {
+            showError(pastBookingsContainer, `Error fetching past bookings: ${error.message}`);
+            if (pastPaginationContainer) pastPaginationContainer.style.display = 'none';
+        }
+    }
+
+
+    function displayBookings(bookings, container, template, isUpcoming) {
+        // This function is now largely superseded by fetchUpcomingBookings and fetchPastBookings
+        // but its core logic for creating cards is now in createBookingCardElement.
+        // Kept for reference, but direct calls to createBookingCardElement are now used.
+        container.innerHTML = ''; // Clear loading/previous content
+        if (bookings && bookings.length > 0) {
+            bookings.forEach(booking => {
+                // Assume check_in_out_enabled is fetched globally or passed if needed here.
+                // For now, createBookingCardElement might need to fetch it or have it passed.
+                // The refactored fetch functions now pass it to createBookingCardElement.
+                const bookingCard = createBookingCardElement(booking, window.checkInOutEnabledGlobal || false); // Example global
+                container.appendChild(bookingCard);
+            });
+        } else {
+            container.innerHTML = `<p>No ${isUpcoming ? 'upcoming' : 'past'} bookings found.</p>`;
+        }
+    }
+
+
+    // Original fetchAndDisplayBookings is effectively split into fetchUpcomingBookings and fetchPastBookings
+    // The filter application logic will now trigger both.
+
     document.addEventListener('click', async (event) => {
         const target = event.target;
+        const bookingItem = target.closest('.booking-card'); // Changed from .booking-item to .booking-card
 
-        // Check if the click is within the new containers or their children
-        // This helps avoid processing clicks on other parts of the page if this listener is too broad.
-        const clickedBookingItem = target.closest('.booking-item');
-        if (!clickedBookingItem || (!upcomingBookingsContainer.contains(clickedBookingItem) && !pastBookingsContainer.contains(clickedBookingItem))) {
-            // If the click is not on a booking item within our containers, do nothing specific here.
-            // Modal clicks are handled separately by their own listeners on modal buttons.
-            // This check is important if 'document' is used as the listener base.
-            if (!target.closest('.modal')) { // Allow clicks inside modals
-                 return;
-            }
+        if (target.classList.contains('edit-title-btn')) {
+            event.stopPropagation(); // Prevent card click if any
+            const bookingId = target.closest('.booking-card').dataset.bookingId;
+            const titleValueElement = target.closest('.booking-card').querySelector('.booking-title-text');
+            const currentTitle = titleValueElement ? titleValueElement.textContent : '';
+
+            const resourceName = target.closest('.booking-card').querySelector('.booking-resource').textContent;
+
+            if (modalBookingIdInput) modalBookingIdInput.value = bookingId;
+            if (newBookingTitleInput) newBookingTitleInput.value = currentTitle;
+            if (updateBookingModalLabel) updateBookingModalLabel.textContent = `Update Booking for: ${resourceName}`;
+
+            hideStatusMessage(updateModalStatusDiv);
+            if (updateModal) updateModal.show();
+            return; // Processed
         }
+
 
         if (target.classList.contains('cancel-booking-btn')) {
             const bookingId = target.dataset.bookingId;
@@ -300,116 +484,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     await apiCall(`/api/bookings/${bookingId}`, { method: 'DELETE' });
                     showSuccess(statusDiv, `Booking ${bookingId} cancelled successfully.`);
-                    const bookingItemToRemove = target.closest('.booking-item');
-                    const parentContainer = bookingItemToRemove.parentElement; // upcomingBookingsContainer or pastBookingsContainer
-
-                    if (bookingItemToRemove) {
-                        bookingItemToRemove.remove();
-                    }
-
-                    // Check if specific container is empty
-                    if (parentContainer === upcomingBookingsContainer && upcomingBookingsContainer.children.length === 0) {
-                        upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings.</p>';
-                    } else if (parentContainer === pastBookingsContainer && pastBookingsContainer.children.length === 0) {
-                        pastBookingsContainer.innerHTML = '<p>No past booking history.</p>';
-                    }
-
-                    // Check if both containers are empty to show overall "no bookings" message
-                    if (upcomingBookingsContainer.children.length === 0 && pastBookingsContainer.children.length === 0) {
-                        // This might overwrite the specific "no upcoming/past" messages if statusDiv is global.
-                        // Consider if a different global message area is better or if this is fine.
-                        showStatusMessage(statusDiv, 'You have no bookings remaining.', 'info');
-                    }
-
+                    // Re-fetch both sections as a cancelled booking might move or affect counts
+                    fetchUpcomingBookings();
+                    fetchPastBookings();
                 } catch (error) {
-                    console.error('Error cancelling booking:', error);
                     showError(statusDiv, error.message || `Failed to cancel booking ${bookingId}.`);
                 }
             }
         }
 
-        if (target.classList.contains('update-booking-btn')) {
-            const bookingId = target.dataset.bookingId;
-            const bookingItemDiv = target.closest('.booking-item');
-
-            if (!bookingItemDiv) {
-                console.error('Could not find .booking-item parent for update button.');
-                return;
-            }
-
-            const titleValueElement = bookingItemDiv.querySelector('.booking-title-value');
-            const resourceNameElement = bookingItemDiv.querySelector('.resource-name-value');
-
-            if (!titleValueElement || !resourceNameElement) {
-                console.error('Could not find title or resource name element within booking item.');
-                return;
-            }
-
-            const currentTitle = titleValueElement.dataset.originalTitle || titleValueElement.textContent; // Use originalTitle if available, else current text
-            const currentStartTimeISO = bookingItemDiv.dataset.startTime;
-            const resourceName = resourceNameElement.textContent;
-            const resourceId = bookingItemDiv.dataset.resourceId;
-
-            modalBookingIdInput.value = bookingId;
-            newBookingTitleInput.value = currentTitle;
-
-            // Store resourceId on the modal itself or a hidden input within the modal
-            updateModalElement.dataset.resourceId = resourceId; // Storing on modal element
-
-            // Populate new date field
-            const startDate = new Date(currentStartTimeISO);
-            const modalBookingDateInput = document.getElementById('modal-booking-date');
-            if (modalBookingDateInput) {
-                modalBookingDateInput.value = startDate.toISOString().split('T')[0];
-                // Trigger change event to load slots for the current date
-                modalBookingDateInput.dispatchEvent(new Event('change'));
-            }
-
-            // Clear old time fields (if they are still in HTML, eventually they'll be removed)
-            const oldStartDateInput = document.getElementById('new-booking-start-date');
-            if (oldStartDateInput) oldStartDateInput.value = '';
-            const oldStartTimeInput = document.getElementById('new-booking-start-time');
-            if (oldStartTimeInput) oldStartTimeInput.value = '';
-            const oldEndDateInput = document.getElementById('new-booking-end-date');
-            if (oldEndDateInput) oldEndDateInput.value = '';
-            const oldEndTimeInput = document.getElementById('new-booking-end-time');
-            if (oldEndTimeInput) oldEndTimeInput.value = '';
-            
-            updateBookingModalLabel.textContent = `Update Booking for: ${resourceName}`;
-            hideStatusMessage(updateModalStatusDiv);
-            updateModal.show();
-        }
-
         if (target.classList.contains('check-in-btn')) {
             const bookingId = target.dataset.bookingId;
-            const pinInput = document.querySelector(`.booking-pin-input[data-booking-id='${bookingId}']`);
+            const pinInput = bookingItem ? bookingItem.querySelector('.booking-pin-input') : null; // Not present in new card
             const pinValue = pinInput ? pinInput.value.trim() : null;
-
             let payload = {};
-            if (pinValue && pinValue !== "") {
-                payload.pin = pinValue;
-            }
+            if (pinValue) payload.pin = pinValue;
 
             showLoading(statusDiv, 'Checking in...');
             try {
-                // Pass CSRF token if your apiCall helper doesn't handle it globally for POST/PUT etc.
-                // For now, assuming apiCall or a global fetch wrapper handles CSRF if needed.
                 await apiCall(`/api/bookings/${bookingId}/check_in`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }, // Ensure correct header
-                    body: JSON.stringify(payload) // Send payload
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
                 });
-                // Hide the entire check-in controls (input + button)
-                const checkInControls = target.closest('.check-in-controls');
-                if (checkInControls) checkInControls.style.display = 'none';
-
-                const bookingItemDiv = target.closest('.booking-item');
-                const checkOutBtn = bookingItemDiv.querySelector('.check-out-btn');
-                if (checkOutBtn) checkOutBtn.style.display = 'inline-block';
                 showSuccess(statusDiv, 'Checked in successfully.');
-                if (pinInput) pinInput.value = ''; // Clear PIN input
+                fetchUpcomingBookings(); // Refresh to update status and buttons
             } catch (error) {
-                console.error('Check in failed:', error);
                 showError(statusDiv, error.message || 'Check in failed.');
             }
         }
@@ -419,404 +519,342 @@ document.addEventListener('DOMContentLoaded', () => {
             showLoading(statusDiv, 'Checking out...');
             try {
                 await apiCall(`/api/bookings/${bookingId}/check_out`, { method: 'POST' });
-                target.style.display = 'none';
                 showSuccess(statusDiv, 'Checked out successfully.');
+                fetchUpcomingBookings(); // Refresh
             } catch (error) {
-                console.error('Check out failed:', error);
                 showError(statusDiv, error.message || 'Check out failed.');
             }
         }
-
-        if (target.classList.contains('clear-admin-message-btn')) {
-            // This button should no longer be generated for the user view.
-            // If it were, this is where its client-side logic would be.
-            // For robustness, we can leave the handler, but it shouldn't be triggered from user UI.
-            console.warn("'clear-admin-message-btn' was clicked, but this button should not be available to users on my_bookings page.");
-        }
     });
 
-    // Handle modal form submission for updating booking
-    saveBookingTitleBtn.addEventListener('click', async () => {
-        const bookingId = modalBookingIdInput.value;
-        const newTitle = newBookingTitleInput.value.trim();
-        const selectedDate = document.getElementById('modal-booking-date').value;
-        const selectedSlot = document.getElementById('modal-available-slots-select').value;
+    if (document.getElementById('update-booking-title-form')) {
+        document.getElementById('update-booking-title-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const bookingId = document.getElementById('update-booking-id-input').value;
+            const newTitle = document.getElementById('new-booking-title-input').value.trim();
 
-        if (!newTitle) {
-            showStatusMessage(updateModalStatusDiv, 'Title cannot be empty.', 'danger');
-            return;
-        }
-        if (!selectedDate) {
-            showStatusMessage(updateModalStatusDiv, 'Please select a date.', 'danger');
-            return;
-        }
-        if (!selectedSlot) {
-            showStatusMessage(updateModalStatusDiv, 'Please select an available time slot.', 'danger');
-            return;
-        }
-
-        const [slotStart, slotEnd] = selectedSlot.split(',');
-        const isoStartTime = `${selectedDate}T${slotStart}:00Z`; // Assuming slot times are UTC
-        const isoEndTime = `${selectedDate}T${slotEnd}:00Z`;   // Assuming slot times are UTC
-
-        const payload = {
-            title: newTitle,
-            start_time: isoStartTime,
-            end_time: isoEndTime
-        };
-
-        // Refined "No Changes" detection
-        const originalButtonText = saveBookingTitleBtn.textContent; // Keep this for button state reset later
-
-        // Find the booking item in either upcoming or past container
-        let bookingItemDiv = upcomingBookingsContainer.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
-        if (!bookingItemDiv) {
-            bookingItemDiv = pastBookingsContainer.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
-        }
-        let noChangesMade = false;
-
-        if (bookingItemDiv) {
-            const titleValueElement = bookingItemDiv.querySelector('.booking-title-value');
-            const originalTitle = titleValueElement ? (titleValueElement.dataset.originalTitle || titleValueElement.textContent) : '';
-            const originalStartTimeISO = bookingItemDiv.dataset.startTime; // Full ISO string from booking item
-            const originalEndTimeISO = bookingItemDiv.dataset.endTime;     // Full ISO string from booking item
-
-            const titleChanged = newTitle !== originalTitle;
-            let timeChanged = false;
-
-            // Selected date and slot are already validated to be present by checks above.
-            // isoStartTime and isoEndTime are already constructed based on selectedDate and selectedSlot.
-            if (isoStartTime !== originalStartTimeISO || isoEndTime !== originalEndTimeISO) {
-                timeChanged = true;
-            }
-
-            if (!titleChanged && !timeChanged) {
-                noChangesMade = true;
-            }
-        } else {
-            // If bookingItemDiv is not found, something is wrong, proceed with save and let server handle it,
-            // or show an error. For now, assume it will be found or error handling later catches issues.
-            console.warn(`Could not find booking item div for booking ID ${bookingId} to check for changes.`);
-        }
-
-        if (noChangesMade) {
-            showStatusMessage(updateModalStatusDiv, 'No changes detected.', 'info');
-            // Button state reset is handled by the finally block, but we need to return early.
-            // No need to manually reset here if we return BEFORE setting to "Processing..."
-            // However, the current structure sets to "Processing..." then tries to save.
-            // Let's adjust. This "no changes" check should be before setting to "Processing...".
-            // Re-evaluating placement: The "No changes" check should be done BEFORE "Processing..." state.
-            // The current diff places this logic *after* originalButtonText is captured, which is fine.
-            // The button state will be reset by the finally block if we return now.
-            return;
-        }
-
-        saveBookingTitleBtn.textContent = 'Processing...';
-        saveBookingTitleBtn.disabled = true;
-        showLoading(updateModalStatusDiv, 'Saving changes...');
-
-        try {
-            const updatedBooking = await apiCall(`/api/bookings/${bookingId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            
-            // Update the UI (find in either upcoming or past container)
-            let bookingItemDiv = upcomingBookingsContainer.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
-            if (!bookingItemDiv) {
-                bookingItemDiv = pastBookingsContainer.querySelector(`.booking-item[data-booking-id="${bookingId}"]`);
-            }
-
-            if (bookingItemDiv) {
-                const titleValueSpan = bookingItemDiv.querySelector('.booking-title-value');
-                if (titleValueSpan) {
-                    titleValueSpan.textContent = updatedBooking.title;
-                    titleValueSpan.dataset.originalTitle = updatedBooking.title; // Update original title as well
-                }
-
-                // Assuming booking-date-value, booking-start-time-value, booking-end-time-value are the correct classes for display
-                const dateValueSpan = bookingItemDiv.querySelector('.booking-date-value');
-                const startTimeValueSpan = bookingItemDiv.querySelector('.booking-start-time-value');
-                const endTimeValueSpan = bookingItemDiv.querySelector('.booking-end-time-value');
-
-                const newStartDate = new Date(updatedBooking.start_time);
-                const newEndDate = new Date(updatedBooking.end_time);
-
-                if (dateValueSpan) dateValueSpan.textContent = newStartDate.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
-                if (startTimeValueSpan) startTimeValueSpan.textContent = newStartDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' });
-                if (endTimeValueSpan) endTimeValueSpan.textContent = newEndDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' });
-
-                // Update dataset attributes on the .booking-item itself
-                bookingItemDiv.dataset.startTime = updatedBooking.start_time;
-                bookingItemDiv.dataset.endTime = updatedBooking.end_time;
-            }
-            
-            showSuccess(statusDiv, `Booking ${bookingId} updated successfully.`);
-            updateModal.hide();
-            // Consider re-fetching all bookings for simplicity and to ensure all states are correct.
-            // fetchAndDisplayBookings(); 
-        } catch (error) {
-            console.error('Error updating booking:', error);
-            // Ensure showError is available or use showStatusMessage
-            if (typeof showError === 'function') {
-                 showError(updateModalStatusDiv, error.message || 'Failed to update booking.');
-            } else {
-                showStatusMessage(updateModalStatusDiv, error.message || 'Failed to update booking.', 'danger');
-            }
-        } finally {
-            saveBookingTitleBtn.textContent = originalButtonText;
-            saveBookingTitleBtn.disabled = false;
-        }
-    });
-
-    // Event listener for modal date change
-    const modalBookingDateInput = document.getElementById('modal-booking-date');
-    if (modalBookingDateInput) {
-        modalBookingDateInput.addEventListener('change', async () => {
-            const availableSlotsSelect = document.getElementById('modal-available-slots-select');
-            const resourceId = updateModalElement.dataset.resourceId;
-            const selectedDate = modalBookingDateInput.value;
-            const currentBookingId = modalBookingIdInput.value; // Booking being edited
-
-            if (!selectedDate || !resourceId) {
-                availableSlotsSelect.innerHTML = '<option value="">Select a date first</option>';
+            if (!newTitle) {
+                showModalStatus('Title cannot be empty.', 'danger');
                 return;
             }
-
-            availableSlotsSelect.innerHTML = '<option value="">Loading...</option>';
-            availableSlotsSelect.disabled = true;
+            const originalButtonText = this.querySelector('button[type="submit"]').textContent;
+            this.querySelector('button[type="submit"]').textContent = 'Saving...';
+            this.querySelector('button[type="submit"]').disabled = true;
 
             try {
-                // Step 3: Fetch necessary data
-                let resourceMaintenanceStatus = { is_under_maintenance: false, maintenance_until: null };
-                const selectedDateString = modalBookingDateInput.value; // Ensure this is in YYYY-MM-DD
+                const updatedBooking = await apiCall(`/api/bookings/${bookingId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: newTitle }) // Only sending title
+                }, updateModalStatusDiv);
 
-                try {
-                    // This call will either return booked slots (200 OK) or an error if resource is unavailable/under maintenance.
-                    // We are primarily interested in the error case for maintenance.
-                    await apiCall(`/api/resources/${resourceId}/availability?date=${selectedDateString}`);
-                    // If the call succeeds (200 OK), it means the resource is generally available for booking on this date,
-                    // so we assume it's not under prohibitive maintenance for this date.
-                } catch (error) {
-                    if (error.response && error.response.status === 403) {
-                        try {
-                            const errorData = await error.response.json();
-                            if (errorData.error && errorData.error.toLowerCase().includes('maintenance')) {
-                                resourceMaintenanceStatus.is_under_maintenance = true;
-                                // 'maintenance_until' is not directly available from this error structure,
-                                // but the 403 implies maintenance for the selectedDate.
-                                console.log(`Resource ${resourceId} is under maintenance on ${selectedDateString}. Error: ${errorData.error}`);
-                            } else {
-                                console.warn(`Received 403 from /availability for resource ${resourceId} but error message doesn't indicate maintenance:`, errorData.error);
-                                // Potentially treat as other critical error if slot calculation depends on availability data not just maintenance.
-                                // For now, if not maintenance, assume other 403s might still allow slot display if other data is fetched.
-                                // However, the current logic path after this try-catch doesn't rely on successful data from /availability,
-                                // so a non-maintenance 403 might not break things unless it was meant to provide data.
-                                // If the error is critical enough to stop, use clearAndDisableSlotsSelect and return.
-                            }
-                        } catch (parseError) {
-                            console.warn(`Could not parse JSON from 403 error response for /availability on resource ${resourceId}:`, parseError);
-                            // Treat as a general failure to get maintenance status, could default to not maintained or stop.
-                            // To be safe, if we can't parse the specific error, we might not know if it's safe to proceed.
-                        }
-                    } else if (error.response && error.response.status === 404) {
-                        console.error(`Resource ${resourceId} not found when checking availability.`);
-                        showModalStatus(`Error: Resource details not found (ID: ${resourceId}).`, 'danger');
-                        clearAndDisableSlotsSelect("Error fetching resource details.");
-                        return; // Stop further processing for slots
-                    } else {
-                        // Other unexpected errors (e.g., 500, network error)
-                        console.error(`Error fetching resource availability for ${resourceId} on ${selectedDateString}:`, error);
-                        showModalStatus('Error checking resource availability. Please try again.', 'danger');
-                        clearAndDisableSlotsSelect("Error checking resource availability.");
-                        return; // Stop further processing for slots
-                    }
-                }
-
-                // Fetch user's own bookings for the selected date
-                // The endpoint /api/bookings/my_bookings_for_date?date=${selectedDateString} needs to be implemented
-                // For now, let's assume it exists or adapt.
-                // If not, we might need to fetch all user bookings and filter, which is less ideal.
-                // Let's placeholder the call:
-                let usersBookingsOnDate = [];
-                try {
-                    // Use selectedDateString for consistency
-                    usersBookingsOnDate = await apiCall(`/api/bookings/my_bookings_for_date?date=${selectedDateString}`);
-                } catch (e) {
-                    // If endpoint doesn't exist, this will fail. Log and continue, conflict check will be partial.
-                    console.warn(`Could not fetch user's bookings for date ${selectedDateString}. User conflict check might be incomplete. Error: ${e.message}`);
-                }
-
-
-                // Step 5: Filter Slots
-                availableSlotsSelect.innerHTML = ''; // Clear "Loading..."
-                let availableSlotsFound = 0;
-
-                const selectedDateObj = new Date(selectedDate + "T00:00:00Z"); // Ensure date is treated as UTC midnight
-
-                for (const slot of predefinedSlots) {
-                    const slotStartDateTime = new Date(`${selectedDate}T${slot.start}:00Z`);
-                    const slotEndDateTime = new Date(`${selectedDate}T${slot.end}:00Z`);
-                    let isAvailable = true;
-                    let unavailabilityReason = "";
-
-                    // Past Date/Time Check
-                    const now = new Date();
-                    if (slotEndDateTime < now) {
-                        isAvailable = false;
-                        unavailabilityReason = " (Past)";
-                    }
-
-                    // Resource Maintenance Check
-                    if (isAvailable && resourceMaintenanceStatus.is_under_maintenance) {
-                        // If the /availability call returned a 403 due to maintenance for the selectedDate,
-                        // then all slots on this day for this resource are considered unavailable due to maintenance.
-                        console.log(`Slot ${slot.name} on ${selectedDateString} for resource ${resourceId} is unavailable due to maintenance.`);
-                        isAvailable = false;
-                        unavailabilityReason = " (Resource under maintenance)";
-                    }
-
-                    // User's Own Bookings Check (excluding the current booking being edited)
-                    if (isAvailable && usersBookingsOnDate && usersBookingsOnDate.length > 0) {
-                        for (const userBooking of usersBookingsOnDate) {
-                            // Ensure currentBookingId is a string if userBooking.id is a number, or vice-versa, for comparison.
-                            // Assuming userBooking.booking_id from the API.
-                            if (userBooking.booking_id && userBooking.booking_id.toString() === currentBookingId) {
-                                continue;
-                            }
-                            // Defensive check for start_time and end_time
-                            if (!userBooking || typeof userBooking.start_time !== 'string' || !userBooking.start_time.trim() ||
-                                typeof userBooking.end_time !== 'string' || !userBooking.end_time.trim()) {
-                                console.warn('Skipping a user booking due to missing or invalid start/end time:', userBooking);
-                                continue; // Skip this iteration
-                            }
-
-                            // Construct full Date objects for user's other bookings using selectedDateString
-                            const userBookingStartDateTime = new Date(`${selectedDateString}T${userBooking.start_time}Z`); // Assume times are UTC
-                            const userBookingEndDateTime = new Date(`${selectedDateString}T${userBooking.end_time}Z`);   // Assume times are UTC
-
-                            // Validate date objects
-                            if (isNaN(userBookingStartDateTime.getTime()) || isNaN(userBookingEndDateTime.getTime())) {
-                                console.warn('Skipping a user booking due to invalid date construction from start/end time:', userBooking);
-                                continue;
-                            }
-
-                            if (checkOverlap(slotStartDateTime, slotEndDateTime, userBookingStartDateTime, userBookingEndDateTime)) {
-                                isAvailable = false;
-                                unavailabilityReason = " (Conflicts with your other booking)";
-                                break;
-                            }
-                        }
-                    }
-
-                    // Server-side will handle resource booking conflicts.
-
-                    const option = document.createElement('option');
-                    option.value = `${slot.start},${slot.end}`;
-                    option.textContent = `${slot.name}${isAvailable ? '' : unavailabilityReason}`;
-                    option.disabled = !isAvailable;
-                    if (isAvailable) {
-                        availableSlotsFound++;
-                    }
-                    availableSlotsSelect.appendChild(option);
-                }
-
-                if (availableSlotsFound === 0) {
-                    availableSlotsSelect.innerHTML = '<option value="">No available slots</option>';
-                }
-                availableSlotsSelect.disabled = false;
+                showSuccess(statusDiv, `Booking ${bookingId} title updated successfully.`);
+                if (updateModal) updateModal.hide();
+                // Refresh relevant section
+                // Determine if it was upcoming or past based on current state or re-fetch both
+                fetchUpcomingBookings();
+                fetchPastBookings();
 
             } catch (error) {
-                console.error('Error fetching slot availability:', error);
-                showModalStatus(`Error loading slots: ${error.message}`, 'danger'); // Use showModalStatus
-                clearAndDisableSlotsSelect("Error loading slots."); // Use helper
+                // Error is shown by apiCall in updateModalStatusDiv
+            } finally {
+                this.querySelector('button[type="submit"]').textContent = originalButtonText;
+                this.querySelector('button[type="submit"]').disabled = false;
             }
         });
     }
 
-    // Helper functions
-    function parseISODateTime(dateTimeStr) {
-        return new Date(dateTimeStr);
+    function handleFilterOrToggleChange() {
+        upcomingCurrentPage = 1;
+        pastCurrentPage = 1;
+        if (toggleUpcomingCheckbox && toggleUpcomingCheckbox.checked) {
+            fetchUpcomingBookings();
+        } else if(upcomingPaginationContainer) {
+            upcomingPaginationContainer.style.display = 'none';
+            if(upcomingBookingsContainer) upcomingBookingsContainer.innerHTML = '<p>Upcoming bookings hidden.</p>';
+        }
+        if (togglePastCheckbox && togglePastCheckbox.checked) {
+            fetchPastBookings();
+        } else if(pastPaginationContainer) {
+            pastPaginationContainer.style.display = 'none';
+            if(pastBookingsContainer) pastBookingsContainer.innerHTML = '<p>Past bookings hidden.</p>';
+        }
     }
 
-    function checkOverlap(startA, endA, startB, endB) {
-        // Ensure these are Date objects
-        const aStart = startA instanceof Date ? startA : new Date(startA);
-        const aEnd = endA instanceof Date ? endA : new Date(endA);
-        const bStart = startB instanceof Date ? startB : new Date(startB);
-        const bEnd = endB instanceof Date ? endB : new Date(endB);
-
-        // Check if one interval starts after the other ends, or vice-versa
-        // No overlap if (A ends before B starts) OR (A starts after B ends)
-        const noOverlap = (aEnd <= bStart) || (aStart >= bEnd);
-        return !noOverlap; // Overlap is true if it's not "no overlap"
+    if (applyFiltersBtn) {
+        applyFiltersBtn.addEventListener('click', handleFilterOrToggleChange);
     }
+    if (clearFiltersBtn) {
+        clearFiltersBtn.addEventListener('click', () => {
+            if(statusFilterSelect) statusFilterSelect.value = '';
+            if(resourceNameFilterInput) resourceNameFilterInput.value = '';
+            // Clear date filters if they were re-added
+            // if(dateFilterTypeSelect) dateFilterTypeSelect.value = 'all';
+            // if(datePickerContainer) datePickerContainer.style.display = 'none';
+            // if(datePickerInput) datePickerInput.value = '';
+            // if(flatpickrInstance) flatpickrInstance.clear();
+            handleFilterOrToggleChange();
+        });
+    }
+
+    if (toggleUpcomingCheckbox) {
+        toggleUpcomingCheckbox.addEventListener('change', handleFilterOrToggleChange);
+    }
+    if (togglePastCheckbox) {
+        togglePastCheckbox.addEventListener('change', handleFilterOrToggleChange);
+    }
+
+    // Initial Load
+    initializeMyBookingsPerPageSelect('upcoming_bk_pg_', upcomingPerPageSelect, (val) => upcomingItemsPerPage = val, (val) => upcomingCurrentPage = val, fetchUpcomingBookings, upcomingItemsPerPage);
+    initializeMyBookingsPerPageSelect('past_bk_pg_', pastPerPageSelect, (val) => pastItemsPerPage = val, (val) => pastCurrentPage = val, fetchPastBookings, pastItemsPerPage);
     
-    // Event Listeners for filters
-    function handleFilterChange() {
-        fetchAndDisplayBookings();
+    handleFilterOrToggleChange(); // Initial fetch based on default filter and toggle states
+});
+// This is where the functions for upcoming and past bookings will be,
+// after being modified for pagination.
+// For now, the old combined fetchAndDisplayBookings is removed.
+// New fetchUpcomingBookings and fetchPastBookings will be added.
+
+// Placeholder for the content of fetchUpcomingBookings
+async function fetchUpcomingBookings() {
+    if (!upcomingBookingsContainer) return;
+    if (toggleUpcomingCheckbox && !toggleUpcomingCheckbox.checked) {
+        upcomingBookingsContainer.innerHTML = '<p class="list-group-item">Upcoming bookings hidden.</p>';
+        if(upcomingPaginationContainer) upcomingPaginationContainer.style.display = 'none';
+        return;
     }
+    showLoading(upcomingBookingsContainer, 'Loading upcoming bookings...');
 
-    if (statusFilterSelect) {
-        statusFilterSelect.addEventListener('change', handleFilterChange);
-    }
+    let url = `/api/bookings/upcoming?page=${upcomingCurrentPage}&per_page=${upcomingItemsPerPage}`;
+    const statusVal = statusFilterSelect ? statusFilterSelect.value : '';
+    const resourceNameVal = resourceNameFilterInput ? resourceNameFilterInput.value.trim() : '';
+    if (statusVal) url += `&status_filter=${encodeURIComponent(statusVal)}`;
+    if (resourceNameVal) url += `&resource_name_filter=${encodeURIComponent(resourceNameVal)}`;
 
-    if (dateFilterTypeSelect) {
-        dateFilterTypeSelect.addEventListener('change', function() {
-            if (this.value === 'specific') {
-                if (datePickerContainer) datePickerContainer.style.display = 'block';
-                if (flatpickrInstance) flatpickrInstance.open();
-            } else {
-                if (datePickerContainer) datePickerContainer.style.display = 'none';
-                if (datePickerInput) datePickerInput.value = '';
-                if (flatpickrInstance) flatpickrInstance.clear();
-                handleFilterChange();
-            }
-        });
-    }
-
-    // Initialize Flatpickr for the date picker
-    if (datePickerInput && typeof flatpickr === "function") {
-        flatpickrInstance = flatpickr(datePickerInput, {
-            dateFormat: "Y-m-d",
-            onChange: function(selectedDates, dateStr, instance) {
-                if (dateFilterTypeSelect && dateFilterTypeSelect.value === 'specific') {
-                    fetchAndDisplayBookings();
-                }
-            }
-        });
-    } else {
-        console.warn("Flatpickr not available or datePickerInput not found. Date picker will not be initialized.");
-    }
-
-    // Set default status filter before the initial fetch
-    if (statusFilterSelect) {
-        statusFilterSelect.value = 'approved';
-    }
-
-    // Initial fetch of bookings - now uses default filter values
-    fetchAndDisplayBookings();
-
-    // Visibility toggles (existing logic from previous step)
-    function updateSectionVisibility() {
-        const upcomingContainer = document.getElementById('upcoming-bookings-container');
-        const pastContainer = document.getElementById('past-bookings-container');
-
-        if (toggleUpcomingCheckbox && upcomingContainer) {
-            upcomingContainer.style.display = toggleUpcomingCheckbox.checked ? '' : 'none';
+    try {
+        const data = await apiCall(url, {}, statusDiv);
+        if (data.success === false) {
+            showError(upcomingBookingsContainer, data.message || 'Failed to fetch upcoming bookings.');
+            if (upcomingPaginationContainer) upcomingPaginationContainer.style.display = 'none';
+            return;
         }
-        if (togglePastCheckbox && pastContainer) {
-            pastContainer.style.display = togglePastCheckbox.checked ? '' : 'none';
+
+        upcomingTotalItems = data.pagination.total_items;
+        upcomingTotalPages = data.pagination.total_pages;
+        upcomingCurrentPage = data.pagination.current_page;
+
+        renderMyBookingsPaginationControls('upcoming_bk_pg_', upcomingPaginationUl, upcomingPaginationContainer, upcomingTotalResultsDisplay, upcomingCurrentPage, upcomingTotalPages, upcomingTotalItems, upcomingItemsPerPage, fetchUpcomingBookings, (val) => upcomingCurrentPage = val);
+
+        upcomingBookingsContainer.innerHTML = '';
+        if (data.bookings && data.bookings.length > 0) {
+            data.bookings.forEach(booking => {
+                const bookingCard = createBookingCardElement(booking, data.check_in_out_enabled);
+                upcomingBookingsContainer.appendChild(bookingCard);
+            });
+        } else {
+            upcomingBookingsContainer.innerHTML = '<p class="list-group-item">No upcoming bookings found.</p>';
+        }
+    } catch (error) {
+        showError(upcomingBookingsContainer, `Error: ${error.message}`);
+        if (upcomingPaginationContainer) upcomingPaginationContainer.style.display = 'none';
+    }
+}
+
+// Placeholder for the content of fetchPastBookings
+async function fetchPastBookings() {
+    if (!pastBookingsContainer) return;
+    if (togglePastCheckbox && !togglePastCheckbox.checked) {
+        pastBookingsContainer.innerHTML = '<p class="list-group-item">Past bookings hidden.</p>';
+        if(pastPaginationContainer) pastPaginationContainer.style.display = 'none';
+        return;
+    }
+    showLoading(pastBookingsContainer, 'Loading past bookings...');
+
+    let url = `/api/bookings/past?page=${pastCurrentPage}&per_page=${pastItemsPerPage}`;
+    const statusVal = statusFilterSelect ? statusFilterSelect.value : '';
+    const resourceNameVal = resourceNameFilterInput ? resourceNameFilterInput.value.trim() : '';
+    if (statusVal) url += `&status_filter=${encodeURIComponent(statusVal)}`;
+    if (resourceNameVal) url += `&resource_name_filter=${encodeURIComponent(resourceNameVal)}`;
+
+    try {
+        const data = await apiCall(url, {}, statusDiv);
+         if (data.success === false) {
+            showError(pastBookingsContainer, data.message || 'Failed to fetch past bookings.');
+            if (pastPaginationContainer) pastPaginationContainer.style.display = 'none';
+            return;
+        }
+
+        pastTotalItems = data.pagination.total_items;
+        pastTotalPages = data.pagination.total_pages;
+        pastCurrentPage = data.pagination.current_page;
+
+        renderMyBookingsPaginationControls('past_bk_pg_', pastPaginationUl, pastPaginationContainer, pastTotalResultsDisplay, pastCurrentPage, pastTotalPages, pastTotalItems, pastItemsPerPage, fetchPastBookings, (val) => pastCurrentPage = val);
+
+        pastBookingsContainer.innerHTML = '';
+        if (data.bookings && data.bookings.length > 0) {
+            data.bookings.forEach(booking => {
+                const bookingCard = createBookingCardElement(booking, data.check_in_out_enabled);
+                pastBookingsContainer.appendChild(bookingCard);
+            });
+        } else {
+            pastBookingsContainer.innerHTML = '<p class="list-group-item">No past bookings found.</p>';
+        }
+    } catch (error) {
+        showError(pastBookingsContainer, `Error: ${error.message}`);
+        if (pastPaginationContainer) pastPaginationContainer.style.display = 'none';
+    }
+}
+
+
+// Event listener for dynamically created buttons (needs to be on a static parent)
+document.addEventListener('click', async (event) => {
+    const target = event.target;
+    const bookingCard = target.closest('.booking-card');
+
+    if (target.classList.contains('edit-title-btn')) {
+        event.stopPropagation(); // Prevent card click if any
+        if (!bookingCard) return;
+        const bookingId = bookingCard.dataset.bookingId;
+        const titleValueElement = bookingCard.querySelector('.booking-title-text'); // Adjusted selector
+        const currentTitle = titleValueElement ? titleValueElement.textContent : '';
+
+        const resourceName = bookingCard.querySelector('.booking-resource').textContent;
+
+        if (document.getElementById('update-booking-id-input')) document.getElementById('update-booking-id-input').value = bookingId;
+        if (document.getElementById('new-booking-title-input')) document.getElementById('new-booking-title-input').value = currentTitle;
+        if (updateBookingModalLabel) updateBookingModalLabel.textContent = `Update Booking Title for: ${resourceName}`;
+
+        hideStatusMessage(updateModalStatusDiv);
+        if (updateModal) updateModal.show();
+        return;
+    }
+
+    if (target.classList.contains('cancel-booking-btn')) {
+        if (!bookingCard) return;
+        const bookingId = bookingCard.dataset.bookingId;
+        if (confirm(`Are you sure you want to cancel booking ID ${bookingId}?`)) {
+            showLoading(statusDiv, `Cancelling booking ${bookingId}...`);
+            try {
+                await apiCall(`/api/bookings/${bookingId}`, { method: 'DELETE' });
+                showSuccess(statusDiv, `Booking ${bookingId} cancelled successfully.`);
+                handleFilterOrToggleChange(); // Re-fetch both to update counts and lists
+            } catch (error) {
+                showError(statusDiv, error.message || `Failed to cancel booking ${bookingId}.`);
+            }
         }
     }
 
-    if (toggleUpcomingCheckbox && togglePastCheckbox) {
-        updateSectionVisibility(); // Initial call
-
-        toggleUpcomingCheckbox.addEventListener('change', updateSectionVisibility);
-        togglePastCheckbox.addEventListener('change', updateSectionVisibility);
-    } else {
-        console.warn("Visibility toggle checkboxes not found. Section visibility control will not be active.");
+    if (target.classList.contains('check-in-btn')) {
+        if (!bookingCard) return;
+        const bookingId = bookingCard.dataset.bookingId;
+        // PIN input is not part of the card in this version. Assume PIN-less or handled by backend if required.
+        showLoading(statusDiv, 'Checking in...');
+        try {
+            await apiCall(`/api/bookings/${bookingId}/check_in`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}) // Empty payload if no PIN
+            });
+            showSuccess(statusDiv, 'Checked in successfully.');
+            fetchUpcomingBookings();
+        } catch (error) {
+            showError(statusDiv, error.message || 'Check in failed.');
+        }
     }
+
+    if (target.classList.contains('check-out-btn')) {
+        if (!bookingCard) return;
+        const bookingId = bookingCard.dataset.bookingId;
+        showLoading(statusDiv, 'Checking out...');
+        try {
+            await apiCall(`/api/bookings/${bookingId}/check_out`, { method: 'POST' });
+            showSuccess(statusDiv, 'Checked out successfully.');
+            fetchUpcomingBookings();
+        } catch (error) {
+            showError(statusDiv, error.message || 'Check out failed.');
+        }
+    }
+});
+
+// Handle modal form submission for updating booking title (only title)
+if (document.getElementById('update-booking-title-form')) {
+    document.getElementById('update-booking-title-form').addEventListener('submit', async function(event) {
+        event.preventDefault();
+        const bookingId = document.getElementById('update-booking-id-input').value;
+        const newTitle = document.getElementById('new-booking-title-input').value.trim();
+
+        if (!newTitle) {
+            showModalStatus('Title cannot be empty.', 'danger');
+            return;
+        }
+        const submitButton = this.querySelector('button[type="submit"]');
+        const originalButtonText = submitButton.textContent;
+        submitButton.textContent = 'Saving...';
+        submitButton.disabled = true;
+
+        try {
+            await apiCall(`/api/bookings/${bookingId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: newTitle })
+            }, updateModalStatusDiv);
+
+            showSuccess(statusDiv, `Booking ${bookingId} title updated successfully.`);
+            if (updateModal) updateModal.hide();
+            handleFilterOrToggleChange(); // Re-fetch both lists
+        } catch (error) {
+            // Error is shown by apiCall in updateModalStatusDiv
+        } finally {
+            submitButton.textContent = originalButtonText;
+            submitButton.disabled = false;
+        }
+    });
+}
+
+
+// Event Listeners for filters and toggles
+function handleFilterOrToggleChange() {
+    upcomingCurrentPage = 1;
+    pastCurrentPage = 1;
+    // Fetch upcoming if visible
+    if (toggleUpcomingCheckbox && toggleUpcomingCheckbox.checked) {
+        fetchUpcomingBookings();
+    } else if (upcomingPaginationContainer) { // If not checked, hide its pagination and clear content
+        upcomingPaginationContainer.style.display = 'none';
+        if(upcomingBookingsContainer) upcomingBookingsContainer.innerHTML = '<p class="list-group-item">Upcoming bookings hidden.</p>';
+    }
+    // Fetch past if visible
+    if (togglePastCheckbox && togglePastCheckbox.checked) {
+        fetchPastBookings();
+    } else if (pastPaginationContainer) { // If not checked, hide its pagination and clear content
+        pastPaginationContainer.style.display = 'none';
+        if(pastBookingsContainer) pastBookingsContainer.innerHTML = '<p class="list-group-item">Past bookings hidden.</p>';
+    }
+}
+
+if (applyFiltersBtn) {
+    applyFiltersBtn.addEventListener('click', handleFilterOrToggleChange);
+}
+if (clearFiltersBtn) {
+    clearFiltersBtn.addEventListener('click', () => {
+        if(statusFilterSelect) statusFilterSelect.value = '';
+        if(resourceNameFilterInput) resourceNameFilterInput.value = '';
+        // Removed date filter logic for now
+        handleFilterOrToggleChange();
+    });
+}
+
+if (toggleUpcomingCheckbox) {
+    toggleUpcomingCheckbox.addEventListener('change', handleFilterOrToggleChange);
+}
+if (togglePastCheckbox) {
+    togglePastCheckbox.addEventListener('change', handleFilterOrToggleChange);
+}
+
+// Initial Load
+initializeMyBookingsPerPageSelect('upcoming_bk_pg_', upcomingPerPageSelect, (val) => upcomingItemsPerPage = val, (val) => upcomingCurrentPage = val, fetchUpcomingBookings, upcomingItemsPerPage);
+initializeMyBookingsPerPageSelect('past_bk_pg_', pastPerPageSelect, (val) => pastItemsPerPage = val, (val) => pastCurrentPage = val, fetchPastBookings, pastItemsPerPage);
+
+// Initial fetch based on default filter and toggle states
+handleFilterOrToggleChange();
 });

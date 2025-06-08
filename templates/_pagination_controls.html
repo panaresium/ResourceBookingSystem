@@ -1,0 +1,123 @@
+{% macro render_pagination_controls(pagination_data, endpoint_name, params={}) %}
+{#
+    pagination_data: An object or dict containing:
+        - page: current page number
+        - per_page: items per page
+        - total_pages: total number of pages
+        - total_items: total number of items (optional, for display)
+        - per_page_options: list of integers for "results per page" dropdown (e.g., [10, 25, 50, 100])
+
+    endpoint_name: The Flask endpoint name for generating page URLs (e.g., 'admin_ui.serve_admin_bookings_page').
+
+    params: A dictionary of existing query parameters to preserve when generating pagination links.
+            Example: {'status_filter': 'approved'}
+#}
+<div class="pagination-controls-container d-flex justify-content-between align-items-center my-3">
+    <div class="results-per-page-container">
+        <form method="GET" action="{{ url_for(endpoint_name, **params) }}" class="d-inline-block">
+            {# Preserve other query parameters not related to pagination #}
+            {% for key, value in params.items() %}
+                {% if key not in ['page', 'per_page'] %}
+                <input type="hidden" name="{{ key }}" value="{{ value }}">
+                {% endif %}
+            {% endfor %}
+            <input type="hidden" name="page" value="1"> {# Reset to page 1 when changing per_page #}
+            <label for="per_page_select_{{ endpoint_name|replace('.', '_') }}" class="me-2">{{ _('Results') }}</label>
+            <select name="per_page" id="per_page_select_{{ endpoint_name|replace('.', '_') }}" class="form-select form-select-sm d-inline-block" style="width: auto;" onchange="this.form.submit()">
+                {% for option in pagination_data.per_page_options %}
+                <option value="{{ option }}" {% if option == pagination_data.per_page %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+            <span class="ms-2">{{ _('per page') }}</span>
+        </form>
+        {% if pagination_data.total_items is defined %}
+            <span class="ms-3 text-muted">{{ _('Total: %(total_items)s results', total_items=pagination_data.total_items) }}</span>
+        {% endif %}
+    </div>
+
+    <nav aria-label="Page navigation">
+        <ul class="pagination pagination-sm mb-0">
+            {# Previous Page Link #}
+            <li class="page-item {% if pagination_data.page <= 1 %}disabled{% endif %}">
+                <a class="page-link" href="{{ url_for(endpoint_name, page=pagination_data.page - 1, per_page=pagination_data.per_page, **params) }}" aria-label="{{ _('Previous') }}">
+                    &lt; {{ _('Previous') }}
+                </a>
+            </li>
+
+            {# Page Number Links #}
+            {# Logic for displaying a limited set of page numbers (e.g., first, last, current, and some neighbors) #}
+            {% set show_pages = 5 %} {# Max number of page links to show around current page #}
+            {% set start_page = [1, pagination_data.page - (show_pages // 2)] | max %}
+            {% set end_page = [pagination_data.total_pages, start_page + show_pages - 1] | min %}
+            {% if end_page - start_page + 1 < show_pages %}
+                {% set start_page = [1, end_page - show_pages + 1] | max %}
+            {% endif %}
+
+            {% if start_page > 1 %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for(endpoint_name, page=1, per_page=pagination_data.per_page, **params) }}">1</a>
+                </li>
+                {% if start_page > 2 %}
+                    <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                {% endif %}
+            {% endif %}
+
+            {% for p in range(start_page, end_page + 1) %}
+            <li class="page-item {% if p == pagination_data.page %}active{% endif %}">
+                <a class="page-link" href="{{ url_for(endpoint_name, page=p, per_page=pagination_data.per_page, **params) }}">{{ p }}</a>
+            </li>
+            {% endfor %}
+
+            {% if end_page < pagination_data.total_pages %}
+                {% if end_page < pagination_data.total_pages - 1 %}
+                    <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                {% endif %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for(endpoint_name, page=pagination_data.total_pages, per_page=pagination_data.per_page, **params) }}">{{ pagination_data.total_pages }}</a>
+                </li>
+            {% endif %}
+
+            {# Next Page Link #}
+            <li class="page-item {% if pagination_data.page >= pagination_data.total_pages %}disabled{% endif %}">
+                <a class="page-link" href="{{ url_for(endpoint_name, page=pagination_data.page + 1, per_page=pagination_data.per_page, **params) }}" aria-label="{{ _('Next') }}">
+                    {{ _('Next') }} &gt;
+                </a>
+            </li>
+        </ul>
+    </nav>
+</div>
+{% endmacro %}
+
+{# Macro for JavaScript-driven pagination #}
+{% macro render_js_pagination_controls(unique_id_prefix) %}
+{#
+    unique_id_prefix: A string to prefix IDs to ensure uniqueness if multiple pagination
+                      controls are on the same page (e.g., 'upcoming_bookings_').
+#}
+<div id="{{ unique_id_prefix }}pagination_controls_container" class="pagination-controls-container d-flex justify-content-between align-items-center my-3" style="display: none;"> {# Initially hidden #}
+    <div class="results-per-page-container">
+        <label for="{{ unique_id_prefix }}per_page_select" class="me-2">{{ _('Results') }}</label>
+        <select id="{{ unique_id_prefix }}per_page_select" class="form-select form-select-sm d-inline-block" style="width: auto;">
+            {# Options will be populated by JavaScript, e.g., [10, 25, 50, 100] #}
+        </select>
+        <span class="ms-2">{{ _('per page') }}</span>
+        <span id="{{ unique_id_prefix }}total_results_display" class="ms-3 text-muted"></span>
+    </div>
+
+    <nav aria-label="Page navigation">
+        <ul id="{{ unique_id_prefix }}pagination_ul" class="pagination pagination-sm mb-0">
+            {# Populated by JavaScript #}
+            {# Example structure:
+            <li class="page-item disabled">
+                <a class="page-link previous-page" href="#" aria-label="{{ _('Previous') }}">&lt; {{ _('Previous') }}</a>
+            </li>
+            <li class="page-item active"><a class="page-link" href="#">1</a></li>
+            <li class="page-item"><a class="page-link" href="#">2</a></li>
+            <li class="page-item">
+                <a class="page-link next-page" href="#" aria-label="{{ _('Next') }}">{{ _('Next') }} &gt;</a>
+            </li>
+            #}
+        </ul>
+    </nav>
+</div>
+{% endmacro %}

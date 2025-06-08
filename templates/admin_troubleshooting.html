@@ -36,14 +36,30 @@
 
                         <div id="db-results-area" class="mt-3">
                             <h5>{{ _('Records') }}</h5>
-                            <div id="db-records-output" class="table-responsive" style="max-height: 500px; overflow-y: auto;">
-                                <p>{{ _('Select a table and apply filters to view records.') }}</p>
-                                <!-- Table will be dynamically generated here -->
+                            {# SCROLLABLE CONTAINER ADDED HERE #}
+                            <div class="scrollable-table-container">
+                                <div id="db-records-output" style="max-height: none; overflow-y: visible;"> {# Removed inline style conflicting with class #}
+                                    <p>{{ _('Select a table and apply filters to view records.') }}</p>
+                                    <!-- Table will be dynamically generated here -->
+                                </div>
                             </div>
                         </div>
 
-                        <div id="db-pagination-controls" class="mt-3" style="display: none;">
-                            <!-- Pagination buttons will be dynamically added here -->
+                        {# PAGINATION CONTROLS STRUCTURE MODIFIED HERE #}
+                        <div id="db-pagination-controls" class="pagination-controls-container d-flex justify-content-between align-items-center my-3" style="display: none;">
+                            <div class="results-per-page-container">
+                                <label for="db-per-page-select" class="me-2">{{ _('Results') }}</label>
+                                <select id="db-per-page-select" class="form-select form-select-sm d-inline-block" style="width: auto;">
+                                    <!-- Options will be populated by JavaScript -->
+                                </select>
+                                <span class="ms-2">{{ _('per page') }}</span>
+                                <span id="db-total-results-display" class="ms-3 text-muted"></span>
+                            </div>
+                            <nav aria-label="Table navigation">
+                                <ul id="db-pagination-ul" class="pagination pagination-sm mb-0">
+                                    <!-- Page links will be dynamically added here by renderPagination JS function -->
+                                </ul>
+                            </nav>
                         </div>
 
                         <div id="db-view-status" class="mt-2"></div>
@@ -86,13 +102,18 @@ document.addEventListener('DOMContentLoaded', function () {
     const dbRecordsOutput = document.getElementById('db-records-output');
     const dbPaginationControls = document.getElementById('db-pagination-controls');
     const dbViewStatusEl = document.getElementById('db-view-status'); // Renamed from viewDbRecordsStatusEl
+    const dbPerPageSelect = document.getElementById('db-per-page-select');
+    const dbTotalResultsDisplay = document.getElementById('db-total-results-display');
+    const dbPaginationUl = document.getElementById('db-pagination-ul'); // Added reference
+
+    const dbItemsPerPageOptions = [10, 25, 50, 100, 200];
 
     let dbViewState = {
         selectedTable: null,
         currentPage: 1,
         currentFilters: [],
         columns: [],
-        perPage: 30, // Default per page
+        perPage: dbItemsPerPageOptions[0], // Use first option as default
         sortBy: null,
         sortOrder: 'asc'
     };
@@ -300,58 +321,79 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function renderPagination(paginationData) {
-        dbPaginationControls.innerHTML = '';
+        if (!dbPaginationUl) return;
+        dbPaginationUl.innerHTML = ''; // Clear only the page links list
+
         if (!paginationData || paginationData.total_pages <= 0) {
             dbPaginationControls.style.display = 'none';
+            if(dbTotalResultsDisplay) dbTotalResultsDisplay.textContent = '';
             return;
         }
-        dbPaginationControls.style.display = 'block';
+        dbPaginationControls.style.display = 'flex'; // Use flex for the main container
 
-        let html = `<nav aria-label="Table navigation"><ul class="pagination pagination-sm justify-content-center">`;
+        if(dbTotalResultsDisplay) {
+            dbTotalResultsDisplay.textContent = `Total: ${paginationData.total_records} records`;
+        }
+
+        let pageLinksHtml = '';
 
         // Previous button
-        html += `<li class="page-item ${paginationData.page === 1 ? 'disabled' : ''}">
-                    <a class="page-link" href="#" data-page="${paginationData.page - 1}">${("{{ _('Previous') }}")}</a>
-                 </li>`;
+        pageLinksHtml += `<li class="page-item ${paginationData.page === 1 ? 'disabled' : ''}">
+                            <a class="page-link" href="#" data-page="${paginationData.page - 1}">${("{{ _('Previous') }}")}</a>
+                          </li>`;
 
-        // Page numbers (simplified: first, current, last if far apart)
-        // This can be expanded to show more page numbers like typical pagination.
-        if (paginationData.page > 2) {
-             html += `<li class="page-item"><a class="page-link" href="#" data-page="1">1</a></li>`;
-             if (paginationData.page > 3) html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-        }
-        if (paginationData.page > 1) {
-            html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.page - 1}">${paginationData.page - 1}</a></li>`;
-        }
-        html += `<li class="page-item active"><span class="page-link">${paginationData.page}</span></li>`;
-        if (paginationData.page < paginationData.total_pages) {
-             html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.page + 1}">${paginationData.page + 1}</a></li>`;
-        }
-         if (paginationData.page < paginationData.total_pages - 2) {
-            if (paginationData.page < paginationData.total_pages - 3) html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-            html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.total_pages}">${paginationData.total_pages}</a></li>`;
-        } else if (paginationData.page === paginationData.total_pages - 2 && paginationData.total_pages > 2) {
-             html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.total_pages}">${paginationData.total_pages}</a></li>`;
+        let show_pages_count = 5;
+        let start_p = Math.max(1, paginationData.page - Math.floor(show_pages_count / 2));
+        let end_p = Math.min(paginationData.total_pages, start_p + show_pages_count - 1);
+        if (end_p - start_p + 1 < show_pages_count) {
+            start_p = Math.max(1, end_p - show_pages_count + 1);
         }
 
+        if (start_p > 1) {
+             pageLinksHtml += `<li class="page-item"><a class="page-link" href="#" data-page="1">1</a></li>`;
+             if (start_p > 2) pageLinksHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+        for (let i = start_p; i <= end_p; i++) {
+            pageLinksHtml += `<li class="page-item ${i === paginationData.page ? 'active' : ''}"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+        }
+        if (end_p < paginationData.total_pages) {
+            if (end_p < paginationData.total_pages - 1) pageLinksHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            pageLinksHtml += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.total_pages}">${paginationData.total_pages}</a></li>`;
+        }
 
         // Next button
-        html += `<li class="page-item ${paginationData.page === paginationData.total_pages ? 'disabled' : ''}">
-                    <a class="page-link" href="#" data-page="${paginationData.page + 1}">${("{{ _('Next') }}")}</a>
-                 </li>`;
-        html += `</ul></nav>`;
-        html += `<p class="text-center text-muted small">${("{{ _('Page') }}")} ${paginationData.page} ${("{{ _('of') }}")} ${paginationData.total_pages}. ${("{{ _('Total records:') }}")} ${paginationData.total_records}</p>`;
+        pageLinksHtml += `<li class="page-item ${paginationData.page === paginationData.total_pages ? 'disabled' : ''}">
+                            <a class="page-link" href="#" data-page="${paginationData.page + 1}">${("{{ _('Next') }}")}</a>
+                          </li>`;
 
-        dbPaginationControls.innerHTML = html;
+        dbPaginationUl.innerHTML = pageLinksHtml;
 
-        dbPaginationControls.querySelectorAll('.page-link').forEach(link => {
+        dbPaginationUl.querySelectorAll('.page-link').forEach(link => {
             link.addEventListener('click', function(e) {
                 e.preventDefault();
+                if (this.closest('li').classList.contains('disabled')) return; // Prevent action on disabled
                 const pageNum = parseInt(this.dataset.page);
                 if (pageNum && pageNum !== dbViewState.currentPage) {
                     handlePaginationClick(pageNum);
                 }
             });
+        });
+    }
+
+    function initializeDbPerPageSelect() {
+        if (!dbPerPageSelect) return;
+        dbPerPageSelect.innerHTML = ''; // Clear existing options
+        dbItemsPerPageOptions.forEach(optionValue => {
+            const option = new Option(optionValue, optionValue);
+            if (optionValue === dbViewState.perPage) {
+                option.selected = true;
+            }
+            dbPerPageSelect.add(option);
+        });
+        dbPerPageSelect.addEventListener('change', function() {
+            dbViewState.perPage = parseInt(this.value);
+            dbViewState.currentPage = 1; // Reset to first page
+            fetchAndDisplayTableData();
         });
     }
 
@@ -477,6 +519,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Load initial table names
     loadTableNames();
+    initializeDbPerPageSelect(); // Initialize the per-page select dropdown
 
 
     // --- End of New Database Browser UI Logic ---

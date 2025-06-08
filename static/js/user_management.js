@@ -69,6 +69,18 @@ document.addEventListener('DOMContentLoaded', function() {
     let localUsersCache = []; // To store fetched users for editing
     let allAvailableRolesCache = null; // To cache all available roles
 
+    // --- Pagination State & Elements (User Management) ---
+    let userCurrentPage = 1;
+    const userItemsPerPageOptions = [10, 25, 50, 100];
+    let userItemsPerPage = userItemsPerPageOptions[0];
+    let userTotalItems = 0;
+    let userTotalPages = 0;
+
+    const userPaginationContainer = document.getElementById('user_pg_pagination_controls_container');
+    const userPerPageSelect = document.getElementById('user_pg_per_page_select');
+    const userPaginationUl = document.getElementById('user_pg_pagination_ul');
+    const userTotalResultsDisplay = document.getElementById('user_pg_total_results_display');
+
     // --- Helper Function Availability (Assume from script.js) ---
     // apiCall, showLoading, showSuccess, showError, hideMessage
 
@@ -84,30 +96,72 @@ document.addEventListener('DOMContentLoaded', function() {
 
     }
 
-    async function fetchAndDisplayUsers(filters = {}) {
+    function initializeUserPerPageSelect() {
+        if (!userPerPageSelect) return;
+        userPerPageSelect.innerHTML = ''; // Clear existing options
+        userItemsPerPageOptions.forEach(optionValue => {
+            const option = new Option(optionValue, optionValue);
+            if (optionValue === userItemsPerPage) {
+                option.selected = true;
+            }
+            userPerPageSelect.add(option);
+        });
+        // Remove existing listener before adding, to prevent duplicates if called multiple times
+        userPerPageSelect.removeEventListener('change', handleUserPerPageChange);
+        userPerPageSelect.addEventListener('change', handleUserPerPageChange);
+    }
+
+    function handleUserPerPageChange() {
+        userItemsPerPage = parseInt(this.value);
+        userCurrentPage = 1;
+        fetchAndDisplayUsers();
+    }
+
+    async function fetchAndDisplayUsers() {
         if (!usersTableBody) return;
         showLoading(userManagementStatusDiv, 'Fetching users...');
-        try {
-            let queryParams = [];
-            const activeFilters = Object.keys(filters).length > 0 ? filters : currentFilters;
-            if (activeFilters.username) queryParams.push(`username_filter=${encodeURIComponent(activeFilters.username)}`);
-            if (activeFilters.isAdmin !== undefined && activeFilters.isAdmin !== '') queryParams.push(`is_admin=${activeFilters.isAdmin}`);
-            const queryString = queryParams.length ? `?${queryParams.join('&')}` : '';
 
-            const users = await apiCall(`/api/admin/users${queryString}`); // Assumes apiCall is global
-            localUsersCache = users; // Store for local use (e.g., populating edit form)
+        let url = `/api/admin/users?page=${userCurrentPage}&per_page=${userItemsPerPage}`;
+        if (currentFilters.username) url += `&username_filter=${encodeURIComponent(currentFilters.username)}`;
+        // Ensure userFilterAdminSelect.value is correctly handled for 'Any' (empty string) vs 'true'/'false'
+        if (currentFilters.isAdmin !== undefined && currentFilters.isAdmin !== '') {
+             url += `&is_admin=${encodeURIComponent(currentFilters.isAdmin)}`;
+        }
+        // Add other filters like role if implemented
+        // if (currentFilters.role) url += `&role_id=${encodeURIComponent(currentFilters.role)}`;
+
+
+        try {
+            const data = await apiCall(url); // API should return {users: [], pagination: {}}
             
+            if (data.success === false) { // Handle explicit API failure indication
+                showError(userManagementStatusDiv, data.message || 'Failed to fetch users.');
+                if(userPaginationContainer) userPaginationContainer.style.display = 'none';
+                usersTableBody.innerHTML = '<tr><td colspan="8">Error loading users.</td></tr>'; // Updated colspan
+                return;
+            }
+
+            localUsersCache = data.users || [];
+            const pagination = data.pagination || {};
+
+            userCurrentPage = pagination.current_page || 1;
+            userItemsPerPage = pagination.per_page || userItemsPerPageOptions[0];
+            userTotalItems = pagination.total_items || 0;
+            userTotalPages = pagination.total_pages || 0;
+
+            initializeUserPerPageSelect(); // Update per page select with current value
+            renderUserPaginationControls(); // Render pagination UI
+
             usersTableBody.innerHTML = ''; // Clear existing rows
-            if (users && users.length > 0) {
-                users.forEach(user => {
+            if (localUsersCache.length > 0) {
+                localUsersCache.forEach(user => {
                     const row = usersTableBody.insertRow();
-                    const selectCell = row.insertCell();
-                    selectCell.innerHTML = `<input type="checkbox" class="select-user-checkbox" data-user-id="${user.id}">`;
+                    row.insertCell().innerHTML = `<input type="checkbox" class="select-user-checkbox" data-user-id="${user.id}">`;
                     row.insertCell().textContent = user.id;
                     row.insertCell().textContent = user.username;
                     row.insertCell().textContent = user.email;
                     row.insertCell().textContent = user.is_admin ? 'Yes' : 'No';
-                    row.insertCell().textContent = user.roles.map(role => role.name).join(', ') || 'N/A'; // Display roles
+                    row.insertCell().textContent = user.roles && user.roles.length > 0 ? user.roles.map(role => role.name).join(', ') : 'N/A';
                     row.insertCell().textContent = user.google_id ? 'Yes' : 'No';
 
                     const actionsCell = row.insertCell();
@@ -121,29 +175,155 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 hideMessage(userManagementStatusDiv);
             } else {
-                usersTableBody.innerHTML = '<tr><td colspan="7">No users found.</td></tr>';
-                showSuccess(userManagementStatusDiv, 'No users to display.');
+                usersTableBody.innerHTML = '<tr><td colspan="8">No users found.</td></tr>'; // Updated colspan
+                 if (userTotalItems > 0) { // No users on current page, but some exist
+                     showSuccess(userManagementStatusDiv, 'No users on this page. Try another page or adjust filters.');
+                } else { // No users at all matching filters
+                     showSuccess(userManagementStatusDiv, 'No users to display with current filters.');
+                }
             }
         } catch (error) {
             showError(userManagementStatusDiv, `Error fetching users: ${error.message}`);
-            localUsersCache = []; // Clear cache on error
+            localUsersCache = [];
+            if(userPaginationContainer) userPaginationContainer.style.display = 'none';
+            usersTableBody.innerHTML = '<tr><td colspan="8">Error loading users.</td></tr>'; // Updated colspan
         }
     }
+
+    function renderUserPaginationControls() {
+        if (!userPaginationUl || !userPaginationContainer || !userTotalResultsDisplay) {
+            console.warn('User pagination elements not found.');
+            return;
+        }
+        userPaginationUl.innerHTML = '';
+
+        if (userTotalItems === 0 && Object.keys(currentFilters).length === 0) { // Only hide if no items and no filters
+            userPaginationContainer.style.display = 'none';
+            userTotalResultsDisplay.textContent = 'No users in the system.';
+            return;
+        }
+
+        userPaginationContainer.style.display = 'flex';
+        userTotalResultsDisplay.textContent = `Total: ${userTotalItems} results`;
+
+        if (userTotalPages <= 1 && userTotalItems <= userItemsPerPage) {
+            userPaginationUl.style.display = 'none'; // Hide page numbers if only one page or less
+            return;
+        }
+        userPaginationUl.style.display = 'flex';
+
+
+        // Previous button
+        const prevLi = document.createElement('li');
+        prevLi.className = `page-item ${userCurrentPage <= 1 ? 'disabled' : ''}`;
+        const prevA = document.createElement('a');
+        prevA.className = 'page-link';
+        prevA.href = '#';
+        prevA.innerHTML = '&lt; Previous';
+        prevA.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (userCurrentPage > 1) {
+                userCurrentPage--;
+                fetchAndDisplayUsers();
+            }
+        });
+        prevLi.appendChild(prevA);
+        userPaginationUl.appendChild(prevLi);
+
+        const showPages = 5;
+        let startPage = Math.max(1, userCurrentPage - Math.floor(showPages / 2));
+        let endPage = Math.min(userTotalPages, startPage + showPages - 1);
+        if (endPage - startPage + 1 < showPages) {
+            startPage = Math.max(1, endPage - showPages + 1);
+        }
+
+        if (startPage > 1) {
+            const firstLi = document.createElement('li');
+            firstLi.className = 'page-item';
+            const firstA = document.createElement('a');
+            firstA.className = 'page-link';
+            firstA.href = '#';
+            firstA.textContent = '1';
+            firstA.addEventListener('click', (e) => { e.preventDefault(); userCurrentPage = 1; fetchAndDisplayUsers(); });
+            firstLi.appendChild(firstA);
+            userPaginationUl.appendChild(firstLi);
+            if (startPage > 2) {
+                const ellipsisLi = document.createElement('li');
+                ellipsisLi.className = 'page-item disabled';
+                ellipsisLi.innerHTML = `<span class="page-link">&hellip;</span>`;
+                userPaginationUl.appendChild(ellipsisLi);
+            }
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            const pageLi = document.createElement('li');
+            pageLi.className = `page-item ${i === userCurrentPage ? 'active' : ''}`;
+            const pageA = document.createElement('a');
+            pageA.className = 'page-link';
+            pageA.href = '#';
+            pageA.textContent = i;
+            pageA.addEventListener('click', ((pageNum) => (e) => {
+                e.preventDefault();
+                userCurrentPage = pageNum;
+                fetchAndDisplayUsers();
+            })(i));
+            pageLi.appendChild(pageA);
+            userPaginationUl.appendChild(pageLi);
+        }
+
+        if (endPage < userTotalPages) {
+            if (endPage < userTotalPages - 1) {
+                const ellipsisLi = document.createElement('li');
+                ellipsisLi.className = 'page-item disabled';
+                ellipsisLi.innerHTML = `<span class="page-link">&hellip;</span>`;
+                userPaginationUl.appendChild(ellipsisLi);
+            }
+            const lastLi = document.createElement('li');
+            lastLi.className = 'page-item';
+            const lastA = document.createElement('a');
+            lastA.className = 'page-link';
+            lastA.href = '#';
+            lastA.textContent = userTotalPages;
+            lastA.addEventListener('click', (e) => { e.preventDefault(); userCurrentPage = userTotalPages; fetchAndDisplayUsers(); });
+            lastLi.appendChild(lastA);
+            userPaginationUl.appendChild(lastLi);
+        }
+
+        // Next button
+        const nextLi = document.createElement('li');
+        nextLi.className = `page-item ${userCurrentPage >= userTotalPages ? 'disabled' : ''}`;
+        const nextA = document.createElement('a');
+        nextA.className = 'page-link';
+        nextA.href = '#';
+        nextA.innerHTML = 'Next &gt;';
+        nextA.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (userCurrentPage < userTotalPages) {
+                userCurrentPage++;
+                fetchAndDisplayUsers();
+            }
+        });
+        nextLi.appendChild(nextA);
+        userPaginationUl.appendChild(nextLi);
+    }
+
 
     if (userApplyFiltersBtn) {
         userApplyFiltersBtn.addEventListener('click', () => {
             currentFilters.username = userFilterUsernameInput.value.trim();
-            currentFilters.isAdmin = userFilterAdminSelect.value;
-            fetchAndDisplayUsers(currentFilters);
+            currentFilters.isAdmin = userFilterAdminSelect.value; // This should be correct if select has "" for any
+            userCurrentPage = 1; // Reset to page 1 on filter change
+            fetchAndDisplayUsers();
         });
     }
 
     if (userClearFiltersBtn) {
         userClearFiltersBtn.addEventListener('click', () => {
             if (userFilterUsernameInput) userFilterUsernameInput.value = '';
-            if (userFilterAdminSelect) userFilterAdminSelect.value = '';
+            if (userFilterAdminSelect) userFilterAdminSelect.value = ''; // Assuming "" is the "Any" value
             currentFilters = {};
-            fetchAndDisplayUsers(currentFilters);
+            userCurrentPage = 1; // Reset to page 1
+            fetchAndDisplayUsers();
         });
     }
 
@@ -215,7 +395,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 if ((result.users_created || 0) > 0 || (result.users_updated || 0) > 0) {
-                    fetchAndDisplayUsers(currentFilters); // Refresh table
+                    userCurrentPage = 1; // Reset to page 1
+                    fetchAndDisplayUsers(); // Refresh table
                 }
 
             } catch (e) {
@@ -288,7 +469,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(json)
                 }, userManagementStatusDiv);
-                fetchAndDisplayUsers(currentFilters);
+                userCurrentPage = 1; // Reset to page 1
+                fetchAndDisplayUsers();
             } catch (e) {
                 console.error(e);
                 showError(userManagementStatusDiv, 'Import failed.');
@@ -319,7 +501,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     method: 'DELETE',
                     body: JSON.stringify({ ids })
                 }, userManagementStatusDiv);
-                fetchAndDisplayUsers(currentFilters);
+                userCurrentPage = 1; // Reset to page 1 or refetch current page
+                fetchAndDisplayUsers();
             } catch (err) {
                 console.error(err);
             }
@@ -438,7 +621,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             // apiCall's default behavior is to show response.message on success, 
                             // or hide messageElement if no message. We want a consistent success message.
                             showSuccess(userManagementStatusDiv, response.message || `User '${usernameForConfirmation}' deleted successfully.`);
-                            fetchAndDisplayUsers(currentFilters); // Refresh the table
+                            fetchAndDisplayUsers(); // Refresh the table (current page)
                         })
                         .catch(error => {
                             // apiCall already shows the error in userManagementStatusDiv
@@ -468,7 +651,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     }, userManagementStatusDiv)
                     .then(response => {
                         showSuccess(userManagementStatusDiv, response.message || `Google ID successfully assigned to '${username}'.`);
-                        fetchAndDisplayUsers(currentFilters); // Refresh table
+                        fetchAndDisplayUsers(); // Refresh table
                     })
                     .catch(error => {
                         // apiCall already shows the error in userManagementStatusDiv
@@ -552,7 +735,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (response && (response.id || response.message)) { // Check for successful response indicators
                     showSuccess(userManagementStatusDiv, `User ${id ? 'updated' : 'added'} successfully!`);
                     if (userFormModal) userFormModal.style.display = 'none';
-                    fetchAndDisplayUsers(currentFilters); // Refresh the table
+                    // Decide whether to go to page 1 or refresh current.
+                    // If adding new, might want to go to page 1 or last page.
+                    // For edit, current page is fine.
+                    fetchAndDisplayUsers(); // Refresh the table
                 } else if (!userFormModalStatusDiv.textContent || userFormModalStatusDiv.style.display === 'none') {
                     // If apiCall didn't show a message (e.g. 204 No Content or just hid loading)
                     showError(userFormModalStatusDiv, "Operation completed, but no specific confirmation received.");
@@ -571,11 +757,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initial Setup
     if (userFormModal) userFormModal.style.display = 'none'; // Ensure modal is hidden initially
-    if (bulkAddUsersModal) bulkAddUsersModal.style.display = 'none'; // Hide bulk add modal initially
-    if (bulkEditUsersModal) bulkEditUsersModal.style.display = 'none'; // Hide bulk edit modal initially
-    if (bulkAddPatternModal) bulkAddPatternModal.style.display = 'none'; // Hide pattern modal initially
+    if (bulkAddUsersModal) bulkAddUsersModal.style.display = 'none';
+    if (bulkEditUsersModal) bulkEditUsersModal.style.display = 'none';
+    if (bulkAddPatternModal) bulkAddPatternModal.style.display = 'none';
 
-    fetchAndDisplayUsers(currentFilters); // Fetch and display users on page load
+    // Initial Load
+    initializeUserPerPageSelect();
+    fetchAndDisplayUsers(); // Fetch and display users on page load with default pagination
 
     // --- Bulk Add Users ---
     if (bulkAddUsersBtn && bulkAddUsersModal) {
@@ -655,7 +843,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 if ((response.users_added || 0) > 0) {
-                    fetchAndDisplayUsers(currentFilters); // Refresh table
+                    userCurrentPage = 1; // Go to first page after bulk add
+                    fetchAndDisplayUsers(); // Refresh table
                 }
                 if (bulkAddUsersModal && (!response.errors || response.errors.length === 0) ) { // Close modal if no errors
                     bulkAddUsersModal.style.display = 'none';
@@ -838,7 +1027,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 if ((response.users_updated || 0) > 0) {
-                    fetchAndDisplayUsers(currentFilters); // Refresh table
+                    fetchAndDisplayUsers(); // Refresh current page after bulk edit
                 }
                  if (bulkEditUsersModal && (!response.errors || response.errors.length === 0) ) { // Close modal if no errors
                     bulkEditUsersModal.style.display = 'none';
@@ -998,24 +1187,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 if ((response.users_added || 0) > 0) {
-                    fetchAndDisplayUsers(currentFilters); // Refresh table
+                    userCurrentPage = 1; // Go to first page after pattern add
+                    fetchAndDisplayUsers(); // Refresh table
                 }
-                // Close modal only if fully successful or if only warnings (e.g. skips)
-                if (bulkAddPatternModal && (!response.errors_warnings || response.errors_warnings.every(e => e.error.includes("already exists")))) {
-                    // Consider closing if errors are just skips. For now, keeps modal open if any error/warning.
-                    // if (bulkAddPatternModal && (!response.errors_warnings || response.errors_warnings.length === 0)) {
-                    //    bulkAddPatternModal.style.display = 'none';
-                    // }
-                // The above commented out block was part of the previous erroneous fix attempt.
-                // The correct logic is to ensure the try block is properly closed before the catch.
-                // The following line for closing the modal if no errors is correct.
                 if (bulkAddPatternModal && (!response.errors_warnings || response.errors_warnings.length === 0)) {
                     bulkAddPatternModal.style.display = 'none';
                 }
-				}
-            // This is where the try block should end.
-            } catch (error) { // This is the catch block
-                // Error should have been shown by apiCall. If not, this is a fallback.
+            } catch (error) {
                 if (!bulkAddPatternStatusDiv.textContent || bulkAddPatternStatusDiv.style.display === 'none') {
                      showError(bulkAddPatternStatusDiv, `Pattern bulk add failed: ${error.message}`);
                 }
