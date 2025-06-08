@@ -418,25 +418,37 @@ document.addEventListener('DOMContentLoaded', () => {
         openingBracketLi.appendChild(openingBracketSpan);
         ulElement.appendChild(openingBracketLi);
 
-        // 5. Page Numbers (using existing logic for ellipses)
+        // Helper function to create a comma separator LI
+        function createCommaLI() {
+            const li = document.createElement('li');
+            li.className = 'page-item disabled';
+            const span = document.createElement('span');
+            span.className = 'page-link';
+            span.textContent = ',';
+            li.appendChild(span);
+            return li;
+        }
+
+        // 5. Page Numbers (with commas and ellipses)
         const currentPage = paginationData.page;
         const totalPages = paginationData.total_pages;
-        // iter_pages logic from Flask-SQLAlchemy adapted for client-side
-        // Show 1 edge page, 2 adjacent pages to current, 1 edge page
         const leftEdge = 1;
         const rightEdge = 1;
         const leftCurrent = 2;
-        const rightCurrent = 2; // Adjusted to be symmetrical, total 2+1+2 around current
+        const rightCurrent = 2;
         let lastPagePrinted = 0;
+        let firstPageElementInSequence = true; // Flag to manage comma insertion
 
         for (let p = 1; p <= totalPages; p++) {
-            const showPage = (p <= leftEdge) || // beginning pages
-                             (p > totalPages - rightEdge) || // ending pages
-                             (p >= currentPage - leftCurrent && p <= currentPage + rightCurrent); // around current
+            const showPage = (p <= leftEdge) ||
+                             (p > totalPages - rightEdge) ||
+                             (p >= currentPage - leftCurrent && p <= currentPage + rightCurrent);
 
             if (showPage) {
-                if (p > lastPagePrinted + 1) {
-                    // Add ellipsis if there was a gap
+                if (p > lastPagePrinted + 1) { // Ellipsis needed
+                    if (!firstPageElementInSequence) {
+                        ulElement.appendChild(createCommaLI());
+                    }
                     const ellipsisLi = document.createElement('li');
                     ellipsisLi.className = 'page-item disabled';
                     const ellipsisSpan = document.createElement('span');
@@ -444,6 +456,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     ellipsisSpan.textContent = '...';
                     ellipsisLi.appendChild(ellipsisSpan);
                     ulElement.appendChild(ellipsisLi);
+                    firstPageElementInSequence = false;
+                }
+
+                // Add comma before the page number if it's not the first element
+                if (!firstPageElementInSequence) {
+                    ulElement.appendChild(createCommaLI());
                 }
 
                 const pageLi = document.createElement('li');
@@ -468,6 +486,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 pageLi.appendChild(pageLink);
                 ulElement.appendChild(pageLi);
                 lastPagePrinted = p;
+                firstPageElementInSequence = false; // Reset flag after adding the first page element
             }
         }
         // This check for a final ellipsis might be redundant if the loop structure is correct.
