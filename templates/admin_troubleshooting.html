@@ -97,6 +97,123 @@ document.addEventListener('DOMContentLoaded', function () {
         sortOrder: 'asc'
     };
 
+    const dbBrowserItemsPerPageOptions = [10, 30, 50, 100];
+
+    function initializeDbBrowserPerPageSelect(selectElement, optionsArray, currentPerPage, itemsPerPageSetter, pageSetter, fetchDataCb) {
+        if (!selectElement) return;
+        selectElement.innerHTML = ''; // Clear existing
+        optionsArray.forEach(optionValue => {
+            const option = new Option(optionValue, optionValue);
+            if (optionValue === currentPerPage) {
+                option.selected = true;
+            }
+            selectElement.add(option);
+        });
+
+        const eventKey = 'dbBrowserPerPageChangeHandler';
+        if (selectElement[eventKey]) {
+            selectElement.removeEventListener('change', selectElement[eventKey]);
+        }
+        selectElement[eventKey] = function() {
+            itemsPerPageSetter(parseInt(this.value));
+            pageSetter(1); // Reset to page 1
+            fetchDataCb();
+        };
+        selectElement.addEventListener('change', selectElement[eventKey]);
+    }
+
+    function createDbBrowserOuterPageLink(page, text, isDisabled, pageSetter, fetchDataCb) {
+        const li = document.createElement('li');
+        li.className = `page-item ${isDisabled ? 'disabled' : ''}`;
+        const a = document.createElement('a');
+        a.className = 'page-link';
+        a.href = '#';
+        a.innerHTML = text;
+        if (!isDisabled) {
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                pageSetter(page);
+                fetchDataCb();
+            });
+        }
+        li.appendChild(a);
+        return li;
+    }
+
+    function createDbBrowserPageNumbersLi(currentPage, totalPages, pageSetter, fetchDataCb) {
+        const pageNumbersLi = document.createElement('li');
+        pageNumbersLi.className = 'page-item';
+
+        const innerSpan = document.createElement('span');
+        innerSpan.className = 'page-link page-numbers-span-container';
+        innerSpan.appendChild(document.createTextNode('['));
+
+        const pageElements = [];
+        const showPages = 3;
+        let startPage = Math.max(1, currentPage - Math.floor(showPages / 2));
+        let endPage = Math.min(totalPages, startPage + showPages - 1);
+
+        if (endPage - startPage + 1 < showPages && totalPages >= showPages) {
+            if (currentPage <= Math.ceil(showPages / 2)) {
+                endPage = Math.min(totalPages, showPages);
+            } else if (currentPage > totalPages - Math.ceil(showPages / 2)) {
+                startPage = Math.max(1, totalPages - showPages + 1);
+            } else {
+                 startPage = Math.max(1, endPage - showPages + 1);
+            }
+        } else if (totalPages < showPages) {
+            startPage = 1;
+            endPage = totalPages;
+        }
+
+        const createInternalPageLink = (page, textDisplay) => {
+            const a = document.createElement('a');
+            a.href = '#';
+            a.textContent = textDisplay || page.toString();
+            a.className = 'internal-page-link';
+            if (page === currentPage) {
+                a.classList.add('active-page-link');
+            }
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (page !== currentPage) {
+                    pageSetter(page);
+                    fetchDataCb();
+                }
+            });
+            return a;
+        };
+
+        if (startPage > 1) {
+            pageElements.push(createInternalPageLink(1));
+            if (startPage > 2) {
+                pageElements.push(document.createTextNode('...'));
+            }
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            pageElements.push(createInternalPageLink(i));
+        }
+
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) {
+                pageElements.push(document.createTextNode('...'));
+            }
+            pageElements.push(createInternalPageLink(totalPages));
+        }
+
+        pageElements.forEach((el, index) => {
+            innerSpan.appendChild(el);
+            if (index < pageElements.length - 1) {
+                innerSpan.appendChild(document.createTextNode(', '));
+            }
+        });
+
+        innerSpan.appendChild(document.createTextNode(']'));
+        pageNumbersLi.appendChild(innerSpan);
+        return pageNumbersLi;
+    }
+
     function updateDbViewStatus(message, isError = false) {
         if (!dbViewStatusEl) return;
         dbViewStatusEl.textContent = message;
@@ -299,66 +416,81 @@ document.addEventListener('DOMContentLoaded', function () {
         dbRecordsOutput.appendChild(table);
     }
 
-    function renderPagination(paginationData) {
-        dbPaginationControls.innerHTML = '';
-        if (!paginationData || paginationData.total_pages <= 0) {
-            dbPaginationControls.style.display = 'none';
+    function renderDbBrowserPagination(apiPaginationData) {
+        const paginationContainer = document.getElementById('db-pagination-controls');
+        if (!paginationContainer) return;
+
+        let paginationUl = document.getElementById('db_browser_pagination_ul');
+        if (!paginationUl) {
+            paginationUl = document.createElement('ul');
+            paginationUl.id = 'db_browser_pagination_ul';
+            paginationContainer.appendChild(paginationUl);
+        }
+        paginationUl.innerHTML = ''; // Clear existing items
+        paginationUl.className = 'pagination pagination-sm mb-0 d-flex flex-wrap align-items-baseline';
+
+        const currentPage = dbViewState.currentPage;
+        const itemsPerPage = dbViewState.perPage;
+        const totalItems = apiPaginationData.total_records;
+        const totalPages = apiPaginationData.total_pages;
+
+        if (totalItems === 0 && dbViewState.currentFilters.length === 0) {
+            paginationContainer.style.display = 'none';
             return;
         }
-        dbPaginationControls.style.display = 'block';
+        paginationContainer.style.display = 'block';
 
-        let html = `<nav aria-label="Table navigation"><ul class="pagination pagination-sm justify-content-center">`;
+        // 1. "Total Results" li
+        const totalResultsLi = document.createElement('li');
+        totalResultsLi.className = 'page-item total-results-li';
+        const totalDiv = document.createElement('div');
+        totalDiv.id = "db_browser_total_results_display";
+        totalDiv.className = 'text-muted p-2';
+        totalDiv.textContent = `Total: ${totalItems} results`; // TODO: Localize
+        totalResultsLi.appendChild(totalDiv);
+        const totalResultsSpacer = document.createElement('span');
+        totalResultsSpacer.className = 'pagination-controls-spacer me-3';
+        totalResultsLi.appendChild(totalResultsSpacer);
+        paginationUl.appendChild(totalResultsLi);
 
-        // Previous button
-        html += `<li class="page-item ${paginationData.page === 1 ? 'disabled' : ''}">
-                    <a class="page-link" href="#" data-page="${paginationData.page - 1}">${("{{ _('Previous') }}")}</a>
-                 </li>`;
+        // 2. "Per Page" li
+        const perPageLi = document.createElement('li');
+        perPageLi.className = 'page-item per-page-li';
+        const perPageWrapperSpan = document.createElement('span');
+        const label = document.createElement('label');
+        label.htmlFor = "db_browser_per_page_select";
+        label.className = 'form-label me-2';
+        label.textContent = 'Per Page:'; // TODO: Localize
+        const select = document.createElement('select');
+        select.id = "db_browser_per_page_select";
+        select.className = 'form-select form-select-sm d-inline-block';
+        select.style.width = 'auto';
+        initializeDbBrowserPerPageSelect(
+            select,
+            dbBrowserItemsPerPageOptions,
+            itemsPerPage,
+            (newVal) => { dbViewState.perPage = newVal; },
+            (newVal) => { dbViewState.currentPage = newVal; },
+            fetchAndDisplayTableData
+        );
+        const perPageSpacer = document.createElement('span');
+        perPageSpacer.className = 'pagination-controls-spacer me-3';
+        perPageWrapperSpan.appendChild(label);
+        perPageWrapperSpan.appendChild(select);
+        perPageWrapperSpan.appendChild(perPageSpacer);
+        perPageLi.appendChild(perPageWrapperSpan);
+        paginationUl.appendChild(perPageLi);
 
-        // Page numbers (simplified: first, current, last if far apart)
-        // This can be expanded to show more page numbers like typical pagination.
-        if (paginationData.page > 2) {
-             html += `<li class="page-item"><a class="page-link" href="#" data-page="1">1</a></li>`;
-             if (paginationData.page > 3) html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        if (totalPages > 1) {
+            // 3. "Previous" li
+            paginationUl.appendChild(createDbBrowserOuterPageLink(currentPage - 1, '{{ _("Previous") }}', currentPage <= 1, (pg) => dbViewState.currentPage = pg, fetchAndDisplayTableData));
+
+            // 4. Page Numbers [1,...,n] li
+            paginationUl.appendChild(createDbBrowserPageNumbersLi(currentPage, totalPages, (pg) => dbViewState.currentPage = pg, fetchAndDisplayTableData));
+
+            // 5. "Next" li
+            paginationUl.appendChild(createDbBrowserOuterPageLink(currentPage + 1, '{{ _("Next") }}', currentPage >= totalPages, (pg) => dbViewState.currentPage = pg, fetchAndDisplayTableData));
         }
-        if (paginationData.page > 1) {
-            html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.page - 1}">${paginationData.page - 1}</a></li>`;
-        }
-        html += `<li class="page-item active"><span class="page-link">${paginationData.page}</span></li>`;
-        if (paginationData.page < paginationData.total_pages) {
-             html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.page + 1}">${paginationData.page + 1}</a></li>`;
-        }
-         if (paginationData.page < paginationData.total_pages - 2) {
-            if (paginationData.page < paginationData.total_pages - 3) html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-            html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.total_pages}">${paginationData.total_pages}</a></li>`;
-        } else if (paginationData.page === paginationData.total_pages - 2 && paginationData.total_pages > 2) {
-             html += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.total_pages}">${paginationData.total_pages}</a></li>`;
-        }
-
-
-        // Next button
-        html += `<li class="page-item ${paginationData.page === paginationData.total_pages ? 'disabled' : ''}">
-                    <a class="page-link" href="#" data-page="${paginationData.page + 1}">${("{{ _('Next') }}")}</a>
-                 </li>`;
-        html += `</ul></nav>`;
-        html += `<p class="text-center text-muted small">${("{{ _('Page') }}")} ${paginationData.page} ${("{{ _('of') }}")} ${paginationData.total_pages}. ${("{{ _('Total records:') }}")} ${paginationData.total_records}</p>`;
-
-        dbPaginationControls.innerHTML = html;
-
-        dbPaginationControls.querySelectorAll('.page-link').forEach(link => {
-            link.addEventListener('click', function(e) {
-                e.preventDefault();
-                const pageNum = parseInt(this.dataset.page);
-                if (pageNum && pageNum !== dbViewState.currentPage) {
-                    handlePaginationClick(pageNum);
-                }
-            });
-        });
-    }
-
-    async function handlePaginationClick(newPage) {
-        if (newPage < 1) return; // Should be handled by disabled state, but good check
-        dbViewState.currentPage = newPage;
-        await fetchAndDisplayTableData();
     }
 
     async function fetchAndDisplayTableData() {
@@ -396,7 +528,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     dbViewState.columns = data.columns;
                 }
                 renderTable(dbViewState.columns, data.records);
-                renderPagination(data.pagination);
+                renderDbBrowserPagination(data.pagination);
                 updateDbViewStatus(`{{ _('Data loaded for table:') }} ${currentTableName}.`, false);
             } else {
                 throw new Error(data.message || `{{ _('Failed to fetch data for table:') }} ${currentTableName}`);

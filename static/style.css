@@ -1650,7 +1650,7 @@ ul.pagination > li.page-item.ms-auto > div[id$="_total_results_display"] {
 */
 
 /* --- New Styles for specific LI items (total-results-li, per-page-li) --- */
-/* Assuming JS adds these classes: 'total-results-li' and 'per-page-li' */
+/* Applied to both my_bookings.html and admin_troubleshooting.html pagination */
 
 .total-results-li,
 .per-page-li {
@@ -1659,6 +1659,7 @@ ul.pagination > li.page-item.ms-auto > div[id$="_total_results_display"] {
     cursor: default;
     padding: 0 !important; /* Reset padding on the li itself */
     margin: 0 !important;  /* Reset margin on the li itself */
+    /* align-self: baseline; /* Helps with baseline alignment in a flex container */
 }
 
 .total-results-li:hover,
@@ -1668,7 +1669,7 @@ ul.pagination > li.page-item.ms-auto > div[id$="_total_results_display"] {
 }
 
 /* Inner content of total-results-li */
-.total-results-li > div[id$="_total_results_display"] { /* The div holding the text */
+.total-results-li > div { /* The div holding the 'Total: X results' text */
     padding: 0.375rem 0.75rem; /* Match typical page-link padding for vertical alignment */
     display: inline-block; /* Allow spacer to sit beside it */
 }
@@ -1703,4 +1704,7 @@ ul.pagination.align-items-baseline > li.page-item {
    /* Ensure consistent baseline behavior. Bootstrap's default for page-item under display:flex on pagination should be fine.
       The key is `align-items-baseline` on the `ul` and consistent padding/line-height of content within `li`s.
    */
+   /* align-self: baseline; /* Reinforce baseline alignment for each item */
 }
+
+[end of static/style.css]
