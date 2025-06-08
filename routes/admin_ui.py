@@ -1030,3 +1030,20 @@ def import_bookings_csv():
         flash(_('Invalid file type. Please upload a CSV file.'), 'danger')
 
     return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+@admin_ui_bp.route('/clear_all_bookings', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def clear_all_bookings_data():
+    current_app.logger.info(f"User {current_user.username} initiated clearing of all booking data.")
+    try:
+        num_deleted = db.session.query(Booking).delete()
+        db.session.commit()
+        current_app.logger.info(f"User {current_user.username} successfully cleared all {num_deleted} booking(s).")
+        flash(_('Successfully cleared all %(num_deleted)s booking(s).', num_deleted=num_deleted), 'success')
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error clearing all bookings by user {current_user.username}: {str(e)}", exc_info=True)
+        flash(_('Error clearing booking data. Please check system logs for details.'), 'danger')
+
+    return redirect(url_for('admin_ui.serve_backup_booking_data_page'))

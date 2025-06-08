@@ -209,6 +209,19 @@
                     </ul>
                 </nav>
                 {% endif %}
+
+                <hr> <!-- Separator for Destructive Actions -->
+                <div class="mt-4">
+                    <h5>{{ _('Destructive Actions') }}</h5>
+                    <p class="text-danger">{{ _('Warning: The following action is irreversible and will permanently delete data from the database.') }}</p>
+                    <form method="POST" action="{{ url_for('admin_ui.clear_all_bookings_data') }}" style="margin-top: 10px;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <button type="submit" class="btn btn-danger"
+                                onclick="return confirm('{{ _('Are you absolutely sure you want to delete ALL booking data? This action cannot be undone and will permanently erase all bookings.') }}');">
+                            <i class="fas fa-trash-alt"></i> {{ _('Clear All Booking Data') }}
+                        </button>
+                    </form>
+                </div>
             </section>
         </div>
     </div>
