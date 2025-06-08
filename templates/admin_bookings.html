@@ -70,7 +70,7 @@
                           </button>
                         {% elif booking.status and booking.status.lower() not in ['cancelled', 'rejected', 'completed', 'checked_out', 'cancelled_by_admin'] %}
                         {# Delete button for active bookings might still be relevant for hard deletion #}
-                        <button class="button button-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel') }}</button>
+                        <button class="button button-danger btn-sm delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel') }}</button>
                         {% else %}
                         {# For completed, cancelled, rejected bookings, show a dash or specific info #}
                         <span class="text-muted">-</span>
@@ -83,6 +83,64 @@
     </div>
     {% else %}
     <p>{{ _('No bookings found.') }}</p>
+    {% endif %}
+
+    <!-- Pagination Controls - New Structure -->
+    {% if bookings_page_obj and bookings_page_obj.total > 0 %} {# Check total items instead of just has_prev/has_next for showing the bar #}
+    <nav aria-label="Bookings pagination" class="mt-4">
+        <ul class="pagination justify-content-center">
+            <!-- Items Per Page Selector -->
+            <li class="page-item disabled">
+                <form method="GET" action="{{ url_for('admin_ui.serve_admin_bookings_page') }}" class="d-flex align-items-center">
+                    {% if current_status_filter %}
+                        <input type="hidden" name="status_filter" value="{{ current_status_filter }}">
+                    {% endif %}
+                    <label for="per_page_select_pagination" class="visually-hidden me-2">{{ _('Items per page:') }}</label>
+                    <select name="per_page" id="per_page_select_pagination" class="form-select form-select-sm me-2" style="width: auto;" onchange="this.form.submit()">
+                        {% for val in [10, 25, 50, 100] %}
+                            <option value="{{ val }}" {% if val == per_page %}selected{% endif %}>{{ val }}</option>
+                        {% endfor %}
+                    </select>
+                </form>
+            </li>
+
+            <!-- Blank Separator -->
+            <li class="page-item disabled"><span class="page-link" style="padding-left: 1em;"></span></li>
+
+            <!-- Previous Icon Link -->
+            <li class="page-item {% if not bookings_page_obj.has_prev %}disabled{% endif %}">
+                <a class="page-link" href="{{ url_for('admin_ui.serve_admin_bookings_page', page=bookings_page_obj.prev_num, per_page=per_page, status_filter=current_status_filter) if bookings_page_obj.has_prev else '#' }}">&laquo;</a>
+            </li>
+
+            <!-- Opening Bracket -->
+            <li class="page-item disabled"><span class="page-link">[</span></li>
+
+            <!-- Page Numbers and Commas Loop -->
+            {% for page_num in bookings_page_obj.iter_pages(left_edge=1, left_current=1, right_current=1, right_edge=1) %}
+                {% if not loop.first %}
+                    <li class="page-item disabled"><span class="page-link">,</span></li>
+                {% endif %}
+                {% if page_num %}
+                    <li class="page-item {% if page_num == bookings_page_obj.page %}active{% endif %}">
+                        <a class="page-link" href="{{ url_for('admin_ui.serve_admin_bookings_page', page=page_num, per_page=per_page, status_filter=current_status_filter) }}">{{ page_num }}</a>
+                    </li>
+                {% else %}
+                    <li class="page-item disabled"><span class="page-link">...</span></li>
+                {% endif %}
+            {% endfor %}
+
+            <!-- Closing Bracket -->
+            <li class="page-item disabled"><span class="page-link">]</span></li>
+
+            <!-- Next Icon Link -->
+            <li class="page-item {% if not bookings_page_obj.has_next %}disabled{% endif %}">
+                <a class="page-link" href="{{ url_for('admin_ui.serve_admin_bookings_page', page=bookings_page_obj.next_num, per_page=per_page, status_filter=current_status_filter) if bookings_page_obj.has_next else '#' }}">&raquo;</a>
+            </li>
+
+            <!-- Final Blank Separator -->
+            <li class="page-item disabled"><span class="page-link" style="padding-left: 1em;"></span></li>
+        </ul>
+    </nav>
     {% endif %}
 </div>
 
@@ -249,5 +307,37 @@ document.addEventListener('DOMContentLoaded', function() {
     // dismissButton.addEventListener('click', dismissAdminMessageHandler);
 });
 </script>
+{% endblock %}
 
+{% block scripts %}
+{{ super() }}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const adminTable = document.getElementById('admin-bookings-table');
+    const paginationLinks = document.querySelectorAll('.pagination .page-link');
+    const perPageSelectors = document.querySelectorAll('select[name="per_page"]');
+
+    // Check if we should scroll (e.g., after a pagination action)
+    if (sessionStorage.getItem('adminBookingsScrollTop') === 'true' && adminTable) {
+        adminTable.scrollIntoView({ behavior: 'smooth' });
+        sessionStorage.removeItem('adminBookingsScrollTop');
+    }
+
+    paginationLinks.forEach(function(link) {
+        link.addEventListener('click', function() {
+            // Check if the link is not disabled and not for the current active page
+            if (!link.parentElement.classList.contains('disabled') && !link.parentElement.classList.contains('active')) {
+                sessionStorage.setItem('adminBookingsScrollTop', 'true');
+            }
+        });
+    });
+
+    perPageSelectors.forEach(function(select) {
+        select.addEventListener('change', function() {
+            sessionStorage.setItem('adminBookingsScrollTop', 'true');
+            // The form submits automatically via onchange attribute in the HTML
+        });
+    });
+});
+</script>
 {% endblock %}

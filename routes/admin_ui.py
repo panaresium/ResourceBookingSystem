@@ -60,7 +60,10 @@ def serve_resource_management_page():
 def serve_admin_bookings_page():
     logger = current_app.logger
     status_filter = request.args.get('status_filter')
-    logger.info(f"User {current_user.username} accessed Admin Bookings page. Status filter: '{status_filter}'")
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+
+    logger.info(f"User {current_user.username} accessed Admin Bookings page. Status filter: '{status_filter}', Page: {page}, Per Page: {per_page}")
 
     # Define the list of possible statuses for the dropdown
     possible_statuses = ['approved', 'checked_in', 'completed', 'cancelled', 'rejected', 'cancelled_by_admin']
@@ -81,10 +84,12 @@ def serve_admin_bookings_page():
         if status_filter:
             bookings_query = bookings_query.filter(Booking.status == status_filter)
 
-        all_bookings = bookings_query.order_by(Booking.start_time.desc()).all()
+        bookings_query = bookings_query.order_by(Booking.start_time.desc())
+
+        bookings_page_obj = bookings_query.paginate(page=page, per_page=per_page, error_out=False)
 
         bookings_list = []
-        for booking_row in all_bookings:
+        for booking_row in bookings_page_obj.items:
             bookings_list.append({
                 'id': booking_row.id,
                 'title': booking_row.title,
@@ -96,16 +101,20 @@ def serve_admin_bookings_page():
                 'admin_deleted_message': booking_row.admin_deleted_message
             })
         return render_template("admin_bookings.html",
-                               bookings=bookings_list,
+                               bookings_page_obj=bookings_page_obj, # Pass pagination object
+                               bookings=bookings_list, # Still pass the list of items for current page
                                all_statuses=possible_statuses,
-                               current_status_filter=status_filter)
+                               current_status_filter=status_filter,
+                               per_page=per_page) # Pass per_page for items-per-page dropdown
     except Exception as e:
         logger.error(f"Error fetching bookings for admin page: {e}", exc_info=True)
         return render_template("admin_bookings.html",
+                               bookings_page_obj=None, # Ensure it's passed in error case too
                                bookings=[],
                                error="Could not load bookings.",
                                all_statuses=possible_statuses,
-                               current_status_filter=status_filter)
+                               current_status_filter=status_filter,
+                               per_page=per_page) # Pass per_page here as well
 
 @admin_ui_bp.route('/backup_restore')
 @login_required
