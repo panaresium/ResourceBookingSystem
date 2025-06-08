@@ -2048,6 +2048,61 @@ def restore_media_component(timestamp_str, media_type_name, local_target_dir, re
         return files_failed == 0, final_msg, actions # Success if no files failed
 
 
+def download_scheduler_settings_component(timestamp_str, config_share_client, dry_run=False, socketio_instance=None, task_id=None):
+    """
+    Downloads the scheduler settings JSON from a backup.
+
+    Returns:
+        tuple: (success_bool, message_str, actions_list, downloaded_config_path_or_placeholder_str)
+    """
+    actions = []
+    dry_run_prefix = "DRY RUN: " if dry_run else ""
+    component_name = "Scheduler Settings"
+    downloaded_config_path = None
+
+    _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Starting {component_name} download component...', detail=f'Timestamp: {timestamp_str}', level='INFO')
+
+    remote_config_filename = f"scheduler_settings_{timestamp_str}.json"
+    azure_config_path = f"{CONFIG_BACKUPS_DIR}/{remote_config_filename}"
+    local_config_target_path = os.path.join(DATA_DIR, remote_config_filename)
+
+    config_file_client = config_share_client.get_file_client(azure_config_path)
+
+    if not _client_exists(config_file_client):
+        warn_msg = f"{dry_run_prefix}{component_name} backup file '{azure_config_path}' not found on share '{config_share_client.share_name}'. Skipping."
+        logger.warning(warn_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, detail=azure_config_path, level='WARNING')
+        if dry_run: actions.append(warn_msg)
+        # This is not a critical failure for the overall restore, so return True.
+        return True, warn_msg, actions, None
+
+    if dry_run:
+        action_msg = f"DRY RUN: Would download {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'."
+        actions.append(action_msg)
+        _emit_progress(socketio_instance, task_id, 'restore_progress', action_msg, level='INFO')
+        logger.info(action_msg)
+        downloaded_config_path = "DRY_RUN_SCHEDULER_SETTINGS_PATH_PLACEHOLDER"
+        success_msg = f"DRY RUN: {component_name} component finished (simulated download)."
+        _emit_progress(socketio_instance, task_id, 'restore_progress', success_msg, level='INFO')
+        logger.info(success_msg)
+        return True, success_msg, actions, downloaded_config_path
+    else:
+        _emit_progress(socketio_instance, task_id, 'restore_progress', f'Downloading {component_name}...', detail=f'{azure_config_path} to {local_config_target_path}', level='INFO')
+        logger.info(f"Downloading {component_name} from '{config_share_client.share_name}/{azure_config_path}' to '{local_config_target_path}'.")
+        if download_file(config_share_client, azure_config_path, local_config_target_path):
+            success_msg = f"{component_name} JSON downloaded successfully."
+            logger.info(success_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', f'{component_name} download complete.', detail=local_config_target_path, level='SUCCESS')
+            downloaded_config_path = local_config_target_path
+            return True, success_msg, actions, downloaded_config_path
+        else:
+            # Log as warning because scheduler settings might be optional for some restore scenarios.
+            warn_msg = f"{component_name} JSON download failed from '{azure_config_path}'."
+            logger.warning(warn_msg)
+            _emit_progress(socketio_instance, task_id, 'restore_progress', warn_msg, detail=azure_config_path, level='WARNING')
+            return True, warn_msg, actions, None # Non-critical failure, return True
+
+
 def list_available_backups():
     """
     Lists available backup timestamps based on the presence of database backup files.
@@ -2109,11 +2164,11 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
         task_id: Optional task ID for SocketIO progress emitting.
 
     Returns:
-        tuple: (path_to_restored_db_or_None, path_to_downloaded_map_config_or_None, path_to_downloaded_resource_configs_or_None, path_to_downloaded_user_configs_or_None, actions_list)
-               Returns (None, None, None, None, actions_list) if critical (DB) restoration fails.
-               actions_list contains strings describing operations if dry_run is True.
+        tuple: (path_to_restored_db_or_None, path_to_downloaded_map_config_or_None, path_to_downloaded_resource_configs_or_None, path_to_downloaded_user_configs_or_None, path_to_downloaded_scheduler_settings_or_None)
+               Returns (None, None, None, None, None) if critical (DB) restoration fails.
+               actions_list (used internally if dry_run) is not returned in the primary path.
     """
-    overall_actions_list = []
+    overall_actions_list = []  # Kept for dry_run logging, but not returned directly
     dry_run_prefix = "DRY RUN: " if dry_run else ""
     final_restored_db_path = None
     final_downloaded_map_config_path = None
@@ -2136,7 +2191,7 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
             logger.error(err_msg)
             _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg, detail=f"Share {db_share_name} missing.", level='ERROR')
             if dry_run: overall_actions_list.append(err_msg)
-            return None, None, None, None, overall_actions_list # Adjusted return to include all 4 paths
+            return None, None, None, None, None # Return 5 Nones
 
         db_success, db_message, db_actions, db_output_path = restore_database_component(
             timestamp_str, db_share_client, dry_run, socketio_instance, task_id
@@ -2147,7 +2202,7 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
         if not db_success: # Critical failure if DB component fails
             logger.error(f"{dry_run_prefix}Database restore component failed: {db_message}. Aborting full restore.")
             _emit_progress(socketio_instance, task_id, 'restore_progress', f"{dry_run_prefix}Database restore failed. Full restore aborted.", detail=db_message, level='ERROR')
-            return None, None, None, None, overall_actions_list # Return None for paths, include actions gathered so far
+            return None, None, None, None, None # Return 5 Nones
 
         # --- Map Configuration Download Component ---
         config_share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
@@ -2225,14 +2280,16 @@ def restore_full_backup(timestamp_str, dry_run=False, socketio_instance=None, ta
 
         logger.info(f"{dry_run_prefix}Full restore process completed for timestamp: {timestamp_str}")
         _emit_progress(socketio_instance, task_id, 'restore_progress', f'{dry_run_prefix}Full restore operations finished.', level='INFO')
-        return final_restored_db_path, final_downloaded_map_config_path, final_downloaded_resource_configs_path, final_downloaded_user_configs_path, final_downloaded_scheduler_settings_path, overall_actions_list
+        # Ensure overall_actions_list is not returned for the primary success path
+        return final_restored_db_path, final_downloaded_map_config_path, final_downloaded_resource_configs_path, final_downloaded_user_configs_path, final_downloaded_scheduler_settings_path
 
     except Exception as e:
         err_msg_final = f"{dry_run_prefix}Critical error during full restore orchestration for timestamp {timestamp_str}: {e}"
         logger.error(err_msg_final, exc_info=True)
         _emit_progress(socketio_instance, task_id, 'restore_progress', err_msg_final, detail=str(e), level='ERROR')
-        if dry_run: overall_actions_list.append(err_msg_final)
-        return None, None, None, None, None, overall_actions_list # Adjusted return
+        # overall_actions_list can be logged or handled internally, but not returned for the exception path either if 5 values are expected
+        # For dry_run, actions are appended to overall_actions_list, which is fine for logging.
+        return None, None, None, None, None # Return 5 Nones for exception path
 
 
 def delete_backup_set(timestamp_str, socketio_instance=None, task_id=None):
