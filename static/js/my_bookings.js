@@ -995,4 +995,3 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-[end of static/js/my_bookings.js]
