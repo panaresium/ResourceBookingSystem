@@ -265,39 +265,63 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Generic renderMyBookingsPaginationControls
-    function renderMyBookingsPaginationControls(prefix, paginationUl, paginationContainer, totalResultsDisplay, currentPage, totalPages, totalItems, itemsPerPage, fetchDataFunction, currentPageSetter) {
-        if (!paginationUl || !paginationContainer || !totalResultsDisplay) {
-            console.warn(`Pagination elements for prefix ${prefix} not found.`);
+    function renderMyBookingsPaginationControls(prefix, paginationUl, paginationContainer, currentPage, totalPages, totalItems, itemsPerPage, fetchDataFunction, currentPageSetter, itemsPerPageVarSetter) {
+        if (!paginationUl || !paginationContainer) {
+            console.warn(`Pagination UL or Container for prefix ${prefix} not found.`);
             return;
         }
         paginationUl.innerHTML = ''; // Clear existing content
+        paginationUl.classList.add('d-flex', 'flex-wrap', 'align-items-baseline');
 
-        const currentStatusFilter = statusFilterSelect ? statusFilterSelect.value : '';
-        const currentResourceFilter = resourceNameFilterInput ? resourceNameFilterInput.value : '';
+
+        const currentStatusFilter = statusFilterSelect ? statusFilterSelect.value : ''; // Assuming statusFilterSelect is globally accessible or passed
+        const currentResourceFilter = resourceNameFilterInput ? resourceNameFilterInput.value : ''; // Assuming resourceNameFilterInput is globally accessible or passed
 
         if (totalItems === 0 && !currentStatusFilter && !currentResourceFilter) {
              paginationContainer.style.display = 'none';
-             totalResultsDisplay.textContent = '';
+             // No totalResultsDisplay element to clear text from directly here anymore
              return;
         }
+        paginationContainer.style.display = 'block'; // Or 'flex' if paginationContainer itself needs flex properties, but UL is the primary flex now. Let's use block.
 
-        paginationContainer.style.display = 'flex'; // Ensure the main container is visible
-        totalResultsDisplay.textContent = totalItems > 0 ? `Total: ${totalItems} results` : 'No results for current filter.';
+        // --- Create "Per Page" Element (as an <li>) ---
+        const perPageLi = document.createElement('li');
+        perPageLi.className = 'page-item'; // Or custom class like 'pagination-per-page-item'
 
-        if (totalPages === 0) { // If no pages, display nothing in UL
-            paginationUl.style.display = 'none';
-            return;
-        }
-        paginationUl.style.display = 'flex';
+        const perPageWrapperSpan = document.createElement('span');
+        // perPageWrapperSpan.className = 'page-link'; // Avoid .page-link styling for the wrapper if it's not desired
 
-        // 1. "Previous" Link (remains individual li)
+        const label = document.createElement('label');
+        label.htmlFor = `${prefix}per_page_select`;
+        label.className = 'form-label me-2'; // Bootstrap classes for label
+        label.textContent = 'Per Page:'; // TODO: Add localization if needed: gettext('Per Page:')
+
+        const select = document.createElement('select');
+        select.id = `${prefix}per_page_select`;
+        select.className = 'form-select form-select-sm d-inline-block';
+        select.style.width = 'auto';
+
+        // Call initializeMyBookingsPerPageSelect - this function populates the select and adds event listener
+        // itemsPerPageVarSetter is now passed to renderMyBookingsPaginationControls
+        initializeMyBookingsPerPageSelect(prefix, select, itemsPerPageVarSetter, currentPageSetter, fetchDataFunction, itemsPerPage);
+
+        const spacerSpan = document.createElement('span');
+        spacerSpan.className = 'me-3 pagination-controls-spacer'; // Use existing spacer class
+
+        perPageWrapperSpan.appendChild(label);
+        perPageWrapperSpan.appendChild(select);
+        perPageWrapperSpan.appendChild(spacerSpan); // Spacer after select, inside the wrapper span
+        perPageLi.appendChild(perPageWrapperSpan);
+        paginationUl.appendChild(perPageLi);
+
+        // Helper for "Previous" and "Next" links
         const createOuterPageLink = (page, text, isDisabled = false) => {
             const li = document.createElement('li');
             li.className = `page-item ${isDisabled ? 'disabled' : ''}`;
             const a = document.createElement('a');
             a.className = 'page-link';
             a.href = '#';
-            a.innerHTML = text; // Use innerHTML for entities like &lt;
+            a.innerHTML = text;
             if (!isDisabled) {
                 a.addEventListener('click', (e) => {
                     e.preventDefault();
@@ -308,19 +332,19 @@ document.addEventListener('DOMContentLoaded', () => {
             li.appendChild(a);
             return li;
         };
-        paginationUl.appendChild(createOuterPageLink(currentPage - 1, '&lt; Previous', currentPage <= 1));
 
-        // 2. Create a single list item for page numbers
-        if (totalPages > 0) { // Only add page numbers if there are pages
+        if (totalPages > 1) { // Only show Prev/Next and page numbers if more than one page
+            paginationUl.appendChild(createOuterPageLink(currentPage - 1, '&lt; Previous', currentPage <= 1));
+
+            // --- Create Page Numbers [1, ..., n] (as an <li>) ---
             const pageNumbersLi = document.createElement('li');
             pageNumbersLi.className = 'page-item';
 
             const innerSpan = document.createElement('span');
-            innerSpan.className = 'page-link page-numbers-span-container'; // Added new class
+            innerSpan.className = 'page-link page-numbers-span-container';
             innerSpan.appendChild(document.createTextNode('['));
 
             const pageElements = [];
-
             const showPages = 3;
             let startPage = Math.max(1, currentPage - Math.floor(showPages / 2));
             let endPage = Math.min(totalPages, startPage + showPages - 1);
@@ -331,7 +355,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else if (currentPage > totalPages - Math.ceil(showPages / 2)) {
                     startPage = Math.max(1, totalPages - showPages + 1);
                 } else {
-                     startPage = Math.max(1, endPage - showPages + 1);
+                    startPage = Math.max(1, endPage - showPages + 1);
                 }
             } else if (totalPages < showPages) {
                 startPage = 1;
@@ -384,10 +408,22 @@ document.addEventListener('DOMContentLoaded', () => {
             innerSpan.appendChild(document.createTextNode(']'));
             pageNumbersLi.appendChild(innerSpan);
             paginationUl.appendChild(pageNumbersLi);
+
+            paginationUl.appendChild(createOuterPageLink(currentPage + 1, 'Next &gt;', currentPage >= totalPages));
         }
 
-        // 3. "Next" Link (remains individual li)
-        paginationUl.appendChild(createOuterPageLink(currentPage + 1, 'Next &gt;', currentPage >= totalPages));
+        // --- Create "Total Results" Element (as an <li>) ---
+        const totalResultsLi = document.createElement('li');
+        totalResultsLi.className = 'page-item ms-auto'; // ms-auto to push to the right
+
+        const totalDiv = document.createElement('div');
+        totalDiv.id = `${prefix}total_results_display`; // Recreate the ID for potential other JS interactions
+        totalDiv.className = 'text-muted p-2'; // p-2 for padding similar to page-links
+        totalDiv.textContent = totalItems > 0 ? `Total: ${totalItems} results` : 'No results for current filter.';
+        // TODO: Add localization for "Total: X results" and "No results for current filter."
+
+        totalResultsLi.appendChild(totalDiv);
+        paginationUl.appendChild(totalResultsLi);
     }
 
 
@@ -418,7 +454,18 @@ document.addEventListener('DOMContentLoaded', () => {
             upcomingTotalPages = data.pagination.total_pages;
             upcomingCurrentPage = data.pagination.current_page; // Sync with server response
 
-            renderMyBookingsPaginationControls('upcoming_bk_pg_', upcomingPaginationUl, upcomingPaginationContainer, upcomingTotalResultsDisplay, upcomingCurrentPage, upcomingTotalPages, upcomingTotalItems, upcomingItemsPerPage, fetchUpcomingBookings, (val) => upcomingCurrentPage = val);
+            renderMyBookingsPaginationControls(
+                'upcoming_bk_pg_',
+                upcomingPaginationUl,
+                upcomingPaginationContainer,
+                upcomingCurrentPage,
+                upcomingTotalPages,
+                upcomingTotalItems,
+                upcomingItemsPerPage,
+                fetchUpcomingBookings,
+                (val) => upcomingCurrentPage = val,
+                (val) => upcomingItemsPerPage = val // Pass the setter for itemsPerPage
+            );
 
             upcomingBookingsContainer.innerHTML = ''; // Clear loading
             if (data.bookings && data.bookings.length > 0) {
@@ -462,7 +509,18 @@ document.addEventListener('DOMContentLoaded', () => {
             pastTotalPages = data.pagination.total_pages;
             pastCurrentPage = data.pagination.current_page;
 
-            renderMyBookingsPaginationControls('past_bk_pg_', pastPaginationUl, pastPaginationContainer, pastTotalResultsDisplay, pastCurrentPage, pastTotalPages, pastTotalItems, pastItemsPerPage, fetchPastBookings, (val) => pastCurrentPage = val);
+            renderMyBookingsPaginationControls(
+                'past_bk_pg_',
+                pastPaginationUl,
+                pastPaginationContainer,
+                pastCurrentPage,
+                pastTotalPages,
+                pastTotalItems,
+                pastItemsPerPage,
+                fetchPastBookings,
+                (val) => pastCurrentPage = val,
+                (val) => pastItemsPerPage = val // Pass the setter for itemsPerPage
+            );
 
             pastBookingsContainer.innerHTML = ''; // Clear loading
             if (data.bookings && data.bookings.length > 0) {
