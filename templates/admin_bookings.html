@@ -116,18 +116,16 @@
             <li class="page-item disabled"><span class="page-link">[</span></li>
 
             <!-- Page Numbers and Commas Loop -->
-            {% set last_was_page_or_ellipsis = false %} {# This can be initialized before the loop #}
             {% for page_num in bookings_page_obj.iter_pages(left_edge=1, left_current=1, right_current=1, right_edge=1) %}
-                {% if page_num %} {# Current item is a page number #}
-                    {% if last_was_page_or_ellipsis %}<li class="page-item disabled"><span class="page-link">,</span></li>{% endif %}
+                {% if not loop.first %}
+                    <li class="page-item disabled"><span class="page-link">,</span></li>
+                {% endif %}
+                {% if page_num %}
                     <li class="page-item {% if page_num == bookings_page_obj.page %}active{% endif %}">
                         <a class="page-link" href="{{ url_for('admin_ui.serve_admin_bookings_page', page=page_num, per_page=per_page, status_filter=current_status_filter) }}">{{ page_num }}</a>
                     </li>
-                    {% set last_was_page_or_ellipsis = true %}
-                {% else %} {# Current item is an ellipsis (None) #}
-                    {% if last_was_page_or_ellipsis %}<li class="page-item disabled"><span class="page-link">,</span></li>{% endif %}
+                {% else %}
                     <li class="page-item disabled"><span class="page-link">...</span></li>
-                    {% set last_was_page_or_ellipsis = true %}
                 {% endif %}
             {% endfor %}
 
