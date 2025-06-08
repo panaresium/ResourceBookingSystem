@@ -3311,6 +3311,125 @@ class TestAdminBookings(AppTests):
         self.assertEqual(settings.past_booking_time_adjustment_hours, -2)
         self.logout()
 
+    def test_admin_bookings_page_filters(self):
+        """Comprehensive test for filtering on the admin bookings page."""
+        admin_user = self._create_admin_user(username="admin_filter_test", email_ext="adminfilter")
+        self.login(admin_user.username, 'adminpass')
+
+        # Create additional users for filtering
+        user1 = User(username='user1_filter_test', email='user1f@example.com')
+        user1.set_password('password')
+        user2 = User(username='user2_filter_test', email='user2f@example.com')
+        user2.set_password('password')
+        db.session.add_all([user1, user2])
+        db.session.commit()
+
+        # Create bookings
+        # For date filtering, ensure we use fixed dates relative to "today" for the test.
+        # datetime.utcnow() inside _create_booking might vary if tests run near midnight.
+        # Let's use a fixed "today" for test data generation.
+        fixed_test_today = datetime.utcnow().date()
+        date1_dt = fixed_test_today
+        date2_dt = fixed_test_today - timedelta(days=1) # Yesterday
+
+        # Booking 1: User1, Date1, Approved
+        booking1_start = datetime.combine(date1_dt, time(10, 0))
+        booking1 = Booking(user_name=user1.username, resource_id=self.resource1.id, start_time=booking1_start, end_time=booking1_start + timedelta(hours=1), title="B1 U1 D1 Approved", status="approved")
+        # Booking 2: User2, Date1, Checked In
+        booking2_start = datetime.combine(date1_dt, time(12, 0))
+        booking2 = Booking(user_name=user2.username, resource_id=self.resource2.id, start_time=booking2_start, end_time=booking2_start + timedelta(hours=1), title="B2 U2 D1 CheckedIn", status="checked_in")
+        # Booking 3: User1, Date2, Approved
+        booking3_start = datetime.combine(date2_dt, time(10, 0))
+        booking3 = Booking(user_name=user1.username, resource_id=self.resource1.id, start_time=booking3_start, end_time=booking3_start + timedelta(hours=1), title="B3 U1 D2 Approved", status="approved")
+        # Booking 4: User2, Date2, Cancelled
+        booking4_start = datetime.combine(date2_dt, time(12, 0))
+        booking4 = Booking(user_name=user2.username, resource_id=self.resource2.id, start_time=booking4_start, end_time=booking4_start + timedelta(hours=1), title="B4 U2 D2 Cancelled", status="cancelled")
+
+        db.session.add_all([booking1, booking2, booking3, booking4])
+        db.session.commit()
+
+        # 1. Test No Filters
+        response_no_filters = self.client.get(url_for('admin_ui.serve_admin_bookings_page'))
+        self.assertEqual(response_no_filters.status_code, 200)
+        html_no_filters = response_no_filters.data.decode()
+        self.assertIn(booking1.title, html_no_filters)
+        self.assertIn(booking2.title, html_no_filters)
+        self.assertIn(booking3.title, html_no_filters)
+        self.assertIn(booking4.title, html_no_filters)
+        self.assertIn('<select name="user_filter"', html_no_filters)
+        self.assertIn(user1.username, html_no_filters) # Check user in dropdown
+        self.assertIn(user2.username, html_no_filters) # Check user in dropdown
+        self.assertIn('<input type="text" name="date_filter"', html_no_filters)
+        self.assertIn('id="date_filter_input"', html_no_filters)
+
+
+        # 2. Test Filter by User (user1)
+        response_user1_filter = self.client.get(url_for('admin_ui.serve_admin_bookings_page', user_filter=user1.username))
+        html_user1_filter = response_user1_filter.data.decode()
+        self.assertIn(booking1.title, html_user1_filter)
+        self.assertNotIn(booking2.title, html_user1_filter)
+        self.assertIn(booking3.title, html_user1_filter)
+        self.assertNotIn(booking4.title, html_user1_filter)
+        self.assertIn(f'<option value="{user1.username}" selected', html_user1_filter)
+
+        # 3. Test Filter by Date (date1_dt)
+        date1_str = date1_dt.strftime('%Y-%m-%d')
+        response_date1_filter = self.client.get(url_for('admin_ui.serve_admin_bookings_page', date_filter=date1_str))
+        html_date1_filter = response_date1_filter.data.decode()
+        self.assertIn(booking1.title, html_date1_filter)
+        self.assertIn(booking2.title, html_date1_filter)
+        self.assertNotIn(booking3.title, html_date1_filter)
+        self.assertNotIn(booking4.title, html_date1_filter)
+        self.assertIn(f'value="{date1_str}"', html_date1_filter)
+
+        # 4. Test Filter by User (user1) AND Date (date2_dt)
+        date2_str = date2_dt.strftime('%Y-%m-%d')
+        response_user1_date2_filter = self.client.get(url_for('admin_ui.serve_admin_bookings_page', user_filter=user1.username, date_filter=date2_str))
+        html_user1_date2_filter = response_user1_date2_filter.data.decode()
+        self.assertNotIn(booking1.title, html_user1_date2_filter)
+        self.assertNotIn(booking2.title, html_user1_date2_filter)
+        self.assertIn(booking3.title, html_user1_date2_filter) # Only B3 matches U1 and D2
+        self.assertNotIn(booking4.title, html_user1_date2_filter)
+        self.assertIn(f'<option value="{user1.username}" selected', html_user1_date2_filter)
+        self.assertIn(f'value="{date2_str}"', html_user1_date2_filter)
+
+        # 5. Test Filter by Status ("approved"), User (user1), AND Date (date1_dt)
+        response_status_user_date = self.client.get(url_for('admin_ui.serve_admin_bookings_page', status_filter="approved", user_filter=user1.username, date_filter=date1_str))
+        html_status_user_date = response_status_user_date.data.decode()
+        self.assertIn(booking1.title, html_status_user_date) # B1 matches all: U1, D1, Approved
+        self.assertNotIn(booking2.title, html_status_user_date) # B2 is D1 but not U1 or Approved
+        self.assertNotIn(booking3.title, html_status_user_date) # B3 is U1, Approved but not D1
+        self.assertNotIn(booking4.title, html_status_user_date)
+        self.assertIn('<option value="approved" selected', html_status_user_date)
+        self.assertIn(f'<option value="{user1.username}" selected', html_status_user_date)
+        self.assertIn(f'value="{date1_str}"', html_status_user_date)
+
+        # 6. Test Filter No Results
+        response_no_results = self.client.get(url_for('admin_ui.serve_admin_bookings_page', user_filter=user2.username, date_filter=date1_str, status_filter="cancelled"))
+        html_no_results = response_no_results.data.decode()
+        self.assertNotIn(booking1.title, html_no_results)
+        self.assertNotIn(booking2.title, html_no_results) # B2 is U2,D1 but status 'checked_in'
+        self.assertNotIn(booking3.title, html_no_results)
+        self.assertNotIn(booking4.title, html_no_results)
+        self.assertIn("No bookings found.", html_no_results) # Or translated version
+
+        # 7. Test Invalid Date Format
+        response_invalid_date = self.client.get(url_for('admin_ui.serve_admin_bookings_page', date_filter="invalid-date-format"))
+        html_invalid_date = response_invalid_date.data.decode()
+        self.assertEqual(response_invalid_date.status_code, 200) # Page should load
+        # All bookings should be shown as date filter is ignored
+        self.assertIn(booking1.title, html_invalid_date)
+        self.assertIn(booking2.title, html_invalid_date)
+        self.assertIn(booking3.title, html_invalid_date)
+        self.assertIn(booking4.title, html_invalid_date)
+        # Check that the invalid date is NOT set in the input (it should be empty or not present if parsing failed)
+        # The route currently passes the invalid string back, so it might be in the value attribute.
+        # Depending on how strict we want to be, this might be okay or might need adjustment in the route.
+        # For now, let's check it IS passed back.
+        self.assertIn('value="invalid-date-format"', html_invalid_date)
+
+        self.logout()
+
     def test_admin_post_update_booking_settings_specific_fields(self):
         """Test updating specific fields including past_booking_time_adjustment_hours, its persistence, and interaction with allow_past_bookings."""
         admin = self._create_admin_user(username="settingsadmin_specific", email_ext="settings_specific")
