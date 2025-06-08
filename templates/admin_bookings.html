@@ -125,11 +125,11 @@
         <ul class="pagination justify-content-center">
             {# Previous Page Link #}
             <li class="page-item {% if not bookings_page_obj.has_prev %}disabled{% endif %}">
-                <a class="page-link" href="{% if bookings_page_obj.has_prev %}{{ url_for('admin_ui.serve_admin_bookings_page', page=bookings_page_obj.prev_num, per_page=per_page, status_filter=current_status_filter if current_status_filter else None) }}{% else %}#__{% endif %}">{{ _('Previous') }}</a>
+                <a class="page-link" href="{% if bookings_page_obj.has_prev %}{{ url_for('admin_ui.serve_admin_bookings_page', page=bookings_page_obj.prev_num, per_page=per_page, status_filter=current_status_filter if current_status_filter else None) }}{% else %}#__{% endif %}">&laquo;</a>
             </li>
 
             {# Page Numbers #}
-            {% for page_num in bookings_page_obj.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+            {% for page_num in bookings_page_obj.iter_pages(left_edge=1, left_current=2, right_current=3, right_edge=1) %}
                 {% if page_num %}
                     <li class="page-item {% if page_num == bookings_page_obj.page %}active{% endif %}">
                         <a class="page-link" href="{{ url_for('admin_ui.serve_admin_bookings_page', page=page_num, per_page=per_page, status_filter=current_status_filter if current_status_filter else None) }}">{{ page_num }}</a>
@@ -141,7 +141,7 @@
 
             {# Next Page Link #}
             <li class="page-item {% if not bookings_page_obj.has_next %}disabled{% endif %}">
-                <a class="page-link" href="{% if bookings_page_obj.has_next %}{{ url_for('admin_ui.serve_admin_bookings_page', page=bookings_page_obj.next_num, per_page=per_page, status_filter=current_status_filter if current_status_filter else None) }}{% else %}#__{% endif %}">{{ _('Next') }}</a>
+                <a class="page-link" href="{% if bookings_page_obj.has_next %}{{ url_for('admin_ui.serve_admin_bookings_page', page=bookings_page_obj.next_num, per_page=per_page, status_filter=current_status_filter if current_status_filter else None) }}{% else %}#__{% endif %}">&raquo;</a>
             </li>
         </ul>
     </nav>
@@ -313,5 +313,37 @@ document.addEventListener('DOMContentLoaded', function() {
     // dismissButton.addEventListener('click', dismissAdminMessageHandler);
 });
 </script>
+{% endblock %}
 
+{% block scripts %}
+{{ super() }}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const adminTable = document.getElementById('admin-bookings-table');
+    const paginationLinks = document.querySelectorAll('.pagination .page-link');
+    const perPageSelectors = document.querySelectorAll('select[name="per_page"]');
+
+    // Check if we should scroll (e.g., after a pagination action)
+    if (sessionStorage.getItem('adminBookingsScrollTop') === 'true' && adminTable) {
+        adminTable.scrollIntoView({ behavior: 'smooth' });
+        sessionStorage.removeItem('adminBookingsScrollTop');
+    }
+
+    paginationLinks.forEach(function(link) {
+        link.addEventListener('click', function() {
+            // Check if the link is not disabled and not for the current active page
+            if (!link.parentElement.classList.contains('disabled') && !link.parentElement.classList.contains('active')) {
+                sessionStorage.setItem('adminBookingsScrollTop', 'true');
+            }
+        });
+    });
+
+    perPageSelectors.forEach(function(select) {
+        select.addEventListener('change', function() {
+            sessionStorage.setItem('adminBookingsScrollTop', 'true');
+            // The form submits automatically via onchange attribute in the HTML
+        });
+    });
+});
+</script>
 {% endblock %}
