@@ -1423,6 +1423,8 @@ a.fc-daygrid-event.fc-event {
     font-size: 0.8em;
     border-width: 2px;
     border-style: solid;
+    font-weight: bold;
+    text-shadow: 0 0 8px rgba(0, 0, 0, 0.5);
 }
 
 #new-booking-map-container .resource-area.map-area-green {
