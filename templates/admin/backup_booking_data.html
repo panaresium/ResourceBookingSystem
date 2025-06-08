@@ -137,7 +137,33 @@
                     </div>
                 </form>
 
+                <!-- Export All Bookings to CSV Button -->
+                <div class="mb-3">
+                    <a href="{{ url_for('admin_ui.export_bookings_csv') }}" class="btn btn-success">
+                        <i class="fas fa-file-export"></i> {{ _('Export All Bookings to CSV') }}
+                    </a>
+                </div>
+
+                <hr> <!-- Separator -->
+
+                <!-- Import Bookings from CSV Form -->
+                <h5>{{ _('Import Bookings from CSV File') }}</h5>
+                <form method="POST" action="{{ url_for('admin_ui.import_bookings_csv') }}" enctype="multipart/form-data" class="mb-4">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    <div class="form-group">
+                        <label for="csv_file_import">{{ _('Select CSV File to Import:') }}</label>
+                        <input type="file" name="file" id="csv_file_import" class="form-control-file" accept=".csv" required>
+                        <small class="form-text text-muted">{{ _('Ensure the CSV format matches the export format, including the header row.') }}</small>
+                    </div>
+                    <button type="submit" class="btn btn-info mt-2">
+                        <i class="fas fa-file-import"></i> {{ _('Import Bookings from CSV') }}
+                    </button>
+                </form>
+
+                <hr> <!-- Separator -->
+
                 {% if booking_csv_backups and booking_csv_backups|length > 0 %}
+                <h5>{{ _('Available Booking CSV Backups (Legacy)') }}</h5>
                 <table class="table table-striped">
                     <thead>
                         <tr>
