@@ -270,7 +270,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn(`Pagination elements for prefix ${prefix} not found.`);
             return;
         }
-        paginationUl.innerHTML = '';
+        paginationUl.innerHTML = ''; // Clear existing content
 
         const currentStatusFilter = statusFilterSelect ? statusFilterSelect.value : '';
         const currentResourceFilter = resourceNameFilterInput ? resourceNameFilterInput.value : '';
@@ -281,22 +281,23 @@ document.addEventListener('DOMContentLoaded', () => {
              return;
         }
 
-        paginationContainer.style.display = 'flex';
+        paginationContainer.style.display = 'flex'; // Ensure the main container is visible
         totalResultsDisplay.textContent = totalItems > 0 ? `Total: ${totalItems} results` : 'No results for current filter.';
 
-        if (totalPages === 0 || totalPages === 1 && totalItems <= itemsPerPage) {
+        if (totalPages === 0) { // If no pages, display nothing in UL
             paginationUl.style.display = 'none';
             return;
         }
         paginationUl.style.display = 'flex';
 
-        const createPageLink = (page, text, isDisabled = false, isActive = false) => {
+        // 1. "Previous" Link (remains individual li)
+        const createOuterPageLink = (page, text, isDisabled = false) => {
             const li = document.createElement('li');
-            li.className = `page-item ${isDisabled ? 'disabled' : ''} ${isActive ? 'active' : ''}`;
+            li.className = `page-item ${isDisabled ? 'disabled' : ''}`;
             const a = document.createElement('a');
             a.className = 'page-link';
             a.href = '#';
-            a.innerHTML = text;
+            a.innerHTML = text; // Use innerHTML for entities like &lt;
             if (!isDisabled) {
                 a.addEventListener('click', (e) => {
                     e.preventDefault();
@@ -307,43 +308,86 @@ document.addEventListener('DOMContentLoaded', () => {
             li.appendChild(a);
             return li;
         };
+        paginationUl.appendChild(createOuterPageLink(currentPage - 1, '&lt; Previous', currentPage <= 1));
 
-        paginationUl.appendChild(createPageLink(currentPage - 1, '&lt; Previous', currentPage <= 1));
+        // 2. Create a single list item for page numbers
+        if (totalPages > 0) { // Only add page numbers if there are pages
+            const pageNumbersLi = document.createElement('li');
+            pageNumbersLi.className = 'page-item';
 
-        const showPages = 3;
-        let startPage = Math.max(1, currentPage - Math.floor(showPages / 2));
-        let endPage = Math.min(totalPages, startPage + showPages - 1);
-        if (endPage - startPage + 1 < showPages && totalPages >= showPages) {
-            startPage = Math.max(1, endPage - showPages + 1);
-        } else if (totalPages < showPages) {
-            startPage = 1;
-            endPage = totalPages;
-        }
+            const innerSpan = document.createElement('span');
+            innerSpan.className = 'page-link page-numbers-span-container'; // Added new class
+            innerSpan.appendChild(document.createTextNode('['));
 
-        if (startPage > 1) {
-            paginationUl.appendChild(createPageLink(1, '1'));
-            if (startPage > 2) {
-                const ellipsisLi = document.createElement('li');
-                ellipsisLi.className = 'page-item disabled';
-                ellipsisLi.innerHTML = `<span class="page-link">&hellip;</span>`;
-                paginationUl.appendChild(ellipsisLi);
+            const pageElements = [];
+
+            const showPages = 3;
+            let startPage = Math.max(1, currentPage - Math.floor(showPages / 2));
+            let endPage = Math.min(totalPages, startPage + showPages - 1);
+
+            if (endPage - startPage + 1 < showPages && totalPages >= showPages) {
+                if (currentPage <= Math.ceil(showPages / 2)) {
+                    endPage = Math.min(totalPages, showPages);
+                } else if (currentPage > totalPages - Math.ceil(showPages / 2)) {
+                    startPage = Math.max(1, totalPages - showPages + 1);
+                } else {
+                     startPage = Math.max(1, endPage - showPages + 1);
+                }
+            } else if (totalPages < showPages) {
+                startPage = 1;
+                endPage = totalPages;
             }
-        }
 
-        for (let i = startPage; i <= endPage; i++) {
-            paginationUl.appendChild(createPageLink(i, i, false, i === currentPage));
-        }
+            const createInternalPageLink = (page, textDisplay) => {
+                const a = document.createElement('a');
+                a.href = '#';
+                a.textContent = textDisplay || page;
+                a.className = 'internal-page-link';
+                if (page === currentPage) {
+                    a.classList.add('active-page-link');
+                }
+                a.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (page !== currentPage) {
+                        currentPageSetter(page);
+                        fetchDataFunction();
+                    }
+                });
+                return a;
+            };
 
-        if (endPage < totalPages) {
-            if (endPage < totalPages - 1) {
-                const ellipsisLi = document.createElement('li');
-                ellipsisLi.className = 'page-item disabled';
-                ellipsisLi.innerHTML = `<span class="page-link">&hellip;</span>`;
-                paginationUl.appendChild(ellipsisLi);
+            if (startPage > 1) {
+                pageElements.push(createInternalPageLink(1, '1'));
+                if (startPage > 2) {
+                    pageElements.push(document.createTextNode('...'));
+                }
             }
-            paginationUl.appendChild(createPageLink(totalPages, totalPages));
+
+            for (let i = startPage; i <= endPage; i++) {
+                pageElements.push(createInternalPageLink(i, i.toString()));
+            }
+
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    pageElements.push(document.createTextNode('...'));
+                }
+                pageElements.push(createInternalPageLink(totalPages, totalPages.toString()));
+            }
+
+            pageElements.forEach((el, index) => {
+                innerSpan.appendChild(el);
+                if (index < pageElements.length - 1) {
+                    innerSpan.appendChild(document.createTextNode(', '));
+                }
+            });
+
+            innerSpan.appendChild(document.createTextNode(']'));
+            pageNumbersLi.appendChild(innerSpan);
+            paginationUl.appendChild(pageNumbersLi);
         }
-        paginationUl.appendChild(createPageLink(currentPage + 1, 'Next &gt;', currentPage >= totalPages));
+
+        // 3. "Next" Link (remains individual li)
+        paginationUl.appendChild(createOuterPageLink(currentPage + 1, 'Next &gt;', currentPage >= totalPages));
     }
 
 

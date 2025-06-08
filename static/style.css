@@ -1564,3 +1564,48 @@ div.responsive-table-container > table#admin-bookings-table { /* Admin Bookings 
     /* This will override Bootstrap's me-3 if it's also present due to specificity or order. */
     margin-right: 1.5rem !important; /* Ensuring it overrides me-3 if both are present */
 }
+
+/* Styling for the active page link within the new pagination format */
+.internal-page-link.active-page-link {
+    font-weight: bold;
+    text-decoration: underline;
+    /* Optional: Add a color if desired, but bold/underline is usually enough for active state */
+    /* color: var(--accent-color); */
+}
+
+/* Neutralize styles for the span wrapping page numbers */
+.page-item .page-link.page-numbers-span-container {
+    padding: 0.375rem 0.75rem; /* Match default .page-link padding to keep height consistent */
+    cursor: default;
+    background-color: transparent; /* No background */
+    border-color: transparent; /* No border */
+    /* Inherit text color from parent, or set to a non-link color */
+    color: var(--bs-body-color, inherit); /* Use Bootstrap variable for body color or inherit */
+}
+
+.page-item .page-link.page-numbers-span-container:hover {
+    background-color: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+    color: var(--bs-body-color, inherit) !important; /* Keep text color same on hover */
+}
+
+/* Ensure internal links still look like links and are spaced correctly */
+.page-numbers-span-container .internal-page-link {
+    /* Standard link color, Bootstrap variables can be used if available in :root */
+    color: var(--bs-link-color, #0d6efd);
+    text-decoration: none; /* Usually page links in pagination are not underlined by default */
+    padding: 0 0.15rem; /* Minimal horizontal padding for spacing */
+}
+.page-numbers-span-container .internal-page-link:hover {
+    /* Standard link hover color */
+    color: var(--bs-link-hover-color, #0a58ca);
+    text-decoration: var(--bs-link-hover-decoration, underline);
+}
+
+/* Active page link style is already defined and should take precedence if specific enough:
+.internal-page-link.active-page-link {
+    font-weight: bold;
+    text-decoration: underline;
+}
+*/
