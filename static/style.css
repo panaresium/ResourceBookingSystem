@@ -1534,4 +1534,25 @@ a.fc-daygrid-event.fc-event {
 }
 */
 
-[end of static/style.css]
+/* Ensure Bootstrap pagination items are displayed inline-flex */
+.pagination > .page-item {
+    display: inline-flex;
+}
+
+/* Scrollable Admin Table Containers & My Bookings Sections */
+.admin-table-scroll-wrapper,       /* Resource Management */
+div.responsive-table-container,   /* User Management & Admin Bookings */
+#upcoming-bookings-container,      /* My Bookings */
+#past-bookings-container {          /* My Bookings */
+    max-height: 500px;
+    overflow-y: auto;
+    margin-bottom: 1rem;
+}
+
+/* Ensure tables within specific admin scrollable wrappers behave correctly */
+.admin-table-scroll-wrapper > table,
+div.responsive-table-container > table#users-table, /* User Management */
+div.responsive-table-container > table#admin-bookings-table { /* Admin Bookings */
+    width: 100%;
+}
+
