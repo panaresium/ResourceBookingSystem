@@ -24,7 +24,190 @@ api_bookings_bp = Blueprint('api_bookings', __name__, url_prefix='/api')
 def init_api_bookings_routes(app):
     app.register_blueprint(api_bookings_bp)
 
+# Helper function to fetch and paginate user bookings
+def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_filter, resource_name_filter, logger):
+    """
+    Helper function to fetch, filter, sort, and paginate bookings for a user.
+    """
+    try:
+        booking_settings = BookingSettings.query.first()
+        enable_check_in_out = booking_settings.enable_check_in_out if booking_settings else False
+        check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings else 15
+        check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings else 15
+        if not booking_settings:
+            logger.warning("BookingSettings not found, using default check-in window for _fetch_user_bookings_data.")
+
+        base_query = Booking.query.filter_by(user_name=user_name)
+
+        if status_filter and status_filter.lower() != 'all' and status_filter.lower() != '':
+            base_query = base_query.filter(
+                sqlfunc.trim(sqlfunc.lower(Booking.status)) == status_filter.lower()
+            )
+
+        if resource_name_filter:
+            base_query = base_query.join(Resource).filter(Resource.name.ilike(f"%{resource_name_filter}%"))
+
+        all_user_bookings_from_db = base_query.all()
+
+        relevant_bookings_dicts = []
+        now_utc = datetime.now(timezone.utc)
+
+        for booking in all_user_bookings_from_db:
+            resource = Resource.query.get(booking.resource_id)
+            resource_name = resource.name if resource else "Unknown Resource"
+
+            booking_start_time_aware = booking.start_time
+            if booking_start_time_aware.tzinfo is None:
+                booking_start_time_aware = booking_start_time_aware.replace(tzinfo=timezone.utc)
+
+            is_upcoming = booking_start_time_aware >= now_utc
+
+            if (booking_type == 'upcoming' and not is_upcoming) or \
+               (booking_type == 'past' and is_upcoming):
+                continue # Skip if not matching the requested type
+
+            can_check_in = (
+                enable_check_in_out and
+                booking.checked_in_at is None and
+                booking.status == 'approved' and
+                (booking_start_time_aware - timedelta(minutes=check_in_minutes_before) <= now_utc <=
+                 booking_start_time_aware + timedelta(minutes=check_in_minutes_after))
+            )
+
+            display_check_in_token = None
+            if booking.check_in_token and booking.checked_in_at is None and booking.status == 'approved':
+                token_expires_at_aware = booking.check_in_token_expires_at
+                if token_expires_at_aware and token_expires_at_aware.tzinfo is None:
+                    token_expires_at_aware = token_expires_at_aware.replace(tzinfo=timezone.utc)
+
+                booking_end_time_aware = booking.end_time
+                if booking_end_time_aware.tzinfo is None:
+                    booking_end_time_aware = booking_end_time_aware.replace(tzinfo=timezone.utc)
+
+                if token_expires_at_aware and token_expires_at_aware > now_utc and booking_end_time_aware > now_utc:
+                    display_check_in_token = booking.check_in_token
+
+            pin_required_for_resource = resource.pin_required_for_check_in if resource else False
+            pin_set_for_booking = booking.pin is not None and booking.pin != ""
+
+
+            booking_dict = {
+                'id': booking.id,
+                'resource_id': booking.resource_id,
+                'resource_name': resource_name,
+                'user_name': booking.user_name,
+                'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
+                'end_time': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
+                'title': booking.title,
+                'status': booking.status,
+                'recurrence_rule': booking.recurrence_rule,
+                'admin_deleted_message': booking.admin_deleted_message,
+                'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else None,
+                'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else None,
+                'can_check_in': can_check_in,
+                'check_in_token': display_check_in_token, # For QR code link primarily
+                'pin': booking.pin if pin_set_for_booking and enable_check_in_out else None, # Display PIN if set and check-in enabled
+                'pin_required_for_resource': pin_required_for_resource, # Inform frontend if resource generally requires PIN
+            }
+            relevant_bookings_dicts.append(booking_dict)
+
+        # Sort based on booking_type
+        if booking_type == 'upcoming':
+            relevant_bookings_dicts.sort(key=lambda b: b['start_time'])
+        else: # past
+            relevant_bookings_dicts.sort(key=lambda b: b['start_time'], reverse=True)
+
+        total_items = len(relevant_bookings_dicts)
+        total_pages = (total_items + per_page - 1) // per_page if per_page > 0 else 0
+        if total_pages == 0 and total_items > 0: total_pages = 1 # Ensure at least one page if items exist
+
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated_bookings = relevant_bookings_dicts[start_idx:end_idx]
+
+        pagination_info = {
+            'current_page': page,
+            'per_page': per_page,
+            'total_items': total_items,
+            'total_pages': total_pages,
+        }
+
+        return paginated_bookings, pagination_info, enable_check_in_out
+
+    except Exception as e:
+        logger.exception(f"Error in _fetch_user_bookings_data for user {user_name}, type {booking_type}: {e}")
+        raise # Re-raise to be caught by the calling route
+
+
 # API Routes will be added below this line
+
+@api_bookings_bp.route('/bookings/upcoming', methods=['GET'])
+@login_required
+def get_upcoming_bookings():
+    logger = current_app.logger
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', current_app.config.get('DEFAULT_ITEMS_PER_PAGE', 5), type=int)
+        status_filter = request.args.get('status_filter')
+        resource_name_filter = request.args.get('resource_name_filter')
+
+        my_bookings_per_page_options = current_app.config.get('MY_BOOKINGS_ITEMS_PER_PAGE_OPTIONS', [5, 10, 25, 50])
+        if per_page not in my_bookings_per_page_options:
+             per_page = my_bookings_per_page_options[0]
+
+
+        paginated_bookings, pagination_info, check_in_out_enabled = _fetch_user_bookings_data(
+            current_user.username, 'upcoming', page, per_page, status_filter, resource_name_filter, logger
+        )
+
+        pagination_info['per_page_options'] = my_bookings_per_page_options
+
+
+        logger.info(f"User '{current_user.username}' fetched UPCOMING bookings. Page {page}/{pagination_info['total_pages']}, Items {len(paginated_bookings)}/{pagination_info['total_items']}.")
+        return jsonify({
+            'success': True,
+            'bookings': paginated_bookings,
+            'pagination': pagination_info,
+            'check_in_out_enabled': check_in_out_enabled
+        }), 200
+
+    except Exception as e:
+        logger.exception(f"Error fetching UPCOMING bookings for user '{current_user.username}': {e}")
+        return jsonify({'success': False, 'error': 'Failed to fetch upcoming bookings due to a server error.'}), 500
+
+
+@api_bookings_bp.route('/bookings/past', methods=['GET'])
+@login_required
+def get_past_bookings():
+    logger = current_app.logger
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', current_app.config.get('DEFAULT_ITEMS_PER_PAGE', 5), type=int)
+        status_filter = request.args.get('status_filter')
+        resource_name_filter = request.args.get('resource_name_filter')
+
+        my_bookings_per_page_options = current_app.config.get('MY_BOOKINGS_ITEMS_PER_PAGE_OPTIONS', [5, 10, 25, 50])
+        if per_page not in my_bookings_per_page_options:
+             per_page = my_bookings_per_page_options[0]
+
+        paginated_bookings, pagination_info, check_in_out_enabled = _fetch_user_bookings_data(
+            current_user.username, 'past', page, per_page, status_filter, resource_name_filter, logger
+        )
+
+        pagination_info['per_page_options'] = my_bookings_per_page_options
+
+        logger.info(f"User '{current_user.username}' fetched PAST bookings. Page {page}/{pagination_info['total_pages']}, Items {len(paginated_bookings)}/{pagination_info['total_items']}.")
+        return jsonify({
+            'success': True,
+            'bookings': paginated_bookings,
+            'pagination': pagination_info,
+            'check_in_out_enabled': check_in_out_enabled
+        }), 200
+
+    except Exception as e:
+        logger.exception(f"Error fetching PAST bookings for user '{current_user.username}': {e}")
+        return jsonify({'success': False, 'error': 'Failed to fetch past bookings due to a server error.'}), 500
+
 
 @api_bookings_bp.route('/bookings', methods=['POST'])
 @login_required
@@ -359,10 +542,9 @@ def get_my_bookings():
             }
 
             if booking_start_time_aware >= now_utc:
-                upcoming_bookings_data.append(booking_dict)
                 all_upcoming_bookings_dicts.append(booking_dict)
             else:
-                past_bookings_data.append(booking_dict)
+                all_past_bookings_dicts.append(booking_dict)
 
         # Sort before pagination
         all_upcoming_bookings_dicts.sort(key=lambda b: b['start_time'])
