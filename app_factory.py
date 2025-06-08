@@ -316,8 +316,9 @@ def create_app(config_object=config, testing=False): # Added testing parameter
         @app.before_request
         def ensure_sqlite_configured_wrapper():
            # Also check if not testing here, and URI starts with sqlite
-           if not current_app.config.get('TESTING', False) and \
-              current_app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite'):
+           # Use 'app.config' from the closure instead of 'current_app.config'
+           if not app.config.get('TESTING', False) and \
+              app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite'):
                _ensure_sqlite_configured_factory_hook(app, db)
 
     # 5. Register i18n
