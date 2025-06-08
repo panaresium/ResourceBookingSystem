@@ -35,6 +35,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const userApplyFiltersBtn = document.getElementById('user-apply-filters-btn');
     const userClearFiltersBtn = document.getElementById('user-clear-filters-btn');
 
+    let currentUsersPage = 1;
+    let usersItemsPerPage = 10; // Default items per page
+
     // New Bulk Operations Elements
     const bulkAddUsersBtn = document.getElementById('bulk-add-users-btn');
     const bulkAddUsersModal = document.getElementById('bulk-add-users-modal');
@@ -84,22 +87,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
     }
 
-    async function fetchAndDisplayUsers(filters = {}) {
+    async function fetchAndDisplayUsers() { // filters = {} removed, uses global currentFilters, currentUsersPage, usersItemsPerPage
         if (!usersTableBody) return;
         showLoading(userManagementStatusDiv, 'Fetching users...');
         try {
-            let queryParams = [];
-            const activeFilters = Object.keys(filters).length > 0 ? filters : currentFilters;
-            if (activeFilters.username) queryParams.push(`username_filter=${encodeURIComponent(activeFilters.username)}`);
-            if (activeFilters.isAdmin !== undefined && activeFilters.isAdmin !== '') queryParams.push(`is_admin=${activeFilters.isAdmin}`);
-            const queryString = queryParams.length ? `?${queryParams.join('&')}` : '';
+            const params = new URLSearchParams();
+            params.append('page', currentUsersPage);
+            params.append('per_page', usersItemsPerPage);
 
-            const users = await apiCall(`/api/admin/users${queryString}`); // Assumes apiCall is global
-            localUsersCache = users; // Store for local use (e.g., populating edit form)
+            if (currentFilters.username) params.append('username_filter', currentFilters.username);
+            if (currentFilters.isAdmin !== undefined && currentFilters.isAdmin !== '') params.append('is_admin', currentFilters.isAdmin);
+            // Add other filters like role_id if implemented
+            // if (currentFilters.roleId) params.append('role_id', currentFilters.roleId);
+
+            const data = await apiCall(`/api/admin/users?${params.toString()}`);
+
+            localUsersCache = data.users || []; // Update cache with current page's users
             
             usersTableBody.innerHTML = ''; // Clear existing rows
-            if (users && users.length > 0) {
-                users.forEach(user => {
+            if (data.users && data.users.length > 0) {
+                data.users.forEach(user => {
                     const row = usersTableBody.insertRow();
                     const selectCell = row.insertCell();
                     selectCell.innerHTML = `<input type="checkbox" class="select-user-checkbox" data-user-id="${user.id}">`;
@@ -107,7 +114,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     row.insertCell().textContent = user.username;
                     row.insertCell().textContent = user.email;
                     row.insertCell().textContent = user.is_admin ? 'Yes' : 'No';
-                    row.insertCell().textContent = user.roles.map(role => role.name).join(', ') || 'N/A'; // Display roles
+                    row.insertCell().textContent = user.roles.map(role => role.name).join(', ') || 'N/A';
                     row.insertCell().textContent = user.google_id ? 'Yes' : 'No';
 
                     const actionsCell = row.insertCell();
@@ -121,20 +128,223 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 hideMessage(userManagementStatusDiv);
             } else {
-                usersTableBody.innerHTML = '<tr><td colspan="7">No users found.</td></tr>';
-                showSuccess(userManagementStatusDiv, 'No users to display.');
+                usersTableBody.innerHTML = '<tr><td colspan="8">No users found matching your criteria.</td></tr>'; // Colspan updated
+                showSuccess(userManagementStatusDiv, 'No users to display for the current page/filters.');
             }
+            renderUserPagination(data.pagination);
         } catch (error) {
             showError(userManagementStatusDiv, `Error fetching users: ${error.message}`);
-            localUsersCache = []; // Clear cache on error
+            localUsersCache = [];
+            renderUserPagination(null); // Clear pagination on error
         }
     }
+
+    function renderUserPagination(paginationData) {
+        const controlsContainer = document.getElementById('user-pagination-controls');
+        if (!controlsContainer) return;
+        controlsContainer.innerHTML = '';
+
+        if (!paginationData || paginationData.total_pages <= 0) {
+            controlsContainer.style.display = 'none';
+            return;
+        }
+        controlsContainer.style.display = 'block';
+
+        const navElement = document.createElement('nav');
+        navElement.className = 'mt-4';
+        navElement.setAttribute('aria-label', 'Users pagination');
+
+        const ulElement = document.createElement('ul');
+        ulElement.className = 'pagination justify-content-center';
+
+        // Items Per Page Selector
+        const itemsPerPageLi = document.createElement('li');
+        itemsPerPageLi.className = 'page-item disabled';
+        const form = document.createElement('form');
+        form.className = 'd-flex align-items-center';
+        const label = document.createElement('label');
+        label.className = 'visually-hidden me-2';
+        label.setAttribute('for', 'per_page_select_user_pagination');
+        label.textContent = 'Items per page:';
+        form.appendChild(label);
+        const select = document.createElement('select');
+        select.className = 'form-select form-select-sm me-2';
+        select.name = 'per_page';
+        select.id = 'per_page_select_user_pagination';
+        select.style.width = 'auto';
+        const perPageOptions = [10, 25, 50, 100];
+        perPageOptions.forEach(num => {
+            const option = document.createElement('option');
+            option.value = num;
+            option.textContent = num;
+            if (num === usersItemsPerPage) option.selected = true;
+            select.appendChild(option);
+        });
+        select.addEventListener('change', function() {
+            usersItemsPerPage = parseInt(this.value, 10);
+            currentUsersPage = 1;
+            fetchAndDisplayUsers();
+        });
+        form.appendChild(select);
+        itemsPerPageLi.appendChild(form);
+        ulElement.appendChild(itemsPerPageLi);
+
+        if (paginationData.total_pages <= 1 && paginationData.total_items > 0) {
+            const p = document.createElement('p');
+            p.className = 'text-center text-muted small mt-2';
+            p.textContent = `Total items: ${paginationData.total_items}`;
+            navElement.appendChild(ulElement); // Add ul first
+            navElement.appendChild(p);       // Then add paragraph
+            controlsContainer.appendChild(navElement);
+            return;
+        }
+         if (paginationData.total_pages <= 1) { // Handles 0 or 1 page where no nav needed beyond selector
+            navElement.appendChild(ulElement);
+            controlsContainer.appendChild(navElement);
+            return;
+        }
+
+
+        // Blank Separator
+        const liSep1 = document.createElement('li');
+        liSep1.className = 'page-item disabled';
+        const spanSep1 = document.createElement('span');
+        spanSep1.className = 'page-link';
+        spanSep1.style.paddingLeft = '1em';
+        liSep1.appendChild(spanSep1);
+        ulElement.appendChild(liSep1);
+
+        // Previous Icon Link
+        const liPrev = document.createElement('li');
+        liPrev.className = 'page-item' + (paginationData.page === 1 ? ' disabled' : '');
+        const aPrev = document.createElement('a');
+        aPrev.className = 'page-link';
+        aPrev.href = '#';
+        aPrev.innerHTML = '&laquo;';
+        if (paginationData.page > 1) {
+            aPrev.addEventListener('click', (e) => { e.preventDefault(); handleUserPageClick(paginationData.page - 1); });
+        }
+        liPrev.appendChild(aPrev);
+        ulElement.appendChild(liPrev);
+
+        // Opening Bracket
+        const liOpenBracket = document.createElement('li');
+        liOpenBracket.className = 'page-item disabled';
+        const spanOpenBracket = document.createElement('span');
+        spanOpenBracket.className = 'page-link';
+        spanOpenBracket.textContent = '[';
+        liOpenBracket.appendChild(spanOpenBracket);
+        ulElement.appendChild(liOpenBracket);
+
+        // Page Numbers and Commas
+        function createCommaLi() {
+            const li = document.createElement('li');
+            li.className = 'page-item disabled';
+            const span = document.createElement('span');
+            span.className = 'page-link';
+            span.textContent = ',';
+            li.appendChild(span);
+            return li;
+        }
+
+        let isFirstElementInSequence = true;
+        const totalPages = paginationData.total_pages;
+        const currentDisplayPage = paginationData.page;
+
+        const pagesToShow = new Set();
+        pagesToShow.add(1);
+        pagesToShow.add(totalPages);
+        if (currentDisplayPage > 1) pagesToShow.add(currentDisplayPage - 1);
+        pagesToShow.add(currentDisplayPage);
+        if (currentDisplayPage < totalPages) pagesToShow.add(currentDisplayPage + 1);
+
+        const sortedPages = Array.from(pagesToShow).sort((a, b) => a - b);
+        let lastPageShown = 0;
+
+        sortedPages.forEach(p => {
+            if (p < 1 || p > totalPages) return;
+
+            if (p > lastPageShown + 1 && p !== 1 && lastPageShown !== 0) {
+                 if (!isFirstElementInSequence) ulElement.appendChild(createCommaLi());
+                 const liEllipsis = document.createElement('li');
+                 liEllipsis.className = 'page-item disabled';
+                 const spanEllipsis = document.createElement('span');
+                 spanEllipsis.className = 'page-link';
+                 spanEllipsis.textContent = '...';
+                 liEllipsis.appendChild(spanEllipsis);
+                 ulElement.appendChild(liEllipsis);
+                 isFirstElementInSequence = false;
+            }
+
+            if (p > lastPageShown) {
+                if (!isFirstElementInSequence) ulElement.appendChild(createCommaLi());
+                const liPage = document.createElement('li');
+                liPage.className = 'page-item' + (p === currentDisplayPage ? ' active' : '');
+                const aPage = document.createElement('a');
+                aPage.className = 'page-link';
+                aPage.href = '#';
+                aPage.textContent = p;
+                aPage.addEventListener('click', (e) => { e.preventDefault(); handleUserPageClick(p); });
+                liPage.appendChild(aPage);
+                ulElement.appendChild(liPage);
+                isFirstElementInSequence = false;
+                lastPageShown = p;
+            }
+        });
+
+        // Closing Bracket
+        const liCloseBracket = document.createElement('li');
+        liCloseBracket.className = 'page-item disabled';
+        const spanCloseBracket = document.createElement('span');
+        spanCloseBracket.className = 'page-link';
+        spanCloseBracket.textContent = ']';
+        liCloseBracket.appendChild(spanCloseBracket);
+        ulElement.appendChild(liCloseBracket);
+
+        // Next Icon Link
+        const liNext = document.createElement('li');
+        liNext.className = 'page-item' + (paginationData.page === totalPages ? ' disabled' : '');
+        const aNext = document.createElement('a');
+        aNext.className = 'page-link';
+        aNext.href = '#';
+        aNext.innerHTML = '&raquo;';
+        if (paginationData.page < totalPages) {
+            aNext.addEventListener('click', (e) => { e.preventDefault(); handleUserPageClick(paginationData.page + 1); });
+        }
+        liNext.appendChild(aNext);
+        ulElement.appendChild(liNext);
+
+        // Final Blank Separator
+        const liSep2 = document.createElement('li');
+        liSep2.className = 'page-item disabled';
+        const spanSep2 = document.createElement('span');
+        spanSep2.className = 'page-link';
+        spanSep2.style.paddingLeft = '1em';
+        liSep2.appendChild(spanSep2);
+        ulElement.appendChild(liSep2);
+
+        navElement.appendChild(ulElement);
+
+        const pTotal = document.createElement('p');
+        pTotal.className = 'text-center text-muted small mt-2';
+        pTotal.textContent = `Page ${currentDisplayPage} of ${totalPages}. Total items: ${paginationData.total_items}`;
+        navElement.appendChild(pTotal);
+
+        controlsContainer.appendChild(navElement);
+    }
+
+    function handleUserPageClick(newPageNum) {
+        currentUsersPage = newPageNum;
+        fetchAndDisplayUsers(); // Uses global currentFilters
+    }
+
 
     if (userApplyFiltersBtn) {
         userApplyFiltersBtn.addEventListener('click', () => {
             currentFilters.username = userFilterUsernameInput.value.trim();
             currentFilters.isAdmin = userFilterAdminSelect.value;
-            fetchAndDisplayUsers(currentFilters);
+            currentUsersPage = 1; // Reset to first page
+            fetchAndDisplayUsers();
         });
     }
 
@@ -142,8 +352,9 @@ document.addEventListener('DOMContentLoaded', function() {
         userClearFiltersBtn.addEventListener('click', () => {
             if (userFilterUsernameInput) userFilterUsernameInput.value = '';
             if (userFilterAdminSelect) userFilterAdminSelect.value = '';
-            currentFilters = {};
-            fetchAndDisplayUsers(currentFilters);
+            currentFilters = { username: '', isAdmin: ''}; // Reset filters
+            currentUsersPage = 1; // Reset to first page
+            fetchAndDisplayUsers();
         });
     }
 
