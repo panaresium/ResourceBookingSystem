@@ -1675,3 +1675,8 @@ ul.pagination.align-items-baseline > li.page-item {
        For example, ensuring they all have a consistent top/bottom reference.
     */
 }
+
+/* Ensure ul.pagination spans full width for ms-auto to work on children */
+ul.pagination.d-flex {
+    width: 100%;
+}
