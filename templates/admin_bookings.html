@@ -43,9 +43,10 @@
             </select>
         </div>
 
-        <div>
+        <div style="display: flex; align-items: center;"> {# Added a wrapper div for date input and reset button for alignment #}
             <label for="date_filter_input" style="margin-right: 5px; font-weight: bold;">{{ _('Filter by Date:') }}</label>
             <input type="text" name="date_filter" id="date_filter_input" value="{{ current_date_filter if current_date_filter else '' }}" placeholder="YYYY-MM-DD" style="padding: 5px; border-radius: 3px; border: 1px solid #ced4da;">
+            <button type="button" id="reset_date_filter" class="btn btn-sm btn-outline-secondary" style="margin-left: 5px;">{{ _('Reset') }}</button>
         </div>
 
         {# Optional: A submit button if onchange is not desired for all fields, or as a fallback #}
@@ -116,21 +117,35 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize Flatpickr for the date filter input
     const dateFilterInput = document.getElementById('date_filter_input');
+    let fpInstance = null; // Declare fpInstance in a scope accessible to reset button
     if (dateFilterInput) {
-        flatpickr(dateFilterInput, {
+        fpInstance = flatpickr(dateFilterInput, { // Assign to fpInstance
             dateFormat: "Y-m-d", // Backend format
             altInput: true,      // Show user-friendly format
             altFormat: "F j, Y", // User-friendly format (e.g., March 10, 2024)
             allowInput: true,    // Allow manual typing
             enableTime: false,   // Date only, no time
             onChange: function(selectedDates, dateStr, instance) {
-                // Trigger form submission when a date is picked
-                // Ensure the original input (hidden by altInput) has the correct value
-                if (instance.input.form) {
-                    instance.input.form.submit();
+                // Trigger form submission when a date is picked or cleared by flatpickr
+                if (dateFilterInput.form) { // Use dateFilterInput to access form
+                    dateFilterInput.form.submit();
                 }
             }
         });
+
+        const resetDateButton = document.getElementById('reset_date_filter');
+        if (resetDateButton && fpInstance) { // Check if fpInstance is not null
+            resetDateButton.addEventListener('click', function() {
+                dateFilterInput.value = ''; // Clear the actual input value first
+                fpInstance.clear();      // Clear flatpickr's date; this should trigger its onChange if value was present
+                                         // and form was submitted.
+                                         // If fpInstance.clear() does not trigger onChange when input is already empty,
+                                         // or if we need to ensure submission even if it was already empty:
+                if (dateFilterInput.form) {
+                    dateFilterInput.form.submit(); // Explicitly submit the form
+                }
+            });
+        }
     }
 
     document.querySelectorAll('.delete-booking-btn').forEach(button => {

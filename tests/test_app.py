@@ -3428,6 +3428,45 @@ class TestAdminBookings(AppTests):
         # For now, let's check it IS passed back.
         self.assertIn('value="invalid-date-format"', html_invalid_date)
 
+        # --- Test Reset Date Filter (after only date filter was active) ---
+        # This follows from step 3 (Test Filter by Date) where date1_str was applied
+        response_reset_date_only = self.client.get(url_for('admin_ui.serve_admin_bookings_page')) # No query params
+        html_reset_date_only = response_reset_date_only.data.decode()
+        # Check date input is empty
+        self.assertIn('name="date_filter" value=""', html_reset_date_only)
+        # All bookings should be visible again (same as no_filters state)
+        self.assertIn(booking1.title, html_reset_date_only)
+        self.assertIn(booking2.title, html_reset_date_only)
+        self.assertIn(booking3.title, html_reset_date_only)
+        self.assertIn(booking4.title, html_reset_date_only)
+
+
+        # --- Test Reset Date Filter (when user_filter was also active) ---
+        # This follows from step 5 (Test Filter by Status, User, Date)
+        # Let's set up a state with user_filter and date_filter first
+        response_user_date_active = self.client.get(url_for('admin_ui.serve_admin_bookings_page', user_filter=user1.username, date_filter=date1_str))
+        html_user_date_active = response_user_date_active.data.decode()
+        self.assertIn(booking1.title, html_user_date_active) # B1 (U1, D1, Approved)
+        self.assertNotIn(booking2.title, html_user_date_active) # B2 (U2, D1, CheckedIn)
+        self.assertNotIn(booking3.title, html_user_date_active) # B3 (U1, D2, Approved)
+        self.assertIn(f'value="{date1_str}"', html_user_date_active) # Date is set
+        self.assertIn(f'<option value="{user1.username}" selected', html_user_date_active) # User is set
+        self.assertIn('id="reset_date_filter"', html_user_date_active) # Reset button is present
+
+        # Now, simulate reset: only user_filter remains
+        response_reset_date_with_user = self.client.get(url_for('admin_ui.serve_admin_bookings_page', user_filter=user1.username))
+        html_reset_date_with_user = response_reset_date_with_user.data.decode()
+        # Check date input is empty
+        self.assertIn('name="date_filter" value=""', html_reset_date_with_user)
+        # User filter should still be active
+        self.assertIn(f'<option value="{user1.username}" selected', html_reset_date_with_user)
+        # Bookings for user1 on ALL dates should now appear
+        self.assertIn(booking1.title, html_reset_date_with_user) # B1 (U1, D1)
+        self.assertIn(booking3.title, html_reset_date_with_user) # B3 (U1, D2)
+        # Bookings for user2 should not appear
+        self.assertNotIn(booking2.title, html_reset_date_with_user)
+        self.assertNotIn(booking4.title, html_reset_date_with_user)
+
         self.logout()
 
     def test_admin_post_update_booking_settings_specific_fields(self):
