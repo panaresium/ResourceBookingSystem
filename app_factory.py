@@ -127,71 +127,78 @@ def load_booking_csv_schedule_settings(app):
             return default_settings
     return default_settings
 
-def create_app(config_object=config):
+def create_app(config_object=config, testing=False): # Added testing parameter
     app = Flask(__name__, template_folder='templates', static_folder='static')
     # Corrected template_folder and static_folder paths assuming app_factory.py is in root.
     # If app_factory is in a sub-directory, these might need adjustment (e.g. app.Flask('instance', ...))
 
     # 1. Load Configuration
     app.config.from_object(config_object)
-    # Initialize DB early for startup restore if needed
+
+    if testing:
+        app.config['TESTING'] = True
+        app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('TEST_DATABASE_URL', 'sqlite:///:memory:')
+        app.config['WTF_CSRF_ENABLED'] = False
+        app.config['LOGIN_DISABLED'] = True # Custom flag for decorators
+        app.config['SCHEDULER_ENABLED'] = False # Disable scheduler during tests
+        app.config['MAIL_SUPPRESS_SEND'] = True # Suppress emails
+        app.config['SERVER_NAME'] = 'localhost.test' # For url_for in tests without active request context
+
+    # Initialize DB early
     db.init_app(app)
 
-    # Ensure UPLOAD_FOLDER and other paths from config are created if not existing
-    # This logic was in app.py; it's better here or in config.py itself.
-    # config.py now handles directory creation, so this might be redundant.
-    # However, double-checking critical folders controlled by app.config is fine.
-    if not os.path.exists(app.config['DATA_DIR']): # From config.py
+    if testing:
+        # EXTREMELY MINIMAL SETUP FOR TESTING when create_app(testing=True)
+        app.logger.setLevel(logging.DEBUG)
+        if not app.logger.hasHandlers():
+            app.logger.addHandler(logging.StreamHandler())
+        app.logger.info("Flask app CREATED in EXTREMELY MINIMAL testing mode.")
+        # Skip almost all other initializations for this specific test run
+        return app # Return early for minimal test
+
+    # Conditional setup for non-testing vs testing (this block is now only for non-testing)
+    # Production or non-testing development setup for DATA_DIR and specific configs
+    if not os.path.exists(app.config['DATA_DIR']):
         os.makedirs(app.config['DATA_DIR'])
-
-    # Load Booking CSV Schedule Settings after DATA_DIR is ensured
     app.config['BOOKING_CSV_SCHEDULE_SETTINGS'] = load_booking_csv_schedule_settings(app)
-    # app.logger.info(f"Loaded Booking CSV Schedule Settings: {app.config['BOOKING_CSV_SCHEDULE_SETTINGS']}") # Moved after logging setup
+    # Note: app.logger is not fully configured yet here, so logging these settings is deferred
 
-    # 2. Initialize Logging
+    # 2. Initialize Logging (this block is now only for non-testing)
+    # Full logging setup for production/development
+    default_log_level_str = 'INFO'
+        log_level_str = os.environ.get('APP_GLOBAL_LOG_LEVEL', default_log_level_str).upper()
+        log_level_map = {
+            'DEBUG': logging.DEBUG, 'INFO': logging.INFO, 'WARNING': logging.WARNING,
+            'ERROR': logging.ERROR, 'CRITICAL': logging.CRITICAL
+        }
+        effective_log_level = log_level_map.get(log_level_str, logging.INFO)
+        root_logger = logging.getLogger()
+        root_logger.setLevel(effective_log_level)
+        if not root_logger.hasHandlers():
+            stream_handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            stream_handler.setFormatter(formatter)
+            root_logger.addHandler(stream_handler)
+            logging.info(f"Root logger configured with level {log_level_str} and a default StreamHandler.")
+        else:
+            logging.info(f"Root logger level set to {log_level_str}. Existing handlers detected.")
 
-    # New: Configure root logger based on environment variable
-    default_log_level_str = 'INFO' # Default if env var is not set or invalid
-    log_level_str = os.environ.get('APP_GLOBAL_LOG_LEVEL', default_log_level_str).upper()
-    log_level_map = {
-        'DEBUG': logging.DEBUG,
-        'INFO': logging.INFO,
-        'WARNING': logging.WARNING,
-        'ERROR': logging.ERROR,
-        'CRITICAL': logging.CRITICAL
-    }
-    effective_log_level = log_level_map.get(log_level_str, logging.INFO) # Default to INFO if invalid string
-
-    root_logger = logging.getLogger()
-    root_logger.setLevel(effective_log_level)
-
-    if not root_logger.hasHandlers():
-        # Add a basic stream handler if no handlers are configured on the root logger
-        # This ensures logs go somewhere (stderr by default)
-        stream_handler = logging.StreamHandler()
-        # You can add a formatter for better log readability, e.g.:
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        stream_handler.setFormatter(formatter)
-        root_logger.addHandler(stream_handler)
-        logging.info(f"Root logger configured with level {log_level_str} and a default StreamHandler because no handlers were present.")
+        app_log_level_config = app.config.get('LOG_LEVEL', default_log_level_str).upper()
+        app_effective_log_level = log_level_map.get(app_log_level_config, logging.INFO)
+        app.logger.setLevel(app_effective_log_level)
+        logging.info(f"Flask app.logger level set to {app_log_level_config}.")
+        # Log settings after logger is configured
+        app.logger.info(f"Loaded Booking CSV Schedule Settings: {app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS')}")
     else:
-        logging.info(f"Root logger level set to {log_level_str}. Existing handlers detected.")
+        # Minimal logging for testing
+        app.logger.setLevel(logging.DEBUG) # Or WARNING to reduce noise if DEBUG is too verbose
+        if not app.logger.hasHandlers(): # Ensure app.logger has a handler for tests
+            app.logger.addHandler(logging.StreamHandler())
+        app.logger.info("Logging configured for TESTING mode.")
+        app.logger.info(f"Testing Booking CSV Schedule Settings: {app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS')}")
 
-    # Existing Flask app logger level setting (can complement the root logger)
-    # It's fine to keep this, as it sets the level for Flask's specific logger instance.
-    # The root logger setting above will affect all loggers unless they have specific more restrictive levels/handlers.
-    app_log_level_config = app.config.get('LOG_LEVEL', default_log_level_str).upper() # Use same default
-    app_effective_log_level = log_level_map.get(app_log_level_config, logging.INFO)
-    app.logger.setLevel(app_effective_log_level)
-    logging.info(f"Flask app.logger level set to {app_log_level_config} based on app.config['LOG_LEVEL'].")
-
-    # Now that logging is configured, log the Booking CSV settings
-    app.logger.info(f"Loaded Booking CSV Schedule Settings: {app.config['BOOKING_CSV_SCHEDULE_SETTINGS']}")
-
-
-    # New logic for startup restore
-    # db.init_app(app) has been moved before this block
-    if azure_backup_available and callable(restore_latest_backup_set_on_startup):
+    # New logic for startup restore - SKIP IF TESTING
+    if not testing and azure_backup_available and callable(restore_latest_backup_set_on_startup):
         try:
             app.logger.info("Attempting to restore latest backup set from Azure on startup...")
             # Pass app.logger to the function for consistent logging
@@ -261,8 +268,8 @@ def create_app(config_object=config):
     else:
         app.logger.info("Azure backup utilities not available (azure_backup or restore_latest_backup_set_on_startup not imported). Skipping startup restore from Azure.")
 
-    # New: Conditional restore of incremental booking backups
-    if azure_backup_available and callable(restore_incremental_bookings):
+    # New: Conditional restore of incremental booking backups - SKIP IF TESTING
+    if not testing and azure_backup_available and callable(restore_incremental_bookings):
         app.logger.info("Checking configuration for automatic restore of incremental booking records on startup...")
         scheduler_settings = load_scheduler_settings() # Load from utils.py
         should_restore_bookings = scheduler_settings.get('auto_restore_booking_records_on_startup', False)
@@ -285,7 +292,7 @@ def create_app(config_object=config):
                     add_audit_log(action="STARTUP_INCREMENTAL_BOOKING_RESTORE_ERROR", details=f"Exception: {str(e_incr_restore)}")
         else:
             app.logger.info("Automatic restore of incremental booking records on startup is disabled in settings.")
-    elif callable(load_scheduler_settings) and load_scheduler_settings().get('auto_restore_booking_records_on_startup', False):
+    elif not testing and callable(load_scheduler_settings) and load_scheduler_settings().get('auto_restore_booking_records_on_startup', False):
         # This case handles if setting is true, but azure_backup_available or restore_incremental_bookings is not.
         app.logger.warning("Automatic restore of incremental booking records is configured, but Azure backup utilities (restore_incremental_bookings) are not available. Skipping.")
 
@@ -299,16 +306,20 @@ def create_app(config_object=config):
 
     # login_manager and oauth are initialized within init_auth
 
-    # 4. Setup SQLite Pragmas (if using SQLite)
-    with app.app_context(): # Important for operations needing app context, like DB access
-        configure_sqlite_pragmas_factory(app, db)
+    # 4. Setup SQLite Pragmas (if using SQLite) - Skip if testing
+    if not testing and app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite'):
+        with app.app_context():
+            configure_sqlite_pragmas_factory(app, db)
 
-    @app.before_request
-    def ensure_sqlite_configured_wrapper():
-       _ensure_sqlite_configured_factory_hook(app, db)
+        @app.before_request
+        def ensure_sqlite_configured_wrapper():
+           # Also check if not testing here, and URI starts with sqlite
+           if not current_app.config.get('TESTING', False) and \
+              current_app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite'):
+               _ensure_sqlite_configured_factory_hook(app, db)
 
     # 5. Register i18n
-    init_translations(app)
+    init_translations(app) # i18n might be needed for tests if templates are rendered
 
     # 6. Register Auth (includes LoginManager and OAuth init)
     init_auth(app, login_manager, oauth, csrf)
@@ -326,42 +337,40 @@ def create_app(config_object=config):
     init_admin_api_bookings_routes(app) # Register new blueprint
     init_admin_api_system_settings_routes(app) # Register new blueprint
 
-    # 8. Register Error Handlers
-    @app.errorhandler(CSRFError)
-    def handle_csrf_error_factory(e):
-        app.logger.warning(f"CSRF error encountered: {e.description}. Request URL: {request.url}")
-        # Consider what info is safe to expose in error. e.description is usually safe.
-        return jsonify(error=str(e.description), type='CSRF_ERROR'), 400
+    # 8. Register Error Handlers - Skip if testing
+    if not testing:
+        @app.errorhandler(CSRFError)
+        def handle_csrf_error_factory(e):
+            app.logger.warning(f"CSRF error encountered: {e.description}. Request URL: {request.url}")
+            return jsonify(error=str(e.description), type='CSRF_ERROR'), 400
 
-    @app.errorhandler(404)
-    def not_found_error(error):
-        # Distinguish between API and HTML requests for 404
-        if request.blueprint and request.blueprint.startswith('api_'): # A bit simplistic, adjust if needed
-             return jsonify(error="Not Found", message=str(error)), 404
-        # return render_template('404.html'), 404 # Assuming you have a 404.html
-        return "Page Not Found (HTML - create a template for this)", 404 # Placeholder
+        @app.errorhandler(404)
+        def not_found_error(error):
+            if request.blueprint and request.blueprint.startswith('api_'):
+                 return jsonify(error="Not Found", message=str(error)), 404
+            return "Page Not Found (HTML - create a template for this)", 404 # Placeholder
 
-    @app.errorhandler(500)
-    def internal_error(error):
-        db.session.rollback() # Rollback the session in case of DB error
-        if request.blueprint and request.blueprint.startswith('api_'):
-             return jsonify(error="Internal Server Error", message=str(error)), 500
-        # return render_template('500.html'), 500 # Assuming you have a 500.html
-        return "Internal Server Error (HTML - create a template for this)", 500 # Placeholder
-
+        @app.errorhandler(500)
+        def internal_error(error):
+            db.session.rollback()
+            if request.blueprint and request.blueprint.startswith('api_'):
+                 return jsonify(error="Internal Server Error", message=str(error)), 500
+            return "Internal Server Error (HTML - create a template for this)", 500 # Placeholder
 
     # 9. Initialize Scheduler
-    apscheduler_available_check = True # Assuming it's available unless explicitly configured otherwise
-    try:
-        from apscheduler.schedulers.background import BackgroundScheduler # Already imported
-    except ImportError:
-        apscheduler_available_check = False
-        app.logger.warning("APScheduler not installed. Scheduled tasks will not run.")
+    # Skip if testing or if SCHEDULER_ENABLED is False in config
+    if not testing and app.config.get("SCHEDULER_ENABLED", True):
+        apscheduler_available_check = True
+        try:
+            from apscheduler.schedulers.background import BackgroundScheduler # Already imported
+        except ImportError:
+            apscheduler_available_check = False
+            app.logger.warning("APScheduler not installed. Scheduled tasks will not run.")
 
-    if apscheduler_available_check and app.config.get("SCHEDULER_ENABLED", True): # Add a config flag
-        scheduler = BackgroundScheduler(daemon=True) # daemon=True allows app to exit even if scheduler thread is running
+        if apscheduler_available_check:
+            scheduler = BackgroundScheduler(daemon=True)
 
-        # Add jobs from scheduler_tasks.py
+            # Add jobs from scheduler_tasks.py
         if cancel_unchecked_bookings:
             scheduler.add_job(cancel_unchecked_bookings, 'interval', minutes=app.config.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', 5), args=[app])
         if apply_scheduled_resource_status_changes:
@@ -403,19 +412,27 @@ def create_app(config_object=config):
         if azure_backup_if_changed: # Legacy Azure backup
              scheduler.add_job(azure_backup_if_changed, 'interval', minutes=app.config.get('AZURE_BACKUP_INTERVAL_MINUTES', 60))
 
-        if not app.testing:
+        # if not app.testing: # Original condition
+        if not app.config.get('TESTING', False) and app.config.get("SCHEDULER_ENABLED", True): # More robust check
              try:
                  scheduler.start()
                  app.logger.info("Background scheduler started.")
              except Exception as e:
                  app.logger.exception(f"Failed to start background scheduler: {e}")
         else:
-            app.logger.info("Background scheduler not started in test mode or if SCHEDULER_ENABLED is False.")
-        app.scheduler = scheduler
-    else:
-        app.logger.info("APScheduler not available or SCHEDULER_ENABLED is False. Scheduled tasks disabled.")
-        app.scheduler = None # Ensure app.scheduler exists even if not started
+            app.logger.info("Background scheduler not started (either in test mode or SCHEDULER_ENABLED is False).")
+            app.scheduler = scheduler
+        else: # apscheduler_available_check is False
+            app.scheduler = None # Ensure app.scheduler exists
+            app.logger.info("APScheduler not installed, so it was not started.")
+    else: # Testing or SCHEDULER_ENABLED is False
+        app.scheduler = None # Ensure app.scheduler exists but is None
+        if testing:
+            app.logger.info("Scheduler not started in TESTING mode.")
+        else: # SCHEDULER_ENABLED was False
+            app.logger.info("Scheduler not started because SCHEDULER_ENABLED is False.")
 
-    app.logger.info("Flask app created and configured via factory.")
+    if not testing: # Final log message only if not testing
+        app.logger.info("Flask app created and configured via factory.")
 
     return app
