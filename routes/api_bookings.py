@@ -359,10 +359,9 @@ def get_my_bookings():
             }
 
             if booking_start_time_aware >= now_utc:
-                upcoming_bookings_data.append(booking_dict)
                 all_upcoming_bookings_dicts.append(booking_dict)
             else:
-                past_bookings_data.append(booking_dict)
+                all_past_bookings_dicts.append(booking_dict)
 
         # Sort before pagination
         all_upcoming_bookings_dicts.sort(key=lambda b: b['start_time'])
