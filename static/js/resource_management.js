@@ -115,6 +115,46 @@ document.addEventListener('DOMContentLoaded', function() {
                             <button class="button danger delete-resource-btn" data-id="${r.id}" data-name="${r.name}">Delete</button>
                         `;
                     });
+                }
+            }
+
+            const data = await apiCall(`/api/admin/resources?${params.toString()}`);
+            tableBody.innerHTML = ''; // Clear existing rows
+
+            const resourcesToShow = data.resources;
+            const paginationData = data.pagination;
+
+            const tableWrapper = document.querySelector('.admin-table-scroll-wrapper');
+            if (tableWrapper) {
+                if (paginationData && paginationData.total_pages > 1) {
+                    tableWrapper.classList.add('scrollable-when-paginated');
+                } else {
+                    tableWrapper.classList.remove('scrollable-when-paginated');
+                }
+            }
+
+            const mapsById = {}; // Populate this if needed for grouping, or fetch maps separately
+            // If maps are needed for display and not fetched globally, fetch them here or pass from a global store.
+            // For simplicity, assuming map name isn't displayed in the resource row directly or is part of resource_to_dict if needed.
+
+            if (resourcesToShow && resourcesToShow.length > 0) {
+                // Grouping logic can be simplified if the API returns resources sorted by map or if grouping is removed for pagination
+                // For now, let's render without grouping by map to simplify pagination integration.
+                // If grouping is required, the logic would need to handle pagination within groups or adjust UI significantly.
+                resourcesToShow.forEach(r => {
+                    const row = tableBody.insertRow();
+                    const selectCell = row.insertCell();
+                    selectCell.innerHTML = `<input type="checkbox" class="select-resource-checkbox" data-id="${r.id}">`;
+                    row.insertCell().textContent = r.id;
+                    row.insertCell().textContent = r.name;
+                    row.insertCell().textContent = r.status || 'draft';
+                    row.insertCell().textContent = r.capacity !== null && r.capacity !== undefined ? r.capacity : '';
+                    row.insertCell().textContent = r.tags || '';
+                    const actionsCell = row.insertCell();
+                    actionsCell.innerHTML = `
+                        <button class="button edit-resource-btn" data-id="${r.id}">Edit</button>
+                        <button class="button danger delete-resource-btn" data-id="${r.id}" data-name="${r.name}">Delete</button>
+                    `;
                 });
                 hideMessage(statusDiv);
             } else {

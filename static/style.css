@@ -1539,14 +1539,21 @@ a.fc-daygrid-event.fc-event {
     display: inline-flex;
 }
 
-/* Scrollable Admin Table Containers & My Bookings Sections */
-.admin-table-scroll-wrapper,       /* Resource Management */
-div.responsive-table-container,   /* User Management & Admin Bookings */
-#upcoming-bookings-container,      /* My Bookings */
-#past-bookings-container {          /* My Bookings */
-    max-height: 500px;
+/* Styling for Admin Table Containers & My Bookings Sections Wrappers */
+.admin-table-scroll-wrapper,
+div.responsive-table-container,
+#upcoming-bookings-container,
+#past-bookings-container {
+    margin-bottom: 1rem; /* Retain if needed, or remove if scrollable class handles it */
+    /* Other general styles for these wrappers, if any, can remain */
+}
+
+/* Class to make content scrollable when pagination is active (more than 1 page) */
+.scrollable-when-paginated {
+    max-height: 500px; /* Standard height for scrollable content */
     overflow-y: auto;
-    margin-bottom: 1rem;
+    /* If margin-bottom was tied to scrollability, move it here */
+    /* margin-bottom: 1rem; */
 }
 
 /* Ensure tables within specific admin scrollable wrappers behave correctly */
