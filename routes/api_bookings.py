@@ -90,7 +90,10 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
             pin_required_for_resource = False # Defaulting as the attribute doesn't exist on Resource model
             # TODO: Revisit logic for determining if a resource generally requires a PIN for check-in,
             # potentially by checking active ResourcePIN entries or a new field on Resource model.
-            pin_set_for_booking = booking.pin is not None and booking.pin != ""
+
+            # 'resource' is assumed to be populated (e.g., resource = Resource.query.get(booking.resource_id) or via booking.resource_booked)
+            current_resource_pin_value = resource.current_pin if resource else None
+            pin_is_set_on_resource = current_resource_pin_value is not None and current_resource_pin_value != ""
 
 
             booking_dict = {
@@ -108,7 +111,7 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
                 'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else None,
                 'can_check_in': can_check_in,
                 'check_in_token': display_check_in_token, # For QR code link primarily
-                'pin': booking.pin if pin_set_for_booking and enable_check_in_out else None, # Display PIN if set and check-in enabled
+                'pin': current_resource_pin_value if pin_is_set_on_resource and enable_check_in_out else None,
                 'pin_required_for_resource': pin_required_for_resource, # Inform frontend if resource generally requires PIN
             }
             relevant_bookings_dicts.append(booking_dict)
