@@ -395,7 +395,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         // Apply translucent background color
                         const rgbString = colorMap[finalClass];
                         if (rgbString) {
-                            areaDiv.style.backgroundColor = `rgba(${rgbString}, ${mapResourceOpacity})`;
+                            areaDiv.style.setProperty('background-color', `rgba(${rgbString}, ${mapResourceOpacity})`, 'important');
                         }
 
                         areaDiv.title = finalTitle;
