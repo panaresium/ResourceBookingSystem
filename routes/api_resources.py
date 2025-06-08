@@ -137,24 +137,9 @@ def get_resource_available_slots(resource_id):
 def get_all_resources_admin():
     logger = current_app.logger
     try:
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 10, type=int) # Default to 10
-
-        name_filter = request.args.get('name')
-        status_filter = request.args.get('status')
-        tags_filter = request.args.get('tags')
         map_id_str = request.args.get('map_id')
-
         query = Resource.query
 
-        if name_filter:
-            query = query.filter(Resource.name.ilike(f'%{name_filter}%'))
-        if status_filter:
-            query = query.filter(Resource.status == status_filter)
-        if tags_filter:
-            # Assuming tags are stored as comma-separated strings or similar
-            # Adjust if tags are stored differently (e.g., separate table, JSON)
-            query = query.filter(Resource.tags.ilike(f'%{tags_filter}%'))
         if map_id_str:
             try:
                 map_id = int(map_id_str)
@@ -163,25 +148,9 @@ def get_all_resources_admin():
                 logger.warning(f"Invalid map_id format: {map_id_str}. Must be an integer.")
                 return jsonify({'error': f"Invalid map_id format: '{map_id_str}'. Must be an integer."}), 400
 
-        # Default sorting
-        query = query.order_by(Resource.name.asc())
-
-        pagination_obj = query.paginate(page=page, per_page=per_page, error_out=False)
-        resources_on_page = pagination_obj.items
-
-        resources_list = [resource_to_dict(r) for r in resources_on_page]
-
-        return jsonify({
-            "resources": resources_list,
-            "pagination": {
-                "page": pagination_obj.page,
-                "per_page": pagination_obj.per_page,
-                "total_pages": pagination_obj.pages,
-                "total_items": pagination_obj.total,
-                "has_next": pagination_obj.has_next,
-                "has_prev": pagination_obj.has_prev
-            }
-        }), 200
+        resources = query.all()
+        resources_list = [resource_to_dict(r) for r in resources]
+        return jsonify(resources_list), 200
     except Exception as e:
         logger.exception("Error fetching all resources for admin:")
         return jsonify({'error': 'Failed to fetch resources due to a server error.'}), 500
