@@ -196,6 +196,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const terminalStatuses = ['completed', 'cancelled', 'rejected', 'cancelled_by_admin', 'cancelled_admin_acknowledged'];
         if (!terminalStatuses.includes(booking.status)) {
+            // Add Edit button
+            const editButton = document.createElement('button');
+            editButton.textContent = 'Edit';
+            editButton.className = 'btn btn-sm btn-primary edit-title-btn me-1';
+            editButton.dataset.bookingId = booking.id;
+            actionsContainer.appendChild(editButton);
+
             if (checkInOutEnabled) {
                 if (booking.can_check_in && !booking.checked_in_at) {
                     const checkInBtn = document.createElement('button');
@@ -219,9 +226,9 @@ document.addEventListener('DOMContentLoaded', () => {
             cancelBtn.dataset.bookingId = booking.id;
             actionsContainer.appendChild(cancelBtn);
         }
-         // Edit title button (already in template, just ensure it has dataset.bookingId)
-        const editTitleBtn = bookingCardDiv.querySelector('.edit-title-btn');
-        if(editTitleBtn) editTitleBtn.dataset.bookingId = booking.id;
+        // The following lines are removed as the edit button is now conditionally added above.
+        // const editTitleBtn = bookingCardDiv.querySelector('.edit-title-btn');
+        // if(editTitleBtn) editTitleBtn.dataset.bookingId = booking.id;
 
 
         return bookingCardDiv;
