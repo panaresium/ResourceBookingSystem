@@ -302,24 +302,96 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderPaginationControls(section, paginationData) {
         const container = section === 'upcoming' ? upcomingPaginationControls : pastPaginationControls;
-        if (!container) return;
+        if (!container) {
+            console.error(`Pagination container for section '${section}' not found.`);
+            return;
+        }
         container.innerHTML = ''; // Clear previous controls
 
-        if (paginationData.total_pages <= 1) return;
+        // If there are no pages (e.g., no items at all), don't render pagination.
+        if (paginationData.total_pages <= 0) {
+            return;
+        }
 
-        const nav = document.createElement('nav');
-        nav.setAttribute('aria-label', `${section} bookings navigation`);
-        const ul = document.createElement('ul');
-        ul.className = 'pagination pagination-sm justify-content-center';
+        const navElement = document.createElement('nav');
+        navElement.className = 'mt-4';
+        navElement.setAttribute('aria-label', 'Bookings pagination');
 
-        // Previous button
-        const prevLi = document.createElement('li');
-        prevLi.className = `page-item ${paginationData.page === 1 ? 'disabled' : ''}`;
-        const prevLink = document.createElement('a');
-        prevLink.className = 'page-link';
-        prevLink.href = '#';
-        prevLink.innerHTML = '&laquo;'; // Use innerHTML for HTML entities
-        prevLink.addEventListener('click', (e) => {
+        const ulElement = document.createElement('ul');
+        ulElement.className = 'pagination justify-content-center';
+
+        // 1. Items Per Page Selector
+        const itemsPerPageLi = document.createElement('li');
+        itemsPerPageLi.className = 'page-item disabled'; // Disabled as it's not a clickable link
+
+        const form = document.createElement('form');
+        form.className = 'd-flex align-items-center';
+        form.method = 'GET'; // Or 'POST', though not submitting to server
+        form.action = '#'; // Prevent page reload
+
+        const label = document.createElement('label');
+        label.className = 'visually-hidden me-2'; // visually-hidden for accessibility, me-2 for spacing
+        label.setAttribute('for', `per_page_select_${section}_pagination`);
+        label.textContent = 'Items per page:';
+        form.appendChild(label);
+
+        const select = document.createElement('select');
+        select.className = 'form-select form-select-sm me-2';
+        select.name = 'per_page';
+        select.id = `per_page_select_${section}_pagination`;
+        select.style.width = 'auto';
+
+        const perPageOptions = [10, 25, 50, 100];
+        perPageOptions.forEach(num => {
+            const option = document.createElement('option');
+            option.value = num;
+            option.textContent = num;
+            if (num === itemsPerPage) {
+                option.selected = true;
+            }
+            select.appendChild(option);
+        });
+
+        select.addEventListener('change', function() {
+            itemsPerPage = parseInt(this.value, 10);
+            currentUpcomingPage = 1;
+            currentPastPage = 1;
+            fetchAndDisplayBookings();
+            const myBookingsListElement = document.getElementById('my-bookings-list');
+            if (myBookingsListElement) {
+                myBookingsListElement.scrollIntoView({ behavior: 'smooth' });
+            }
+        });
+        form.appendChild(select);
+        itemsPerPageLi.appendChild(form);
+        ulElement.appendChild(itemsPerPageLi);
+
+        // If total_pages is 1 or less, only show the items per page selector
+        // The prompt says: "If total_pages <=1, only render the 'Items Per Page Selector' part of the nav."
+        // This means we append the navElement with just the itemsPerPageLi inside ulElement.
+        if (paginationData.total_pages <= 1) {
+            navElement.appendChild(ulElement);
+            container.appendChild(navElement);
+            return; // Stop here, no further pagination controls needed
+        }
+
+        // 2. Blank Separator
+        const blankSeparator1Li = document.createElement('li');
+        blankSeparator1Li.className = 'page-item disabled';
+        const blankSeparator1Span = document.createElement('span');
+        blankSeparator1Span.className = 'page-link';
+        blankSeparator1Span.style.paddingLeft = '1em';
+        blankSeparator1Li.appendChild(blankSeparator1Span);
+        ulElement.appendChild(blankSeparator1Li);
+
+        // 3. Previous Icon Link
+        const prevIconLi = document.createElement('li');
+        prevIconLi.className = `page-item ${paginationData.page === 1 ? 'disabled' : ''}`;
+        const prevIconLink = document.createElement('a');
+        prevIconLink.className = 'page-link';
+        prevIconLink.href = '#';
+        prevIconLink.textContent = '«';
+        prevIconLink.addEventListener('click', (e) => {
             e.preventDefault();
             if (paginationData.page > 1) {
                 if (section === 'upcoming') {
@@ -334,22 +406,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         });
-        prevLi.appendChild(prevLink);
-        ul.appendChild(prevLi);
+        prevIconLi.appendChild(prevIconLink);
+        ulElement.appendChild(prevIconLi);
 
-        // Page numbers with iter_pages-like logic
+        // 4. Opening Bracket
+        const openingBracketLi = document.createElement('li');
+        openingBracketLi.className = 'page-item disabled';
+        const openingBracketSpan = document.createElement('span');
+        openingBracketSpan.className = 'page-link';
+        openingBracketSpan.textContent = '[';
+        openingBracketLi.appendChild(openingBracketSpan);
+        ulElement.appendChild(openingBracketLi);
+
+        // 5. Page Numbers (using existing logic for ellipses)
         const currentPage = paginationData.page;
         const totalPages = paginationData.total_pages;
+        // iter_pages logic from Flask-SQLAlchemy adapted for client-side
+        // Show 1 edge page, 2 adjacent pages to current, 1 edge page
         const leftEdge = 1;
         const rightEdge = 1;
         const leftCurrent = 2;
-        const rightCurrent = 3;
+        const rightCurrent = 2; // Adjusted to be symmetrical, total 2+1+2 around current
         let lastPagePrinted = 0;
 
         for (let p = 1; p <= totalPages; p++) {
-            const showPage = (p <= leftEdge) ||
-                             (p > totalPages - rightEdge) ||
-                             (p >= currentPage - leftCurrent && p <= currentPage + rightCurrent);
+            const showPage = (p <= leftEdge) || // beginning pages
+                             (p > totalPages - rightEdge) || // ending pages
+                             (p >= currentPage - leftCurrent && p <= currentPage + rightCurrent); // around current
 
             if (showPage) {
                 if (p > lastPagePrinted + 1) {
@@ -360,7 +443,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ellipsisSpan.className = 'page-link';
                     ellipsisSpan.textContent = '...';
                     ellipsisLi.appendChild(ellipsisSpan);
-                    ul.appendChild(ellipsisLi);
+                    ulElement.appendChild(ellipsisLi);
                 }
 
                 const pageLi = document.createElement('li');
@@ -369,7 +452,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 pageLink.className = 'page-link';
                 pageLink.href = '#';
                 pageLink.textContent = p;
-                pageLink.addEventListener('click', ((pageNum) => (e) => { // IIFE to capture pageNum
+                pageLink.addEventListener('click', ((pageNum) => (e) => {
                     e.preventDefault();
                     if (section === 'upcoming') {
                         currentUpcomingPage = pageNum;
@@ -377,40 +460,41 @@ document.addEventListener('DOMContentLoaded', () => {
                         currentPastPage = pageNum;
                     }
                     fetchAndDisplayBookings();
-                const myBookingsListElement = document.getElementById('my-bookings-list');
-                if (myBookingsListElement) {
-                    myBookingsListElement.scrollIntoView({ behavior: 'smooth' });
-                }
+                    const myBookingsListElement = document.getElementById('my-bookings-list');
+                    if (myBookingsListElement) {
+                        myBookingsListElement.scrollIntoView({ behavior: 'smooth' });
+                    }
                 })(p));
                 pageLi.appendChild(pageLink);
-                ul.appendChild(pageLi);
+                ulElement.appendChild(pageLi);
                 lastPagePrinted = p;
-            } else if (p === lastPagePrinted + 1 && p > leftEdge && p <= totalPages - rightEdge) {
-                // Ensure ellipsis is not printed right after leftEdge or before rightEdge if not needed
             }
         }
-         // Final ellipsis if needed before the right edge (if lastPagePrinted is far from totalPages - rightEdge + 1)
-        if (lastPagePrinted < totalPages - rightEdge && totalPages > (leftEdge + leftCurrent + rightCurrent + rightEdge)) {
-             const ellipsisLi = document.createElement('li');
-             ellipsisLi.className = 'page-item disabled';
-             const ellipsisSpan = document.createElement('span');
-             ellipsisSpan.className = 'page-link';
-             ellipsisSpan.textContent = '...';
-             ellipsisLi.appendChild(ellipsisSpan);
-             ul.appendChild(ellipsisLi);
-        }
+        // This check for a final ellipsis might be redundant if the loop structure is correct.
+        // The original had a more complex ellipsis logic. Let's simplify based on typical pagination.
+        // If lastPagePrinted is less than totalPages AND not adjacent to totalPages-rightEdge, an ellipsis might be needed.
+        // However, the loop covers `p > totalPages - rightEdge` already.
+        // The condition `if (p > lastPagePrinted + 1)` should handle all necessary ellipses.
 
+        // 6. Closing Bracket
+        const closingBracketLi = document.createElement('li');
+        closingBracketLi.className = 'page-item disabled';
+        const closingBracketSpan = document.createElement('span');
+        closingBracketSpan.className = 'page-link';
+        closingBracketSpan.textContent = ']';
+        closingBracketLi.appendChild(closingBracketSpan);
+        ulElement.appendChild(closingBracketLi);
 
-        // Next button
-        const nextLi = document.createElement('li');
-        nextLi.className = `page-item ${paginationData.page === paginationData.total_pages ? 'disabled' : ''}`;
-        const nextLink = document.createElement('a');
-        nextLink.className = 'page-link';
-        nextLink.href = '#';
-        nextLink.innerHTML = '&raquo;'; // Use innerHTML for HTML entities
-        nextLink.addEventListener('click', (e) => {
+        // 7. Next Icon Link
+        const nextIconLi = document.createElement('li');
+        nextIconLi.className = `page-item ${paginationData.page === totalPages ? 'disabled' : ''}`;
+        const nextIconLink = document.createElement('a');
+        nextIconLink.className = 'page-link';
+        nextIconLink.href = '#';
+        nextIconLink.textContent = '»';
+        nextIconLink.addEventListener('click', (e) => {
             e.preventDefault();
-            if (paginationData.page < paginationData.total_pages) {
+            if (paginationData.page < totalPages) {
                 if (section === 'upcoming') {
                     currentUpcomingPage++;
                 } else {
@@ -423,11 +507,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         });
-        nextLi.appendChild(nextLink);
-        ul.appendChild(nextLi);
+        nextIconLi.appendChild(nextIconLink);
+        ulElement.appendChild(nextIconLi);
 
-        nav.appendChild(ul);
-        container.appendChild(nav);
+        // 8. Final Blank Separator
+        const blankSeparator2Li = document.createElement('li');
+        blankSeparator2Li.className = 'page-item disabled';
+        const blankSeparator2Span = document.createElement('span');
+        blankSeparator2Span.className = 'page-link';
+        blankSeparator2Span.style.paddingLeft = '1em'; // Or other suitable spacing
+        blankSeparator2Li.appendChild(blankSeparator2Span);
+        ulElement.appendChild(blankSeparator2Li);
+
+
+        navElement.appendChild(ulElement);
+        container.appendChild(navElement);
     }
 
 
