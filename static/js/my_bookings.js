@@ -318,7 +318,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const prevLink = document.createElement('a');
         prevLink.className = 'page-link';
         prevLink.href = '#';
-        prevLink.textContent = '{{ _("Previous") }}';
+        prevLink.innerHTML = '&laquo;'; // Use innerHTML for HTML entities
         prevLink.addEventListener('click', (e) => {
             e.preventDefault();
             if (paginationData.page > 1) {
@@ -328,31 +328,78 @@ document.addEventListener('DOMContentLoaded', () => {
                     currentPastPage--;
                 }
                 fetchAndDisplayBookings();
+                const myBookingsListElement = document.getElementById('my-bookings-list');
+                if (myBookingsListElement) {
+                    myBookingsListElement.scrollIntoView({ behavior: 'smooth' });
+                }
             }
         });
         prevLi.appendChild(prevLink);
         ul.appendChild(prevLi);
 
-        // Page numbers (simplified for now, can be extended with ellipsis)
-        for (let i = 1; i <= paginationData.total_pages; i++) {
-            const pageLi = document.createElement('li');
-            pageLi.className = `page-item ${i === paginationData.page ? 'active' : ''}`;
-            const pageLink = document.createElement('a');
-            pageLink.className = 'page-link';
-            pageLink.href = '#';
-            pageLink.textContent = i;
-            pageLink.addEventListener('click', (e) => {
-                e.preventDefault();
-                if (section === 'upcoming') {
-                    currentUpcomingPage = i;
-                } else {
-                    currentPastPage = i;
+        // Page numbers with iter_pages-like logic
+        const currentPage = paginationData.page;
+        const totalPages = paginationData.total_pages;
+        const leftEdge = 1;
+        const rightEdge = 1;
+        const leftCurrent = 2;
+        const rightCurrent = 3;
+        let lastPagePrinted = 0;
+
+        for (let p = 1; p <= totalPages; p++) {
+            const showPage = (p <= leftEdge) ||
+                             (p > totalPages - rightEdge) ||
+                             (p >= currentPage - leftCurrent && p <= currentPage + rightCurrent);
+
+            if (showPage) {
+                if (p > lastPagePrinted + 1) {
+                    // Add ellipsis if there was a gap
+                    const ellipsisLi = document.createElement('li');
+                    ellipsisLi.className = 'page-item disabled';
+                    const ellipsisSpan = document.createElement('span');
+                    ellipsisSpan.className = 'page-link';
+                    ellipsisSpan.textContent = '...';
+                    ellipsisLi.appendChild(ellipsisSpan);
+                    ul.appendChild(ellipsisLi);
                 }
-                fetchAndDisplayBookings();
-            });
-            pageLi.appendChild(pageLink);
-            ul.appendChild(pageLi);
+
+                const pageLi = document.createElement('li');
+                pageLi.className = `page-item ${p === currentPage ? 'active' : ''}`;
+                const pageLink = document.createElement('a');
+                pageLink.className = 'page-link';
+                pageLink.href = '#';
+                pageLink.textContent = p;
+                pageLink.addEventListener('click', ((pageNum) => (e) => { // IIFE to capture pageNum
+                    e.preventDefault();
+                    if (section === 'upcoming') {
+                        currentUpcomingPage = pageNum;
+                    } else {
+                        currentPastPage = pageNum;
+                    }
+                    fetchAndDisplayBookings();
+                const myBookingsListElement = document.getElementById('my-bookings-list');
+                if (myBookingsListElement) {
+                    myBookingsListElement.scrollIntoView({ behavior: 'smooth' });
+                }
+                })(p));
+                pageLi.appendChild(pageLink);
+                ul.appendChild(pageLi);
+                lastPagePrinted = p;
+            } else if (p === lastPagePrinted + 1 && p > leftEdge && p <= totalPages - rightEdge) {
+                // Ensure ellipsis is not printed right after leftEdge or before rightEdge if not needed
+            }
         }
+         // Final ellipsis if needed before the right edge (if lastPagePrinted is far from totalPages - rightEdge + 1)
+        if (lastPagePrinted < totalPages - rightEdge && totalPages > (leftEdge + leftCurrent + rightCurrent + rightEdge)) {
+             const ellipsisLi = document.createElement('li');
+             ellipsisLi.className = 'page-item disabled';
+             const ellipsisSpan = document.createElement('span');
+             ellipsisSpan.className = 'page-link';
+             ellipsisSpan.textContent = '...';
+             ellipsisLi.appendChild(ellipsisSpan);
+             ul.appendChild(ellipsisLi);
+        }
+
 
         // Next button
         const nextLi = document.createElement('li');
@@ -360,7 +407,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const nextLink = document.createElement('a');
         nextLink.className = 'page-link';
         nextLink.href = '#';
-        nextLink.textContent = '{{ _("Next") }}';
+        nextLink.innerHTML = '&raquo;'; // Use innerHTML for HTML entities
         nextLink.addEventListener('click', (e) => {
             e.preventDefault();
             if (paginationData.page < paginationData.total_pages) {
@@ -370,6 +417,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     currentPastPage++;
                 }
                 fetchAndDisplayBookings();
+                const myBookingsListElement = document.getElementById('my-bookings-list');
+                if (myBookingsListElement) {
+                    myBookingsListElement.scrollIntoView({ behavior: 'smooth' });
+                }
             }
         });
         nextLi.appendChild(nextLink);
@@ -896,6 +947,23 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn("Flatpickr not available or datePickerInput not found. Date picker will not be initialized.");
     }
 
+    // Items per page selector
+    if (itemsPerPageSelect) {
+        itemsPerPageSelect.addEventListener('change', function() {
+            itemsPerPage = parseInt(this.value, 10);
+            currentUpcomingPage = 1;
+            currentPastPage = 1;
+            fetchAndDisplayBookings();
+            const myBookingsListElement = document.getElementById('my-bookings-list');
+            if (myBookingsListElement) {
+                myBookingsListElement.scrollIntoView({ behavior: 'smooth' });
+            }
+        });
+        // Set initial itemsPerPage from the select, in case HTML has a default selected
+        itemsPerPage = parseInt(itemsPerPageSelect.value, 10);
+    }
+
+
     // Set default status filter before the initial fetch
     if (statusFilterSelect) {
         statusFilterSelect.value = 'approved';
@@ -926,3 +994,5 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn("Visibility toggle checkboxes not found. Section visibility control will not be active.");
     }
 });
+
+[end of static/js/my_bookings.js]
