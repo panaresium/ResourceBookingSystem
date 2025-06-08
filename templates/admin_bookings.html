@@ -127,6 +127,7 @@
             <li class="page-item {% if not bookings_page_obj.has_prev %}disabled{% endif %}">
                 <a class="page-link" href="{% if bookings_page_obj.has_prev %}{{ url_for('admin_ui.serve_admin_bookings_page', page=bookings_page_obj.prev_num, per_page=per_page, status_filter=current_status_filter if current_status_filter else None) }}{% else %}#__{% endif %}">&laquo;</a>
             </li>
+            <li class="page-item disabled"><span class="page-link">||</span></li>
 
             {# Page Numbers #}
             {% for page_num in bookings_page_obj.iter_pages(left_edge=1, left_current=2, right_current=3, right_edge=1) %}
@@ -139,13 +140,13 @@
                 {% endif %}
             {% endfor %}
 
+            <li class="page-item disabled"><span class="page-link">||</span></li>
             {# Next Page Link #}
             <li class="page-item {% if not bookings_page_obj.has_next %}disabled{% endif %}">
                 <a class="page-link" href="{% if bookings_page_obj.has_next %}{{ url_for('admin_ui.serve_admin_bookings_page', page=bookings_page_obj.next_num, per_page=per_page, status_filter=current_status_filter if current_status_filter else None) }}{% else %}#__{% endif %}">&raquo;</a>
             </li>
         </ul>
     </nav>
-    <p class="text-center">{{ _('Page %(page_num)s of %(total_pages)s.') % {'page_num': bookings_page_obj.page, 'total_pages': bookings_page_obj.pages} }}</p>
     {% endif %}
 
 </div>
