@@ -73,8 +73,21 @@
         <li id="log-nav-link" style="display: none;">
             <a href="{{ url_for('admin_ui.serve_audit_log_page') }}">{{ _('Audit Logs') }}</a> <!-- Icon removed -->
         </li>
-        <li id="backup-restore-nav-link" style="display: none;">
-            <a href="{{ url_for('admin_ui.serve_backup_restore_page') }}">{{ _('Backup & Restore') }}</a> <!-- Icon removed -->
+        <li id="backup-restore-nav-link" style="display:none;">
+            <details id="backup-restore-section" open>
+                <summary><span class="menu-text"><b>{{ _('Backup & Restore') }}</b></span></summary>
+                <ul class="admin-menu">
+                    <li>
+                        <a href="{{ url_for('admin_ui.serve_backup_system_page') }}">{{ _('System Operations') }}</a>
+                    </li>
+                    <li>
+                        <a href="{{ url_for('admin_ui.serve_backup_booking_data_page') }}">{{ _('Booking Data') }}</a>
+                    </li>
+                    <li>
+                        <a href="{{ url_for('admin_ui.serve_backup_settings_page') }}">{{ _('General Settings') }}</a>
+                    </li>
+                </ul>
+            </details>
         </li>
         <li id="troubleshooting-nav-link" style="display: none;">
             <a href="{{ url_for('admin_ui.serve_troubleshooting_page') }}">{{ _('Troubleshooting') }}</a> <!-- Icon removed -->

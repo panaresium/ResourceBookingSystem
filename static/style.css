@@ -1552,3 +1552,4 @@ div.responsive-table-container { /* Targeting the existing wrapper for the users
 div.responsive-table-container > table {
     width: 100%; /* Ensure table takes full width of scrollable container */
 }
+
