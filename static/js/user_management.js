@@ -88,28 +88,14 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!usersTableBody) return;
         showLoading(userManagementStatusDiv, 'Fetching users...');
         try {
-            const params = new URLSearchParams();
-            params.append('page', currentUsersPage);
-            params.append('per_page', usersItemsPerPage);
+            let queryParams = [];
+            const activeFilters = Object.keys(filters).length > 0 ? filters : currentFilters;
+            if (activeFilters.username) queryParams.push(`username_filter=${encodeURIComponent(activeFilters.username)}`);
+            if (activeFilters.isAdmin !== undefined && activeFilters.isAdmin !== '') queryParams.push(`is_admin=${activeFilters.isAdmin}`);
+            const queryString = queryParams.length ? `?${queryParams.join('&')}` : '';
 
-            if (currentFilters.username) params.append('username_filter', currentFilters.username);
-            if (currentFilters.isAdmin !== undefined && currentFilters.isAdmin !== '') params.append('is_admin', currentFilters.isAdmin);
-            // Add other filters like role_id if implemented
-            // if (currentFilters.roleId) params.append('role_id', currentFilters.roleId);
-
-            const data = await apiCall(`/api/admin/users?${params.toString()}`);
-
-            localUsersCache = data.users || []; // Update cache with current page's users
-
-            const usersTable = document.getElementById('users-table');
-            const tableWrapper = usersTable ? usersTable.closest('.responsive-table-container') : null;
-            if (tableWrapper) {
-                if (data.pagination && data.pagination.total_pages > 1) {
-                    tableWrapper.classList.add('scrollable-when-paginated');
-                } else {
-                    tableWrapper.classList.remove('scrollable-when-paginated');
-                }
-            }
+            const users = await apiCall(`/api/admin/users${queryString}`); // Assumes apiCall is global
+            localUsersCache = users; // Store for local use (e.g., populating edit form)
             
             usersTableBody.innerHTML = ''; // Clear existing rows
             if (users && users.length > 0) {

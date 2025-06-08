@@ -235,24 +235,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const pastBookings = apiResponse.past_bookings;
             const checkInOutEnabled = apiResponse.check_in_out_enabled;
 
-            // Conditionally apply scrollable class based on pagination data
-            if (upcomingBookingsContainer) {
-                if (apiResponse.upcoming_bookings && apiResponse.upcoming_bookings.total_pages > 1) {
-                    upcomingBookingsContainer.classList.add('scrollable-when-paginated');
-                } else {
-                    upcomingBookingsContainer.classList.remove('scrollable-when-paginated');
-                }
-            }
-            if (pastBookingsContainer) {
-                if (apiResponse.past_bookings && apiResponse.past_bookings.total_pages > 1) {
-                    pastBookingsContainer.classList.add('scrollable-when-paginated');
-                } else {
-                    pastBookingsContainer.classList.remove('scrollable-when-paginated');
-                }
-            }
-
-            upcomingBookingsContainer.innerHTML = '';
-            pastBookingsContainer.innerHTML = '';
+            upcomingBookingsContainer.innerHTML = ''; // Clear loading message
+            pastBookingsContainer.innerHTML = '';   // Clear loading message
 
             if ((!upcomingBookings || upcomingBookings.length === 0) && (!pastBookings || pastBookings.length === 0)) {
                 if (myBookingsStatusDiv) showStatusMessage(myBookingsStatusDiv, 'You have no bookings matching the current filters.', 'info');
