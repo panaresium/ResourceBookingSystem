@@ -160,6 +160,7 @@ async function updateAuthLink() {
     const backupRestoreNavLink = document.getElementById('backup-restore-nav-link'); // Added
     const troubleshootingNavLink = document.getElementById('troubleshooting-nav-link');
     const bookingSettingsNavLink = document.getElementById('booking-settings-nav-link'); // Added for Booking Settings
+    const systemSettingsNavLink = document.getElementById('system-settings-nav-link'); // New System Settings link
     const sidebar = document.getElementById('sidebar'); // Added for sidebar visibility
     const sidebarToggleBtn = document.getElementById('sidebar-toggle'); // Added for toggle button visibility
 
@@ -171,6 +172,7 @@ async function updateAuthLink() {
         const localBackupRestoreNavLink = document.getElementById('backup-restore-nav-link'); // Added for this scope
         const localTroubleshootingNavLink = document.getElementById('troubleshooting-nav-link');
         const localBookingSettingsNavLink = document.getElementById('booking-settings-nav-link'); // Added for Booking Settings
+        const localSystemSettingsNavLink = document.getElementById('system-settings-nav-link'); // New System Settings link
         const localUserActionsArea = document.getElementById('user-actions-area'); // Added
 
         sessionStorage.removeItem('loggedInUserUsername');
@@ -200,6 +202,7 @@ async function updateAuthLink() {
         if (localBackupRestoreNavLink) localBackupRestoreNavLink.style.display = 'none'; // Added
         if (localTroubleshootingNavLink) localTroubleshootingNavLink.style.display = 'none';
         if (localBookingSettingsNavLink) localBookingSettingsNavLink.style.display = 'none'; // Added for Booking Settings
+        if (localSystemSettingsNavLink) localSystemSettingsNavLink.style.display = 'none'; // Hide new link
 
         if (localSidebar) localSidebar.style.display = 'none';
         if (localSidebarToggleBtn) localSidebarToggleBtn.style.display = 'none';
@@ -267,6 +270,17 @@ async function updateAuthLink() {
             }
             if (bookingSettingsNavLink) { // Added for Booking Settings
                 bookingSettingsNavLink.style.display = data.user.is_admin ? 'list-item' : 'none';
+            }
+            // New System Settings link - visibility based on 'manage_system_settings' permission
+            if (systemSettingsNavLink && data.user.is_admin) { // Only check permissions if user is admin
+                // Assuming data.user.permissions is an array of permission strings
+                if (data.user.permissions && data.user.permissions.includes('manage_system_settings')) {
+                    systemSettingsNavLink.style.display = 'list-item';
+                } else {
+                    systemSettingsNavLink.style.display = 'none';
+                }
+            } else if (systemSettingsNavLink) { // Hide if not admin or element doesn't exist (though latter is unlikely)
+                systemSettingsNavLink.style.display = 'none';
             }
 
             // Sidebar and body class management based on admin status

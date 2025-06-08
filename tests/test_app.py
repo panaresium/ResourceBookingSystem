@@ -15,6 +15,9 @@ from unittest.mock import patch # For mocking datetime
 from datetime import datetime, timedelta, time as dt_time # Added for new test
 
 # from flask_login import current_user # Not directly used for assertions here
+import os # New import for system settings tests
+from unittest.mock import patch, mock_open # New imports for system settings tests
+
 
 class AppTests(unittest.TestCase):
 
@@ -1207,6 +1210,179 @@ class TestAdminFunctionality(AppTests): # Renamed from AppTests to avoid confusi
         self.assertEqual(resp_admin.status_code, 200)
         self.assertIn(b'Analytics Dashboard', resp_admin.data) # Updated title
         # Further checks for new elements can be added in a dedicated page rendering test
+
+    # --- Tests for Admin System Settings API (Map Opacity) ---
+
+    def test_get_map_opacity_api_no_file_no_env(self, admin_user_logged_in=True):
+        # Test GET when no config file and no env var, should use default from config.py
+        # (which is 0.7 if MAP_RESOURCE_OPACITY env var is not set or invalid)
+        if admin_user_logged_in: # Allow calling without re-login if part of a sequence
+            admin = self._create_admin_user(username="opacity_admin_get_default", email_ext="opacity_default")
+            self.login(admin.username, "adminpass")
+
+        # Store original config values to restore them later
+        original_map_opacity_config_file = app.config.get('MAP_OPACITY_CONFIG_FILE')
+        original_map_resource_opacity = app.config.get('MAP_RESOURCE_OPACITY')
+
+        app.config['MAP_OPACITY_CONFIG_FILE'] = '/fake/path/map_settings.json'
+        # Simulate that config.py has set MAP_RESOURCE_OPACITY to its default (0.7)
+        # because no valid env var was found.
+        app.config['MAP_RESOURCE_OPACITY'] = 0.7
+
+        with patch('routes.admin_api_system_settings.os.path.exists') as mock_exists:
+            mock_exists.return_value = False # Config file does not exist
+
+            response = self.client.get('/api/admin/system-settings/map-opacity')
+            self.assertEqual(response.status_code, 200)
+            data = json.loads(response.data)
+            # The logic in get_map_opacity_value is: file -> app.config['MAP_RESOURCE_OPACITY']
+            # app.config['MAP_RESOURCE_OPACITY'] itself is (env var or 0.7 default from config.py)
+            self.assertEqual(data['opacity'], 0.7) # Default value from config.py
+
+        # Restore original config values
+        if original_map_opacity_config_file is not None:
+            app.config['MAP_OPACITY_CONFIG_FILE'] = original_map_opacity_config_file
+        else:
+            if 'MAP_OPACITY_CONFIG_FILE' in app.config: del app.config['MAP_OPACITY_CONFIG_FILE']
+
+        if original_map_resource_opacity is not None:
+            app.config['MAP_RESOURCE_OPACITY'] = original_map_resource_opacity
+        else:
+            # This might be risky if other tests rely on it being set by config.py logic.
+            # Ideally, config.py sets it, so it should always be present.
+            # For safety, if it was None, we ensure it's reset to how config.py would leave it (e.g. 0.7 if no env var)
+            # However, the test setup for AppTests reloads app context, so this might be okay.
+            # Let's assume if it was None, it means it wasn't set by env var and config.py used default.
+            app.config['MAP_RESOURCE_OPACITY'] = 0.7 # Reset to default if it was not originally set by test env
+
+    def test_get_map_opacity_api_with_env_var(self, admin_user_logged_in=True):
+        if admin_user_logged_in:
+            admin = self._create_admin_user(username="opacity_admin_env", email_ext="opacity_env")
+            self.login(admin.username, "adminpass")
+
+        original_map_opacity_config_file = app.config.get('MAP_OPACITY_CONFIG_FILE')
+        original_map_resource_opacity = app.config.get('MAP_RESOURCE_OPACITY')
+
+        app.config['MAP_OPACITY_CONFIG_FILE'] = '/fake/path/map_settings.json'
+        # Simulate that config.py processed an env var and set MAP_RESOURCE_OPACITY to 0.5
+        app.config['MAP_RESOURCE_OPACITY'] = 0.5
+
+        with patch('routes.admin_api_system_settings.os.path.exists') as mock_exists:
+            mock_exists.return_value = False # Config file does not exist
+
+            response = self.client.get('/api/admin/system-settings/map-opacity')
+            self.assertEqual(response.status_code, 200)
+            data = json.loads(response.data)
+            self.assertEqual(data['opacity'], 0.5) # Should use value from app.config (simulating env var)
+
+        # Restore original config
+        if original_map_opacity_config_file is not None:
+            app.config['MAP_OPACITY_CONFIG_FILE'] = original_map_opacity_config_file
+        else:
+            if 'MAP_OPACITY_CONFIG_FILE' in app.config: del app.config['MAP_OPACITY_CONFIG_FILE']
+        if original_map_resource_opacity is not None:
+            app.config['MAP_RESOURCE_OPACITY'] = original_map_resource_opacity
+        else:
+            app.config['MAP_RESOURCE_OPACITY'] = 0.7 # Default if was None
+
+    def test_get_map_opacity_api_with_config_file(self, admin_user_logged_in=True):
+        if admin_user_logged_in:
+            admin = self._create_admin_user(username="opacity_admin_file", email_ext="opacity_file")
+            self.login(admin.username, "adminpass")
+
+        mock_file_content = json.dumps({'map_resource_opacity': 0.6})
+
+        original_map_opacity_config_file = app.config.get('MAP_OPACITY_CONFIG_FILE')
+        fake_config_path = '/fake/path/map_settings.json'
+        app.config['MAP_OPACITY_CONFIG_FILE'] = fake_config_path
+
+        with patch('routes.admin_api_system_settings.os.path.exists') as mock_exists, \
+             patch('builtins.open', mock_open(read_data=mock_file_content)) as mock_file:
+
+            mock_exists.return_value = True # Config file exists
+
+            response = self.client.get('/api/admin/system-settings/map-opacity')
+            self.assertEqual(response.status_code, 200)
+            data = json.loads(response.data)
+            self.assertEqual(data['opacity'], 0.6) # Should use value from file
+            mock_file.assert_called_once_with(fake_config_path, 'r')
+
+        if original_map_opacity_config_file is not None:
+            app.config['MAP_OPACITY_CONFIG_FILE'] = original_map_opacity_config_file
+        else:
+            if 'MAP_OPACITY_CONFIG_FILE' in app.config: del app.config['MAP_OPACITY_CONFIG_FILE']
+
+
+    def test_set_map_opacity_api_valid(self, admin_user_logged_in=True):
+        if admin_user_logged_in:
+            admin = self._create_admin_user(username="opacity_admin_set", email_ext="opacity_set")
+            self.login(admin.username, "adminpass")
+
+        original_map_opacity_config_file = app.config.get('MAP_OPACITY_CONFIG_FILE')
+        fake_config_path = '/fake/path/map_settings.json'
+        app.config['MAP_OPACITY_CONFIG_FILE'] = fake_config_path
+
+        with patch('routes.admin_api_system_settings.os.path.exists') as mock_exists, \
+             patch('builtins.open', mock_open()) as mock_file, \
+             patch('routes.admin_api_system_settings.os.makedirs') as mock_makedirs:
+
+            # mock_exists can be True or False, os.makedirs should handle it.
+            # Let's assume the directory part of fake_config_path is '/fake/path'
+            expected_dir_path = os.path.dirname(fake_config_path)
+
+
+            payload = {'opacity': 0.85}
+            response = self.client.post('/api/admin/system-settings/map-opacity', json=payload)
+            self.assertEqual(response.status_code, 200)
+            data = json.loads(response.data)
+            self.assertEqual(data['message'], 'Map opacity updated successfully.')
+            self.assertEqual(data['opacity'], 0.85)
+
+            if expected_dir_path: # Only call makedirs if there's a directory part
+                mock_makedirs.assert_called_once_with(expected_dir_path, exist_ok=True)
+            else: # If fake_config_path was just 'file.json', makedirs shouldn't be called with empty string
+                mock_makedirs.assert_not_called()
+
+            mock_file.assert_called_once_with(fake_config_path, 'w')
+            mock_file().write.assert_called_once_with(json.dumps({'map_resource_opacity': 0.85}))
+
+        if original_map_opacity_config_file is not None:
+            app.config['MAP_OPACITY_CONFIG_FILE'] = original_map_opacity_config_file
+        else:
+            if 'MAP_OPACITY_CONFIG_FILE' in app.config: del app.config['MAP_OPACITY_CONFIG_FILE']
+
+    def test_set_map_opacity_api_invalid_value(self, admin_user_logged_in=True):
+        if admin_user_logged_in:
+            admin = self._create_admin_user(username="opacity_admin_set_invalid", email_ext="opacity_set_invalid")
+            self.login(admin.username, "adminpass")
+
+        payload = {'opacity': 1.5} # Out of range
+        response = self.client.post('/api/admin/system-settings/map-opacity', json=payload)
+        self.assertEqual(response.status_code, 400)
+        data = json.loads(response.data)
+        self.assertIn('Opacity value must be between 0.0 and 1.0', data['error'])
+
+    def test_set_map_opacity_api_invalid_type(self, admin_user_logged_in=True):
+        if admin_user_logged_in:
+            admin = self._create_admin_user(username="opacity_admin_set_type", email_ext="opacity_set_type")
+            self.login(admin.username, "adminpass")
+
+        payload = {'opacity': 'not-a-float'}
+        response = self.client.post('/api/admin/system-settings/map-opacity', json=payload)
+        self.assertEqual(response.status_code, 400)
+        data = json.loads(response.data)
+        self.assertIn('Invalid opacity value. Must be a float', data['error'])
+
+    def test_map_opacity_api_permission_denied(self):
+        # Login as a regular user (testuser from AppTests.setUp)
+        self.login('testuser', 'password')
+
+        response_get = self.client.get('/api/admin/system-settings/map-opacity')
+        self.assertEqual(response_get.status_code, 403) # Forbidden
+
+        response_post = self.client.post('/api/admin/system-settings/map-opacity', json={'opacity': 0.5})
+        self.assertEqual(response_post.status_code, 403)
+        self.logout() # Logout regular user
 
     # test_view_db_raw_top100_all_tables has been removed as the endpoint's primary purpose
     # is now covered by the new /api/admin/db/table_data endpoint and its tests.

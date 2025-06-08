@@ -719,6 +719,12 @@ def analytics_dashboard():
     current_app.logger.info(f"User {current_user.username} accessed analytics dashboard.")
     return render_template('analytics.html')
 
+@admin_ui_bp.route('/system-settings', methods=['GET'])
+@login_required
+@permission_required('manage_system_settings') # Or a more specific view permission if created
+def system_settings_page():
+    return render_template('admin/system_settings.html')
+
 @admin_ui_bp.route('/analytics/data') # New route for analytics data
 @login_required
 @permission_required('view_analytics')
