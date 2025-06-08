@@ -418,13 +418,4 @@ def create_app(config_object=config):
 
     app.logger.info("Flask app created and configured via factory.")
 
-    if not app.testing: # Avoid printing during tests
-        app.logger.info("--- Registered URL Rules ---")
-        output_lines = []
-        for rule in app.url_map.iter_rules():
-            output_lines.append(f"Endpoint: {rule.endpoint}, Methods: {','.join(rule.methods)}, Path: {str(rule)}")
-        # Log as a single multi-line entry if possible, or loop
-        app.logger.info("\n".join(output_lines))
-        app.logger.info("--- End of Registered URL Rules ---")
-
     return app

@@ -87,7 +87,9 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
                 if token_expires_at_aware and token_expires_at_aware > now_utc and booking_end_time_aware > now_utc:
                     display_check_in_token = booking.check_in_token
 
-            pin_required_for_resource = resource.pin_required_for_check_in if resource else False
+            pin_required_for_resource = False # Defaulting as the attribute doesn't exist on Resource model
+            # TODO: Revisit logic for determining if a resource generally requires a PIN for check-in,
+            # potentially by checking active ResourcePIN entries or a new field on Resource model.
             pin_set_for_booking = booking.pin is not None and booking.pin != ""
 
 
