@@ -103,10 +103,19 @@ def update_profile():
 @login_required
 @permission_required('manage_users')
 def get_all_users():
+    logger = current_app.logger # Use logger instead of current_app.logger directly
     try:
-        username_filter = request.args.get('username_filter')
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        per_page_options = [10, 25, 50, 100] # Should match JS options
+
+        if per_page not in per_page_options:
+            per_page = per_page_options[0]
+
+        # Filters from request arguments
+        username_filter = request.args.get('username') # Changed from username_filter to match JS
         is_admin_filter = request.args.get('is_admin')
-        role_id_filter = request.args.get('role_id', type=int)
+        # role_id_filter = request.args.get('role_id', type=int) # Role filter might need more thought if multiple roles or 'any role' is needed
 
         query = User.query
 
@@ -120,26 +129,43 @@ def get_all_users():
             elif val in ['false', '0', 'no']:
                 query = query.filter_by(is_admin=False)
             else:
-                return jsonify({'error': 'Invalid is_admin value. Use true or false.'}), 400
+                # Return consistent error structure
+                return jsonify({'success': False, 'error': 'Invalid is_admin value. Use true or false.', 'pagination': None}), 400
 
-        if role_id_filter:
-            query = query.join(User.roles).filter(Role.id == role_id_filter)
+        # Example: if role_id_filter:
+        #    query = query.join(User.roles).filter(Role.id == role_id_filter)
 
-        users = query.all()
+        # Order by username for consistent results
+        query = query.order_by(User.username.asc())
 
-        users_list = [{
-            'id': u.id,
-            'username': u.username,
-            'email': u.email,
-            'is_admin': u.is_admin,
-            'google_id': u.google_id,
-            'roles': [{'id': role.id, 'name': role.name} for role in u.roles]
-        } for u in users]
-        current_app.logger.info(f"Admin user {current_user.username} fetched users list with filters.")
-        return jsonify(users_list), 200
+        pagination_obj = query.paginate(page=page, per_page=per_page, error_out=False)
+
+        users_list = []
+        for u in pagination_obj.items:
+            users_list.append({
+                'id': u.id,
+                'username': u.username,
+                'email': u.email,
+                'is_admin': u.is_admin,
+                'google_id': u.google_id, # Assuming this is still needed
+                'roles': [{'id': role.id, 'name': role.name} for role in u.roles]
+            })
+
+        response_data = {
+            'success': True,
+            'users': users_list,
+            'pagination': {
+                'current_page': pagination_obj.page,
+                'per_page': pagination_obj.per_page,
+                'total_items': pagination_obj.total,
+                'total_pages': pagination_obj.pages
+            }
+        }
+        logger.info(f"Admin user {current_user.username} fetched users list. Page: {page}, PerPage: {per_page}, TotalItems: {pagination_obj.total}, Filters: username='{username_filter}', is_admin='{is_admin_filter}'")
+        return jsonify(response_data), 200
     except Exception as e:
-        current_app.logger.exception("Error fetching all users:")
-        return jsonify({'error': 'Failed to fetch users due to a server error.'}), 500
+        logger.exception("Error fetching all users for admin:")
+        return jsonify({'success': False, 'error': 'Failed to fetch users due to a server error.', 'pagination': None}), 500
 
 @api_users_bp.route('/admin/users', methods=['POST'])
 @login_required

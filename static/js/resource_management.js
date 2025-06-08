@@ -27,6 +27,39 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let currentResourceIdForPins = null; // For PIN Management
 
+    // Pagination state variables
+    let resourceCurrentPage = 1;
+    const resourceItemsPerPageOptions = [10, 25, 50, 100];
+    let resourceItemsPerPage = resourceItemsPerPageOptions[0];
+    let resourceTotalItems = 0;
+    let resourceTotalPages = 0;
+
+    // Pagination UI elements
+    const resourcePaginationContainer = document.getElementById('resource_pg_pagination_controls_container');
+    const resourcePerPageSelect = document.getElementById('resource_pg_per_page_select');
+    const resourcePaginationUl = document.getElementById('resource_pg_pagination_ul');
+    const resourceTotalResultsDisplay = document.getElementById('resource_pg_total_results_display');
+
+    function initializeResourcePerPageSelect() {
+        if (!resourcePerPageSelect) return;
+        resourcePerPageSelect.innerHTML = ''; // Clear existing options
+        resourceItemsPerPageOptions.forEach(optionValue => {
+            const option = new Option(optionValue, optionValue);
+            if (optionValue === resourceItemsPerPage) {
+                option.selected = true;
+            }
+            resourcePerPageSelect.add(option);
+        });
+        resourcePerPageSelect.removeEventListener('change', handlePerPageChange); // Remove if already added
+        resourcePerPageSelect.addEventListener('change', handlePerPageChange);
+    }
+
+    function handlePerPageChange() {
+        resourceItemsPerPage = parseInt(this.value);
+        resourceCurrentPage = 1;
+        fetchAndDisplayResources();
+    }
+
     const bulkModal = document.getElementById('bulk-resource-modal');
     const bulkForm = document.getElementById('bulk-resource-form');
     const bulkFormStatus = document.getElementById('bulk-resource-form-status');
@@ -50,67 +83,80 @@ document.addEventListener('DOMContentLoaded', function() {
     const importResourcesFile = document.getElementById('import-resources-file');
     const importResourcesBtn = document.getElementById('import-resources-btn');
 
-    async function fetchAndDisplayResources(filters = {}) {
+    async function fetchAndDisplayResources() {
         showLoading(statusDiv, 'Fetching resources...');
-        try {
-            const [resources, maps] = await Promise.all([
-                apiCall('/api/admin/resources'),
-                apiCall('/api/admin/maps')
-            ]);
-            tableBody.innerHTML = '';
-            const mapsById = {};
-            if (maps) maps.forEach(m => { mapsById[m.id] = m; });
 
-            if (filterMapSelect && filterMapSelect.options.length === 1 && maps) {
-                maps.forEach(m => {
-                    const opt = document.createElement('option');
-                    opt.value = m.id;
-                    opt.textContent = m.name;
+        // Build URL with filters and pagination
+        let url = `/api/admin/resources?page=${resourceCurrentPage}&per_page=${resourceItemsPerPage}`;
+        if (currentFilters.name) url += `&name=${encodeURIComponent(currentFilters.name)}`;
+        if (currentFilters.status) url += `&status=${encodeURIComponent(currentFilters.status)}`;
+        if (currentFilters.mapId) url += `&map_id=${encodeURIComponent(currentFilters.mapId)}`;
+        if (currentFilters.tags) url += `&tags=${encodeURIComponent(currentFilters.tags)}`;
+
+        try {
+            // Fetch resources and maps (maps for filter population if not already done)
+            // Assuming apiCall handles errors and returns JSON or throws
+            const data = await apiCall(url); // API should now return {resources: [], pagination: {}}
+            const mapsData = await apiCall('/api/admin/maps'); // Potentially cache this
+
+            tableBody.innerHTML = ''; // Clear table
+
+            // Populate map filter if not already done
+            const mapsById = {};
+            if (mapsData) mapsData.forEach(m => { mapsById[m.id] = m; });
+            if (filterMapSelect && filterMapSelect.options.length === 1 && mapsData) {
+                mapsData.forEach(m => {
+                    const opt = new Option(m.name, m.id);
                     filterMapSelect.appendChild(opt);
                 });
             }
 
-            let filtered = resources || [];
-            if (filters.name) {
-                filtered = filtered.filter(r => r.name.toLowerCase().includes(filters.name.toLowerCase()));
-            }
-            if (filters.status) {
-                filtered = filtered.filter(r => r.status === filters.status);
-            }
-            if (filters.mapId) {
-                filtered = filtered.filter(r => String(r.floor_map_id || '') === String(filters.mapId));
-            }
-            if (filters.tags) {
-                filtered = filtered.filter(r => r.tags && r.tags.toLowerCase().includes(filters.tags.toLowerCase()));
+            if (data.success === false) { // Check for explicit failure from API
+                 showError(statusDiv, data.message || 'Failed to fetch resources.');
+                 if (resourcePaginationContainer) resourcePaginationContainer.style.display = 'none';
+                 return;
             }
 
-            const grouped = {};
-            filtered.forEach(r => {
-                const key = r.floor_map_id ? String(r.floor_map_id) : 'none';
-                if (!grouped[key]) grouped[key] = [];
-                grouped[key].push(r);
-            });
+            const resources = data.resources || [];
+            const pagination = data.pagination || {};
 
-            const mapIdsInOrder = Object.keys(grouped);
-            if (mapIdsInOrder.length > 0) {
-                mapIdsInOrder.forEach(mid => {
+            // Update pagination state
+            resourceCurrentPage = pagination.current_page || 1;
+            resourceItemsPerPage = pagination.per_page || resourceItemsPerPageOptions[0];
+            resourceTotalItems = pagination.total_items || 0;
+            resourceTotalPages = pagination.total_pages || 0;
+
+            initializeResourcePerPageSelect(); // Ensure perPageSelect is up-to-date with current itemsPerPage
+            renderResourcePaginationControls(); // Render pagination controls with new data
+
+            if (resources.length > 0) {
+                const grouped = {};
+                resources.forEach(r => {
+                    const key = r.floor_map_id ? String(r.floor_map_id) : 'none';
+                    if (!grouped[key]) grouped[key] = [];
+                    grouped[key].push(r);
+                });
+
+                Object.keys(grouped).sort((a,b) => { // Sort map groups for consistency
+                    if (a === 'none') return 1; if (b === 'none') return -1;
+                    return (mapsById[a]?.name || '').localeCompare(mapsById[b]?.name || '');
+                }).forEach(mid => {
                     const headingRow = tableBody.insertRow();
                     const headingCell = headingRow.insertCell();
-                    headingCell.colSpan = 7;
+                    headingCell.colSpan = 7; // Ensure colspan matches number of columns
                     const mapName = mid === 'none' ? 'Unassigned' : (mapsById[mid] ? mapsById[mid].name : 'Map ' + mid);
                     headingCell.textContent = `Map: ${mapName}`;
+                    headingCell.style.backgroundColor = '#f0f0f0'; // Style for group header
 
                     grouped[mid].forEach(r => {
                         const row = tableBody.insertRow();
-                        const selectCell = row.insertCell();
-                        selectCell.innerHTML = `<input type="checkbox" class="select-resource-checkbox" data-id="${r.id}">`;
+                        row.insertCell().innerHTML = `<input type="checkbox" class="select-resource-checkbox" data-id="${r.id}">`;
                         row.insertCell().textContent = r.id;
                         row.insertCell().textContent = r.name;
                         row.insertCell().textContent = r.status || 'draft';
                         row.insertCell().textContent = r.capacity !== null && r.capacity !== undefined ? r.capacity : '';
                         row.insertCell().textContent = r.tags || '';
-                        const actionsCell = row.insertCell();
-                        actionsCell.innerHTML = `
+                        row.insertCell().innerHTML = `
                             <button class="button edit-resource-btn" data-id="${r.id}">Edit</button>
                             <button class="button danger delete-resource-btn" data-id="${r.id}" data-name="${r.name}">Delete</button>
                         `;
@@ -118,14 +164,143 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 hideMessage(statusDiv);
             } else {
-                tableBody.innerHTML = '<tr><td colspan="6">No resources found.</td></tr>';
-                showSuccess(statusDiv, 'No resources to display.');
+                tableBody.innerHTML = '<tr><td colspan="7">No resources found.</td></tr>'; // Ensure colspan matches
+                if (resourceTotalItems > 0) { // No resources on current page, but some exist
+                     showSuccess(statusDiv, 'No resources on this page. Try another page or adjust filters.');
+                } else { // No resources at all matching filters
+                     showSuccess(statusDiv, 'No resources to display with current filters.');
+                }
             }
             if (selectAllCheckbox) selectAllCheckbox.checked = false;
+            updateBulkPinActionsUI(); // Update based on new table content
+
         } catch (error) {
             showError(statusDiv, `Error fetching resources: ${error.message}`);
+            if (resourcePaginationContainer) resourcePaginationContainer.style.display = 'none';
         }
     }
+
+    function renderResourcePaginationControls() {
+        if (!resourcePaginationUl || !resourcePaginationContainer || !resourceTotalResultsDisplay) {
+            console.warn('Resource pagination elements not found.');
+            return;
+        }
+        resourcePaginationUl.innerHTML = '';
+
+        if (resourceTotalItems === 0 && !currentFilters.name && !currentFilters.status && !currentFilters.mapId && !currentFilters.tags) {
+            // Only hide completely if no filters are active and no items
+            resourcePaginationContainer.style.display = 'none';
+            resourceTotalResultsDisplay.textContent = 'No resources available.';
+            return;
+        }
+
+        resourcePaginationContainer.style.display = 'flex';
+        resourceTotalResultsDisplay.textContent = `Total: ${resourceTotalItems} results`;
+
+        if (resourceTotalPages <= 1 && resourceTotalItems <= resourceItemsPerPage) { // Hide pagination if only one page or less
+            resourcePaginationContainer.style.display = 'flex'; // Keep per_page visible
+            resourcePaginationUl.innerHTML = ''; // No page numbers needed
+             // Optionally hide the UL itself if no pages to show
+            resourcePaginationUl.style.display = 'none';
+            return;
+        }
+        resourcePaginationUl.style.display = 'flex'; // Ensure UL is visible if pages exist
+
+
+        // Previous button
+        const prevLi = document.createElement('li');
+        prevLi.className = `page-item ${resourceCurrentPage <= 1 ? 'disabled' : ''}`;
+        const prevA = document.createElement('a');
+        prevA.className = 'page-link';
+        prevA.href = '#';
+        prevA.innerHTML = '&lt; Previous';
+        prevA.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (resourceCurrentPage > 1) {
+                resourceCurrentPage--;
+                fetchAndDisplayResources();
+            }
+        });
+        prevLi.appendChild(prevA);
+        resourcePaginationUl.appendChild(prevLi);
+
+        const showPages = 5;
+        let startPage = Math.max(1, resourceCurrentPage - Math.floor(showPages / 2));
+        let endPage = Math.min(resourceTotalPages, startPage + showPages - 1);
+        if (endPage - startPage + 1 < showPages) {
+            startPage = Math.max(1, endPage - showPages + 1);
+        }
+
+        if (startPage > 1) {
+            const firstLi = document.createElement('li');
+            firstLi.className = 'page-item';
+            const firstA = document.createElement('a');
+            firstA.className = 'page-link';
+            firstA.href = '#';
+            firstA.textContent = '1';
+            firstA.addEventListener('click', (e) => { e.preventDefault(); resourceCurrentPage = 1; fetchAndDisplayResources(); });
+            firstLi.appendChild(firstA);
+            resourcePaginationUl.appendChild(firstLi);
+            if (startPage > 2) {
+                const ellipsisLi = document.createElement('li');
+                ellipsisLi.className = 'page-item disabled';
+                ellipsisLi.innerHTML = `<span class="page-link">&hellip;</span>`;
+                resourcePaginationUl.appendChild(ellipsisLi);
+            }
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            const pageLi = document.createElement('li');
+            pageLi.className = `page-item ${i === resourceCurrentPage ? 'active' : ''}`;
+            const pageA = document.createElement('a');
+            pageA.className = 'page-link';
+            pageA.href = '#';
+            pageA.textContent = i;
+            pageA.addEventListener('click', ((pageNum) => (e) => {
+                e.preventDefault();
+                resourceCurrentPage = pageNum;
+                fetchAndDisplayResources();
+            })(i));
+            pageLi.appendChild(pageA);
+            resourcePaginationUl.appendChild(pageLi);
+        }
+
+        if (endPage < resourceTotalPages) {
+            if (endPage < resourceTotalPages - 1) {
+                const ellipsisLi = document.createElement('li');
+                ellipsisLi.className = 'page-item disabled';
+                ellipsisLi.innerHTML = `<span class="page-link">&hellip;</span>`;
+                resourcePaginationUl.appendChild(ellipsisLi);
+            }
+            const lastLi = document.createElement('li');
+            lastLi.className = 'page-item';
+            const lastA = document.createElement('a');
+            lastA.className = 'page-link';
+            lastA.href = '#';
+            lastA.textContent = resourceTotalPages;
+            lastA.addEventListener('click', (e) => { e.preventDefault(); resourceCurrentPage = resourceTotalPages; fetchAndDisplayResources(); });
+            lastLi.appendChild(lastA);
+            resourcePaginationUl.appendChild(lastLi);
+        }
+
+        // Next button
+        const nextLi = document.createElement('li');
+        nextLi.className = `page-item ${resourceCurrentPage >= resourceTotalPages ? 'disabled' : ''}`;
+        const nextA = document.createElement('a');
+        nextA.className = 'page-link';
+        nextA.href = '#';
+        nextA.innerHTML = 'Next &gt;';
+        nextA.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (resourceCurrentPage < resourceTotalPages) {
+                resourceCurrentPage++;
+                fetchAndDisplayResources();
+            }
+        });
+        nextLi.appendChild(nextA);
+        resourcePaginationUl.appendChild(nextLi);
+    }
+
 
     addBtn.addEventListener('click', function() {
         resourceForm.reset();
@@ -195,7 +370,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else {
                     showSuccess(statusDiv, message);
                 }
-                fetchAndDisplayResources(currentFilters); // Refresh the list
+                resourceCurrentPage = 1; // Reset to first page after import
+                fetchAndDisplayResources(); // Refresh the list
             } catch (error) {
                 showError(statusDiv, `Error importing resources: ${error.message}`);
             } finally {
@@ -291,6 +467,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ids })
             }, statusDiv);
+                resourceCurrentPage = 1; // Reset to first page
             fetchAndDisplayResources();
         } catch (error) {
             /* handled by apiCall */
@@ -337,7 +514,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!confirm(`Delete resource '${name}' (ID: ${id})?`)) return;
             try {
                 await apiCall(`/api/admin/resources/${id}`, { method: 'DELETE' }, statusDiv);
-                fetchAndDisplayResources();
+                fetchAndDisplayResources(); // Will fetch current page, might be empty if last item deleted
             } catch (error) {
                 /* error handled by apiCall */
             }
@@ -368,7 +545,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     body: JSON.stringify(payload)
                 }, resourceFormStatus);
             }
-            await fetchAndDisplayResources();
+            // Decide if we should reset to page 1 or refetch current page
+            // For simplicity, refetching current page. If item was new, it might appear on a new last page.
+            fetchAndDisplayResources();
             setTimeout(() => { resourceFormModal.style.display = 'none'; }, 500);
         } catch (error) {
             /* error shown by apiCall */
@@ -395,10 +574,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 }, bulkFormStatus);
-                await fetchAndDisplayResources();
+
                 if (result && result.created) {
                     showSuccess(bulkFormStatus, `Created ${result.created.length} resources.` + (result.skipped && result.skipped.length ? ` Skipped: ${result.skipped.join(', ')}` : ''));
                 }
+                resourceCurrentPage = 1; // Go to first page to see new items potentially
+                fetchAndDisplayResources();
                 setTimeout(() => { bulkModal.style.display = 'none'; }, 500);
             } catch (error) {
                 /* error shown by apiCall */
@@ -425,7 +606,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ids, changes: fields })
                 }, bulkEditFormStatus);
-                await fetchAndDisplayResources();
+                fetchAndDisplayResources(); // Refetch current page as items are modified in place
                 setTimeout(() => { bulkEditModal.style.display = 'none'; }, 500);
             } catch (error) {
                 /* handled by apiCall */
@@ -441,7 +622,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 mapId: filterMapSelect.value,
                 tags: filterTagsInput.value.trim()
             };
-            fetchAndDisplayResources(currentFilters);
+            resourceCurrentPage = 1; // Reset to page 1 when applying filters
+            fetchAndDisplayResources();
         });
     }
 
@@ -449,14 +631,17 @@ document.addEventListener('DOMContentLoaded', function() {
         clearFiltersBtn.addEventListener('click', () => {
             if (filterNameInput) filterNameInput.value = '';
             if (filterStatusSelect) filterStatusSelect.value = '';
-            if (filterMapSelect) filterMapSelect.value = '';
+            if (filterMapSelect) filterMapSelect.value = ''; // Also reset map filter
             if (filterTagsInput) filterTagsInput.value = '';
             currentFilters = {};
-            fetchAndDisplayResources(currentFilters);
+            resourceCurrentPage = 1; // Reset to page 1 when clearing filters
+            fetchAndDisplayResources();
         });
     }
 
-    fetchAndDisplayResources();
+    // Initial setup
+    initializeResourcePerPageSelect();
+    fetchAndDisplayResources(); // Initial fetch
 
     // --- Bulk PIN Actions UI Elements ---
     const bulkPinActionsArea = document.getElementById('bulk-pin-actions-area');
@@ -547,7 +732,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 showSuccess(bulkPinActionStatus, message);
 
-                fetchAndDisplayResources(currentFilters); // Refresh resource list to show updated current_pin etc.
+                fetchAndDisplayResources(); // Refresh resource list
 
                 // Uncheck all and hide bulk actions UI
                 if (selectAllCheckbox) selectAllCheckbox.checked = false;
