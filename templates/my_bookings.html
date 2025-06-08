@@ -64,6 +64,20 @@
                 <!-- Upcoming bookings will be loaded here by JavaScript -->
                 <p class="loading-message">{{ _('Loading upcoming bookings...') }}</p>
             </div>
+            <div class="pagination-controls-wrapper mt-3" id="upcoming_bk_pg_pagination_controls_container" style="display: none;">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <label for="upcoming_bk_pg_per_page_select" class="form-label me-2">{{ _('Per Page:') }}</label>
+                        <select id="upcoming_bk_pg_per_page_select" class="form-select form-select-sm d-inline-block" style="width: auto;"></select>
+                    </div>
+                    <ul class="pagination pagination-sm mb-0" id="upcoming_bk_pg_pagination_ul">
+                        <!-- Pagination links will be built by JavaScript -->
+                    </ul>
+                    <div id="upcoming_bk_pg_total_results_display" class="text-muted">
+                        <!-- Total results will be shown by JavaScript -->
+                    </div>
+                </div>
+            </div>
         </div>
 
         <hr class="my-4"> <!-- Optional separator -->
@@ -78,12 +92,26 @@
                 <!-- Past bookings will be loaded here by JavaScript -->
                 <p class="loading-message">{{ _('Loading past bookings...') }}</p>
             </div>
+            <div class="pagination-controls-wrapper mt-3" id="past_bk_pg_pagination_controls_container" style="display: none;">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <label for="past_bk_pg_per_page_select" class="form-label me-2">{{ _('Per Page:') }}</label>
+                        <select id="past_bk_pg_per_page_select" class="form-select form-select-sm d-inline-block" style="width: auto;"></select>
+                    </div>
+                    <ul class="pagination pagination-sm mb-0" id="past_bk_pg_pagination_ul">
+                        <!-- Pagination links will be built by JavaScript -->
+                    </ul>
+                    <div id="past_bk_pg_total_results_display" class="text-muted">
+                        <!-- Total results will be shown by JavaScript -->
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <!-- Template for a single booking item (hidden, used by JS) -->
     <template id="booking-item-template">
-        <div class="card mb-3 booking-item">
+        <div class="card mb-3 booking-card">
             <div class="card-body">
                 <div class="booking-line1">
                     <span><strong>{{ _('Title') }}:</strong> <span class="booking-title-value"></span></span>
