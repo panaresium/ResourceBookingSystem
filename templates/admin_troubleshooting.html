@@ -101,10 +101,10 @@ document.addEventListener('DOMContentLoaded', function () {
     const dbResultsArea = document.getElementById('db-results-area');
     const dbRecordsOutput = document.getElementById('db-records-output');
     const dbPaginationControls = document.getElementById('db-pagination-controls');
-    const dbViewStatusEl = document.getElementById('db-view-status'); // Renamed from viewDbRecordsStatusEl
+    const dbViewStatusEl = document.getElementById('db-view-status');
     const dbPerPageSelect = document.getElementById('db-per-page-select');
     const dbTotalResultsDisplay = document.getElementById('db-total-results-display');
-    const dbPaginationUl = document.getElementById('db-pagination-ul'); // Added reference
+    const dbPaginationUl = document.getElementById('db-pagination-ul');
 
     const dbItemsPerPageOptions = [10, 25, 50, 100, 200];
 
@@ -137,23 +137,22 @@ document.addEventListener('DOMContentLoaded', function () {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
-            console.log('API response for table names:', JSON.stringify(data, null, 2)); // Added console log
+            console.log('API response for table names:', JSON.stringify(data, null, 2));
 
             if (data.success && data.tables) {
-                dbTableSelect.innerHTML = '<option value="">{{ _("-- Select a Table --") }}</option>'; // Clear existing options
+                dbTableSelect.innerHTML = '<option value="">{{ _("-- Select a Table --") }}</option>';
 
-                // Sort tables by name
                 data.tables.sort((a, b) => a.name.localeCompare(b.name));
 
                 data.tables.forEach(tableInfo => {
                     const option = document.createElement('option');
                     option.value = tableInfo.name;
-                    const recordText = tableInfo.count === 1 ? 'record' : 'records'; // Using plain English
+                    const recordText = tableInfo.count === 1 ? 'record' : 'records';
                     option.textContent = `${tableInfo.name} (${tableInfo.count} ${recordText})`;
                     dbTableSelect.appendChild(option);
                 });
                 updateDbViewStatus("{{ _('Table names loaded.') }}", false);
-                console.log('Generated dbTableSelect HTML:', dbTableSelect.innerHTML); // Added console log
+                console.log('Generated dbTableSelect HTML:', dbTableSelect.innerHTML);
             } else {
                 throw new Error(data.message || "{{ _('Failed to load table names.') }}");
             }
@@ -172,7 +171,7 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
         updateDbViewStatus(`{{ _('Loading schema for table:') }} ${tableName}...`);
-        dbFilterArea.style.display = 'block'; // Ensure parent is visible before querying children
+        dbFilterArea.style.display = 'block';
 
         const dbFilterCol1 = document.getElementById('db-filter-col-1');
         const dbFilterCol2 = document.getElementById('db-filter-col-2');
@@ -186,7 +185,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         dbFilterCol1.innerHTML = `<p>{{ _('Loading filters for ') }}${tableName}...</p>`;
-        dbFilterCol2.innerHTML = ''; // Clear second column initially
+        dbFilterCol2.innerHTML = '';
 
         try {
             const response = await fetch(`/api/admin/db/table_info/${tableName}`);
@@ -195,7 +194,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
             if (data.success && data.columns) {
                 dbViewState.columns = data.columns;
-                dbFilterCol1.innerHTML = ''; // Clear loading message
+                dbFilterCol1.innerHTML = '';
                 dbFilterCol2.innerHTML = '';
 
                 if (data.columns.length === 0) {
@@ -204,9 +203,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 data.columns.forEach((column, index) => {
                     const filterGroup = document.createElement('div');
-                    // Each filter group can be a simple div, styling will be handled by parent col-md-6 and its own items
                     filterGroup.className = 'mb-3 filter-group-item';
-                    // Using template literals for cleaner HTML structure within JS
                     filterGroup.innerHTML = `
                         <div><label class="form-label mb-1">${column.name} <small class="text-muted">(${column.type})</small></label></div>
                         <div class="input-group input-group-sm mb-1">
@@ -245,7 +242,6 @@ document.addEventListener('DOMContentLoaded', function () {
                         dbFilterCol2.appendChild(filterGroup);
                     }
                 });
-                // dbFilterArea.style.display = 'block'; // Already set earlier if tableName is valid
                 updateDbViewStatus(`{{ _('Schema loaded for table:') }} ${tableName}. {{ _('Ready for filtering and data fetching.') }}`, false);
             } else {
                 throw new Error(data.message || `{{ _('Failed to load schema for table:') }} ${tableName}`);
@@ -259,7 +255,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function renderTable(columns, records) {
-        dbRecordsOutput.innerHTML = ''; // Clear previous
+        dbRecordsOutput.innerHTML = '';
         if (!columns || columns.length === 0) {
              dbRecordsOutput.innerHTML = `<p>{{ _('No column information available to display table.') }}</p>`;
              return;
@@ -282,7 +278,6 @@ document.addEventListener('DOMContentLoaded', function () {
             const th = document.createElement('th');
             th.scope = 'col';
             th.textContent = colDef.name;
-            // Basic sort indicator and functionality (can be enhanced)
             let sortIndicator = '';
             if (dbViewState.sortBy === colDef.name) {
                 sortIndicator = dbViewState.sortOrder === 'asc' ? ' &uarr;' : ' &darr;';
@@ -310,7 +305,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (value === null || typeof value === 'undefined') {
                     cell.textContent = 'NULL';
                     cell.classList.add('text-muted', 'fst-italic');
-                } else if (typeof value === 'object') { // Handle potential JSON objects/arrays if not stringified by backend
+                } else if (typeof value === 'object') {
                     cell.textContent = JSON.stringify(value, null, 2);
                 } else {
                     cell.textContent = value;
@@ -321,6 +316,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function renderPagination(paginationData) {
+        // const dbPaginationUl = document.getElementById('db-pagination-ul'); // Already global
         if (!dbPaginationUl) return;
         dbPaginationUl.innerHTML = ''; // Clear only the page links list
 
@@ -332,18 +328,19 @@ document.addEventListener('DOMContentLoaded', function () {
         dbPaginationControls.style.display = 'flex'; // Use flex for the main container
 
         if(dbTotalResultsDisplay) {
-            dbTotalResultsDisplay.textContent = `Total: ${paginationData.total_records} records`;
+            // Use total_items from paginationData (corrected from total_records)
+            dbTotalResultsDisplay.textContent = `Total: ${paginationData.total_items} records`;
         }
 
         let pageLinksHtml = '';
 
-        // Previous button
-        pageLinksHtml += `<li class="page-item ${paginationData.page === 1 ? 'disabled' : ''}">
-                            <a class="page-link" href="#" data-page="${paginationData.page - 1}">${("{{ _('Previous') }}")}</a>
+        // Previous button - use paginationData.current_page
+        pageLinksHtml += `<li class="page-item ${paginationData.current_page === 1 ? 'disabled' : ''}">
+                            <a class="page-link" href="#" data-page="${paginationData.current_page - 1}">${("{{ _('Previous') }}")}</a>
                           </li>`;
 
         let show_pages_count = 5;
-        let start_p = Math.max(1, paginationData.page - Math.floor(show_pages_count / 2));
+        let start_p = Math.max(1, paginationData.current_page - Math.floor(show_pages_count / 2));
         let end_p = Math.min(paginationData.total_pages, start_p + show_pages_count - 1);
         if (end_p - start_p + 1 < show_pages_count) {
             start_p = Math.max(1, end_p - show_pages_count + 1);
@@ -354,16 +351,16 @@ document.addEventListener('DOMContentLoaded', function () {
              if (start_p > 2) pageLinksHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
         }
         for (let i = start_p; i <= end_p; i++) {
-            pageLinksHtml += `<li class="page-item ${i === paginationData.page ? 'active' : ''}"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+            pageLinksHtml += `<li class="page-item ${i === paginationData.current_page ? 'active' : ''}"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
         }
         if (end_p < paginationData.total_pages) {
             if (end_p < paginationData.total_pages - 1) pageLinksHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
             pageLinksHtml += `<li class="page-item"><a class="page-link" href="#" data-page="${paginationData.total_pages}">${paginationData.total_pages}</a></li>`;
         }
 
-        // Next button
-        pageLinksHtml += `<li class="page-item ${paginationData.page === paginationData.total_pages ? 'disabled' : ''}">
-                            <a class="page-link" href="#" data-page="${paginationData.page + 1}">${("{{ _('Next') }}")}</a>
+        // Next button - use paginationData.current_page
+        pageLinksHtml += `<li class="page-item ${paginationData.current_page === paginationData.total_pages ? 'disabled' : ''}">
+                            <a class="page-link" href="#" data-page="${paginationData.current_page + 1}">${("{{ _('Next') }}")}</a>
                           </li>`;
 
         dbPaginationUl.innerHTML = pageLinksHtml;
@@ -371,7 +368,7 @@ document.addEventListener('DOMContentLoaded', function () {
         dbPaginationUl.querySelectorAll('.page-link').forEach(link => {
             link.addEventListener('click', function(e) {
                 e.preventDefault();
-                if (this.closest('li').classList.contains('disabled')) return; // Prevent action on disabled
+                if (this.closest('li').classList.contains('disabled')) return;
                 const pageNum = parseInt(this.dataset.page);
                 if (pageNum && pageNum !== dbViewState.currentPage) {
                     handlePaginationClick(pageNum);
@@ -382,7 +379,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function initializeDbPerPageSelect() {
         if (!dbPerPageSelect) return;
-        dbPerPageSelect.innerHTML = ''; // Clear existing options
+        dbPerPageSelect.innerHTML = '';
         dbItemsPerPageOptions.forEach(optionValue => {
             const option = new Option(optionValue, optionValue);
             if (optionValue === dbViewState.perPage) {
@@ -392,13 +389,13 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         dbPerPageSelect.addEventListener('change', function() {
             dbViewState.perPage = parseInt(this.value);
-            dbViewState.currentPage = 1; // Reset to first page
+            dbViewState.currentPage = 1;
             fetchAndDisplayTableData();
         });
     }
 
     async function handlePaginationClick(newPage) {
-        if (newPage < 1) return; // Should be handled by disabled state, but good check
+        if (newPage < 1) return;
         dbViewState.currentPage = newPage;
         await fetchAndDisplayTableData();
     }
@@ -412,7 +409,7 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
-        const currentTableName = String(selectedTable); // Explicitly cast to string
+        const currentTableName = String(selectedTable);
         console.log('Fetching data for table:', currentTableName, 'Type:', typeof currentTableName);
 
         updateDbViewStatus(`{{ _('Fetching data for table:') }} ${currentTableName}, {{ _('page:') }} ${currentPage}...`);
@@ -434,11 +431,11 @@ document.addEventListener('DOMContentLoaded', function () {
             const data = await response.json();
 
             if (data.success && data.records) {
-                if (data.columns && dbViewState.columns.length === 0) { // Store column info if not already fetched by loadTableInfo
+                if (data.columns && dbViewState.columns.length === 0) {
                     dbViewState.columns = data.columns;
                 }
                 renderTable(dbViewState.columns, data.records);
-                renderPagination(data.pagination);
+                renderPagination(data.pagination); // data.pagination should have current_page, total_items, total_pages
                 updateDbViewStatus(`{{ _('Data loaded for table:') }} ${currentTableName}.`, false);
             } else {
                 throw new Error(data.message || `{{ _('Failed to fetch data for table:') }} ${currentTableName}`);
@@ -452,12 +449,12 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     if (dbTableSelect) {
-        dbTableSelect.addEventListener('change', async function(event) { // Added 'event' parameter
-            dbViewState.selectedTable = event.target.value; // Changed to event.target.value
+        dbTableSelect.addEventListener('change', async function(event) {
+            dbViewState.selectedTable = event.target.value;
             console.log('dbTableSelect changed. Selected table name:', dbViewState.selectedTable, 'Type:', typeof dbViewState.selectedTable);
             dbViewState.currentPage = 1;
             dbViewState.currentFilters = [];
-            dbViewState.columns = []; // Reset columns, will be fetched by loadTableInfo or fetchAndDisplayTableData
+            dbViewState.columns = [];
             dbViewState.sortBy = null;
             dbViewState.sortOrder = 'asc';
 
@@ -480,7 +477,6 @@ document.addEventListener('DOMContentLoaded', function () {
     if (dbApplyFiltersBtn) {
         dbApplyFiltersBtn.addEventListener('click', async function() {
             dbViewState.currentFilters = [];
-            // Iterate over controls in both columns
             const filterItems = dbFilterControlsContainer.querySelectorAll('.filter-group-item');
             filterItems.forEach(item => {
                 const opSelect = item.querySelector('.filter-op');
@@ -538,20 +534,16 @@ document.addEventListener('DOMContentLoaded', function () {
             reloadConfigurationsStatusEl.className = 'alert alert-info';
             reloadConfigurationsBtn.disabled = true;
 
-            // Using global apiCall which handles CSRF
             apiCall('/api/admin/reload_configurations', {
                 method: 'POST'
-                // headers: { 'X-CSRFToken': csrfToken, 'Accept': 'application/json' } // csrfToken handled by apiCall
             }, reloadConfigurationsStatusEl)
-            .then(data => { // apiCall resolves with data on success (2xx status)
-                // Message is already set by apiCall on success if data.message exists
-                if (!data.message && data.success) { // if apiCall's default success message isn't enough
+            .then(data => {
+                if (!data.message && data.success) {
                      showSuccess(reloadConfigurationsStatusEl, "{{ _('Configuration reload attempt finished successfully.') }}");
                 }
             })
-            .catch(error => { // apiCall rejects on network error or non-2xx status, message already set
+            .catch(error => {
                 console.error('Reload Configurations error:', error);
-                // showError is already called by apiCall
             })
             .finally(() => {
                 reloadConfigurationsBtn.disabled = false;
@@ -569,19 +561,13 @@ document.addEventListener('DOMContentLoaded', function () {
                 cleanupSystemDataStatusEl.className = 'alert alert-info';
                 cleanupSystemDataBtn.disabled = true;
 
-                // Using global apiCall which handles CSRF
                 apiCall('/api/admin/cleanup_system_data', {
                     method: 'POST'
-                    // headers: { 'X-CSRFToken': csrfToken, 'Accept': 'application/json' } // csrfToken handled by apiCall
                 }, cleanupSystemDataStatusEl)
                 .then(data => {
                      if (!data.message && data.success) {
                         showSuccess(cleanupSystemDataStatusEl, "{{ _('System data cleanup successful.') }}");
                      }
-                    // Optionally, refresh parts of the page or prompt user to refresh
-                    // Example: if you have a function to reload backups on the Backup/Restore page,
-                    // and this cleanup affects it, you might call it here.
-                    // For now, no specific refresh action after cleanup on this page.
                 })
                 .catch(error => {
                     console.error('Cleanup System Data error:', error);
