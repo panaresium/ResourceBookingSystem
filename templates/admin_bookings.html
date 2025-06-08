@@ -145,7 +145,7 @@
             </li>
         </ul>
     </nav>
-    <p class="text-center">{{ _('Page %(page_num)s of %(total_pages)s.', page_num=bookings_page_obj.page, total_pages=bookings_page_obj.pages) }}</p>
+    <p class="text-center">{{ _('Page %(page_num)s of %(total_pages)s.', {'page_num': bookings_page_obj.page, 'total_pages': bookings_page_obj.pages}) }}</p>
     {% endif %}
 
 </div>
