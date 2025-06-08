@@ -263,43 +263,63 @@ def get_my_bookings():
     Accepts 'status_filter' and 'date_filter_value' query parameters.
     Also includes a global setting `check_in_out_enabled`.
     """
+    logger = current_app.logger
     try:
+        # Pagination parameters for upcoming bookings
+        page_upcoming = request.args.get('page_upcoming', 1, type=int)
+        per_page_upcoming = request.args.get('per_page_upcoming', 5, type=int) # Default from JS
+
+        # Pagination parameters for past bookings
+        page_past = request.args.get('page_past', 1, type=int)
+        per_page_past = request.args.get('per_page_past', 5, type=int) # Default from JS
+
+        my_bookings_per_page_options = [5, 10, 25, 50] # From JS
+
+        if per_page_upcoming not in my_bookings_per_page_options:
+            per_page_upcoming = my_bookings_per_page_options[0]
+        if per_page_past not in my_bookings_per_page_options:
+            per_page_past = my_bookings_per_page_options[0]
+
         status_filter = request.args.get('status_filter')
-        date_filter_value_str = request.args.get('date_filter_value')
+        date_filter_value_str = request.args.get('date_filter_value') # This seems to be from an older version, new JS uses resource_name_filter
+        resource_name_filter = request.args.get('resource_name_filter') # Added for new filter
 
         booking_settings = BookingSettings.query.first()
         enable_check_in_out = booking_settings.enable_check_in_out if booking_settings else False
         check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings else 15
         check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings else 15
         if not booking_settings:
-             current_app.logger.warning("BookingSettings not found in DB, using default check-in window (15/15 mins) for get_my_bookings.")
+             logger.warning("BookingSettings not found, using default check-in window for get_my_bookings.")
 
-        # Base query
         user_bookings_query = Booking.query.filter_by(user_name=current_user.username)
 
-        # Apply Status Filter
-        if status_filter and status_filter.lower() != 'all':
+        if status_filter and status_filter.lower() != 'all' and status_filter.lower() != '':
             user_bookings_query = user_bookings_query.filter(
                 sqlfunc.trim(sqlfunc.lower(Booking.status)) == status_filter.lower()
             )
 
-        # Apply Date Filter
-        if date_filter_value_str:
-            try:
-                target_date_obj = datetime.strptime(date_filter_value_str, '%Y-%m-%d').date()
-                user_bookings_query = user_bookings_query.filter(
-                    sqlfunc.date(Booking.start_time) == target_date_obj
-                )
-            except ValueError:
-                current_app.logger.warning(f"Invalid date_filter_value format: {date_filter_value_str}. Ignoring date filter.")
+        if resource_name_filter: # New filter for resource name
+            user_bookings_query = user_bookings_query.join(Resource).filter(Resource.name.ilike(f"%{resource_name_filter}%"))
 
-        user_all_bookings = user_bookings_query.all() # Execute the query
+        # Note: date_filter_value_str is not used by current JS, but kept for compatibility if needed.
+        # If it were to be used, it would be applied here.
+        # if date_filter_value_str:
+        #     try:
+        #         target_date_obj = datetime.strptime(date_filter_value_str, '%Y-%m-%d').date()
+        #         user_bookings_query = user_bookings_query.filter(
+        #             sqlfunc.date(Booking.start_time) == target_date_obj
+        #         )
+        #     except ValueError:
+        #         logger.warning(f"Invalid date_filter_value format: {date_filter_value_str}. Ignoring date filter.")
 
-        upcoming_bookings_data = []
-        past_bookings_data = []
+        # Fetch ALL bookings matching filters first
+        all_user_bookings_from_db = user_bookings_query.all()
+
+        all_upcoming_bookings_dicts = []
+        all_past_bookings_dicts = []
         now_utc = datetime.now(timezone.utc)
 
-        for booking in user_all_bookings:
+        for booking in all_user_bookings_from_db:
             resource = Resource.query.get(booking.resource_id)
             resource_name = resource.name if resource else "Unknown Resource"
 
@@ -348,24 +368,62 @@ def get_my_bookings():
             if booking_start_time_aware >= now_utc:
                 upcoming_bookings_data.append(booking_dict)
             else:
-                past_bookings_data.append(booking_dict)
+            if booking_start_time_aware >= now_utc:
+                all_upcoming_bookings_dicts.append(booking_dict)
+            else:
+                all_past_bookings_dicts.append(booking_dict)
 
-        # Sort upcoming bookings chronologically (nearest first)
-        upcoming_bookings_data.sort(key=lambda b: b['start_time'])
-        # Sort past bookings reverse chronologically (most recent past first)
-        past_bookings_data.sort(key=lambda b: b['start_time'], reverse=True)
+        # Sort before pagination
+        all_upcoming_bookings_dicts.sort(key=lambda b: b['start_time'])
+        all_past_bookings_dicts.sort(key=lambda b: b['start_time'], reverse=True)
 
-        current_app.logger.info(f"User '{current_user.username}' fetched their bookings. Upcoming: {len(upcoming_bookings_data)}, Past: {len(past_bookings_data)}. Check-in/out enabled: {enable_check_in_out}")
+        # Python-side pagination for upcoming bookings
+        total_items_upcoming = len(all_upcoming_bookings_dicts)
+        total_pages_upcoming = (total_items_upcoming + per_page_upcoming - 1) // per_page_upcoming if per_page_upcoming > 0 else 0
+        if total_pages_upcoming == 0 and total_items_upcoming > 0: total_pages_upcoming = 1
+        start_idx_upcoming = (page_upcoming - 1) * per_page_upcoming
+        end_idx_upcoming = start_idx_upcoming + per_page_upcoming
+        paginated_upcoming_bookings = all_upcoming_bookings_dicts[start_idx_upcoming:end_idx_upcoming]
+
+        # Python-side pagination for past bookings
+        total_items_past = len(all_past_bookings_dicts)
+        total_pages_past = (total_items_past + per_page_past - 1) // per_page_past if per_page_past > 0 else 0
+        if total_pages_past == 0 and total_items_past > 0: total_pages_past = 1
+        start_idx_past = (page_past - 1) * per_page_past
+        end_idx_past = start_idx_past + per_page_past
+        paginated_past_bookings = all_past_bookings_dicts[start_idx_past:end_idx_past]
+
+        logger.info(f"User '{current_user.username}' fetched MyBookings. Upcoming: page {page_upcoming}/{total_pages_upcoming}, items {len(paginated_upcoming_bookings)}/{total_items_upcoming}. Past: page {page_past}/{total_pages_past}, items {len(paginated_past_bookings)}/{total_items_past}.")
 
         return jsonify({
-            'upcoming_bookings': upcoming_bookings_data,
-            'past_bookings': past_bookings_data,
+            'success': True, # Added for consistency
+            'upcoming_bookings': paginated_upcoming_bookings,
+            'upcoming_pagination': {
+                'current_page': page_upcoming,
+                'per_page': per_page_upcoming,
+                'total_items': total_items_upcoming,
+                'total_pages': total_pages_upcoming,
+                'per_page_options': my_bookings_per_page_options # Send options to JS
+            },
+            'past_bookings': paginated_past_bookings,
+            'past_pagination': {
+                'current_page': page_past,
+                'per_page': per_page_past,
+                'total_items': total_items_past,
+                'total_pages': total_pages_past,
+                'per_page_options': my_bookings_per_page_options # Send options to JS
+            },
             'check_in_out_enabled': enable_check_in_out
         }), 200
-
     except Exception as e:
-        current_app.logger.exception(f"Error fetching bookings for user '{current_user.username}':")
-        return jsonify({'error': 'Failed to fetch your bookings due to a server error.'}), 500
+        logger.exception(f"Error fetching bookings for user '{current_user.username}':")
+        # Return consistent error structure
+        return jsonify({
+            'success': False,
+            'error': 'Failed to fetch your bookings due to a server error.',
+            'upcoming_pagination': None, # Or default pagination objects
+            'past_pagination': None
+        }), 500
 
 
 @api_bookings_bp.route('/bookings/my_bookings_for_date', methods=['GET'])
