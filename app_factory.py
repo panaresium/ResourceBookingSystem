@@ -373,65 +373,60 @@ def create_app(config_object=config, testing=False): # Added testing parameter
             scheduler = BackgroundScheduler(daemon=True)
 
             # Add jobs from scheduler_tasks.py
-        if cancel_unchecked_bookings:
-            scheduler.add_job(cancel_unchecked_bookings, 'interval', minutes=app.config.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', 5), args=[app])
-        if apply_scheduled_resource_status_changes:
-            scheduler.add_job(apply_scheduled_resource_status_changes, 'interval', minutes=1, args=[app])
-        if run_scheduled_backup_job:
-            scheduler.add_job(run_scheduled_backup_job, 'interval', minutes=app.config.get('SCHEDULER_BACKUP_JOB_INTERVAL_MINUTES', 60), args=[app]) # New config option
+            if cancel_unchecked_bookings: # Check if function exists before adding
+                scheduler.add_job(cancel_unchecked_bookings, 'interval', minutes=app.config.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', 5), args=[app])
+            if apply_scheduled_resource_status_changes: # Check if function exists
+                scheduler.add_job(apply_scheduled_resource_status_changes, 'interval', minutes=1, args=[app])
+            if run_scheduled_backup_job: # Check if function exists
+                scheduler.add_job(run_scheduled_backup_job, 'interval', minutes=app.config.get('SCHEDULER_BACKUP_JOB_INTERVAL_MINUTES', 60), args=[app]) # New config option
 
-        if run_scheduled_booking_csv_backup: # Check if the function exists
-            booking_schedule_settings = app.config['BOOKING_CSV_SCHEDULE_SETTINGS']
-            if booking_schedule_settings.get('enabled'):
-                interval_value = booking_schedule_settings.get('interval_value', 24) # Default from helper if somehow missing
-                interval_unit = booking_schedule_settings.get('interval_unit', 'hours') # Default from helper
+            if run_scheduled_booking_csv_backup: # Check if the function exists
+                booking_schedule_settings = app.config['BOOKING_CSV_SCHEDULE_SETTINGS']
+                if booking_schedule_settings.get('enabled'):
+                    interval_value = booking_schedule_settings.get('interval_value', 24) # Default from helper if somehow missing
+                    interval_unit = booking_schedule_settings.get('interval_unit', 'hours') # Default from helper
 
-                # APScheduler uses plural for interval units (minutes, hours, days)
-                # However, the add_job function takes kwargs like hours=X, minutes=Y, days=Z
-                job_kwargs = {}
-                if interval_unit == 'minutes':
-                    job_kwargs['minutes'] = interval_value
-                elif interval_unit == 'hours':
-                    job_kwargs['hours'] = interval_value
-                elif interval_unit == 'days':
-                    job_kwargs['days'] = interval_value
+                    job_kwargs = {}
+                    if interval_unit == 'minutes':
+                        job_kwargs['minutes'] = interval_value
+                    elif interval_unit == 'hours':
+                        job_kwargs['hours'] = interval_value
+                    elif interval_unit == 'days':
+                        job_kwargs['days'] = interval_value
+                    else:
+                        app.logger.warning(f"Invalid interval unit '{interval_unit}' from settings. Defaulting to 24 hours.")
+                        job_kwargs['hours'] = 24
+
+                    scheduler.add_job(
+                        run_scheduled_booking_csv_backup,
+                        'interval',
+                        id='scheduled_booking_csv_backup_job', # Add an ID for later modification/removal
+                        **job_kwargs,
+                        args=[app] # Pass the app instance itself
+                    )
+                    app.logger.info(f"Scheduled booking CSV backup job added: Interval {interval_value} {interval_unit}, Range: {booking_schedule_settings.get('range_type')}.")
                 else:
-                    # Should not happen due to validation in load_booking_csv_schedule_settings
-                    app.logger.warning(f"Invalid interval unit '{interval_unit}' from settings. Defaulting to 24 hours.")
-                    job_kwargs['hours'] = 24
+                    app.logger.info("Scheduled booking CSV backup is disabled in settings. Job not added.")
 
-                scheduler.add_job(
-                    run_scheduled_booking_csv_backup,
-                    'interval',
-                    id='scheduled_booking_csv_backup_job', # Add an ID for later modification/removal
-                    **job_kwargs,
-                    args=[app] # Pass the app instance itself
-                )
-                app.logger.info(f"Scheduled booking CSV backup job added: Interval {interval_value} {interval_unit}, Range: {booking_schedule_settings.get('range_type')}.")
-            else:
-                app.logger.info("Scheduled booking CSV backup is disabled in settings. Job not added.")
+            if azure_backup_if_changed: # Legacy Azure backup, check if function exists
+                 scheduler.add_job(azure_backup_if_changed, 'interval', minutes=app.config.get('AZURE_BACKUP_INTERVAL_MINUTES', 60))
 
-        if azure_backup_if_changed: # Legacy Azure backup
-             scheduler.add_job(azure_backup_if_changed, 'interval', minutes=app.config.get('AZURE_BACKUP_INTERVAL_MINUTES', 60))
-
-        # if not app.testing: # Original condition
-        if not app.config.get('TESTING', False) and app.config.get("SCHEDULER_ENABLED", True): # More robust check
-             try:
-                 scheduler.start()
-                 app.logger.info("Background scheduler started.")
-             except Exception as e:
-                 app.logger.exception(f"Failed to start background scheduler: {e}")
-        else:
-            app.logger.info("Background scheduler not started (either in test mode or SCHEDULER_ENABLED is False).")
+            # Start the scheduler only if it's not testing and SCHEDULER_ENABLED is true
+            # The outer 'if not testing and app.config.get("SCHEDULER_ENABLED", True):' already covers this.
+            try:
+                scheduler.start()
+                app.logger.info("Background scheduler started.")
+            except Exception as e:
+                app.logger.exception(f"Failed to start background scheduler: {e}")
             app.scheduler = scheduler
         else: # apscheduler_available_check is False
             app.scheduler = None # Ensure app.scheduler exists
             app.logger.info("APScheduler not installed, so it was not started.")
     else: # Testing or SCHEDULER_ENABLED is False
         app.scheduler = None # Ensure app.scheduler exists but is None
-        if testing:
+        if testing: # This log is now reachable due to the 'if testing: return app' being removed/changed
             app.logger.info("Scheduler not started in TESTING mode.")
-        else: # SCHEDULER_ENABLED was False
+        elif not app.config.get("SCHEDULER_ENABLED", True): # Log if disabled by config
             app.logger.info("Scheduler not started because SCHEDULER_ENABLED is False.")
 
     if not testing: # Final log message only if not testing
