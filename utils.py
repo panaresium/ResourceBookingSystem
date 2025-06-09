@@ -321,23 +321,6 @@ def generate_booking_image(resource_image_filename: str, map_coordinates_str: st
 def send_email(to_address: str, subject: str, body: str = None, html_body: str = None, attachment_path: str = None):
     # mail_instance = current_app.extensions.get('mail') # Removed
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    # New logging using getattr for safety
-    mail_state = getattr(mail, 'state', None)
-    app_from_state = getattr(mail_state, 'app', None)
-    logger.warning(f"UTILS_SEND_EMAIL: send_email using global mail from extensions. ID: {id(mail)}. mail.state: {mail_state}. mail.state.app: {app_from_state}")
-
-    if not app_from_state:
-        logger.warning("Flask-Mail's global instance state not properly initialized (mail.state.app is not set). Email not sent via external server.")
-        # The more detailed breakdown of why it might not be initialized can be complex here
-        # as we are reverting to global `mail`. The factory patch handles the detailed scenarios for global mail.
-        logger.info(f"Email intent: To='{to_address}', Subject='{subject}'. This email was NOT sent via SMTP due to missing Flask-Mail configuration.")
-        if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
-            try:
-                os.remove(attachment_path)
-                logger.info(f"Cleaned up temporary attachment (mail not configured): {attachment_path}")
-            except Exception as e_clean:
-                logger.error(f"Error cleaning up temporary attachment (mail not configured) {attachment_path}: {e_clean}", exc_info=True)
-        return
 
     if not body and not html_body:
         logger.error(f"Email to {to_address} has no body or html_body. Not sending.")
@@ -348,6 +331,17 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
                 logger.info(f"Cleaned up temporary attachment (no email body): {attachment_path}")
             except Exception as e_clean_body:
                 logger.error(f"Error cleaning up temporary attachment (no email body) {attachment_path}: {e_clean_body}", exc_info=True)
+        return
+
+    if current_app.config.get('MAIL_SUPPRESS_SEND'):
+        logger.info(f"Email sending is suppressed by MAIL_SUPPRESS_SEND. Intent: To='{to_address}', Subject='{subject}'.")
+        # Cleanup attachment if necessary, then return
+        if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
+            try:
+                os.remove(attachment_path)
+                logger.info(f"Cleaned up temporary attachment (MAIL_SUPPRESS_SEND): {attachment_path}")
+            except Exception as e_clean_suppress:
+                logger.error(f"Error cleaning up temporary attachment (MAIL_SUPPRESS_SEND) {attachment_path}: {e_clean_suppress}", exc_info=True)
         return
 
     email_entry = {
@@ -393,6 +387,7 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
         mail.send(msg)
         logger.info(f"Email successfully sent to {to_address} via Flask-Mail.")
     except Exception as e:
+        logger.error(f"Email to {to_address} subject '{subject}' was NOT sent due to an error during send operation: {e}", exc_info=True)
         logger.error(f"Failed to send email to {to_address} via Flask-Mail: {e}", exc_info=True)
     finally:
         # Cleanup temporary attachment if it exists and is in the temp directory
