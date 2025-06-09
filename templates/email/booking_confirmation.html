@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Booking Confirmation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+        .container {
+            width: 90%;
+            max-width: 600px;
+            margin: 20px auto;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        h3 {
+            color: #0056b3;
+        }
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+        li {
+            padding-bottom: 8px;
+        }
+        strong {
+            color: #555;
+        }
+        .button {
+            display: inline-block;
+            padding: 10px 15px;
+            margin-top: 15px;
+            background-color: #007bff;
+            color: #ffffff;
+            text-decoration: none;
+            border-radius: 3px;
+        }
+        .footer {
+            margin-top: 20px;
+            font-size: 0.9em;
+            color: #777;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <p>Dear {{ user_name }},</p>
+
+        <p>{{ booking_confirmation_message }}</p>
+
+        <h3>Booking Details:</h3>
+        <ul>
+            <li><strong>Resource:</strong> {{ resource_name }}</li>
+            <li><strong>Title:</strong> {{ booking_title }}</li>
+            <li><strong>Date & Time:</strong> {{ start_time }} - {{ end_time }}</li>
+            <li><strong>Location:</strong> {{ location }}</li>
+            <li><strong>Floor:</strong> {{ floor }}</li>
+        </ul>
+
+        {% if check_in_url %}
+        <p>You can check in for your booking using the link below when it's time:</p>
+        <p><a href="{{ check_in_url }}" class="button">Check-in Now</a></p>
+        {% else %}
+        <p>Check-in for this booking is not available via a direct link at this moment. Please check your bookings section online.</p>
+        {% endif %}
+
+        {% if attachment_path %}  <!-- This is a placeholder, template doesn't know about attachment_path directly -->
+                                  <!-- The sentence below is static text added to the template -->
+        <p class="footer">If an image is attached to this email, it may show the location of your booked resource on the floor map.</p>
+        {% endif %}
+
+        <p class="footer">Thank you for using our booking system!</p>
+    </div>
+</body>
+</html>

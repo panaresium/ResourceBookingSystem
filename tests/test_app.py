@@ -16,7 +16,10 @@ from datetime import datetime, timedelta, time as dt_time # Added for new test
 
 # from flask_login import current_user # Not directly used for assertions here
 import os # New import for system settings tests
-from unittest.mock import patch, mock_open # New imports for system settings tests
+import tempfile # For email attachment tests
+from unittest.mock import patch, mock_open, MagicMock # New imports for system settings tests and email tests
+from utils import generate_booking_image, send_email # For testing email notifications
+# Models User, Resource, Booking, FloorMap are already imported
 
 
 class AppTests(unittest.TestCase):
@@ -8062,3 +8065,219 @@ class TestUnavailableDatesAPI(AppTests):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestEmailNotifications(AppTests):
+    def setUp(self):
+        super().setUp()
+        self.email_user = User.query.filter_by(username='emailuser').first()
+        if not self.email_user:
+            self.email_user = User(username='emailuser', email='emailtest@example.com')
+            self.email_user.set_password('password')
+            db.session.add(self.email_user)
+            db.session.commit()
+
+        # Ensure resource1 from AppTests has an image_filename for tests
+        # The actual file doesn't need to exist if we mock Image.open and os.path.exists
+        if self.resource1: # resource1 is created in AppTests.setUp
+            self.resource1.image_filename = 'test_resource_image.png'
+            # map_coordinates is already set in AppTests.setUp for self.resource1
+            # self.resource1.map_coordinates = json.dumps({'type': 'rect', 'x': 10, 'y': 20, 'width': 30, 'height': 30})
+            db.session.commit()
+        else:
+            # Fallback if resource1 wasn't created, though it should be by AppTests
+            self.resource1 = Resource(name="Test Resource For Email", image_filename='test_resource_image.png',
+                                      map_coordinates=json.dumps({'type': 'rect', 'x': 10, 'y': 20, 'width': 30, 'height': 30}))
+            db.session.add(self.resource1)
+            db.session.commit()
+
+    # Tests for generate_booking_image()
+    @patch('utils.os.path.exists')
+    @patch('utils.Image.open')
+    def test_generate_booking_image_success(self, mock_image_open, mock_os_path_exists):
+        # Mock that the base image file exists
+        mock_os_path_exists.return_value = True
+
+        # Mock PIL Image object and its methods
+        mock_img_instance = MagicMock()
+        mock_converted_img_instance = MagicMock()
+        mock_img_instance.convert.return_value = mock_converted_img_instance
+        mock_image_open.return_value = mock_img_instance
+
+        # Call the function
+        image_path = generate_booking_image(
+            resource_image_filename='test_image.png',
+            map_coordinates_str=self.resource1.map_coordinates
+        )
+
+        self.assertIsNotNone(image_path)
+        self.assertTrue(os.path.exists(image_path)) # Temp file should exist
+        mock_image_open.assert_called_once()
+        mock_img_instance.convert.assert_called_once_with("RGBA")
+        # Check that draw.rectangle was called - requires more specific mocking of ImageDraw if needed
+        mock_converted_img_instance.save.assert_called_once()
+
+        if image_path and os.path.exists(image_path):
+            os.remove(image_path)
+
+    @patch('utils.os.path.exists')
+    def test_generate_booking_image_no_base_image_file(self, mock_os_path_exists):
+        mock_os_path_exists.return_value = False # Simulate base image not found
+
+        image_path = generate_booking_image(
+            resource_image_filename='non_existent.png',
+            map_coordinates_str=self.resource1.map_coordinates
+        )
+        self.assertIsNone(image_path)
+
+    @patch('utils.os.path.exists')
+    @patch('utils.Image.open')
+    def test_generate_booking_image_invalid_coordinates(self, mock_image_open, mock_os_path_exists):
+        mock_os_path_exists.return_value = True
+        mock_img_instance = MagicMock()
+        mock_converted_img_instance = MagicMock()
+        mock_img_instance.convert.return_value = mock_converted_img_instance
+        mock_image_open.return_value = mock_img_instance
+
+        image_path = generate_booking_image(
+            resource_image_filename='test_image.png',
+            map_coordinates_str='invalid json'
+        )
+        self.assertIsNotNone(image_path) # Image should still be created
+        self.assertTrue(os.path.exists(image_path))
+        # Ensure save was called, indicating image was processed even if drawing failed/skipped
+        mock_converted_img_instance.save.assert_called_once()
+        if image_path and os.path.exists(image_path):
+            os.remove(image_path)
+
+    @patch('utils.os.path.exists')
+    @patch('utils.Image.open')
+    def test_generate_booking_image_no_coordinates(self, mock_image_open, mock_os_path_exists):
+        mock_os_path_exists.return_value = True
+        mock_img_instance = MagicMock()
+        mock_converted_img_instance = MagicMock()
+        mock_img_instance.convert.return_value = mock_converted_img_instance
+        mock_image_open.return_value = mock_img_instance
+
+        image_path = generate_booking_image(
+            resource_image_filename='test_image.png',
+            map_coordinates_str=None
+        )
+        self.assertIsNotNone(image_path)
+        self.assertTrue(os.path.exists(image_path))
+        mock_converted_img_instance.save.assert_called_once()
+        if image_path and os.path.exists(image_path):
+            os.remove(image_path)
+
+    # Tests for send_email()
+    @patch('utils.mail.send') # Mocks mail.send from extensions.py, as used in utils.py
+    def test_send_email_html_with_attachment(self, mock_mail_send):
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png", mode='wb')
+        temp_file.write(b'dummy data')
+        temp_file.close()
+        # addCleanup ensures os.remove is called even if test fails after this point
+        self.addCleanup(lambda: os.path.exists(temp_file.name) and os.remove(temp_file.name))
+
+
+        send_email(
+            to_address='test@example.com',
+            subject='Test Subject',
+            html_body='<h1>Hello</h1>',
+            attachment_path=temp_file.name
+        )
+        mock_mail_send.assert_called_once()
+        msg_args = mock_mail_send.call_args[0][0]
+        self.assertEqual(msg_args.recipients, ['test@example.com'])
+        self.assertEqual(msg_args.subject, 'Test Subject')
+        self.assertEqual(msg_args.html, '<h1>Hello</h1>')
+        self.assertEqual(len(msg_args.attachments), 1)
+        self.assertEqual(msg_args.attachments[0].filename, os.path.basename(temp_file.name))
+        self.assertEqual(msg_args.attachments[0].content_type, 'image/png')
+        self.assertEqual(msg_args.attachments[0].data, b'dummy data')
+        self.assertFalse(os.path.exists(temp_file.name), "Temporary attachment file should be cleaned up by send_email.")
+
+
+    @patch('utils.mail.send')
+    def test_send_email_plaintext_only(self, mock_mail_send):
+        send_email(to_address='test@example.com', subject='Plain Subject', body='Just text')
+        mock_mail_send.assert_called_once()
+        msg_args = mock_mail_send.call_args[0][0]
+        self.assertEqual(msg_args.body, 'Just text')
+        self.assertIsNone(msg_args.html)
+        self.assertEqual(len(msg_args.attachments), 0)
+
+    @patch('utils.mail.send')
+    def test_send_email_no_body_or_html(self, mock_mail_send):
+        send_email(to_address='test@example.com', subject='No Body')
+        mock_mail_send.assert_not_called()
+
+    @patch('utils.mail.send')
+    def test_send_email_attachment_cleanup_on_send_failure(self, mock_mail_send):
+        mock_mail_send.side_effect = Exception("SMTP Error")
+
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png", mode='wb')
+        temp_file.write(b'dummy data')
+        temp_file.close()
+        self.addCleanup(lambda: os.path.exists(temp_file.name) and os.remove(temp_file.name))
+
+        send_email(
+            to_address='test@example.com',
+            subject='Test Failure Cleanup',
+            html_body='<h1>Content</h1>',
+            attachment_path=temp_file.name
+        )
+        self.assertFalse(os.path.exists(temp_file.name), "Temporary attachment should be cleaned up even if mail.send fails.")
+
+    # Integration Test for create_booking email sending
+    @patch('routes.api_bookings.send_email') # Patch where send_email is called
+    @patch('routes.api_bookings.generate_booking_image') # Patch where generate_booking_image is called
+    def test_create_booking_sends_confirmation_email(self, mock_generate_image, mock_send_email):
+        mock_generate_image.return_value = '/tmp/mock_image.png' # Dummy path for the generated image
+
+        self.login(self.email_user.username, 'password')
+
+        # Ensure resource1 has the necessary attributes set in setUp
+        self.assertIsNotNone(self.resource1.image_filename)
+        self.assertIsNotNone(self.resource1.map_coordinates)
+
+        payload = {
+            'resource_id': self.resource1.id,
+            'date_str': (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d'),
+            'start_time_str': '10:00',
+            'end_time_str': '11:00',
+            'title': 'Email Test Booking',
+            'user_name': self.email_user.username
+        }
+
+        response = self.client.post('/api/bookings', json=payload)
+        self.assertEqual(response.status_code, 201, f"Booking creation failed: {response.get_json()}")
+
+        # Assert generate_booking_image was called correctly
+        # Based on the logic, it's called if resource_image_filename AND map_coordinates exist
+        mock_generate_image.assert_called_once_with(
+            self.resource1.image_filename,
+            self.resource1.map_coordinates
+        )
+
+        # Assert send_email was called
+        mock_send_email.assert_called_once()
+
+        # Inspect arguments passed to send_email
+        call_args = mock_send_email.call_args
+        self.assertIsNotNone(call_args)
+
+        # call_args is a tuple: (args, kwargs). We want kwargs.
+        kwargs = call_args[1]
+
+        self.assertEqual(kwargs.get('to_address'), self.email_user.email)
+        self.assertIn("Booking Confirmed", kwargs.get('subject', ''))
+        self.assertIn(self.resource1.name, kwargs.get('subject', ''))
+        self.assertIn(payload['title'], kwargs.get('subject', ''))
+
+        html_body = kwargs.get('html_body', '')
+        self.assertTrue(len(html_body) > 0, "HTML body should not be empty")
+        self.assertIn(f"Dear {self.email_user.username}", html_body)
+        self.assertIn("Booking Details:", html_body)
+        self.assertIn(self.resource1.name, html_body) # Check resource name in HTML body
+
+        self.assertEqual(kwargs.get('attachment_path'), '/tmp/mock_image.png')
