@@ -323,6 +323,7 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
 
     if not mail.app:
         logger.warning("Flask-Mail not available or not initialized with app. Email not sent via external server.")
+        logger.info(f"Email intent: To='{to_address}', Subject='{subject}'. This email was NOT sent via SMTP due to missing Flask-Mail configuration.")
         if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
             try:
                 os.remove(attachment_path)
