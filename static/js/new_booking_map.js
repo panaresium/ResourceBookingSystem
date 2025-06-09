@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // const mapAvailabilityDateInput = document.getElementById('new-booking-map-availability-date'); // Old input field, now removed from HTML
     const calendarContainer = document.getElementById('inline-calendar-container'); // New container for inline flatpickr
     const userId = calendarContainer ? calendarContainer.dataset.userId : null;
+    console.log('[Debug] Flatpickr User ID:', userId);
     const mapLocationButtonsContainer = document.getElementById('new-booking-map-location-buttons-container'); // Will be used for combined buttons
     const mapContainer = document.getElementById('new-booking-map-container');
     const mapLoadingStatusDiv = document.getElementById('new-booking-map-loading-status');
@@ -96,13 +97,24 @@ document.addEventListener('DOMContentLoaded', function () {
                 disable: [
                     function(date) {
                         const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-                        // Check against fetched unavailable dates
-                        if (unavailableDatesList.includes(dateStr)) {
+
+                        // --- Add this logging ---
+                        const isDisabledByList = unavailableDatesList.includes(dateStr);
+                        if (unavailableDatesList.length > 0) { // Log only if the list has been populated
+                            console.log(`[Debug] Flatpickr disable check for ${dateStr}: inList = ${isDisabledByList}`);
+                        }
+                        // --- End of added logging ---
+
+                        if (isDisabledByList) {
                             return true;
                         }
-                        // Existing logic for today past 5 PM
                         const todayStr = getTodayDateString();
-                        return dateStr === todayStr && isPastFivePM();
+                        const isPastFivePMToday = dateStr === todayStr && isPastFivePM();
+                        // Log if it's being disabled by the 5 PM rule
+                        // if (isPastFivePMToday) {
+                        //     console.log(`[Debug] Flatpickr disabling ${dateStr} due to 5 PM rule.`);
+                        // }
+                        return isPastFivePMToday;
                     }
                 ],
                 defaultDate: currentSelectedDateStr,
@@ -128,6 +140,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (userId && calendarContainer) {
         apiCall(`/api/resources/unavailable_dates?user_id=${userId}`)
             .then(fetchedDates => {
+                console.log('[Debug] Fetched unavailable dates for Flatpickr:', fetchedDates);
                 initializeFlatpickr(fetchedDates);
             })
             .catch(error => {
