@@ -191,8 +191,8 @@ def get_unavailable_dates():
         end_range_date = first_day_of_next_future_month - timedelta(days=1)
 
         # Fetch all published resources once
-        all_published_resources = Resource.query.filter_by(status='published').all() # Intentionally using the correct name now for search
-        # total_published_resources = len(all_published_resources) # Use this if needed later
+        all_published_resources = Resource.query.filter_by(status='published').all()
+        total_published_resources = len(all_published_resources) # Ensure this is defined
 
         if total_published_resources == 0:
             logger.info("get_unavailable_dates: No published resources available. Result will depend on past date rules.")
@@ -238,8 +238,7 @@ def get_unavailable_dates():
                     active_resources_for_date.append(res_loop_item)
 
             if not active_resources_for_date:
-                # Use len(all_published_resources) to check if there were resources to begin with
-                if len(all_published_resources) > 0 :
+                if total_published_resources > 0 : # Use the defined total_published_resources
                     unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
                     logger.debug(f"No active resources (all under maintenance or none published) on {current_processing_date}. Added to unavailable.")
                 else:
