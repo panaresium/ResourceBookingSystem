@@ -301,7 +301,9 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
     # 3. Initialize Extensions
     # db.init_app(app) has been moved to earlier in the factory function
+    app.logger.debug("Attempting mail.init_app(app)")
     mail.init_app(app)
+    app.logger.debug(f"Mail object after init_app: {mail}, mail.app state: {mail.app}")
     csrf.init_app(app)
     socketio.init_app(app, message_queue=app.config.get('SOCKETIO_MESSAGE_QUEUE')) # Add message_queue from config
     migrate.init_app(app, db)
