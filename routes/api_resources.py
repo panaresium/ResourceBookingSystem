@@ -197,66 +197,101 @@ def get_unavailable_dates():
         if total_published_resources == 0:
             logger.info("get_unavailable_dates: No published resources available. Result will depend on past date rules.")
 
+        # Define Standard Slots
+        STANDARD_SLOTS = [{'start': time(8,0), 'end': time(12,0)}, {'start': time(13,0), 'end': time(17,0)}]
+
         # Loop through the generated date range
         current_iter_date = start_range_date
         while current_iter_date <= end_range_date:
             current_processing_date = current_iter_date
 
-            # Past date handling
+            # a. Past Date Check
             date_is_past = current_processing_date < now.date()
             if date_is_past:
                 if not booking_settings.allow_past_bookings:
                     unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
-                    logger.debug(f"Date {current_processing_date} is past and allow_past_bookings is false.")
+                    logger.debug(f"Date {current_processing_date} is past and allow_past_bookings is false. Added to unavailable.")
                     current_iter_date += timedelta(days=1)
                     continue
 
                 effective_cutoff = datetime.combine(current_processing_date + timedelta(days=1), time.min, tzinfo=timezone.utc) - timedelta(hours=booking_settings.past_booking_time_adjustment_hours)
                 if now > effective_cutoff:
                     unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
-                    logger.debug(f"Date {current_processing_date} is past. Now: {now}, Effective Cutoff: {effective_cutoff}. Added as unavailable.")
+                    logger.debug(f"Date {current_processing_date} is past. Now: {now}, Effective Cutoff: {effective_cutoff}. Added to unavailable.")
                     current_iter_date += timedelta(days=1)
                     continue
 
-            # Date is not made unavailable by past date logic, proceed.
-            # Global Unavailability Check (All Resources Booked/Maintenance)
-            if total_published_resources > 0:
-                resources_unavailable_on_date_count = 0
-                for res in all_resources:
-                    # Check maintenance
-                    if res.is_under_maintenance and (res.maintenance_until is None or current_processing_date <= res.maintenance_until.date()):
-                        resources_unavailable_on_date_count += 1
-                        continue # Check next resource
+            # b. User's Existing Bookings for the Day (for conflict checking against other resources)
+            user_bookings_on_this_date = Booking.query.filter(
+                Booking.user_name == target_user.username,
+                func.date(Booking.start_time) <= current_processing_date,
+                func.date(Booking.end_time) >= current_processing_date,
+                Booking.status.in_(['approved', 'pending', 'checked_in', 'confirmed'])
+            ).all()
 
-                    # Check bookings for this resource on this date
-                    has_booking = Booking.query.filter(
-                        Booking.resource_id == res.id,
-                        func.date(Booking.start_time) <= current_processing_date,
-                        func.date(Booking.end_time) >= current_processing_date,
-                        Booking.status.in_(['approved', 'pending', 'checked_in', 'confirmed'])
-                    ).first() # Use .first() for existence check, more efficient than .count()
+            # c. Check User's Booking Possibility
+            any_slot_bookable_for_user_this_date = False
+            active_resources_for_date = []
+            for res_loop_item in all_published_resources: # Renamed to avoid conflict with outer 'resource' if any
+                if not (res_loop_item.is_under_maintenance and (res_loop_item.maintenance_until is None or current_processing_date <= res_loop_item.maintenance_until.date())):
+                    active_resources_for_date.append(res_loop_item)
 
-                    if has_booking:
-                        resources_unavailable_on_date_count += 1
-
-                if resources_unavailable_on_date_count == total_published_resources:
+            if not active_resources_for_date:
+                if total_published_resources > 0 : # Only mark as unavailable if there were resources to begin with
                     unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
-                    logger.debug(f"All {total_published_resources} resources are booked or in maintenance on {current_processing_date}.")
-                    # No continue here, as a date could be globally unavailable AND user-unavailable (though the latter is removed)
+                    logger.debug(f"No active resources (all under maintenance or none published) on {current_processing_date}. Added to unavailable.")
+                else:
+                    logger.debug(f"No published resources in system for date {current_processing_date}. Not marking as unavailable based on this rule.")
+                current_iter_date += timedelta(days=1)
+                continue
 
-            # The following block for user's own bookings making a date unavailable is intentionally kept removed/commented out.
-            # # Check if the user has any booking on this day (already collected in user_booked_dates)
-            # user_bookings_for_day = Booking.query.filter(
-            #     Booking.user_name == target_user.username, # Check for the target user
-            #     func.date(Booking.start_time) <= current_processing_date,
-            #     func.date(Booking.end_time) >= current_processing_date,
-            #     Booking.status.in_(['approved', 'pending', 'checked_in', 'confirmed'])
-            # ).first() # Check if any such booking exists
-            #
-            # if user_bookings_for_day:
-            #     unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
-            #     logger.debug(f"User {target_user.id} has a booking on {current_processing_date}.")
-            #     # No continue here, allow other checks if necessary, though typically this would be enough
+            for resource_to_check in active_resources_for_date:
+                for slot_def in STANDARD_SLOTS:
+                    # Ensure time objects are combined with current_processing_date and made timezone-aware for comparison
+                    slot_start_dt = datetime.combine(current_processing_date, slot_def['start'])
+                    slot_end_dt = datetime.combine(current_processing_date, slot_def['end'])
+                    if slot_start_dt.tzinfo is None: slot_start_dt = slot_start_dt.replace(tzinfo=timezone.utc)
+                    if slot_end_dt.tzinfo is None: slot_end_dt = slot_end_dt.replace(tzinfo=timezone.utc)
+
+
+                    # Conflict Check 1: Resource Slot Generally Booked?
+                    is_generally_booked = Booking.query.filter(
+                        Booking.resource_id == resource_to_check.id,
+                        Booking.start_time < slot_end_dt,
+                        Booking.end_time > slot_start_dt,
+                        Booking.status.in_(['approved', 'pending', 'checked_in', 'confirmed'])
+                    ).first() is not None
+
+                    if is_generally_booked:
+                        logger.debug(f"Slot {slot_def['start']}-{slot_def['end']} on {resource_to_check.name} for {current_processing_date} is generally booked.")
+                        continue # Next slot
+
+                    # Conflict Check 2: User's Own Schedule Conflicts with this Potential Slot?
+                    user_schedule_conflicts = False
+                    for user_booking in user_bookings_on_this_date:
+                        if user_booking.resource_id != resource_to_check.id:
+                            user_booking_start_dt = user_booking.start_time.replace(tzinfo=timezone.utc) if user_booking.start_time.tzinfo is None else user_booking.start_time
+                            user_booking_end_dt = user_booking.end_time.replace(tzinfo=timezone.utc) if user_booking.end_time.tzinfo is None else user_booking.end_time
+
+                            if user_booking_start_dt < slot_end_dt and user_booking_end_dt > slot_start_dt:
+                                user_schedule_conflicts = True
+                                logger.debug(f"User {target_user.username} has conflict for slot {slot_def['start']}-{slot_def['end']} on {current_processing_date} due to booking ID {user_booking.id} on resource ID {user_booking.resource_id}.")
+                                break
+
+                    if user_schedule_conflicts:
+                        continue # Next slot
+
+                    any_slot_bookable_for_user_this_date = True
+                    logger.debug(f"Found bookable slot for user {target_user.username} on {current_processing_date}: Resource {resource_to_check.name}, Slot {slot_def['start']}-{slot_def['end']}.")
+                    break
+
+                if any_slot_bookable_for_user_this_date:
+                    break
+
+            # d. Final Decision for the Date
+            if not any_slot_bookable_for_user_this_date:
+                unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
+                logger.debug(f"Date {current_processing_date} determined unavailable for user {target_user.username} (no bookable standard slots found). Added to unavailable.")
 
             current_iter_date += timedelta(days=1)
 
