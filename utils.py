@@ -320,7 +320,7 @@ def generate_booking_image(resource_image_filename: str, map_coordinates_str: st
 
 def send_email(to_address: str, subject: str, body: str = None, html_body: str = None, attachment_path: str = None):
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    logger.debug(f"send_email called. mail object: {mail}, mail.app state: {mail.app}")
+    logger.warning(f"UTILS_SEND_EMAIL: send_email called. Mail object ID: {id(mail)}, mail.app state: {mail.app}")
 
     if not mail.app:
         logger.warning("Flask-Mail not available or not initialized with app. Email not sent via external server.")
