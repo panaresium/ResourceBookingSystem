@@ -35,11 +35,11 @@
     </div>
     <div>
         <label for="password">{{ _('New Password:') }}</label>
-        <input type="password" id="password" name="password">
+        <input type="password" id="password" name="password" autocomplete="new-password">
     </div>
     <div>
         <label for="confirm-password">{{ _('Confirm Password:') }}</label>
-        <input type="password" id="confirm-password" name="confirm_password">
+        <input type="password" id="confirm-password" name="confirm_password" autocomplete="new-password">
     </div>
     <button type="submit">{{ _('Save Changes') }}</button>
     <div id="edit-profile-message" aria-live="polite" style="margin-top: 10px;"></div>
@@ -100,49 +100,56 @@
                     return;
                 }
 
-                msg.textContent = '{{ _('Saving...') }}';
-                msg.className = ''; // Clear previous status class
+                // msg.textContent = '{{ _('Saving...') }}'; // apiCall will show "Processing..."
+                // msg.className = ''; // Clear previous status class // apiCall will handle this
+
+                const payload = {
+                    email: currentValues.email || null,
+                    password: password || null, // Send password only if provided
+                    first_name: currentValues.first_name || null,
+                    last_name: currentValues.last_name || null,
+                    phone: currentValues.phone || null,
+                    section: currentValues.section || null,
+                    department: currentValues.department || null,
+                    position: currentValues.position || null
+                };
 
                 try {
-                    const response = await fetch('/api/profile', {
+                    // apiCall will show loading, success, or error messages in 'msg' element
+                    const data = await apiCall('/api/profile', {
                         method: 'PUT',
-                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-                        body: JSON.stringify({
-                            email: currentValues.email || null,
-                            password: password || null, // Send password only if provided
-                            first_name: currentValues.first_name || null,
-                            last_name: currentValues.last_name || null,
-                            phone: currentValues.phone || null,
-                            section: currentValues.section || null,
-                            department: currentValues.department || null,
-                            position: currentValues.position || null
-                        })
-                    });
-                    // Try to parse JSON regardless of response.ok, as error responses might also contain JSON
-                    let data;
-                    try {
-                        data = await response.json();
-                    } catch (jsonError) {
-                        // If JSON parsing fails, create a default error object
-                        console.error('Error parsing JSON response:', jsonError);
-                        data = { error: '{{ _('Invalid server response.') }}' };
-                    }
+                        body: JSON.stringify(payload)
+                        // 'Content-Type' and 'X-CSRFToken' are handled by apiCall
+                    }, msg);
 
-                    if (response.ok) {
-                        msg.textContent = data.message || '{{ _('Profile updated.') }}';
-                        msg.className = 'success';
-                        // Update initialValues to currentValues after successful update
-                        Object.assign(initialValues, currentValues);
-                        // Clear password fields after successful submission
-                        document.getElementById('password').value = '';
-                        document.getElementById('confirm-password').value = '';
-                    } else {
-                        msg.textContent = data.error || data.message || `{{ _('Update failed. Status: ${response.status}') }}`;
-                        msg.className = 'error';
-                    }
+                    // If apiCall is successful (doesn't throw an error), proceed with UI updates
+                    // data variable here would be the responseData from apiCall
+                    // msg.textContent = data.message || '{{ _('Profile updated.') }}'; // apiCall handles this
+                    // msg.className = 'success'; // apiCall handles this
+
+                    // Update initialValues to currentValues after successful update
+                    Object.assign(initialValues, currentValues);
+                    // Clear password fields after successful submission
+                    document.getElementById('password').value = '';
+                    document.getElementById('confirm-password').value = '';
+
+                    // The success message is already shown by apiCall.
+                    // If you need to customize it beyond what apiCall provides by default based on response,
+                    // you might need to call showSuccess(msg, "Custom message") here.
+                    // For now, assume apiCall's default success message is sufficient.
+
                 } catch(err){
-                    console.error('Error during profile update fetch:', err);
-                    msg.textContent = '{{ _('Update failed due to a network or unexpected error.') }}';
+                    // apiCall already displayed the error in 'msg'.
+                    // This catch block is for any other unexpected errors or if you need to do something more.
+                    console.error('Error during profile update:', err.message);
+                    // msg.textContent = '{{ _('Update failed due to a network or unexpected error.') }}'; // apiCall handles this
+                    // msg.className = 'error'; // apiCall handles this
+                }
+            });
+        }
+    });
+</script>
+{% endblock %}
                     msg.className = 'error';
                 }
             });

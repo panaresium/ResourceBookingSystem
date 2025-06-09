@@ -761,7 +761,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     } else {
         // This log helps confirm if the loginForm element itself isn't found on page load
-        console.log('Login form with id "login-form" not found on this page.');
+        console.debug('Login form with id "login-form" not found on this page.');
     }
 
     const googleLoginBtn = document.getElementById('google-login-btn');
