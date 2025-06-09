@@ -137,11 +137,9 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     # but messages sent to it should be buffered or handled once logging is set up.
     # For immediate critical output if needed, standard print() or logging.warning() could be used
     # before app.logger is reliably configured. However, standard practice is to use app.logger.
-    # app.logger.warning("APP_FACTORY: create_app function entered.") # Removed
-    # app.logger.warning(f"APP_FACTORY: Initial mail object ID in create_app: {id(mail)}") # Removed
-    print("PRINT_DEBUG: APP_FACTORY - create_app function entered.", flush=True)
+    app.logger.error("ERROR_DIAG: APP_FACTORY - create_app function entered.")
     # from extensions import mail # mail is already imported at the top level
-    print(f"PRINT_DEBUG: APP_FACTORY - Initial mail object ID in create_app: {id(mail)}", flush=True)
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Initial mail object ID in create_app: {id(mail)}")
 
     # 1. Load Configuration
     app.config.from_object(config_object)
@@ -320,15 +318,11 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
     # 3. Initialize Extensions
     # db.init_app(app) has been moved to earlier in the factory function
-    # app.logger.warning("APP_FACTORY: Attempting mail.init_app(app)") # Removed
-    # app.logger.warning(f"APP_FACTORY: Mail object ID before init: {id(mail)}") # Removed
-    print(f"PRINT_DEBUG: APP_FACTORY - Attempting mail.init_app(app). App object: {app}", flush=True)
-    print(f"PRINT_DEBUG: APP_FACTORY - Mail object ID before init: {id(mail)}", flush=True)
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Attempting mail.init_app(app). App object: {app}")
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Mail object ID before init: {id(mail)}")
     mail.init_app(app)
-    # app.logger.warning(f"APP_FACTORY: Mail object ID after init: {id(mail)}") # Removed
-    # app.logger.warning(f"APP_FACTORY: mail.app state after init: {mail.app}") # Removed
-    print(f"PRINT_DEBUG: APP_FACTORY - Mail object ID after init: {id(mail)}", flush=True)
-    print(f"PRINT_DEBUG: APP_FACTORY - mail.app state after init: {mail.app}", flush=True)
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Mail object ID after init: {id(mail)}")
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - mail.app state after init: {mail.app}")
     csrf.init_app(app)
     socketio.init_app(app, message_queue=app.config.get('SOCKETIO_MESSAGE_QUEUE')) # Add message_queue from config
     migrate.init_app(app, db)
