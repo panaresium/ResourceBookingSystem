@@ -321,9 +321,12 @@ def generate_booking_image(resource_image_filename: str, map_coordinates_str: st
 def send_email(to_address: str, subject: str, body: str = None, html_body: str = None, attachment_path: str = None):
     # mail_instance = current_app.extensions.get('mail') # Removed
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    logger.warning(f"UTILS_SEND_EMAIL: send_email using global mail from extensions. ID: {id(mail)}, mail.state.app: {mail.state.app if hasattr(mail, 'state') and mail.state and hasattr(mail.state, 'app') else 'mail.state or mail.state.app is None'}")
+    # New logging using getattr for safety
+    mail_state = getattr(mail, 'state', None)
+    app_from_state = getattr(mail_state, 'app', None)
+    logger.warning(f"UTILS_SEND_EMAIL: send_email using global mail from extensions. ID: {id(mail)}. mail.state: {mail_state}. mail.state.app: {app_from_state}")
 
-    if not (hasattr(mail, 'state') and mail.state and hasattr(mail.state, 'app') and mail.state.app):
+    if not app_from_state:
         logger.warning("Flask-Mail's global instance state not properly initialized (mail.state.app is not set). Email not sent via external server.")
         # The more detailed breakdown of why it might not be initialized can be complex here
         # as we are reverting to global `mail`. The factory patch handles the detailed scenarios for global mail.
