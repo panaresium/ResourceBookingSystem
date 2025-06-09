@@ -318,6 +318,13 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
     # 3. Initialize Extensions
     # db.init_app(app) has been moved to earlier in the factory function
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_SERVER: {app.config.get('MAIL_SERVER')}")
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_PORT: {app.config.get('MAIL_PORT')}")
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_USE_TLS: {app.config.get('MAIL_USE_TLS')}")
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_USE_SSL: {app.config.get('MAIL_USE_SSL')}")
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_USERNAME: {'<present>' if app.config.get('MAIL_USERNAME') else '<not present>'}")
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_PASSWORD: {'<present>' if app.config.get('MAIL_PASSWORD') else '<not present>'}") # Added password presence check
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_DEFAULT_SENDER: {app.config.get('MAIL_DEFAULT_SENDER')}")
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - Attempting mail.init_app(app). App object: {app}")
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - Mail object ID before init: {id(mail)}")
     mail.init_app(app)
