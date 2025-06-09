@@ -11,9 +11,9 @@ from datetime import datetime, timedelta, timezone, time
 # Assuming extensions.py contains db, socketio, mail
 from extensions import db, socketio, mail
 # Assuming models.py contains these model definitions
-from models import Booking, Resource, User, WaitlistEntry, BookingSettings, ResourcePIN # Added ResourcePIN
+from models import Booking, Resource, User, WaitlistEntry, BookingSettings, ResourcePIN, FloorMap # Added ResourcePIN & FloorMap
 # Assuming utils.py contains these helper functions
-from utils import add_audit_log, parse_simple_rrule, send_email, send_teams_notification, check_booking_permission
+from utils import add_audit_log, parse_simple_rrule, send_email, send_teams_notification, check_booking_permission, generate_booking_image
 # Assuming auth.py contains permission_required decorator
 from auth import permission_required
 
@@ -420,9 +420,102 @@ def create_booking():
 
         db.session.commit() # Commit updates for tokens and expiry times
 
-        for new_booking in created_bookings: # Log after successful commit of the series
-            add_audit_log(action="CREATE_BOOKING", details=f"Booking ID {new_booking.id} for resource ID {resource_id} ('{resource.name}') created by user '{user_name_for_record}'. Title: '{title}'. Token generated.")
-            socketio.emit('booking_updated', {'action': 'created', 'booking_id': new_booking.id, 'resource_id': resource_id})
+        # Prepare and log email data for each booking
+        for new_booking in created_bookings:
+            try:
+                user = User.query.filter_by(username=new_booking.user_name).first()
+                if not user or not user.email:
+                    current_app.logger.warning(f"User {new_booking.user_name} not found or has no email. Skipping confirmation email data preparation for booking {new_booking.id}.")
+                    continue
+
+                resource_for_email = Resource.query.get(new_booking.resource_id) # Renamed to avoid conflict with outer scope 'resource'
+                if not resource_for_email:
+                    current_app.logger.warning(f"Resource {new_booking.resource_id} not found. Skipping confirmation email data preparation for booking {new_booking.id}.")
+                    continue
+
+                floor_map_location = "N/A"
+                floor_map_floor = "N/A"
+                if resource_for_email.floor_map_id:
+                    floor_map = FloorMap.query.get(resource_for_email.floor_map_id)
+                    if floor_map:
+                        floor_map_location = floor_map.location
+                        floor_map_floor = floor_map.floor
+                    else:
+                        current_app.logger.warning(f"FloorMap {resource_for_email.floor_map_id} not found for resource {resource_for_email.id}. Using N/A for location/floor for booking {new_booking.id}.")
+
+                check_in_url = None # Default to None
+                if new_booking.check_in_token:
+                     check_in_url = url_for('api_bookings.qr_check_in', token=new_booking.check_in_token, _external=True)
+                else:
+                    current_app.logger.warning(f"No check_in_token found for booking {new_booking.id}. Check-in URL will be None.")
+
+                email_data = {
+                    'user_name': new_booking.user_name,
+                    'user_email': user.email,
+                    'booking_title': new_booking.title,
+                    'resource_name': resource_for_email.name,
+                    'start_time': new_booking.start_time.strftime('%Y-%m-%d %H:%M'),
+                    'end_time': new_booking.end_time.strftime('%Y-%m-%d %H:%M'),
+                    'location': floor_map_location,
+                    'floor': floor_map_floor,
+                    'resource_image_filename': resource_for_email.image_filename,
+                    'map_coordinates': resource_for_email.map_coordinates,
+                    'check_in_url': check_in_url,
+                    'booking_confirmation_message': f"Your booking for {resource_for_email.name} has been confirmed."
+                }
+                # current_app.logger.info(f"Email data for booking {new_booking.id}: {email_data}") # Old log line
+
+                # Generate image with resource area marked
+                processed_image_path = None # Initialize
+                if email_data.get('resource_image_filename') and email_data.get('map_coordinates'):
+                    # generate_booking_image now sources its own logger via current_app
+                    processed_image_path = generate_booking_image(
+                        email_data['resource_image_filename'],
+                        email_data['map_coordinates']
+                    )
+                elif email_data.get('resource_image_filename'):
+                    current_app.logger.info(f"Booking {new_booking.id}: Image filename present but no map coordinates. No image will be generated or attached.")
+                else:
+                    current_app.logger.info(f"Booking {new_booking.id}: No resource image filename. No image will be generated or attached.")
+
+                # Render HTML email body
+                # Ensure render_template is imported: from flask import render_template
+                html_email_body = render_template('email/booking_confirmation.html', **email_data)
+
+                # Plain text body (fallback)
+                plain_text_body = (
+                    f"Dear {email_data['user_name']},\n\n"
+                    f"{email_data['booking_confirmation_message']}\n\n"
+                    f"Booking Details:\n"
+                    f"- Resource: {email_data['resource_name']}\n"
+                    f"- Title: {email_data['booking_title']}\n"
+                    f"- Date & Time: {email_data['start_time']} - {email_data['end_time']}\n"
+                    f"- Location: {email_data['location']}\n" # Adjusted to match template
+                    f"- Floor: {email_data['floor']}\n\n"     # Adjusted to match template
+                    f"Check-in URL: {email_data['check_in_url']}\n\n"
+                    f"Thank you!"
+                )
+
+                send_email(
+                    to_address=email_data['user_email'],
+                    subject=f"Booking Confirmed: {email_data['resource_name']} - {email_data['booking_title']}",
+                    body=plain_text_body,
+                    html_body=html_email_body,
+                    attachment_path=processed_image_path # This will be None if image generation failed or wasn't applicable
+                )
+                current_app.logger.info(f"Booking confirmation email initiated for booking {new_booking.id} to {email_data['user_email']}.")
+
+            except Exception as e_email: # Changed variable name from 'e' to 'e_email'
+                current_app.logger.error(f"Error processing or sending confirmation email for booking {new_booking.id}: {e_email}", exc_info=True)
+
+        # Audit logging loop
+        for audit_booking in created_bookings: # Use a different loop variable
+            resource_for_audit = Resource.query.get(audit_booking.resource_id)
+            resource_name_for_audit = resource_for_audit.name if resource_for_audit else "Unknown Resource"
+            # Ensure user_name_for_record and title are correctly scoped or fetched if necessary.
+            # Using audit_booking.user_name and audit_booking.title for consistency with the booking object.
+            add_audit_log(action="CREATE_BOOKING", details=f"Booking ID {audit_booking.id} for resource ID {audit_booking.resource_id} ('{resource_name_for_audit}') created by user '{audit_booking.user_name}'. Title: '{audit_booking.title}'. Token generated.")
+            socketio.emit('booking_updated', {'action': 'created', 'booking_id': audit_booking.id, 'resource_id': audit_booking.resource_id})
 
         created_data = [{
             'id': b.id,

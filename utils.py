@@ -1,9 +1,11 @@
 import os
 import json
 import logging # Added for fallback logger
+import tempfile # Added for image generation and email attachment
+from PIL import Image, ImageDraw # Added for image generation
 import requests
 from datetime import datetime, date, timedelta, time, timezone
-from flask import url_for, jsonify, current_app
+from flask import url_for, jsonify, current_app # current_app already here, ensure it's used
 from flask_login import current_user
 from flask_mail import Message # For send_email
 import csv
@@ -251,31 +253,147 @@ def resource_to_dict(resource: Resource) -> dict:
 
     return resource_dict
 
-def send_email(to_address: str, subject: str, body: str):
+def generate_booking_image(resource_image_filename: str, map_coordinates_str: str) -> str | None:
+    """
+    Generates an image with booking details, possibly highlighting an area on a map.
+    Returns the path to the temporary image file, or None if an error occurs.
+    """
     logger = current_app.logger if current_app else logging.getLogger(__name__)
+
+    if not resource_image_filename:
+        logger.warning("generate_booking_image: No resource_image_filename provided.")
+        return None
+
+    upload_folder = current_app.config.get('RESOURCE_IMAGE_UPLOAD_FOLDER')
+    if not upload_folder:
+        logger.error("generate_booking_image: RESOURCE_IMAGE_UPLOAD_FOLDER not configured.")
+        return None
+
+    base_image_path = os.path.join(upload_folder, resource_image_filename)
+
+    if not os.path.exists(base_image_path):
+        logger.error(f"generate_booking_image: Base image not found at {base_image_path}")
+        return None
+
+    try:
+        img = Image.open(base_image_path).convert("RGBA")
+        draw = ImageDraw.Draw(img, "RGBA")
+
+        if map_coordinates_str:
+            try:
+                coords = json.loads(map_coordinates_str)
+                # Handle Fabric.js 'left'/'top' or direct 'x'/'y'
+                x = coords.get('x', coords.get('left'))
+                y = coords.get('y', coords.get('top'))
+                width = coords.get('width')
+                height = coords.get('height')
+
+                if x is not None and y is not None and width is not None and height is not None:
+                    try:
+                        x0, y0 = float(x), float(y)
+                        x1, y1 = float(x) + float(width), float(y) + float(height)
+
+                        outline_color = (255, 0, 0, 200)  # Red, mostly opaque
+                        fill_color = (255, 0, 0, 100)    # Red, more transparent
+                        stroke_width_pil = 3 # Pillow uses 'width' for stroke width in rectangle
+
+                        draw.rectangle([(x0, y0), (x1, y1)], outline=outline_color, fill=fill_color, width=stroke_width_pil)
+                        logger.info(f"Drew rectangle on image at ({x0},{y0})-({x1},{y1}) for resource image {resource_image_filename}")
+                    except (ValueError, TypeError) as e_coords:
+                        logger.warning(f"Invalid coordinate values for drawing on {resource_image_filename}: {e_coords}. Coords string: {map_coordinates_str}")
+                else:
+                    logger.warning(f"Incomplete coordinates for drawing on {resource_image_filename}. Coords string: {map_coordinates_str}")
+            except json.JSONDecodeError as e_json:
+                logger.warning(f"Could not decode map_coordinates JSON for {resource_image_filename}: {e_json}. Coords string: {map_coordinates_str}")
+            except Exception as e_draw: # Catch other potential errors during drawing
+                logger.error(f"Error drawing coordinates on {resource_image_filename}: {e_draw}", exc_info=True)
+
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        img.save(temp_file.name, "PNG")
+        temp_file.close() # Close the file handle so it can be opened by `open()` in send_email
+        logger.info(f"Saved modified image for {resource_image_filename} to temporary file {temp_file.name}")
+        return temp_file.name
+
+    except Exception as e_outer:
+        logger.error(f"Error in generate_booking_image for {resource_image_filename}: {e_outer}", exc_info=True)
+        return None
+
+def send_email(to_address: str, subject: str, body: str = None, html_body: str = None, attachment_path: str = None):
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
+
+    if not mail.app:
+        logger.warning("Flask-Mail not available or not initialized with app. Email not sent via external server.")
+        if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
+            try:
+                os.remove(attachment_path)
+                logger.info(f"Cleaned up temporary attachment (mail not configured): {attachment_path}")
+            except Exception as e_clean:
+                logger.error(f"Error cleaning up temporary attachment (mail not configured) {attachment_path}: {e_clean}", exc_info=True)
+        return
+
+    if not body and not html_body:
+        logger.error(f"Email to {to_address} has no body or html_body. Not sending.")
+        # Clean up attachment if it's a temp file, as email won't be sent
+        if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
+            try:
+                os.remove(attachment_path)
+                logger.info(f"Cleaned up temporary attachment (no email body): {attachment_path}")
+            except Exception as e_clean_body:
+                logger.error(f"Error cleaning up temporary attachment (no email body) {attachment_path}: {e_clean_body}", exc_info=True)
+        return
+
     email_entry = {
         'to': to_address,
         'subject': subject,
-        'body': body,
+        'body': body, # Log basic body, not potentially long HTML
+        'html_body_present': bool(html_body),
+        'attachment_path': attachment_path,
         'timestamp': datetime.now(timezone.utc).isoformat(),
     }
-    email_log.append(email_entry)
-    logger.info(f"Email queued to {to_address}: {subject}")
+    email_log.append(email_entry) # Keep simple log entry
+    logger.info(f"Attempting to send email to {to_address}: {subject} {'with attachment' if attachment_path else ''}")
 
-    if mail.app: # Check if mail is initialized with an app
-        try:
-            msg = Message(
-                subject=subject,
-                recipients=[to_address],
-                body=body,
-                sender=current_app.config.get('MAIL_DEFAULT_SENDER')
-            )
-            mail.send(msg)
-            logger.info(f"Email successfully sent to {to_address} via Flask-Mail.")
-        except Exception as e:
-            logger.error(f"Failed to send email to {to_address} via Flask-Mail: {e}", exc_info=True)
-    else:
-        logger.info("Flask-Mail not available or not initialized with app, email not sent via external server.")
+    try:
+        msg = Message(
+            subject=subject,
+            recipients=[to_address],
+            body=body,
+            html=html_body, # Add html_body to Message
+            sender=current_app.config.get('MAIL_DEFAULT_SENDER')
+        )
+
+        if attachment_path:
+            try:
+                with open(attachment_path, 'rb') as fp:
+                    file_ext = os.path.splitext(attachment_path)[1].lower()
+                    content_type = 'application/octet-stream' # Default
+                    if file_ext == '.png':
+                        content_type = 'image/png'
+                    elif file_ext in ['.jpg', '.jpeg']:
+                        content_type = 'image/jpeg'
+
+                    msg.attach(
+                        filename=os.path.basename(attachment_path),
+                        content_type=content_type,
+                        data=fp.read()
+                    )
+                logger.info(f"Successfully attached {attachment_path} to email for {to_address}.")
+            except Exception as e_attach:
+                logger.error(f"Failed to attach {attachment_path} to email for {to_address}: {e_attach}", exc_info=True)
+                # Decide if email should still be sent without attachment or not. For now, it will.
+
+        mail.send(msg)
+        logger.info(f"Email successfully sent to {to_address} via Flask-Mail.")
+    except Exception as e:
+        logger.error(f"Failed to send email to {to_address} via Flask-Mail: {e}", exc_info=True)
+    finally:
+        # Cleanup temporary attachment if it exists and is in the temp directory
+        if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
+            try:
+                os.remove(attachment_path)
+                logger.info(f"Cleaned up temporary attachment: {attachment_path}")
+            except Exception as e_clean_final:
+                logger.error(f"Error cleaning up temporary attachment {attachment_path}: {e_clean_final}", exc_info=True)
 
 
 def send_slack_notification(text: str):
