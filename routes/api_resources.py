@@ -11,7 +11,7 @@ import string # For PIN generation
 # Assuming db is initialized in extensions.py
 from extensions import db
 # Assuming models are defined in models.py
-from models import Resource, Booking, FloorMap, Role, ResourcePIN, BookingSettings # Added Role, ResourcePIN, BookingSettings
+from models import User, Resource, Booking, FloorMap, Role, ResourcePIN, BookingSettings # Added User, Role, ResourcePIN, BookingSettings
 # Assuming utility functions are in utils.py
 from utils import add_audit_log, resource_to_dict, allowed_file, _import_resource_configurations_data
 # Assuming permission_required is in auth.py
