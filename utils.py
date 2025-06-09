@@ -12,7 +12,7 @@ import csv
 import io
 
 # Assuming db and mail are initialized in extensions.py
-from extensions import db # mail is now fetched from current_app.extensions
+from extensions import db, mail # mail is now fetched from current_app.extensions
 # Assuming models are defined in models.py
 from models import AuditLog, User, Resource, FloorMap, Role, Booking # Added Booking
 from sqlalchemy import func # Ensure func is imported
@@ -319,17 +319,14 @@ def generate_booking_image(resource_image_filename: str, map_coordinates_str: st
         return None
 
 def send_email(to_address: str, subject: str, body: str = None, html_body: str = None, attachment_path: str = None):
-    mail_instance = current_app.extensions.get('mail')
+    # mail_instance = current_app.extensions.get('mail') # Removed
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    logger.warning(f"UTILS_SEND_EMAIL: send_email called. Mail object from current_app.extensions ID: {id(mail_instance) if mail_instance else 'None'}, mail_instance.state.app: {mail_instance.state.app if mail_instance and hasattr(mail_instance, 'state') and mail_instance.state else 'Mail instance or state is None'}")
+    logger.warning(f"UTILS_SEND_EMAIL: send_email using global mail from extensions. ID: {id(mail)}, mail.state.app: {mail.state.app if hasattr(mail, 'state') and mail.state and hasattr(mail.state, 'app') else 'mail.state or mail.state.app is None'}")
 
-    if not mail_instance or not hasattr(mail_instance, 'state') or not mail_instance.state or not mail_instance.state.app:
-        if not mail_instance:
-            logger.warning("Flask-Mail instance not found in current_app.extensions. Email not sent via external server.")
-        elif not hasattr(mail_instance, 'state') or not mail_instance.state:
-            logger.warning("Flask-Mail instance found in app extensions, but its state is not initialized. Email not sent via external server.")
-        else: # mail_instance.state.app is None or not True
-            logger.warning("Flask-Mail instance found and state exists, but state.app is not properly set. Email not sent via external server.")
+    if not (hasattr(mail, 'state') and mail.state and hasattr(mail.state, 'app') and mail.state.app):
+        logger.warning("Flask-Mail's global instance state not properly initialized (mail.state.app is not set). Email not sent via external server.")
+        # The more detailed breakdown of why it might not be initialized can be complex here
+        # as we are reverting to global `mail`. The factory patch handles the detailed scenarios for global mail.
         logger.info(f"Email intent: To='{to_address}', Subject='{subject}'. This email was NOT sent via SMTP due to missing Flask-Mail configuration.")
         if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
             try:
@@ -390,7 +387,7 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
                 logger.error(f"Failed to attach {attachment_path} to email for {to_address}: {e_attach}", exc_info=True)
                 # Decide if email should still be sent without attachment or not. For now, it will.
 
-        mail_instance.send(msg)
+        mail.send(msg)
         logger.info(f"Email successfully sent to {to_address} via Flask-Mail.")
     except Exception as e:
         logger.error(f"Failed to send email to {to_address} via Flask-Mail: {e}", exc_info=True)

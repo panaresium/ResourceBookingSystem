@@ -333,12 +333,24 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - Mail object ID after init: {id(mail)}")
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - app.extensions after mail.init_app: {list(app.extensions.keys())}")
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - app.extensions.get('mail') object after init: {app.extensions.get('mail')}")
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - mail.state.app after init: {mail.state.app if hasattr(mail, 'state') and mail.state else 'mail.state is None'}")
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - mail.state.app after init: {mail.state.app if hasattr(mail, 'state') and mail.state and hasattr(mail.state, 'app') else 'mail.state.app is None or mail.state is None'}") # Adjusted log
 
-    if not hasattr(mail, 'state') or not mail.state or not mail.state.app:
-        app.logger.error("ERROR_DIAG: APP_FACTORY - mail.state.app is not set, cannot send test email from factory.")
+    if not (hasattr(mail, 'state') and mail.state and hasattr(mail.state, 'app') and mail.state.app): # More robust check
+        app.logger.warning(f"ERROR_DIAG: APP_FACTORY - mail.state.app was not properly set by init_app. Current mail.state: {mail.state if hasattr(mail, 'state') else 'No state attr'}, mail.state.app: {mail.state.app if hasattr(mail, 'state') and mail.state and hasattr(mail.state, 'app') else 'No state.app attr'}. Attempting manual fix...")
+        retrieved_state = app.extensions.get('mail')
+        if retrieved_state:
+            try:
+                mail.state = retrieved_state
+                app.logger.warning(f"ERROR_DIAG: APP_FACTORY - Manually set mail.state. New mail.state.app: {mail.state.app if mail.state and hasattr(mail.state, 'app') else 'State or state.app is None'}. Mail object ID: {id(mail)}")
+            except Exception as e_set_state:
+                app.logger.error(f"ERROR_DIAG: APP_FACTORY - Error manually setting mail.state: {e_set_state}", exc_info=True)
+        else:
+            app.logger.error("ERROR_DIAG: APP_FACTORY - Could not retrieve '_MailState' from app.extensions to manually fix mail.state.")
+
+    if not (hasattr(mail, 'state') and mail.state and hasattr(mail.state, 'app') and mail.state.app):
+        app.logger.error("ERROR_DIAG: APP_FACTORY - mail.state.app is still not set (even after potential patch), cannot send test email from factory.")
     else:
-        app.logger.error("ERROR_DIAG: APP_FACTORY - mail.state.app is SET, attempting test email from factory.") # Changed log
+        app.logger.error("ERROR_DIAG: APP_FACTORY - mail.state.app is SET (potentially after patch), attempting test email from factory.") # Adjusted log
         try:
             # from flask_mail import Message # Ensure Message is imported (already added at top)
             msg = Message("Test Email from App Factory",
