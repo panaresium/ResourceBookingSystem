@@ -1725,4 +1725,15 @@ ul.pagination.align-items-baseline > li.page-item {
    /* align-self: baseline; /* Reinforce baseline alignment for each item */
 }
 
+/* Instruction Message Styles */
+.instruction-message {
+    margin-bottom: 15px;
+    padding: 10px;
+    background-color: #f0f0f0; /* Light grey */
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-style: italic;
+    text-align: center;
+}
+
 [end of static/style.css]
