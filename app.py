@@ -3,6 +3,7 @@ from app_factory import create_app
 from extensions import socketio # For socketio.run
 
 # Create the Flask app instance using the factory
+print("PRINT_DEBUG: APP.PY - About to call create_app()", flush=True)
 app = create_app()
 
 if __name__ == "__main__":
