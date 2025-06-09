@@ -6,6 +6,7 @@ import logging
 # Import configurations, extensions, and initialization functions
 import config
 from extensions import db, login_manager, oauth, mail, csrf, socketio, migrate
+from flask_mail import Message # Added for test email
 from models import User # Needed for load_user, others loaded via db object
 
 from translations import init_translations # SimpleTranslator is used internally by init_translations now
@@ -330,6 +331,22 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     mail.init_app(app)
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - Mail object ID after init: {id(mail)}")
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - mail.app state after init: {mail.app}")
+
+    if mail.app is None:
+        app.logger.error("ERROR_DIAG: APP_FACTORY - mail.app is None, cannot send test email from factory.")
+    else:
+        app.logger.error("ERROR_DIAG: APP_FACTORY - mail.app is NOT None, attempting test email from factory.")
+        try:
+            # from flask_mail import Message # Ensure Message is imported (already added at top)
+            msg = Message("Test Email from App Factory",
+                          sender=app.config.get('MAIL_DEFAULT_SENDER', 'default_sender@example.com'), # Added a fallback for sender
+                          recipients=["debug@example.com"]) # Use a dummy recipient
+            msg.body = "This is a test email sent from app_factory.py after mail.init_app()."
+            mail.send(msg)
+            app.logger.error("ERROR_DIAG: APP_FACTORY - Test email: mail.send() SUCCEEDED (or did not raise immediate error).")
+        except Exception as e_factory_mail:
+            app.logger.error(f"ERROR_DIAG: APP_FACTORY - Test email: mail.send() FAILED. Error: {e_factory_mail}", exc_info=True)
+
     csrf.init_app(app)
     socketio.init_app(app, message_queue=app.config.get('SOCKETIO_MESSAGE_QUEUE')) # Add message_queue from config
     migrate.init_app(app, db)
