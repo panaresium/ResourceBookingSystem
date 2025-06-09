@@ -23,6 +23,12 @@ document.addEventListener('DOMContentLoaded', function () {
     const mapLoadingStatusDiv = document.getElementById('new-booking-map-loading-status');
     const resourceSelectBooking = document.getElementById('resource-select-booking');
 
+    // New UI elements for instruction and visibility control
+    const dateSelectionInstructionDiv = document.getElementById('date-selection-instruction');
+    const locationSelectionInstructionDiv = document.getElementById('location-selection-instruction');
+    const locationFloorWrapperDiv = document.getElementById('location-floor-wrapper');
+    const mapViewWrapperDiv = document.getElementById('map-view-wrapper');
+
     let allMapInfo = []; // Stores full map configuration {id, name, location, floor, ...}
     // let allUniqueLocations = []; // Removed
     // let selectedLocationName = null; // Removed
@@ -120,11 +126,22 @@ document.addEventListener('DOMContentLoaded', function () {
                 defaultDate: currentSelectedDateStr,
                 onChange: function(selectedDates, dateStr, instance) {
                     currentSelectedDateStr = dateStr;
+
+                    if (dateSelectionInstructionDiv) dateSelectionInstructionDiv.style.display = 'none';
+                    if (locationFloorWrapperDiv) locationFloorWrapperDiv.style.display = 'flex'; // Assuming flex display
+                    if (locationSelectionInstructionDiv) locationSelectionInstructionDiv.style.display = 'block';
+                    if (mapViewWrapperDiv) mapViewWrapperDiv.style.display = 'none'; // Hide map view when date changes
+
                     updateLocationFloorButtons().then(() => {
-                        if (selectedMapId) {
-                            loadMapDetails(selectedMapId, currentSelectedDateStr);
-                        } else {
-                            loadMapDetails(null, currentSelectedDateStr);
+                        // loadMapDetails is called within updateLocationFloorButtons if a map is selected,
+                        // or map is cleared if no map is selected after buttons update.
+                        // For now, ensure map is cleared if no map is selected yet.
+                        if (!selectedMapId) {
+                            loadMapDetails(null, currentSelectedDateStr); // Clears map
+                        }
+                        // Scroll to location/floor selection area
+                        if (locationFloorWrapperDiv) {
+                            locationFloorWrapperDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
                         }
                     });
                 }
@@ -236,9 +253,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
                     loadMapDetails(selectedMapId, currentSelectedDateStr); // Use global date string
 
-                    const mapDisplayArea = document.getElementById('new-booking-map-container');
-                    if (mapDisplayArea) {
-                        mapDisplayArea.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    if (locationSelectionInstructionDiv) locationSelectionInstructionDiv.style.display = 'none';
+                    if (mapViewWrapperDiv) mapViewWrapperDiv.style.display = 'block';
+
+                    if (mapViewWrapperDiv) { // Scroll to the map view wrapper
+                        mapViewWrapperDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     }
                 });
                 mapLocationButtonsContainer.appendChild(button);
@@ -638,8 +657,19 @@ document.addEventListener('DOMContentLoaded', function () {
             // If a map was previously selected (e.g. selectedMapId is not null from a previous state or default)
             // ensure its details are loaded for the current date.
             // This might be more relevant if we introduce persisting selectedMapId (e.g. in URL params or localStorage)
+            // Initial state setup:
+            if (dateSelectionInstructionDiv) dateSelectionInstructionDiv.style.display = 'block';
+            if (locationSelectionInstructionDiv) locationSelectionInstructionDiv.style.display = 'none';
+            if (locationFloorWrapperDiv) locationFloorWrapperDiv.style.display = 'none';
+            if (mapViewWrapperDiv) mapViewWrapperDiv.style.display = 'none';
+
             if (selectedMapId) {
                  loadMapDetails(selectedMapId, currentSelectedDateStr); // Use global
+                 // If a map is pre-selected, potentially show map view and hide location instruction
+                 if (locationSelectionInstructionDiv) locationSelectionInstructionDiv.style.display = 'none';
+                 if (mapViewWrapperDiv) mapViewWrapperDiv.style.display = 'block';
+                 if (dateSelectionInstructionDiv) dateSelectionInstructionDiv.style.display = 'none'; // Hide date instruction too
+                 if (locationFloorWrapperDiv) locationFloorWrapperDiv.style.display = 'flex'; // Show location wrapper
             } else {
                 // Ensure map is cleared if no specific map is selected on load
                 loadMapDetails(null, currentSelectedDateStr); // Use global
