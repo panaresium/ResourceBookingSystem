@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // const mapAvailabilityDateInput = document.getElementById('new-booking-map-availability-date'); // Old input field, now removed from HTML
     const calendarContainer = document.getElementById('inline-calendar-container'); // New container for inline flatpickr
+    const userId = calendarContainer ? calendarContainer.dataset.userId : null;
     const mapLocationButtonsContainer = document.getElementById('new-booking-map-location-buttons-container'); // Will be used for combined buttons
     const mapContainer = document.getElementById('new-booking-map-container');
     const mapLoadingStatusDiv = document.getElementById('new-booking-map-loading-status');
@@ -73,50 +74,73 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // const today = getTodayDateString(); // currentSelectedDateStr is initialized with this
-    if (calendarContainer) {
-        let initialDate = getTodayDateString();
-        if (isPastFivePM()) {
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            const yyyy = tomorrow.getFullYear();
-            const mm = String(tomorrow.getMonth() + 1).padStart(2, '0');
-            const dd = String(tomorrow.getDate()).padStart(2, '0');
-            initialDate = `${yyyy}-${mm}-${dd}`;
-        }
-        currentSelectedDateStr = initialDate; // Initialize with today or tomorrow
 
-        flatpickr(calendarContainer, {
-            inline: true, // Render the calendar inline
-            static: true, // Added this line
-            dateFormat: "Y-m-d",
-            minDate: "today",
-            disable: [
-                function(date) {
-                    // Disable today if it's past 5 PM
-                    const todayStr = getTodayDateString();
-                    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-                    return dateStr === todayStr && isPastFivePM();
-                }
-            ],
-            defaultDate: currentSelectedDateStr, // Use the global variable, now potentially tomorrow
-            onChange: function(selectedDates, dateStr, instance) {
-                currentSelectedDateStr = dateStr; // Update global date string
-                // When date changes, update location/floor buttons (colors), then try to load map if one is selected
-                updateLocationFloorButtons().then(() => {
-                    if (selectedMapId) {
-                        loadMapDetails(selectedMapId, currentSelectedDateStr);
-                    } else {
-                        loadMapDetails(null, currentSelectedDateStr); // Clear map if no map is selected
-                    }
-                });
+    function initializeFlatpickr(unavailableDatesList = []) {
+        if (calendarContainer) {
+            let initialDate = getTodayDateString();
+            if (isPastFivePM()) {
+                const tomorrow = new Date();
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                const yyyy = tomorrow.getFullYear();
+                const mm = String(tomorrow.getMonth() + 1).padStart(2, '0');
+                const dd = String(tomorrow.getDate()).padStart(2, '0');
+                initialDate = `${yyyy}-${mm}-${dd}`;
             }
-        });
-    } else {
-        console.error('Inline calendar container not found.');
+            currentSelectedDateStr = initialDate; // Initialize with today or tomorrow
+
+            flatpickr(calendarContainer, {
+                inline: true,
+                static: true,
+                dateFormat: "Y-m-d",
+                minDate: "today",
+                disable: [
+                    function(date) {
+                        const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                        // Check against fetched unavailable dates
+                        if (unavailableDatesList.includes(dateStr)) {
+                            return true;
+                        }
+                        // Existing logic for today past 5 PM
+                        const todayStr = getTodayDateString();
+                        return dateStr === todayStr && isPastFivePM();
+                    }
+                ],
+                defaultDate: currentSelectedDateStr,
+                onChange: function(selectedDates, dateStr, instance) {
+                    currentSelectedDateStr = dateStr;
+                    updateLocationFloorButtons().then(() => {
+                        if (selectedMapId) {
+                            loadMapDetails(selectedMapId, currentSelectedDateStr);
+                        } else {
+                            loadMapDetails(null, currentSelectedDateStr);
+                        }
+                    });
+                }
+            });
+            if (mainBookingFormDateInput) {
+                mainBookingFormDateInput.value = currentSelectedDateStr;
+            }
+        } else {
+            console.error('Inline calendar container not found for Flatpickr.');
+        }
     }
-    if (mainBookingFormDateInput) {
-        // Set main form date input to match the calendar's initial date
-        mainBookingFormDateInput.value = currentSelectedDateStr;
+
+    if (userId && calendarContainer) {
+        apiCall(`/api/resources/unavailable_dates?user_id=${userId}`)
+            .then(fetchedDates => {
+                initializeFlatpickr(fetchedDates);
+            })
+            .catch(error => {
+                console.error('Error fetching unavailable dates for Flatpickr:', error);
+                initializeFlatpickr([]); // Initialize with empty list on error
+            });
+    } else {
+        if (!calendarContainer) {
+             console.info('Calendar container not found, Flatpickr setup skipped.');
+        } else if (!userId) {
+            console.info('User ID not found for this calendar instance. Initializing Flatpickr without user-specific unavailable dates.');
+        }
+        initializeFlatpickr([]); // Initialize if no user ID or no container (though latter is caught inside)
     }
 
     // function updateFloorSelectOptions() { // Removed }
