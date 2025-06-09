@@ -172,52 +172,35 @@ def get_unavailable_dates():
             logger.info("get_unavailable_dates: No BookingSettings found, using defaults.")
 
 
-        # 1. Get all distinct dates that have any bookings (for any resource)
-        # and dates where the given user has bookings.
-        all_booking_dates = db.session.query(func.date(Booking.start_time)).distinct().all()
-        all_booking_dates = {d[0] for d in all_booking_dates if d[0]} # Convert to set of date objects
+        # Generate Date Range
+        start_range_date = now.date().replace(day=1)
+        month_offset = 2
+        future_month_year = start_range_date.year
+        future_month_month = start_range_date.month + month_offset
+        if future_month_month > 12:
+            future_month_year += (future_month_month - 1) // 12
+            future_month_month = (future_month_month - 1) % 12 + 1
 
-        # Corrected Booking Query
-        user_bookings = Booking.query.filter_by(user_name=target_user.username).all()
-        user_booked_dates = set()
-        for booking in user_bookings:
-            # Iterate from booking.start_time.date() to booking.end_time.date()
-            current_iter_date = booking.start_time.date()
-            end_iter_date = booking.end_time.date()
-            while current_iter_date <= end_iter_date:
-                user_booked_dates.add(current_iter_date)
-                current_iter_date += timedelta(days=1)
+        next_future_month_year = future_month_year
+        next_future_month_month = future_month_month + 1
+        if next_future_month_month > 12:
+            next_future_month_year += 1
+            next_future_month_month = 1
 
-        # Combine these two sets of dates for initial checks
-        dates_to_check = all_booking_dates.union(user_booked_dates)
+        first_day_of_next_future_month = date(next_future_month_year, next_future_month_month, 1)
+        end_range_date = first_day_of_next_future_month - timedelta(days=1)
 
-        # Add today and future dates for a reasonable range if no bookings exist yet
-        # For now, let's assume we only care about dates with existing activity or specified by user.
-
-        # Resources
+        # Fetch all published resources once
         all_resources = Resource.query.filter_by(status='published').all()
         total_published_resources = len(all_resources)
 
         if total_published_resources == 0:
-            logger.info("get_unavailable_dates: No published resources available.")
-            # If there are no resources, any date requested could be seen as "unavailable"
-            # However, this endpoint is about when resources are *booked* or *past*.
-            # Let's stick to dates derived from bookings or past date logic.
+            logger.info("get_unavailable_dates: No published resources available. Result will depend on past date rules.")
 
-        # Iterate through relevant dates
-        for d_date_item in dates_to_check:
-            current_processing_date = None
-            if isinstance(d_date_item, str):
-                try:
-                    current_processing_date = datetime.strptime(d_date_item, '%Y-%m-%d').date()
-                except ValueError:
-                    logger.warning(f"Could not parse date string '{d_date_item}' from dates_to_check. Skipping.")
-                    continue # Skip this item if it's a string that can't be parsed
-            elif isinstance(d_date_item, date): # Ensure it's a datetime.date object specifically
-                current_processing_date = d_date_item
-            else:
-                logger.warning(f"Unexpected type in dates_to_check: {type(d_date_item)}. Value: {d_date_item}. Skipping.")
-                continue # Skip if it's neither a string nor a date object
+        # Loop through the generated date range
+        current_iter_date = start_range_date
+        while current_iter_date <= end_range_date:
+            current_processing_date = current_iter_date
 
             # Past date handling
             date_is_past = current_processing_date < now.date()
@@ -225,46 +208,57 @@ def get_unavailable_dates():
                 if not booking_settings.allow_past_bookings:
                     unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
                     logger.debug(f"Date {current_processing_date} is past and allow_past_bookings is false.")
-                    continue # Date is unavailable, no need for further checks
+                    current_iter_date += timedelta(days=1)
+                    continue
 
                 effective_cutoff = datetime.combine(current_processing_date + timedelta(days=1), time.min, tzinfo=timezone.utc) - timedelta(hours=booking_settings.past_booking_time_adjustment_hours)
                 if now > effective_cutoff:
                     unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
                     logger.debug(f"Date {current_processing_date} is past. Now: {now}, Effective Cutoff: {effective_cutoff}. Added as unavailable.")
+                    current_iter_date += timedelta(days=1)
                     continue
 
             # Date is not made unavailable by past date logic, proceed.
-            if total_published_resources > 0: # Only check resource availability if there are published resources
-                resources_booked_or_maintenance_count = 0
+            # Global Unavailability Check (All Resources Booked/Maintenance)
+            if total_published_resources > 0:
+                resources_unavailable_on_date_count = 0
                 for res in all_resources:
+                    # Check maintenance
                     if res.is_under_maintenance and (res.maintenance_until is None or current_processing_date <= res.maintenance_until.date()):
-                        resources_booked_or_maintenance_count += 1
-                        logger.debug(f"Resource {res.id} under maintenance on {current_processing_date}.")
-                        continue
+                        resources_unavailable_on_date_count += 1
+                        continue # Check next resource
 
-                    bookings_for_resource_on_date = Booking.query.filter(
+                    # Check bookings for this resource on this date
+                    has_booking = Booking.query.filter(
                         Booking.resource_id == res.id,
                         func.date(Booking.start_time) <= current_processing_date,
                         func.date(Booking.end_time) >= current_processing_date,
                         Booking.status.in_(['approved', 'pending', 'checked_in', 'confirmed'])
-                    ).count()
+                    ).first() # Use .first() for existence check, more efficient than .count()
 
-                    if bookings_for_resource_on_date > 0:
-                        resources_booked_or_maintenance_count += 1
-                        logger.debug(f"Resource {res.id} has bookings on {current_processing_date}.")
-                        continue
+                    if has_booking:
+                        resources_unavailable_on_date_count += 1
 
-                if resources_booked_or_maintenance_count == total_published_resources:
+                if resources_unavailable_on_date_count == total_published_resources:
                     unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
                     logger.debug(f"All {total_published_resources} resources are booked or in maintenance on {current_processing_date}.")
-                    continue # Date is unavailable
+                    # No continue here, as a date could be globally unavailable AND user-unavailable (though the latter is removed)
 
-            # The following block has been removed as per user request:
+            # The following block for user's own bookings making a date unavailable is intentionally kept removed/commented out.
             # # Check if the user has any booking on this day (already collected in user_booked_dates)
-            # if current_processing_date in user_booked_dates: # user_booked_dates contains date objects
+            # user_bookings_for_day = Booking.query.filter(
+            #     Booking.user_name == target_user.username, # Check for the target user
+            #     func.date(Booking.start_time) <= current_processing_date,
+            #     func.date(Booking.end_time) >= current_processing_date,
+            #     Booking.status.in_(['approved', 'pending', 'checked_in', 'confirmed'])
+            # ).first() # Check if any such booking exists
+            #
+            # if user_bookings_for_day:
             #     unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
-            #     logger.debug(f"User {user_id} has a booking on {current_processing_date}.")
-            #     continue # Date is unavailable for this user
+            #     logger.debug(f"User {target_user.id} has a booking on {current_processing_date}.")
+            #     # No continue here, allow other checks if necessary, though typically this would be enough
+
+            current_iter_date += timedelta(days=1)
 
         logger.info(f"Returning {len(unavailable_dates_set)} unavailable dates for user {user_id}.")
         return jsonify(sorted(list(unavailable_dates_set)))
