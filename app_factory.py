@@ -335,37 +335,22 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - app.extensions.get('mail') object after init: {app.extensions.get('mail')}")
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - mail.state.app after init: {mail.state.app if hasattr(mail, 'state') and mail.state and hasattr(mail.state, 'app') else 'mail.state.app is None or mail.state is None'}")
 
-    if not (hasattr(mail, 'state') and mail.state and hasattr(mail.state, 'app') and mail.state.app): # More robust check
-        app.logger.warning(f"ERROR_DIAG: APP_FACTORY - mail.state.app was not properly set by init_app. Current mail.state: {mail.state if hasattr(mail, 'state') else 'No state attr'}, mail.state.app: {mail.state.app if hasattr(mail, 'state') and mail.state and hasattr(mail.state, 'app') else 'No state.app attr'}. Attempting manual fix...")
-        retrieved_state = app.extensions.get('mail')
-        if retrieved_state:
-            try:
-                mail.state = retrieved_state
-                app.logger.warning(f"ERROR_DIAG: APP_FACTORY - Manually set mail.state. New mail.state.app: {mail.state.app if mail.state and hasattr(mail.state, 'app') else 'State or state.app is None'}. Mail object ID: {id(mail)}")
-            except Exception as e_set_state:
-                app.logger.error(f"ERROR_DIAG: APP_FACTORY - Error manually setting mail.state: {e_set_state}", exc_info=True)
-        else:
-            app.logger.error("ERROR_DIAG: APP_FACTORY - Could not retrieve '_MailState' from app.extensions to manually fix mail.state.")
-
     # Test email sending block
     mail_state_for_test = getattr(mail, 'state', None)
     app_from_state_for_test = getattr(mail_state_for_test, 'app', None)
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - Test email check: mail.state: {mail_state_for_test}, mail.state.app: {app_from_state_for_test}") # New log
 
-    if not app_from_state_for_test:
-        app.logger.error("ERROR_DIAG: APP_FACTORY - mail.state.app is still not set (even after potential patch), cannot send test email from factory.")
-    else:
-        app.logger.error("ERROR_DIAG: APP_FACTORY - mail.state.app is SET (potentially after patch), attempting test email from factory.")
-        try:
-            # from flask_mail import Message # Ensure Message is imported (already added at top)
-            msg = Message("Test Email from App Factory",
-                          sender=app.config.get('MAIL_DEFAULT_SENDER', 'default_sender@example.com'), # Added a fallback for sender
-                          recipients=["debug@example.com"]) # Use a dummy recipient
-            msg.body = "This is a test email sent from app_factory.py after mail.init_app()."
-            mail.send(msg)
-            app.logger.error("ERROR_DIAG: APP_FACTORY - Test email: mail.send() completed WITHOUT raising an immediate exception.")
-        except Exception as e_factory_mail:
-            app.logger.error(f"ERROR_DIAG: APP_FACTORY - Test email: mail.send() FAILED. Error: {e_factory_mail}", exc_info=True)
+    app.logger.info("Attempting to send test email from app_factory.py...")
+    try:
+        # from flask_mail import Message # Ensure Message is imported (already added at top)
+        msg = Message("Test Email from App Factory",
+                      sender=app.config.get('MAIL_DEFAULT_SENDER', 'default_sender@example.com'), # Added a fallback for sender
+                      recipients=["debug@example.com"]) # Use a dummy recipient
+        msg.body = "This is a test email sent from app_factory.py after mail.init_app()."
+        mail.send(msg)
+        app.logger.info("Test email from factory sent successfully.")
+    except Exception as e_factory_mail:
+        app.logger.error(f"Test email from factory FAILED. Error: {e_factory_mail}", exc_info=True)
 
     csrf.init_app(app)
     socketio.init_app(app, message_queue=app.config.get('SOCKETIO_MESSAGE_QUEUE')) # Add message_queue from config
