@@ -326,16 +326,19 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_USERNAME: {'<present>' if app.config.get('MAIL_USERNAME') else '<not present>'}")
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_PASSWORD: {'<present>' if app.config.get('MAIL_PASSWORD') else '<not present>'}") # Added password presence check
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_DEFAULT_SENDER: {app.config.get('MAIL_DEFAULT_SENDER')}")
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - app.extensions before mail.init_app: {list(app.extensions.keys())}")
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - Attempting mail.init_app(app). App object: {app}")
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - Mail object ID before init: {id(mail)}")
     mail.init_app(app)
     app.logger.error(f"ERROR_DIAG: APP_FACTORY - Mail object ID after init: {id(mail)}")
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - mail.app state after init: {mail.app}")
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - app.extensions after mail.init_app: {list(app.extensions.keys())}")
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - app.extensions.get('mail') object after init: {app.extensions.get('mail')}")
+    app.logger.error(f"ERROR_DIAG: APP_FACTORY - mail.state.app after init: {mail.state.app if hasattr(mail, 'state') and mail.state else 'mail.state is None'}")
 
-    if mail.app is None:
-        app.logger.error("ERROR_DIAG: APP_FACTORY - mail.app is None, cannot send test email from factory.")
+    if not hasattr(mail, 'state') or not mail.state or not mail.state.app:
+        app.logger.error("ERROR_DIAG: APP_FACTORY - mail.state.app is not set, cannot send test email from factory.")
     else:
-        app.logger.error("ERROR_DIAG: APP_FACTORY - mail.app is NOT None, attempting test email from factory.")
+        app.logger.error("ERROR_DIAG: APP_FACTORY - mail.state.app is SET, attempting test email from factory.") # Changed log
         try:
             # from flask_mail import Message # Ensure Message is imported (already added at top)
             msg = Message("Test Email from App Factory",
