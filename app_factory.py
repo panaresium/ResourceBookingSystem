@@ -186,7 +186,15 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     app_log_level_config = app.config.get('LOG_LEVEL', default_log_level_str).upper()
     app_effective_log_level = log_level_map.get(app_log_level_config, logging.INFO)
     app.logger.setLevel(app_effective_log_level)
-    logging.info(f"Flask app.logger level set to {app_log_level_config}.")
+    logging.info(f"Flask app.logger level set to {app_log_level_config} (effective: {app.logger.level}).")
+
+    # Ensure DEBUG level is comprehensively set if configured
+    if app.config.get('LOG_LEVEL') == 'DEBUG':
+        app.logger.info("LOG_LEVEL is DEBUG, ensuring Flask app and root logger levels are set to DEBUG.")
+        logging.getLogger().setLevel(logging.DEBUG) # Ensure root logger is also DEBUG
+        app.logger.setLevel(logging.DEBUG) # Explicitly set app logger to DEBUG again
+        app.logger.debug("DEBUG log level confirmed for app.logger and root logger.")
+
     # Log settings after logger is configured
     app.logger.info(f"Loaded Booking CSV Schedule Settings: {app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS')}")
     # This else block was associated with the `if not testing:` block for logging.
@@ -301,9 +309,11 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
     # 3. Initialize Extensions
     # db.init_app(app) has been moved to earlier in the factory function
-    app.logger.debug("Attempting mail.init_app(app)")
+    app.logger.warning("APP_FACTORY: Attempting mail.init_app(app)")
+    app.logger.warning(f"APP_FACTORY: Mail object ID before init: {id(mail)}")
     mail.init_app(app)
-    app.logger.debug(f"Mail object after init_app: {mail}, mail.app state: {mail.app}")
+    app.logger.warning(f"APP_FACTORY: Mail object ID after init: {id(mail)}")
+    app.logger.warning(f"APP_FACTORY: mail.app state after init: {mail.app}")
     csrf.init_app(app)
     socketio.init_app(app, message_queue=app.config.get('SOCKETIO_MESSAGE_QUEUE')) # Add message_queue from config
     migrate.init_app(app, db)
