@@ -2,6 +2,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const calendarEl = document.getElementById('calendar');
     const calendarStatusFilterSelect = document.getElementById('calendar-status-filter'); // Changed ID
 
+    let unavailableDates = []; // Store fetched unavailable dates
+
     // Modal elements
     const calendarEditBookingModal = document.getElementById('calendar-edit-booking-modal');
     const cebmCloseModalBtn = document.getElementById('cebm-close-modal-btn');
@@ -243,17 +245,325 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Populate the new status filter dropdown
+    populateStatusFilter(calendarStatusFilterSelect);
 
-    const calendar = new FullCalendar.Calendar(calendarEl, {
-        initialView: 'dayGridMonth',
-        timeZone: 'UTC', // Keep timezone as UTC for consistency with server
-        headerToolbar: {
-            left: 'prev,next today',
-            center: 'title',
-            right: 'dayGridMonth,timeGridWeek,timeGridDay'
-        },
-        editable: false, // Disable drag-and-drop and resize
-        eventClick: function(info) {
+    // --- Logic to initialize and render the calendar ---
+    const initializeCalendar = () => {
+        const calendar = new FullCalendar.Calendar(calendarEl, {
+            initialView: 'dayGridMonth',
+            timeZone: 'UTC', // Keep timezone as UTC for consistency with server
+            selectAllow: function(selectInfo) {
+                // Convert startStr to 'YYYY-MM-DD' format
+                const startDateStr = selectInfo.startStr.split('T')[0];
+                if (unavailableDates.includes(startDateStr)) {
+                    // console.log(`Selection blocked for unavailable date: ${startDateStr}`);
+                    return false; // Date is in the unavailable list, prevent selection
+                }
+                return true; // Date is not in the list, allow selection
+            },
+            dayCellDidMount: function(arg) {
+                // Convert arg.date (Date object) to 'YYYY-MM-DD' string
+                const dateStr = arg.date.toISOString().split('T')[0];
+                if (unavailableDates.includes(dateStr)) {
+                    arg.el.classList.add('fc-unavailable-date');
+                }
+            },
+            headerToolbar: {
+                left: 'prev,next today',
+                center: 'title',
+                right: 'dayGridMonth,timeGridWeek,timeGridDay'
+            },
+            editable: false, // Disable drag-and-drop and resize
+            eventClick: function(info) {
+                // Populate modal with event details
+                cebmBookingId.value = info.event.id;
+                cebmBookingTitle.value = info.event.title;
+
+                // Ensure resource_name is correctly sourced. Assuming it's in extendedProps.
+                cebmResourceName.textContent = info.event.extendedProps.resource_name || info.event.title || 'N/A';
+
+                // Store resource_id in hidden input
+                const cebmResourceIdInput = document.getElementById('cebm-resource-id');
+                cebmResourceIdInput.value = info.event.extendedProps.resource_id;
+
+                const cebmBookingDateInput = document.getElementById('cebm-booking-date');
+
+                if (info.event.start) {
+                    const startDate = new Date(info.event.start); // Local representation of event's start
+                    const year = startDate.getFullYear();
+                    const month = (startDate.getMonth() + 1).toString().padStart(2, '0');
+                    const day = startDate.getDate().toString().padStart(2, '0');
+                    cebmBookingDateInput.value = `${year}-${month}-${day}`;
+
+                    const startHours = info.event.start.getUTCHours().toString().padStart(2, '0');
+                    const startMinutes = info.event.start.getUTCMinutes().toString().padStart(2, '0');
+                    const selectedStartTimeHHMM = `${startHours}:${startMinutes}`;
+
+                    fetchAndDisplayAvailableSlots(info.event.extendedProps.resource_id, cebmBookingDateInput.value, selectedStartTimeHHMM);
+                } else {
+                    cebmBookingDateInput.value = ''; // Or today's date
+                    // Optionally fetch slots for a default date or leave selector empty
+                    document.getElementById('cebm-available-slots-select').innerHTML = '<option value="">-- Select a date first --</option>';
+                }
+
+                cebmBookingDateInput.onchange = () => {
+                    const resourceId = cebmResourceIdInput.value;
+                    if (resourceId && cebmBookingDateInput.value) {
+                        fetchAndDisplayAvailableSlots(resourceId, cebmBookingDateInput.value, null);
+                    }
+                };
+
+                cebmStatusMessage.textContent = ''; // Clear previous messages
+                cebmStatusMessage.className = 'status-message';
+                calendarEditBookingModal.style.display = 'block';
+
+                // Re-assign to the new button for the current scope
+                let currentSaveBtn = cebmSaveChangesBtn; // Initialize with the original button
+
+                // Remove previous event listener to avoid multiple bindings if any
+                if (cebmSaveChangesBtn && cebmSaveChangesBtn.parentNode) {
+                    const newSaveBtn = cebmSaveChangesBtn.cloneNode(true);
+                    cebmSaveChangesBtn.parentNode.replaceChild(newSaveBtn, cebmSaveChangesBtn);
+                    currentSaveBtn = newSaveBtn; // Assign the new button to currentSaveBtn
+                } else {
+                    console.error("Error: Could not find 'cebm-save-changes-btn' or its parent node. Cannot re-attach event listener for save button.");
+                    // Optionally, disable the button or show a user-facing error if this state is critical
+                }
+
+                // Ensure currentSaveBtn is valid before attaching onclick
+                if (currentSaveBtn) {
+                    currentSaveBtn.onclick = () => {
+                        saveBookingChanges(
+                            currentSaveBtn, // Pass the button instance
+                            cebmBookingId.value,
+                            cebmBookingTitle.value,
+                            info.event
+                        );
+                    };
+                } else {
+                    // This case should ideally not be reached if cebmSaveChangesBtn was initially found.
+                    // If it is reached, it means the original button was also null.
+                    console.error("Error: Save changes button ('cebm-save-changes-btn') not found. Save functionality will be unavailable.");
+                }
+
+                // Logic for delete button
+                if (cebmDeleteBookingBtn && cebmDeleteBookingBtn.parentNode) {
+                    const newDeleteBtn = cebmDeleteBookingBtn.cloneNode(true);
+                    cebmDeleteBookingBtn.parentNode.replaceChild(newDeleteBtn, cebmDeleteBookingBtn);
+
+                    newDeleteBtn.onclick = () => {
+                        if (confirm("Are you sure you want to delete this booking?")) {
+                            const bookingId = cebmBookingId.value;
+                            if (!bookingId) {
+                                cebmStatusMessage.textContent = 'Error: Booking ID not found.';
+                                cebmStatusMessage.className = 'status-message error-message';
+                                return;
+                            }
+
+                            // Disable button to prevent multiple clicks
+                            newDeleteBtn.disabled = true;
+                            newDeleteBtn.textContent = 'Deleting...';
+                            cebmStatusMessage.textContent = '';
+                            cebmStatusMessage.className = 'status-message';
+
+                            apiCall(`/api/bookings/${bookingId}`, { method: 'DELETE' })
+                                .then(response => {
+                                    cebmStatusMessage.textContent = response.message || 'Booking deleted successfully!';
+                                    cebmStatusMessage.className = 'status-message success-message';
+
+                                    // Remove event from calendar
+                                    const eventToRemove = calendar.getEventById(bookingId);
+                                    if (eventToRemove) {
+                                        eventToRemove.remove();
+                                    }
+
+                                    // Close modal after a short delay
+                                    setTimeout(() => {
+                                        calendarEditBookingModal.style.display = 'none';
+                                        cebmStatusMessage.textContent = '';
+                                        cebmStatusMessage.className = 'status-message';
+                                    }, 1500);
+                                })
+                                .catch(error => {
+                                    console.error('Error deleting booking:', error);
+                                    cebmStatusMessage.textContent = error.message || 'Failed to delete booking.';
+                                    cebmStatusMessage.className = 'status-message error-message';
+                                })
+                                .finally(() => {
+                                    // Re-enable button
+                                    newDeleteBtn.disabled = false;
+                                    newDeleteBtn.textContent = 'Delete Booking';
+                                });
+                        }
+                    };
+                } else {
+                    console.error("Error: Could not find 'cebm-delete-booking-btn' or its parent node.");
+                }
+            },
+            eventSources: [
+                {
+                    id: 'actualBookings',
+                    events: function(fetchInfo, successCallback, failureCallback) {
+                        let selectedStatusValue = calendarStatusFilterSelect ? calendarStatusFilterSelect.value : 'active';
+
+                        if (selectedStatusValue === 'cancelled_group') {
+                            selectedStatusValue = 'cancelled,rejected,cancelled_by_admin,cancelled_admin_acknowledged';
+                        }
+
+                        let apiUrl = '/api/bookings/calendar';
+                        if (selectedStatusValue && selectedStatusValue !== 'active') {
+                            apiUrl += `?status_filter=${encodeURIComponent(selectedStatusValue)}`;
+                        }
+
+                        allUserEvents = []; // Clear cache before every fetch for simplicity with filter changes
+
+                        apiCall(apiUrl)
+                            .then(bookings => {
+                                const mappedEvents = bookings.map(b => {
+                                    const apiResourceId = b.resource_id;
+                                    const extendedProps = b.extendedProps || {};
+                                    extendedProps.isActualBooking = true;
+                                    extendedProps.resource_id = apiResourceId;
+                                    extendedProps.resource_name = b.resource_name;
+                                    extendedProps.original_title = b.title;
+
+                                    const eventObject = {
+                                        ...b,
+                                        resource_id: apiResourceId,
+                                        extendedProps: extendedProps
+                                    };
+                                    return eventObject;
+                                });
+                                allUserEvents = mappedEvents; // Re-populate cache (optional, but kept for now)
+                                successCallback(mappedEvents);
+                            })
+                            .catch(error => {
+                                console.error('Error fetching user bookings for calendar:', error);
+                                allUserEvents = [];
+                                failureCallback(error);
+                            });
+                    }
+                }
+            ],
+            eventOrder: function(a, b) {
+                if (a.extendedProps && a.extendedProps.isActualBooking) return 1;
+                if (b.extendedProps && b.extendedProps.isActualBooking) return -1;
+                return 0;
+            },
+            eventContent: function(arg) {
+                if (arg.view.type === 'dayGridMonth') {
+                    const MAX_TITLE_LENGTH = 20;
+                    const MAX_TIME_LENGTH = 18; // Max length for "HH:MM - HH:MM UTC"
+
+                    let displayTitle = arg.event.title;
+                    if (arg.event.title.length > MAX_TITLE_LENGTH) {
+                        displayTitle = arg.event.title.substring(0, MAX_TITLE_LENGTH - 3) + "...";
+                    }
+
+                    let eventHtml = `<b>${displayTitle}</b>`;
+
+                    if (arg.event.start) {
+                        const startHours = arg.event.start.getUTCHours().toString().padStart(2, '0');
+                        const startMinutes = arg.event.start.getUTCMinutes().toString().padStart(2, '0');
+                        const startTimeUTC = `${startHours}:${startMinutes}`;
+
+                        let endTimeUTC = '';
+                        if (arg.event.end) {
+                            const endHours = arg.event.end.getUTCHours().toString().padStart(2, '0');
+                            const endMinutes = arg.event.end.getUTCMinutes().toString().padStart(2, '0');
+                            endTimeUTC = `${endHours}:${endMinutes}`;
+                        }
+
+                        let fullTimeString = '';
+                        // Construct the time string only if it's not an all-day event or if time is not midnight
+                        if (!arg.event.allDay || (startTimeUTC !== '00:00' || (endTimeUTC && endTimeUTC !== '00:00'))) {
+                            fullTimeString = startTimeUTC;
+                            if (endTimeUTC && endTimeUTC !== startTimeUTC) {
+                                fullTimeString += ` - ${endTimeUTC}`;
+                            }
+                            fullTimeString += ' UTC';
+                        }
+
+                        if (fullTimeString) {
+                            let displayTime = fullTimeString;
+                            if (fullTimeString.length > MAX_TIME_LENGTH) {
+                                displayTime = fullTimeString.substring(0, MAX_TIME_LENGTH - 3) + "...";
+                            }
+                            eventHtml += `<br>${displayTime}`;
+                        }
+                    }
+                    return { html: eventHtml };
+                }
+                // For other views, retain original behavior (bold title, FC handles time)
+                // Consider applying similar truncation for title here if needed for consistency
+                let displayTitleOtherView = arg.event.title;
+                // const MAX_TITLE_LENGTH_OTHER_VIEW = 30; // Example for other views
+                // if (arg.event.title.length > MAX_TITLE_LENGTH_OTHER_VIEW) {
+                //     displayTitleOtherView = arg.event.title.substring(0, MAX_TITLE_LENGTH_OTHER_VIEW - 3) + "...";
+                // }
+                // return { html: `<b>${displayTitleOtherView}</b>` };
+                // For now, keeping it as it was for other views, only month view is in scope
+                return { html: `<b>${arg.event.title}</b>` };
+            }
+        });
+        calendar.render();
+        console.log('FullCalendar effective timeZone:', calendar.getOption('timeZone')); // Log effective timezone
+
+        // Attach event listeners that depend on the calendar object here, after it's rendered.
+        if (calendarStatusFilterSelect) {
+            calendarStatusFilterSelect.addEventListener('change', () => {
+                if (calendar) {
+                     calendar.refetchEvents();
+                }
+            });
+        }
+    };
+
+    // --- Fetching user ID and then potentially unavailable dates ---
+    let currentUserId = null;
+    if (calendarEl && calendarEl.dataset.userId) {
+        currentUserId = calendarEl.dataset.userId;
+    } else if (typeof window.currentUserId !== 'undefined') { // Fallback to a global variable
+        currentUserId = window.currentUserId;
+    }
+
+    if (currentUserId) {
+        apiCall(`/api/resources/unavailable_dates?user_id=${currentUserId}`)
+            .then(dates => {
+                unavailableDates = dates; // Populate the global array
+                console.log("Unavailable dates fetched:", unavailableDates);
+            })
+            .catch(error => {
+                console.error('Error fetching unavailable dates:', error);
+                // Proceed without unavailable dates functionality
+            })
+            .finally(() => {
+                initializeCalendar(); // Initialize calendar after API call attempt
+            });
+    } else {
+        console.warn('User ID not found. Skipping fetching unavailable dates.');
+        initializeCalendar(); // Initialize calendar immediately if no user ID
+    }
+
+
+    // Event listener for the modal's close button
+    if (cebmCloseModalBtn) {
+        cebmCloseModalBtn.addEventListener('click', () => {
+            calendarEditBookingModal.style.display = 'none';
+        });
+    }
+
+    // Close modal if user clicks outside of the modal content
+    window.addEventListener('click', (event) => {
+        if (event.target === calendarEditBookingModal) {
+            calendarEditBookingModal.style.display = 'none';
+        }
+    });
+
+    // Note: calendarStatusFilterSelect event listener is now inside initializeCalendar
+    // to ensure 'calendar' object is available.
+});
             // Populate modal with event details
             cebmBookingId.value = info.event.id;
             cebmBookingTitle.value = info.event.title;
@@ -486,33 +796,3 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    calendar.render();
-    console.log('FullCalendar effective timeZone:', calendar.getOption('timeZone')); // Log effective timezone
-
-    // Event listener for the modal's close button
-    if (cebmCloseModalBtn) {
-        cebmCloseModalBtn.addEventListener('click', () => {
-            calendarEditBookingModal.style.display = 'none';
-        });
-    }
-
-    // Close modal if user clicks outside of the modal content
-    window.addEventListener('click', (event) => {
-        if (event.target === calendarEditBookingModal) {
-            calendarEditBookingModal.style.display = 'none';
-        }
-    });
-
-    if (calendarStatusFilterSelect) {
-        calendarStatusFilterSelect.addEventListener('change', () => {
-            // The cache `allUserEvents` is cleared inside the `events` function now
-            // before fetching new data, so just refetching is enough.
-            if (calendar) { // Ensure calendar object is available
-                 calendar.refetchEvents();
-            }
-        });
-    }
-
-    // Populate the new status filter dropdown
-    populateStatusFilter(calendarStatusFilterSelect);
-});

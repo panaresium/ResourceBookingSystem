@@ -24,6 +24,24 @@
     font-size: 16px;
 }
 
+/* Calendar specific styles */
+.fc-unavailable-date {
+    background-color: #eeeeee !important; /* Light grey background */
+    color: #aaaaaa !important; /* Darker grey text */
+    pointer-events: none; /* Make it non-interactive */
+}
+
+/* Make unavailable date cells appear more "disabled" */
+.fc-unavailable-date .fc-daygrid-day-number {
+    color: #aaaaaa !important;
+}
+
+/* Ensure events on unavailable dates also look disabled or are less prominent if they can exist */
+/* This might be too aggressive if events *should* be visible but just the day is not selectable for new bookings */
+/* .fc-unavailable-date .fc-event {
+    opacity: 0.5;
+} */
+
 html {
     overflow: hidden;
     height: 100%;

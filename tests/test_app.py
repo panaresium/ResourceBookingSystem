@@ -7479,5 +7479,586 @@ class TestAdminDbDataAPI(AppTests):
         self.assertFalse(data['success'])
         self.assertIn('Invalid filters format: Not valid JSON.', data['message'])
 
+
+class TestUnavailableDatesAPI(AppTests):
+    def setUp(self):
+        super().setUp()
+        # Create a standard user for most tests
+        self.standard_user = self._create_user_for_unavailable_dates_test("testuser_ud", "password")
+        # Create an admin user (is_admin=True)
+        self.admin_user = self._create_user_for_unavailable_dates_test("admin_ud", "adminpass", is_admin=True)
+        # Create a user with 'manage_bookings' permission (not necessarily full admin)
+        self.manage_bookings_role = Role.query.filter_by(name="BookingManager").first()
+        if not self.manage_bookings_role:
+            self.manage_bookings_role = Role(name="BookingManager", permissions="manage_bookings")
+            db.session.add(self.manage_bookings_role)
+            db.session.commit()
+        self.booking_manager_user = self._create_user_for_unavailable_dates_test("manager_ud", "managerpass", roles=[self.manage_bookings_role])
+
+        # Create some resources
+        self.resource_a = self._create_resource_for_unavailable_dates_test("ResourceA_UD")
+        self.resource_b = self._create_resource_for_unavailable_dates_test("ResourceB_UD")
+        self.resource_c = self._create_resource_for_unavailable_dates_test("ResourceC_UD")
+
+        # Default BookingSettings (can be overridden in specific tests)
+        self._set_booking_settings_for_unavailable_dates(allow_past_bookings=False, past_booking_time_adjustment_hours=0)
+
+    def _create_user_for_unavailable_dates_test(self, username, password, is_admin=False, roles=None):
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            user = User(username=username, email=f"{username}@example.com", is_admin=is_admin)
+            user.set_password(password)
+            if roles:
+                user.roles = roles
+            db.session.add(user)
+            db.session.commit()
+        return user
+
+    def _create_resource_for_unavailable_dates_test(self, name, status='published', is_under_maintenance=False, maintenance_until=None):
+        resource = Resource(name=name, status=status, is_under_maintenance=is_under_maintenance, maintenance_until=maintenance_until, capacity=1)
+        db.session.add(resource)
+        db.session.commit()
+        return resource
+
+    def _create_booking_for_unavailable_dates_test(self, user, resource, days_offset_from_today, start_hour, end_hour, title="Test Booking"):
+        # Use a fixed "today" for consistent test data generation relative to a mocked "now" in tests
+        # This "today" is just for creating booking dates. The actual "now" will be mocked in specific tests.
+        booking_date = date.today() + timedelta(days=days_offset_from_today)
+        start_datetime = datetime.combine(booking_date, time(start_hour, 0))
+        end_datetime = datetime.combine(booking_date, time(end_hour, 0))
+
+        booking = Booking(
+            user_name=user.username, # Use username for booking association
+            user_id=user.id,
+            resource_id=resource.id,
+            start_time=start_datetime,
+            end_time=end_datetime,
+            title=title,
+            status='approved' # Default to approved for unavailability checks
+        )
+        db.session.add(booking)
+        db.session.commit()
+        return booking
+
+    def _set_booking_settings_for_unavailable_dates(self, allow_past_bookings, past_booking_time_adjustment_hours):
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings()
+            db.session.add(settings)
+        settings.allow_past_bookings = allow_past_bookings
+        settings.past_booking_time_adjustment_hours = past_booking_time_adjustment_hours
+        db.session.commit()
+        return settings
+
+    def _get_unavailable_dates(self, user_id_to_query, expected_status_code=200):
+        response = self.client.get(f"/api/resources/unavailable_dates?user_id={user_id_to_query}")
+        self.assertEqual(response.status_code, expected_status_code)
+        if expected_status_code == 200:
+            return response.get_json()
+        return response.get_json().get('error') # Return error message for non-200 status
+
+    # --- Authentication/Authorization Tests ---
+    def test_unavailable_dates_unauthenticated(self):
+        self.logout() # Ensure no user is logged in
+        error_msg = self._get_unavailable_dates(self.standard_user.id, expected_status_code=401)
+        # Depending on how @login_required redirects or returns error for API:
+        # self.assertIn("Login required", error_msg) or check for redirect to login page if it's HTML
+        # For JSON APIs, it should be a 401 with JSON error. The route has @login_required.
+        # Flask-Login's default behavior for unauthorized API access with @login_required
+        # can sometimes be a redirect if not configured for JSON responses on auth failure.
+        # However, the API structure suggests it should be JSON.
+        # If tests fail here, it might be due to Flask-Login config.
+        # For now, assume it correctly returns 401 JSON, or that the helper handles it.
+        # The helper _get_unavailable_dates will assert the status code.
+
+    def test_unavailable_dates_fetch_own_data(self):
+        self.login(self.standard_user.username, "password")
+        dates = self._get_unavailable_dates(self.standard_user.id)
+        self.assertIsInstance(dates, list) # Should return a list, even if empty
+        self.logout()
+
+    def test_unavailable_dates_fetch_other_user_no_permission(self):
+        self.login(self.standard_user.username, "password")
+        error_msg = self._get_unavailable_dates(self.admin_user.id, expected_status_code=403)
+        self.assertIn("Not authorized", error_msg)
+        self.logout()
+
+    def test_unavailable_dates_fetch_other_user_with_manage_bookings_permission(self):
+        self.login(self.booking_manager_user.username, "managerpass")
+        dates = self._get_unavailable_dates(self.standard_user.id)
+        self.assertIsInstance(dates, list)
+        self.logout()
+
+    def test_unavailable_dates_fetch_other_user_with_admin_flag(self):
+        # An admin user (is_admin=True) should also have manage_bookings implicitly or explicitly
+        # For this test, we rely on the fact that admin_user has is_admin=True.
+        # The route checks for current_user.has_permission('manage_bookings').
+        # We need to ensure our admin_user gets this permission.
+        # If is_admin=True doesn't grant it, assign the role.
+        if not self.admin_user.has_role_permission('manage_bookings'): # Assuming has_role_permission helper
+             if self.manage_bookings_role not in self.admin_user.roles:
+                self.admin_user.roles.append(self.manage_bookings_role)
+                db.session.commit()
+
+        self.login(self.admin_user.username, "adminpass")
+        dates = self._get_unavailable_dates(self.standard_user.id)
+        self.assertIsInstance(dates, list)
+        self.logout()
+
+    # --- Past Dates Handling Tests ---
+    @patch('routes.api_resources.datetime') # Patch datetime in the module where the endpoint logic resides
+    def test_past_dates_not_allowed(self, mock_datetime):
+        mock_now = datetime(2024, 3, 15, 12, 0, 0, tzinfo=timezone_original.utc) # Fixed "now"
+        mock_datetime.now.return_value = mock_now
+        # If your code uses date.today(), you might need to patch that too, or ensure logic uses datetime.now().date()
+        # For date objects, ensure they are timezone-naive if comparing with DB dates that are naive.
+        # The API uses datetime.now(timezone.utc).date() for "today", so mocking datetime.now is key.
+
+        self._set_booking_settings_for_unavailable_dates(allow_past_bookings=False, past_booking_time_adjustment_hours=0)
+        self.login(self.standard_user.username, "password")
+
+        # Create a booking yesterday relative to mock_now, which should make "yesterday" a date to check
+        self._create_booking_for_unavailable_dates_test(self.standard_user, self.resource_a, days_offset_from_today=-1, start_hour=10, end_hour=11, title="Yesterday Booking")
+
+        yesterday_str = (mock_now.date() - timedelta(days=1)).strftime('%Y-%m-%d')
+        today_str = mock_now.date().strftime('%Y-%m-%d') # For reference, should not be unavailable by this rule alone.
+
+        unavailable = self._get_unavailable_dates(self.standard_user.id)
+        self.assertIn(yesterday_str, unavailable, f"Yesterday ({yesterday_str}) should be unavailable. Got: {unavailable}")
+        # We also need to check if other past dates (not having bookings) are returned.
+        # The current API logic focuses on dates with activity. If the requirement is ALL past dates,
+        # the test or API might need adjustment. For now, test based on activity.
+        self.logout()
+
+
+    @patch('routes.api_resources.datetime')
+    def test_past_dates_allowed_zero_adjustment(self, mock_datetime):
+        mock_now = datetime(2024, 3, 15, 12, 0, 0, tzinfo=timezone_original.utc)
+        mock_datetime.now.return_value = mock_now
+
+        self._set_booking_settings_for_unavailable_dates(allow_past_bookings=True, past_booking_time_adjustment_hours=0)
+        self.login(self.standard_user.username, "password")
+
+        # Booking yesterday (should be unavailable as 'now' is past end of yesterday + 0 hours)
+        self._create_booking_for_unavailable_dates_test(self.standard_user, self.resource_a, days_offset_from_today=-1, start_hour=10, end_hour=11)
+        yesterday_str = (mock_now.date() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+        # Booking for today, but in the past (e.g., 10 AM when mock_now is 12 PM)
+        # This should be available as per current logic, as it's not "a past date" (d_date < now.date() is false)
+        # The logic `effective_cutoff` applies to `d_date` where `d_date < now.date()`.
+        # If a booking is on `now.date()` but its time is past, it's not handled by this past_date logic block.
+        # It would be available unless other rules (user booked, all resources booked) apply.
+        # Let's create one such booking to ensure it doesn't get caught by past date logic incorrectly.
+        self._create_booking_for_unavailable_dates_test(self.standard_user, self.resource_b, days_offset_from_today=0, start_hour=10, end_hour=11, title="Today Past Slot")
+        today_str = mock_now.date().strftime('%Y-%m-%d')
+
+
+        unavailable = self._get_unavailable_dates(self.standard_user.id)
+        self.assertIn(yesterday_str, unavailable, f"Yesterday ({yesterday_str}) should be unavailable. Got: {unavailable}")
+        # Today's date itself (today_str) should NOT be in unavailable list *due to past date logic*.
+        # It might be there if the user's "Today Past Slot" booking makes it unavailable for the user.
+        # This specific test is for the "past_dates_allowed_zero_adjustment" logic.
+        # The endpoint combines all reasons. So, `today_str` will be there due to user's booking.
+        # To isolate past-date logic, we'd need a way to query only for that, or ensure no other rules apply.
+        # For now, we confirm yesterday is unavailable.
+        self.logout()
+
+    @patch('routes.api_resources.datetime')
+    def test_past_dates_allowed_positive_adjustment(self, mock_datetime):
+        mock_now = datetime(2024, 3, 15, 12, 0, 0, tzinfo=timezone_original.utc) # Fri 12:00
+        mock_datetime.now.return_value = mock_now
+        adjustment_hours = 2
+        self._set_booking_settings_for_unavailable_dates(allow_past_bookings=True, past_booking_time_adjustment_hours=adjustment_hours)
+        self.login(self.standard_user.username, "password")
+
+        # Effective cutoff for a past date `d` is `d_end_of_day + adjustment_hours`
+        # which is `d + 1_day + adjustment_hours`
+        # So, for yesterday (Mar 14), cutoff is Mar 15 00:00 + 2 hours = Mar 15 02:00 UTC.
+        # mock_now (Mar 15 12:00 UTC) is AFTER this cutoff, so yesterday should be unavailable.
+        yesterday_str = (mock_now.date() - timedelta(days=1)).strftime('%Y-%m-%d')
+        self._create_booking_for_unavailable_dates_test(self.standard_user, self.resource_a, days_offset_from_today=-1, start_hour=10, end_hour=11, title="Yesterday Booking Positive Adj")
+
+        unavailable = self._get_unavailable_dates(self.standard_user.id)
+        self.assertIn(yesterday_str, unavailable, f"Yesterday ({yesterday_str}) should be unavailable with positive adjustment. Now: {mock_now}, Effective Cutoff for yesterday: Mar 15 02:00. Got: {unavailable}")
+
+        # Test two days ago (Mar 13). Cutoff is Mar 14 00:00 + 2 hours = Mar 14 02:00 UTC.
+        # mock_now (Mar 15 12:00 UTC) is AFTER this cutoff, so two days ago should be unavailable.
+        two_days_ago_str = (mock_now.date() - timedelta(days=2)).strftime('%Y-%m-%d')
+        self._create_booking_for_unavailable_dates_test(self.standard_user, self.resource_b, days_offset_from_today=-2, start_hour=10, end_hour=11, title="Two Days Ago Booking Positive Adj")
+
+        unavailable = self._get_unavailable_dates(self.standard_user.id) # Re-fetch after adding new booking to check
+        self.assertIn(two_days_ago_str, unavailable, f"Two days ago ({two_days_ago_str}) should be unavailable. Effective Cutoff for two days ago: Mar 14 02:00. Got: {unavailable}")
+
+        self.logout()
+
+    @patch('routes.api_resources.datetime')
+    def test_past_dates_allowed_negative_adjustment(self, mock_datetime):
+        mock_now = datetime(2024, 3, 15, 12, 0, 0, tzinfo=timezone_original.utc) # Fri 12:00
+        mock_datetime.now.return_value = mock_now
+        adjustment_hours = -2 # Bookings must be at least 2 hours in the future from end of day.
+                              # This interpretation might be tricky. API uses: effective_cutoff = d_date_end_of_day - timedelta(hours=adjustment_hours)
+                              # If adjustment_hours is -2, then cutoff = d_date_end_of_day - (-2 hours) = d_date_end_of_day + 2 hours.
+                              # So, for yesterday (Mar 14), cutoff is Mar 15 00:00 + 2 hours = Mar 15 02:00 UTC. Same as positive_adjustment=2.
+                              # This means the API's `past_booking_time_adjustment_hours` is more like "grace period into the past from end of day".
+                              # Let's verify this understanding.
+
+        self._set_booking_settings_for_unavailable_dates(allow_past_bookings=True, past_booking_time_adjustment_hours=adjustment_hours)
+        self.login(self.standard_user.username, "password")
+
+        # Yesterday (Mar 14). Cutoff for booking on Mar 14 is Mar 15 00:00 - (-2 hours) = Mar 15 02:00 UTC.
+        # mock_now (Mar 15 12:00 UTC) is AFTER this cutoff. So yesterday is unavailable.
+        yesterday_str = (mock_now.date() - timedelta(days=1)).strftime('%Y-%m-%d')
+        self._create_booking_for_unavailable_dates_test(self.standard_user, self.resource_a, days_offset_from_today=-1, start_hour=10, end_hour=11, title="Yesterday Booking Negative Adj")
+
+        unavailable = self._get_unavailable_dates(self.standard_user.id)
+        self.assertIn(yesterday_str, unavailable, f"Yesterday ({yesterday_str}) should be unavailable with negative adjustment. Now: {mock_now}. Effective Cutoff for yesterday: Mar 15 02:00. Got: {unavailable}")
+
+        # What if adjustment makes cutoff for *today* effectively in the past?
+        # E.g. adjustment_hours = 26. Today is Mar 15. Cutoff for Mar 14 is Mar 15 00:00 + 26 hours = Mar 16 02:00.
+        # If mock_now is Mar 15 12:00, yesterday is still AVAILABLE.
+        mock_now_for_avail_past = datetime(2024, 3, 15, 1, 0, 0, tzinfo=timezone_original.utc) # Mar 15, 01:00 UTC
+        mock_datetime.now.return_value = mock_now_for_avail_past
+        self._set_booking_settings_for_unavailable_dates(allow_past_bookings=True, past_booking_time_adjustment_hours=2) # adj = 2 hours
+
+        # For yesterday (Mar 14), cutoff is Mar 15 00:00 + 2 hours = Mar 15 02:00 UTC.
+        # mock_now_for_avail_past (Mar 15 01:00 UTC) is BEFORE this cutoff. So yesterday should be AVAILABLE.
+        # We need to ensure 'yesterday_str' is actually processed. A booking on it helps.
+        # The previous booking for yesterday_str still exists.
+        unavailable_check2 = self._get_unavailable_dates(self.standard_user.id)
+        self.assertNotIn(yesterday_str, unavailable_check2, f"Yesterday ({yesterday_str}) should be AVAILABLE. Now: {mock_now_for_avail_past}, Effective Cutoff for yesterday: Mar 15 02:00. Got: {unavailable_check2}")
+
+        self.logout()
+
+    # --- Resource Availability Tests ---
+    def test_all_resources_published_no_bookings_not_unavailable(self):
+        self.login(self.standard_user.username, "password")
+        target_date_offset = 10 # A future date
+        target_date_str = (date.today() + timedelta(days=target_date_offset)).strftime('%Y-%m-%d')
+
+        # Ensure all resources are published and not in maintenance
+        for res_attr_name in ['resource_a', 'resource_b', 'resource_c']:
+            res = getattr(self, res_attr_name)
+            res.is_under_maintenance = False
+            res.status = 'published'
+        # Ensure any other resources are archived or also not booked
+        all_other_resources = Resource.query.filter(Resource.id.notin_([self.resource_a.id, self.resource_b.id, self.resource_c.id])).all()
+        for res in all_other_resources:
+            res.status = 'archived'
+        db.session.commit()
+
+        # No bookings are made for target_date_str on any resource.
+        # However, the API only checks dates that have *some* booking activity or are user's booking dates.
+        # To make the API evaluate this date, we need at least one booking somewhere, or make the user book something else.
+        # Let's add a booking for the user on a *different* date to trigger date processing,
+        # or rely on past date processing to include some dates.
+        # For this test, let's assume target_date_str itself won't be processed if there's zero activity on it.
+        # The goal is to check that *if* it were processed, it wouldn't be unavailable *due to this rule*.
+        # So, if it appears in `unavailable`, it must be for other reasons (e.g. past date).
+
+        # To ensure the date is checked, let's create a booking for the *user* on this date,
+        # but on a resource that we'll ensure is NOT part of the "all resources" check (e.g. by archiving it before the check).
+        # This is getting complicated. Let's simplify:
+        # The rule is "if all resources are booked". If no resources are booked, this rule shouldn't make the day unavailable.
+        # We need to ensure target_date_str is processed. Create a booking for another user on this date.
+        other_user_temp = self._create_user_for_unavailable_dates_test("other_temp_for_res_avail", "password")
+        self._create_booking_for_unavailable_dates_test(other_user_temp, self.resource_a, target_date_offset, 9, 10, title="Trigger Date Check")
+
+        unavailable = self._get_unavailable_dates(self.standard_user.id)
+
+        # If target_date_str is in unavailable, it must be due to the trigger booking by other_user_temp on resource_a
+        # making resource_a "not available", but resource_b and resource_c are still available.
+        # So the "all resources booked" condition is NOT met.
+        # The date MIGHT be unavailable for standard_user if they also had a booking (which they don't here).
+        # So, target_date_str should NOT be in unavailable list based on "all resources booked" rule.
+        # It will be there if the "other_user_temp" booking makes resource_a unavailable, and standard_user has another booking on res_b, res_c
+        # This test is tricky to isolate. The core idea: if all resources are pristine, the date shouldn't be marked.
+        # Let's re-evaluate: if there's one booking on res_a by other_user_temp, then res_a is "used".
+        # Res_b and Res_c are not. So, "all resources booked" is false. Date should be available to standard_user.
+        self.assertNotIn(target_date_str, unavailable, f"Date {target_date_str} with no bookings on most resources should NOT be unavailable for this user. Got: {unavailable}")
+        self.logout()
+
+    def test_some_resources_available_not_unavailable(self):
+        self.login(self.standard_user.username, "password")
+        other_user = self._create_user_for_unavailable_dates_test("other_booker_some_avail", "password")
+        target_date_offset = 12
+        target_date_str = (date.today() + timedelta(days=target_date_offset)).strftime('%Y-%m-%d')
+
+        # Resource A is booked by another user
+        self._create_booking_for_unavailable_dates_test(other_user, self.resource_a, target_date_offset, 9, 17)
+        # Resource B is under maintenance
+        self.resource_b.is_under_maintenance = True
+        self.resource_b.maintenance_until = date.today() + timedelta(days=target_date_offset + 1)
+        # Resource C is available (published, not in maintenance, no bookings for this user on it)
+        self.resource_c.is_under_maintenance = False
+        self.resource_c.status = 'published'
+        db.session.commit()
+
+        unavailable = self._get_unavailable_dates(self.standard_user.id)
+        # Since Resource C is available, the date should NOT be unavailable due to "all resources booked/unavailable" rule.
+        self.assertNotIn(target_date_str, unavailable, f"Date {target_date_str} with some resources available should not be globally unavailable. Got: {unavailable}")
+        self.logout()
+
+
+    def test_all_resources_maintenance(self):
+        self.login(self.standard_user.username, "password")
+        target_date = date.today() + timedelta(days=5) # A future date
+        target_date_str = target_date.strftime('%Y-%m-%d')
+
+        self.resource_a.is_under_maintenance = True
+        self.resource_a.maintenance_until = target_date + timedelta(days=1)
+        self.resource_b.is_under_maintenance = True
+        self.resource_b.maintenance_until = target_date + timedelta(days=1)
+        self.resource_c.is_under_maintenance = True
+        self.resource_c.maintenance_until = target_date + timedelta(days=1)
+        # Make sure all other resources that might exist are also in maintenance or not published
+        all_other_resources = Resource.query.filter(Resource.id.notin_([self.resource_a.id, self.resource_b.id, self.resource_c.id])).all()
+        for res in all_other_resources:
+            res.status = 'archived' # Or set maintenance
+        db.session.commit()
+
+        # Create a booking on this date to ensure the date is processed
+        # (The API currently processes dates that have some activity or are user-requested for other reasons)
+        # For this test, let's assume the date will be checked.
+        # A better approach might be to ensure the tested date range for unavailability explicitly includes target_date_str.
+        # The current logic in the API gets dates from existing bookings.
+        # So, we need a booking on target_date_str for it to be evaluated.
+        self._create_booking_for_unavailable_dates_test(self.standard_user, self.resource_a, days_offset_from_today=5, start_hour=9, end_hour=10)
+
+
+        unavailable = self._get_unavailable_dates(self.standard_user.id)
+        self.assertIn(target_date_str, unavailable, f"Date {target_date_str} with all resources under maintenance should be unavailable. Got: {unavailable}")
+        self.logout()
+
+    def test_all_resources_fully_booked_by_others(self):
+        self.login(self.standard_user.username, "password") # Standard user is making the query
+        other_user1 = self._create_user_for_unavailable_dates_test("other_booker1", "password")
+        other_user2 = self._create_user_for_unavailable_dates_test("other_booker2", "password")
+        other_user3 = self._create_user_for_unavailable_dates_test("other_booker3", "password")
+
+        target_date_offset = 7 # Days from today
+        target_date_str = (date.today() + timedelta(days=target_date_offset)).strftime('%Y-%m-%d')
+
+        # Ensure all tested resources are published and NOT in maintenance
+        for res in [self.resource_a, self.resource_b, self.resource_c]:
+            res.is_under_maintenance = False
+            res.status = 'published'
+        db.session.commit()
+
+        # Book all resources fully for the target date by other users
+        # "Fully booked" for a day means any booking exists on that day for the resource.
+        self._create_booking_for_unavailable_dates_test(other_user1, self.resource_a, target_date_offset, 9, 17)
+        self._create_booking_for_unavailable_dates_test(other_user2, self.resource_b, target_date_offset, 9, 17)
+        self._create_booking_for_unavailable_dates_test(other_user3, self.resource_c, target_date_offset, 9, 17)
+
+        # If there are other published resources, they also need to be booked.
+        # For simplicity, assume resource_a,b,c are the only published ones for this test.
+        # Or archive others:
+        all_resources = Resource.query.all()
+        for res in all_resources:
+            if res.id not in [self.resource_a.id, self.resource_b.id, self.resource_c.id] and res.status == 'published':
+                # Create a booking for this other resource too by another_user to make it unavailable
+                 self._create_booking_for_unavailable_dates_test(other_user1, res, target_date_offset, 9, 17, title=f"Booking for {res.name}")
+
+
+        unavailable = self._get_unavailable_dates(self.standard_user.id)
+        self.assertIn(target_date_str, unavailable, f"Date {target_date_str} where all resources are booked by others should be unavailable. Got: {unavailable}")
+        self.logout()
+
+
+    # --- User's Own Bookings Tests ---
+    def test_user_has_booking_on_date(self):
+        self.login(self.standard_user.username, "password")
+        target_date_offset = 3
+        target_date_str = (date.today() + timedelta(days=target_date_offset)).strftime('%Y-%m-%d')
+
+        # User has a booking on this date
+        self._create_booking_for_unavailable_dates_test(self.standard_user, self.resource_a, target_date_offset, 10, 12)
+
+        unavailable = self._get_unavailable_dates(self.standard_user.id)
+        self.assertIn(target_date_str, unavailable, f"Date {target_date_str} where user has a booking should be unavailable. Got: {unavailable}")
+        self.logout()
+
+    def test_user_multiple_bookings_spanning_dates(self):
+        self.login(self.standard_user.username, "password")
+        date_offset1 = 14
+        date_offset2 = 15
+        date_offset3 = 16 # For a multi-day booking
+
+        date_str1 = (date.today() + timedelta(days=date_offset1)).strftime('%Y-%m-%d')
+        date_str2 = (date.today() + timedelta(days=date_offset2)).strftime('%Y-%m-%d')
+
+        # Multi-day booking that spans date_offset3 and date_offset3 + 1
+        multi_day_start_date = date.today() + timedelta(days=date_offset3)
+        multi_day_end_date = multi_day_start_date + timedelta(days=1)
+        multi_day_date_str1 = multi_day_start_date.strftime('%Y-%m-%d')
+        multi_day_date_str2 = multi_day_end_date.strftime('%Y-%m-%d')
+
+
+        self._create_booking_for_unavailable_dates_test(self.standard_user, self.resource_a, date_offset1, 10, 11, title="MultiBooking1")
+        self._create_booking_for_unavailable_dates_test(self.standard_user, self.resource_b, date_offset2, 14, 15, title="MultiBooking2")
+
+        # Create a multi-day booking for standard_user
+        multi_day_booking_start_dt = datetime.combine(multi_day_start_date, time(16,0))
+        multi_day_booking_end_dt = datetime.combine(multi_day_end_date, time(10,0)) # Ends on the next day
+
+        booking_multi = Booking(
+            user_name=self.standard_user.username, user_id=self.standard_user.id, resource_id=self.resource_c.id,
+            start_time=multi_day_booking_start_dt, end_time=multi_day_booking_end_dt, title="MultiDayBooking", status='approved'
+        )
+        db.session.add(booking_multi)
+        db.session.commit()
+
+        unavailable = self._get_unavailable_dates(self.standard_user.id)
+        self.assertIn(date_str1, unavailable, f"Date {date_str1} from MultiBooking1 should be unavailable. Got: {unavailable}")
+        self.assertIn(date_str2, unavailable, f"Date {date_str2} from MultiBooking2 should be unavailable. Got: {unavailable}")
+        self.assertIn(multi_day_date_str1, unavailable, f"Start date {multi_day_date_str1} of multi-day booking should be unavailable. Got: {unavailable}")
+        self.assertIn(multi_day_date_str2, unavailable, f"End date {multi_day_date_str2} of multi-day booking should be unavailable. Got: {unavailable}")
+        self.logout()
+
+    def test_user_has_no_bookings(self):
+        # Login as a user known to have no bookings for this test
+        no_booking_user = self._create_user_for_unavailable_dates_test("nobookinguser", "password")
+        self.login(no_booking_user.username, "password")
+
+        # Ensure this user has no bookings (clean state)
+        Booking.query.filter_by(user_id=no_booking_user.id).delete()
+        db.session.commit()
+
+        # Add a booking for another user on a date to make that date processable by the API
+        # Otherwise, if no dates have any bookings at all, the `dates_to_check` set might be empty.
+        other_user = self.standard_user # Use existing standard_user
+        target_date_offset = 18
+        target_date_str = (date.today() + timedelta(days=target_date_offset)).strftime('%Y-%m-%d')
+        self._create_booking_for_unavailable_dates_test(other_user, self.resource_a, target_date_offset, 10, 11, title="OtherUserBookingForNoBookingTest")
+
+        unavailable = self._get_unavailable_dates(no_booking_user.id)
+
+        # This user (nobookinguser) has no bookings. So, no dates should be unavailable *due to their own bookings*.
+        # target_date_str might be unavailable if all resources are booked by 'other_user',
+        # or if it's a past date and past bookings are disallowed.
+        # For this test, we assume target_date_str is a future date and resource_a is not the only resource.
+        # So, target_date_str should NOT be in the list for no_booking_user.
+        self.assertNotIn(target_date_str, unavailable, f"Date {target_date_str} should not be unavailable for a user with no bookings, unless other global rules apply. Got: {unavailable}")
+
+        # If the only processed date was target_date_str, and it's not unavailable for no_booking_user,
+        # the list might be empty.
+        # A more robust check: ensure any date that IS unavailable is due to global rules (past, all resources booked),
+        # not due to this user's (non-existent) bookings.
+        # For simplicity, if the list is empty, it passes the "no dates unavailable due to this user" criteria.
+        # If not empty, each date needs to be justified by other rules.
+        # This test is primarily that dates are not marked *because* of this specific user's bookings.
+
+        self.logout()
+
+    # --- Combined Scenarios & Empty States ---
+    @patch('routes.api_resources.datetime')
+    def test_combined_user_booking_and_all_resources_booked(self, mock_datetime):
+        mock_now = datetime(2024, 3, 20, 12, 0, 0, tzinfo=timezone_original.utc)
+        mock_datetime.now.return_value = mock_now
+        self._set_booking_settings_for_unavailable_dates(allow_past_bookings=True, past_booking_time_adjustment_hours=0)
+
+        user1 = self.standard_user
+        user2 = self._create_user_for_unavailable_dates_test("combo_user2", "password")
+        self.login(user1.username, "password")
+
+        date1_offset = 20 # Future date
+        date1_str = (mock_now.date() + timedelta(days=date1_offset)).strftime('%Y-%m-%d')
+        date2_offset = 21 # Another future date
+        date2_str = (mock_now.date() + timedelta(days=date2_offset)).strftime('%Y-%m-%d')
+
+        # Scenario for date1_str: User1 has a booking. Resources are otherwise available.
+        self._create_booking_for_unavailable_dates_test(user1, self.resource_a, date1_offset, 10, 11, title="User1BookingOnDate1")
+        # Resource B and C are available on date1_str
+
+        # Scenario for date2_str: User1 has NO booking. All resources are booked by User2.
+        self._create_booking_for_unavailable_dates_test(user2, self.resource_a, date2_offset, 9, 17, title="User2BookResA")
+        self._create_booking_for_unavailable_dates_test(user2, self.resource_b, date2_offset, 9, 17, title="User2BookResB")
+        self._create_booking_for_unavailable_dates_test(user2, self.resource_c, date2_offset, 9, 17, title="User2BookResC")
+        # Archive any other resources to ensure resource_a,b,c are the only "all" resources.
+        all_other_resources = Resource.query.filter(Resource.id.notin_([self.resource_a.id, self.resource_b.id, self.resource_c.id])).all()
+        for res in all_other_resources: res.status = 'archived'; db.session.commit()
+
+
+        unavailable = self._get_unavailable_dates(user1.id)
+        self.assertIn(date1_str, unavailable, f"Date1 ({date1_str}) should be unavailable due to User1's own booking. Got: {unavailable}")
+        self.assertIn(date2_str, unavailable, f"Date2 ({date2_str}) should be unavailable because all resources are booked by User2. Got: {unavailable}")
+        self.logout()
+
+    def test_no_resources_in_system(self):
+        self.login(self.standard_user.username, "password")
+        # Delete all resources
+        Booking.query.delete() # Clear bookings that might reference resources
+        ResourcePIN.query.delete() # Clear PINs
+        Resource.query.delete()
+        db.session.commit()
+
+        # Create a booking for the user on a date to make that date processable
+        # This scenario is a bit artificial as you can't book without resources.
+        # Let's assume the API is called and there are no resources.
+        # The API fetches all_resources. If empty, total_published_resources = 0.
+        # The "all resources booked" logic has `if total_published_resources > 0`.
+        # So, this rule won't make dates unavailable.
+        # Only user's own bookings or past date rules would apply.
+
+        # If user has a booking (e.g. it was created before resources were deleted), that date should still be unavailable for the user.
+        # Let's simulate this by creating a user booking then deleting resources.
+        # This requires a resource to exist temporarily.
+        temp_res = self._create_resource_for_unavailable_dates_test("TempResForNoResTest")
+        date_offset = 25
+        date_str = (date.today() + timedelta(days=date_offset)).strftime('%Y-%m-%d')
+        self._create_booking_for_unavailable_dates_test(self.standard_user, temp_res, date_offset, 10, 11)
+
+        # Now delete all resources
+        Booking.query.filter(Booking.resource_id != temp_res.id).delete() # Clear other bookings
+        Resource.query.filter(Resource.id != temp_res.id).delete()
+        # Do not delete temp_res yet, let the booking refer to it, then delete it.
+        # Actually, if the resource is deleted, the booking might be an orphan or FK constraint fails.
+        # Better: test with 0 *published* resources.
+        Resource.query.delete() # Delete all
+        temp_res_archived = self._create_resource_for_unavailable_dates_test("ArchivedRes", status='archived')
+        # Recreate booking with archived resource to simulate booking exists but resource is not "available"
+        # The API filters by status='published' for `all_resources`.
+        # So, if all resources are archived, `total_published_resources` will be 0.
+        Booking.query.delete() # Clean slate
+        self._create_booking_for_unavailable_dates_test(self.standard_user, temp_res_archived, date_offset, 10, 11)
+
+
+        unavailable = self._get_unavailable_dates(self.standard_user.id)
+        # date_str should be unavailable because the user has a booking on it.
+        self.assertIn(date_str, unavailable, f"Date {date_str} should be unavailable due to user's own booking, even with no published resources. Got: {unavailable}")
+
+        # A date with no user booking, and no published resources, should NOT be unavailable.
+        other_date_str = (date.today() + timedelta(days=date_offset + 1)).strftime('%Y-%m-%d')
+        # To make other_date_str processed, create a booking for another user on it.
+        other_user = self._create_user_for_unavailable_dates_test("other_no_res", "password")
+        self._create_booking_for_unavailable_dates_test(other_user, temp_res_archived, date_offset + 1, 10, 11)
+
+        unavailable_for_std_user_again = self._get_unavailable_dates(self.standard_user.id)
+        self.assertNotIn(other_date_str, unavailable_for_std_user_again, f"Other date {other_date_str} should not be unavailable for std_user. Got: {unavailable_for_std_user_again}")
+
+        self.logout()
+
+
+    def test_no_bookings_for_anyone(self):
+        self.login(self.standard_user.username, "password")
+        # Ensure all resources are published and not in maintenance
+        for res_attr_name in ['resource_a', 'resource_b', 'resource_c']:
+            res = getattr(self, res_attr_name)
+            res.is_under_maintenance = False
+            res.status = 'published'
+        db.session.commit()
+
+        # Delete all bookings
+        Booking.query.delete()
+        db.session.commit()
+
+        unavailable = self._get_unavailable_dates(self.standard_user.id)
+        # With no bookings anywhere, and assuming future dates are being implicitly checked (which they are not by default by API),
+        # the list should be empty unless past date rules make some dates unavailable.
+        # The API's `dates_to_check` will be empty. So, the returned list should be empty.
+        self.assertEqual(len(unavailable), 0, f"With no bookings at all, unavailable list should be empty. Got: {unavailable}")
+        self.logout()
+
+
 if __name__ == '__main__':
     unittest.main()
