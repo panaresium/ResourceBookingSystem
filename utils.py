@@ -12,7 +12,7 @@ import csv
 import io
 
 # Assuming db and mail are initialized in extensions.py
-from extensions import db, mail
+from extensions import db # mail is now fetched from current_app.extensions
 # Assuming models are defined in models.py
 from models import AuditLog, User, Resource, FloorMap, Role, Booking # Added Booking
 from sqlalchemy import func # Ensure func is imported
@@ -319,11 +319,12 @@ def generate_booking_image(resource_image_filename: str, map_coordinates_str: st
         return None
 
 def send_email(to_address: str, subject: str, body: str = None, html_body: str = None, attachment_path: str = None):
+    mail_instance = current_app.extensions.get('mail')
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    logger.warning(f"UTILS_SEND_EMAIL: send_email called. Mail object ID: {id(mail)}, mail.app state: {mail.app}")
+    logger.warning(f"UTILS_SEND_EMAIL: send_email called. Mail object from current_app.extensions ID: {id(mail_instance) if mail_instance else 'None'}, mail_instance.app state: {mail_instance.app if mail_instance else 'Mail instance is None'}")
 
-    if not mail.app:
-        logger.warning("Flask-Mail not available or not initialized with app. Email not sent via external server.")
+    if not mail_instance or not mail_instance.app:
+        logger.warning("Flask-Mail not available or not initialized with app (checked via current_app.extensions). Email not sent via external server.")
         logger.info(f"Email intent: To='{to_address}', Subject='{subject}'. This email was NOT sent via SMTP due to missing Flask-Mail configuration.")
         if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
             try:
@@ -384,7 +385,7 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
                 logger.error(f"Failed to attach {attachment_path} to email for {to_address}: {e_attach}", exc_info=True)
                 # Decide if email should still be sent without attachment or not. For now, it will.
 
-        mail.send(msg)
+        mail_instance.send(msg)
         logger.info(f"Email successfully sent to {to_address} via Flask-Mail.")
     except Exception as e:
         logger.error(f"Failed to send email to {to_address} via Flask-Mail: {e}", exc_info=True)
