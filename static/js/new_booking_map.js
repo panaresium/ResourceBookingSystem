@@ -242,6 +242,12 @@ document.addEventListener('DOMContentLoaded', function () {
                     button.classList.add('selected-map-button'); // Or reuse 'selected-location-button'
                 }
 
+                // Disable button if it's marked as unavailable
+                // This check is after all class assignments and title settings.
+                if (button.classList.contains('location-button-unavailable')) {
+                    button.disabled = true;
+                }
+
                 button.addEventListener('click', function() {
                     selectedMapId = mapInfo.id;
                     currentMapId = mapInfo.id; // Sync currentMapId as well
