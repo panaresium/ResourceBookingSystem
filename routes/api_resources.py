@@ -205,51 +205,64 @@ def get_unavailable_dates():
             # Let's stick to dates derived from bookings or past date logic.
 
         # Iterate through relevant dates
-        for d_date in dates_to_check:
+        for d_date_item in dates_to_check:
+            current_processing_date = None
+            if isinstance(d_date_item, str):
+                try:
+                    current_processing_date = datetime.strptime(d_date_item, '%Y-%m-%d').date()
+                except ValueError:
+                    logger.warning(f"Could not parse date string '{d_date_item}' from dates_to_check. Skipping.")
+                    continue # Skip this item if it's a string that can't be parsed
+            elif isinstance(d_date_item, date): # Ensure it's a datetime.date object specifically
+                current_processing_date = d_date_item
+            else:
+                logger.warning(f"Unexpected type in dates_to_check: {type(d_date_item)}. Value: {d_date_item}. Skipping.")
+                continue # Skip if it's neither a string nor a date object
+
             # Past date handling
-            date_is_past = d_date < now.date()
+            date_is_past = current_processing_date < now.date()
             if date_is_past:
                 if not booking_settings.allow_past_bookings:
-                    unavailable_dates_set.add(d_date.strftime('%Y-%m-%d'))
-                    logger.debug(f"Date {d_date} is past and allow_past_bookings is false.")
+                    unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
+                    logger.debug(f"Date {current_processing_date} is past and allow_past_bookings is false.")
                     continue # Date is unavailable, no need for further checks
 
-                effective_cutoff = datetime.combine(d_date + timedelta(days=1), time.min, tzinfo=timezone.utc) - timedelta(hours=booking_settings.past_booking_time_adjustment_hours)
+                effective_cutoff = datetime.combine(current_processing_date + timedelta(days=1), time.min, tzinfo=timezone.utc) - timedelta(hours=booking_settings.past_booking_time_adjustment_hours)
                 if now > effective_cutoff:
-                    unavailable_dates_set.add(d_date.strftime('%Y-%m-%d'))
-                    logger.debug(f"Date {d_date} is past. Now: {now}, Effective Cutoff: {effective_cutoff}. Added as unavailable.")
+                    unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
+                    logger.debug(f"Date {current_processing_date} is past. Now: {now}, Effective Cutoff: {effective_cutoff}. Added as unavailable.")
                     continue
 
             # Date is not made unavailable by past date logic, proceed.
             if total_published_resources > 0: # Only check resource availability if there are published resources
                 resources_booked_or_maintenance_count = 0
                 for res in all_resources:
-                    if res.is_under_maintenance and (res.maintenance_until is None or d_date <= res.maintenance_until.date()):
+                    if res.is_under_maintenance and (res.maintenance_until is None or current_processing_date <= res.maintenance_until.date()):
                         resources_booked_or_maintenance_count += 1
-                        logger.debug(f"Resource {res.id} under maintenance on {d_date}.")
+                        logger.debug(f"Resource {res.id} under maintenance on {current_processing_date}.")
                         continue
 
                     bookings_for_resource_on_date = Booking.query.filter(
                         Booking.resource_id == res.id,
-                        func.date(Booking.start_time) <= d_date,
-                        func.date(Booking.end_time) >= d_date,
+                        func.date(Booking.start_time) <= current_processing_date,
+                        func.date(Booking.end_time) >= current_processing_date,
                         Booking.status.in_(['approved', 'pending', 'checked_in', 'confirmed'])
                     ).count()
 
                     if bookings_for_resource_on_date > 0:
                         resources_booked_or_maintenance_count += 1
-                        logger.debug(f"Resource {res.id} has bookings on {d_date}.")
+                        logger.debug(f"Resource {res.id} has bookings on {current_processing_date}.")
                         continue
 
                 if resources_booked_or_maintenance_count == total_published_resources:
-                    unavailable_dates_set.add(d_date.strftime('%Y-%m-%d'))
-                    logger.debug(f"All {total_published_resources} resources are booked or in maintenance on {d_date}.")
+                    unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
+                    logger.debug(f"All {total_published_resources} resources are booked or in maintenance on {current_processing_date}.")
                     continue # Date is unavailable
 
             # Check if the user has any booking on this day (already collected in user_booked_dates)
-            if d_date in user_booked_dates:
-                unavailable_dates_set.add(d_date.strftime('%Y-%m-%d'))
-                logger.debug(f"User {user_id} has a booking on {d_date}.")
+            if current_processing_date in user_booked_dates: # user_booked_dates contains date objects
+                unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
+                logger.debug(f"User {user_id} has a booking on {current_processing_date}.")
                 continue # Date is unavailable for this user
 
         logger.info(f"Returning {len(unavailable_dates_set)} unavailable dates for user {user_id}.")
