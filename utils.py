@@ -321,10 +321,15 @@ def generate_booking_image(resource_image_filename: str, map_coordinates_str: st
 def send_email(to_address: str, subject: str, body: str = None, html_body: str = None, attachment_path: str = None):
     mail_instance = current_app.extensions.get('mail')
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    logger.warning(f"UTILS_SEND_EMAIL: send_email called. Mail object from current_app.extensions ID: {id(mail_instance) if mail_instance else 'None'}, mail_instance.app state: {mail_instance.app if mail_instance else 'Mail instance is None'}")
+    logger.warning(f"UTILS_SEND_EMAIL: send_email called. Mail object from current_app.extensions ID: {id(mail_instance) if mail_instance else 'None'}, mail_instance.state.app: {mail_instance.state.app if mail_instance and hasattr(mail_instance, 'state') and mail_instance.state else 'Mail instance or state is None'}")
 
-    if not mail_instance or not mail_instance.app:
-        logger.warning("Flask-Mail not available or not initialized with app (checked via current_app.extensions). Email not sent via external server.")
+    if not mail_instance or not hasattr(mail_instance, 'state') or not mail_instance.state or not mail_instance.state.app:
+        if not mail_instance:
+            logger.warning("Flask-Mail instance not found in current_app.extensions. Email not sent via external server.")
+        elif not hasattr(mail_instance, 'state') or not mail_instance.state:
+            logger.warning("Flask-Mail instance found in app extensions, but its state is not initialized. Email not sent via external server.")
+        else: # mail_instance.state.app is None or not True
+            logger.warning("Flask-Mail instance found and state exists, but state.app is not properly set. Email not sent via external server.")
         logger.info(f"Email intent: To='{to_address}', Subject='{subject}'. This email was NOT sent via SMTP due to missing Flask-Mail configuration.")
         if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
             try:
