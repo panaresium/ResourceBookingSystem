@@ -259,11 +259,12 @@ def get_unavailable_dates():
                     logger.debug(f"All {total_published_resources} resources are booked or in maintenance on {current_processing_date}.")
                     continue # Date is unavailable
 
-            # Check if the user has any booking on this day (already collected in user_booked_dates)
-            if current_processing_date in user_booked_dates: # user_booked_dates contains date objects
-                unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
-                logger.debug(f"User {user_id} has a booking on {current_processing_date}.")
-                continue # Date is unavailable for this user
+            # The following block has been removed as per user request:
+            # # Check if the user has any booking on this day (already collected in user_booked_dates)
+            # if current_processing_date in user_booked_dates: # user_booked_dates contains date objects
+            #     unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
+            #     logger.debug(f"User {user_id} has a booking on {current_processing_date}.")
+            #     continue # Date is unavailable for this user
 
         logger.info(f"Returning {len(unavailable_dates_set)} unavailable dates for user {user_id}.")
         return jsonify(sorted(list(unavailable_dates_set)))
