@@ -132,6 +132,14 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     # Corrected template_folder and static_folder paths assuming app_factory.py is in root.
     # If app_factory is in a sub-directory, these might need adjustment (e.g. app.Flask('instance', ...))
 
+    # NEW LOGS HERE:
+    # Note: app.logger might not be fully configured with handlers/levels yet,
+    # but messages sent to it should be buffered or handled once logging is set up.
+    # For immediate critical output if needed, standard print() or logging.warning() could be used
+    # before app.logger is reliably configured. However, standard practice is to use app.logger.
+    app.logger.warning("APP_FACTORY: create_app function entered.")
+    app.logger.warning(f"APP_FACTORY: Initial mail object ID in create_app: {id(mail)}")
+
     # 1. Load Configuration
     app.config.from_object(config_object)
 
