@@ -3,7 +3,7 @@ import json
 import logging # Added for fallback logger
 import tempfile # Added for image generation and email attachment
 import re # Added for filename sanitization
-from PIL import Image, ImageDraw # Added for image generation
+from PIL import Image, ImageDraw, ImageFont # Added ImageFont for text rendering
 import requests
 from datetime import datetime, date, timedelta, time, timezone
 from flask import url_for, jsonify, current_app # current_app already here, ensure it's used
@@ -20,6 +20,7 @@ from email.mime.application import MIMEApplication # For generic attachments
 from google.oauth2.credentials import Credentials as UserCredentials # Added for OAuth 2.0 Client ID
 import socket # Added for specific network error handling
 import httplib2 # Added for specific network error handling
+import time # Added for retry mechanism
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -331,12 +332,63 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
                         x0, y0 = float(x), float(y)
                         x1, y1 = float(x) + float(width), float(y) + float(height)
 
-                        outline_color = (255, 0, 0, 255)
-                        fill_color = (255, 0, 0, 255)
+                        outline_color = (255, 0, 0, 255)  # Opaque red for outline
+                        fill_color = (255, 0, 0, 77)  # Red with ~0.3 opacity (77/255)
                         stroke_width_pil = 3
 
                         draw.rectangle([(x0, y0), (x1, y1)], outline=outline_color, fill=fill_color, width=stroke_width_pil)
-                        logger.info(f"Drew rectangle on image at ({x0},{y0})-({x1},{y1}) for resource ID {resource_id} (working size {img.width}x{img.height})")
+                        logger.info(f"Drew semi-transparent rectangle on image at ({x0},{y0})-({x1},{y1}) for resource ID {resource_id} (working size {img.width}x{img.height})")
+
+                        # Add resource name text
+                        try:
+                            # Attempt to load a bold font, fallback to default
+                            font_size = 20  # Adjust as needed
+                            try:
+                                # Common bold font names. Actual file names might vary.
+                                # Ensure the font file is accessible in your environment.
+                                font = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size)
+                            except IOError:
+                                try:
+                                    font = ImageFont.truetype("arialbd.ttf", font_size)
+                                except IOError:
+                                    logger.warning("Bold font (DejaVuSans-Bold.ttf or arialbd.ttf) not found. Using default font for resource name. Text may not be bold.")
+                                    font = ImageFont.load_default() # Default font, likely not bold.
+
+                            text_color = (0, 0, 0, 255)  # Black, opaque
+
+                            # Calculate text size and position
+                            # Use textbbox for more accurate bounding box in Pillow 8.0.0+
+                            if hasattr(draw, 'textbbox'):
+                                text_bbox = draw.textbbox((0,0), resource_name, font=font)
+                                text_width = text_bbox[2] - text_bbox[0]
+                                text_height = text_bbox[3] - text_bbox[1]
+                            else: # Fallback for older Pillow versions
+                                text_size_legacy = draw.textsize(resource_name, font=font)
+                                text_width = text_size_legacy[0]
+                                text_height = text_size_legacy[1]
+
+
+                            # Position text above the rectangle, centered horizontally
+                            text_x = x0 + (width - text_width) / 2
+                            text_y = y0 - text_height - 5  # 5 pixels padding above rectangle
+
+                            # Ensure text is not drawn off the top of the image
+                            if text_y < 0:
+                                text_y = 0
+                            # Ensure text is not drawn off the left of the image
+                            if text_x < 0:
+                                text_x = 0
+                            # Ensure text is not drawn off the right of the image (optional, might clip)
+                            if text_x + text_width > img.width:
+                                text_x = img.width - text_width
+                                if text_x < 0: text_x = 0 # If text is wider than image
+
+                            draw.text((text_x, text_y), resource_name, font=font, fill=text_color)
+                            logger.info(f"Drew resource name '{resource_name}' at ({text_x},{text_y}) for resource ID {resource_id}")
+
+                        except Exception as e_text:
+                            logger.error(f"Error drawing resource name for resource ID {resource_id}: {e_text}", exc_info=True)
+
                     except (ValueError, TypeError) as e_coords:
                         logger.warning(f"Invalid coordinate values for drawing on floor map {base_image_filename} for resource ID {resource_id}: {e_coords}. Coords string: {map_coordinates_str}")
                 else:
@@ -413,95 +465,108 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
     email_log_entry = {
         'to': to_address, 'subject': subject, 'body_present': bool(body),
         'html_body_present': bool(html_body), 'attachment_path': attachment_path,
-        'timestamp': datetime.now(timezone.utc).isoformat(), 'status': 'pending_api'
+        'timestamp': datetime.now(timezone.utc).isoformat(), 'status': 'pending_api_retries'
     }
-    email_log.append(email_log_entry)
-    logger.info(f"Attempting to send email via Gmail API to {to_address}: {subject} {'with attachment' if attachment_path else ''}")
+    email_log.append(email_log_entry) # Log initial attempt marker
 
-    try:
-        client_id = current_app.config.get('GOOGLE_CLIENT_ID')
-        client_secret = current_app.config.get('GOOGLE_CLIENT_SECRET')
-        refresh_token = current_app.config.get('GMAIL_REFRESH_TOKEN')
-        from_email = current_app.config.get('GMAIL_SENDER_ADDRESS')
+    max_retries = 5
+    retry_delay = 15  # seconds
 
-        if not all([client_id, client_secret, refresh_token, from_email]):
-            logger.error("Gmail API OAuth 2.0 Client ID credentials not fully configured.")
-            email_log_entry['status'] = 'failed_oauth_config_missing'
-            return
-
+    for attempt in range(max_retries):
+        logger.info(f"Attempt {attempt + 1}/{max_retries} to send email via Gmail API to {to_address}: {subject} {'with attachment' if attachment_path else ''}")
         try:
-            creds = UserCredentials(
-                None, refresh_token=refresh_token, token_uri='https://oauth2.googleapis.com/token',
-                client_id=client_id, client_secret=client_secret,
-                scopes=['https://www.googleapis.com/auth/gmail.send']
-            )
-        except Exception as e_creds:
-            logger.error(f"Failed to create/refresh Google OAuth credentials: {str(e_creds)}", exc_info=True)
-            email_log_entry['status'] = 'failed_oauth_credential_creation'
-            email_log_entry['error_detail'] = str(e_creds)
-            return
+            client_id = current_app.config.get('GOOGLE_CLIENT_ID')
+            client_secret = current_app.config.get('GOOGLE_CLIENT_SECRET')
+            refresh_token = current_app.config.get('GMAIL_REFRESH_TOKEN')
+            from_email = current_app.config.get('GMAIL_SENDER_ADDRESS')
 
-        service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
-        message = MIMEMultipart('mixed')
-        if html_body and attachment_path:
-             message = MIMEMultipart('mixed')
-        elif html_body or attachment_path:
+            if not all([client_id, client_secret, refresh_token, from_email]):
+                logger.error("Gmail API OAuth 2.0 Client ID credentials not fully configured.")
+                email_log_entry['status'] = 'failed_oauth_config_missing'
+                # Do not return immediately, allow cleanup logic to run
+                break # Break from retry loop as this is a config error
+
+            try:
+                creds = UserCredentials(
+                    None, refresh_token=refresh_token, token_uri='https://oauth2.googleapis.com/token',
+                    client_id=client_id, client_secret=client_secret,
+                    scopes=['https://www.googleapis.com/auth/gmail.send']
+                )
+            except Exception as e_creds:
+                logger.error(f"Failed to create/refresh Google OAuth credentials on attempt {attempt + 1}: {str(e_creds)}", exc_info=True)
+                email_log_entry['status'] = 'failed_oauth_credential_creation'
+                email_log_entry['error_detail'] = str(e_creds)
+                # Do not return immediately, allow cleanup logic to run
+                break # Break from retry loop as this is likely a persistent auth issue
+
+            service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
             message = MIMEMultipart('mixed')
-        else:
-            message = MIMEText(body, 'plain', 'utf-8')
+            if html_body and attachment_path:
+                 message = MIMEMultipart('mixed')
+            elif html_body or attachment_path:
+                message = MIMEMultipart('mixed')
+            else:
+                message = MIMEText(body, 'plain', 'utf-8')
 
-        message['to'] = to_address
-        message['from'] = from_email
-        message['subject'] = subject
+            message['to'] = to_address
+            message['from'] = from_email
+            message['subject'] = subject
 
-        if isinstance(message, MIMEMultipart):
-            alt_part = MIMEMultipart('alternative')
-            if body:
-                alt_part.attach(MIMEText(body, 'plain', 'utf-8'))
-            if html_body:
-                alt_part.attach(MIMEText(html_body, 'html', 'utf-8'))
-            message.attach(alt_part)
+            if isinstance(message, MIMEMultipart):
+                alt_part = MIMEMultipart('alternative')
+                if body:
+                    alt_part.attach(MIMEText(body, 'plain', 'utf-8'))
+                if html_body:
+                    alt_part.attach(MIMEText(html_body, 'html', 'utf-8'))
+                message.attach(alt_part)
 
-        if attachment_path:
-            file_ext = os.path.splitext(attachment_path)[1].lower()
-            maintype, subtype = 'application', 'octet-stream'
-            if file_ext == '.png': maintype, subtype = 'image', 'png'
-            elif file_ext in ['.jpg', '.jpeg']: maintype, subtype = 'image', 'jpeg'
-            elif file_ext == '.pdf': maintype, subtype = 'application', 'pdf'
-            elif file_ext == '.txt': maintype, subtype = 'text', 'plain'
+            if attachment_path:
+                file_ext = os.path.splitext(attachment_path)[1].lower()
+                maintype, subtype = 'application', 'octet-stream'
+                if file_ext == '.png': maintype, subtype = 'image', 'png'
+                elif file_ext in ['.jpg', '.jpeg']: maintype, subtype = 'image', 'jpeg'
+                elif file_ext == '.pdf': maintype, subtype = 'application', 'pdf'
+                elif file_ext == '.txt': maintype, subtype = 'text', 'plain'
 
-            with open(attachment_path, 'rb') as fp:
-                if maintype == 'image': msg_attach = MIMEImage(fp.read(), _subtype=subtype, name=os.path.basename(attachment_path))
-                elif maintype == 'text': msg_attach = MIMEText(fp.read().decode('utf-8'), _subtype=subtype, _charset='utf-8')
-                else: msg_attach = MIMEApplication(fp.read(), _subtype=subtype, name=os.path.basename(attachment_path))
+                with open(attachment_path, 'rb') as fp:
+                    if maintype == 'image': msg_attach = MIMEImage(fp.read(), _subtype=subtype, name=os.path.basename(attachment_path))
+                    elif maintype == 'text': msg_attach = MIMEText(fp.read().decode('utf-8'), _subtype=subtype, _charset='utf-8')
+                    else: msg_attach = MIMEApplication(fp.read(), _subtype=subtype, name=os.path.basename(attachment_path))
 
-            msg_attach.add_header('Content-Disposition', 'attachment', filename=os.path.basename(attachment_path))
-            message.attach(msg_attach)
-            logger.info(f"Attachment {attachment_path} prepared for Gmail API.")
+                msg_attach.add_header('Content-Disposition', 'attachment', filename=os.path.basename(attachment_path))
+                message.attach(msg_attach)
+                logger.info(f"Attachment {attachment_path} prepared for Gmail API on attempt {attempt + 1}.")
 
-        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
-        create_message_body = {'raw': raw_message}
-        sent_message = service.users().messages().send(userId='me', body=create_message_body).execute()
-        logger.info(f"Email sent successfully via Gmail API to {to_address}. Message ID: {sent_message.get('id')}")
-        email_log_entry['status'] = 'sent_api_success'
-        email_log_entry['message_id'] = sent_message.get('id')
+            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+            create_message_body = {'raw': raw_message}
+            sent_message = service.users().messages().send(userId='me', body=create_message_body).execute()
+            logger.info(f"Email sent successfully via Gmail API to {to_address} on attempt {attempt + 1}. Message ID: {sent_message.get('id')}")
+            email_log_entry['status'] = 'sent_api_success'
+            email_log_entry['message_id'] = sent_message.get('id')
+            email_log_entry['attempts'] = attempt + 1
+            break  # Exit loop on success
 
-    except socket.gaierror as e_gaierror:
-        logger.error(f"Network error (socket.gaierror) occurred sending email to {to_address} via Gmail API: {e_gaierror}. This often indicates a DNS resolution or network connectivity problem.", exc_info=True)
-        email_log_entry['status'] = 'failed_api_socket_error'
-        email_log_entry['error_detail'] = str(e_gaierror)
-    except httplib2.error.ServerNotFoundError as e_servernotfound:
-        logger.error(f"Network error (httplib2.error.ServerNotFoundError) occurred sending email to {to_address} via Gmail API: {e_servernotfound}. This often indicates a DNS resolution or network connectivity problem.", exc_info=True)
-        email_log_entry['status'] = 'failed_api_servernotfound_error'
-        email_log_entry['error_detail'] = str(e_servernotfound)
-    except HttpError as error:
-        logger.error(f"An HTTP error occurred sending email to {to_address} via Gmail API: {error.resp.status} - {error._get_reason()}", exc_info=True)
-        email_log_entry['status'] = f'failed_api_http_error_{error.resp.status}'
-        email_log_entry['error_detail'] = error._get_reason()
-    except Exception as e:
-        logger.error(f"An unexpected error occurred sending email to {to_address} via Gmail API: {e}", exc_info=True)
-        email_log_entry['status'] = 'failed_api_unexpected_error'
-        email_log_entry['error_detail'] = str(e)
+        except (socket.gaierror, httplib2.error.ServerNotFoundError, HttpError) as e_retryable:
+            logger.warning(f"Retryable error on attempt {attempt + 1}/{max_retries} sending email to {to_address}: {type(e_retryable).__name__} - {str(e_retryable)}", exc_info=True)
+            email_log_entry['status'] = f'failed_api_retryable_error_attempt_{attempt + 1}'
+            email_log_entry['error_detail'] = str(e_retryable)
+            email_log_entry['error_type'] = type(e_retryable).__name__
+            if attempt < max_retries - 1:
+                logger.info(f"Waiting {retry_delay} seconds before next attempt...")
+                time.sleep(retry_delay)
+            else:
+                logger.error(f"Max retries ({max_retries}) reached for email to {to_address}. Final error: {type(e_retryable).__name__}", exc_info=True)
+                email_log_entry['status'] = f'failed_api_max_retries_reached' # More specific final status
+        except Exception as e_non_retryable:
+            logger.error(f"A non-retryable error occurred sending email to {to_address} on attempt {attempt + 1}: {e_non_retryable}", exc_info=True)
+            email_log_entry['status'] = 'failed_api_non_retryable_error'
+            email_log_entry['error_detail'] = str(e_non_retryable)
+            email_log_entry['error_type'] = type(e_non_retryable).__name__
+            break # Exit loop for non-retryable errors (e.g., bad request, auth, unexpected)
+        # No 'finally' block needed here for attachment cleanup if the main 'finally' handles it.
+
+    # This finally block is outside the loop and will execute once after the loop finishes or breaks.
+    # It's responsible for cleaning up the attachment if it exists and is temporary.
     finally:
         if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
             try:

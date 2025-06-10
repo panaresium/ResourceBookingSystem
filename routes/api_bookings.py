@@ -1013,25 +1013,91 @@ def update_booking_by_user(booking_id):
 
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
 
-        # Email sending logic - REMOVED as per subtask instructions
-        # if mail and current_user.email and any("time from" in change for change in change_details_list):
-        #     try:
-        #         from flask_mail import Message # Ensure Message is available
-        #         msg = Message(
-        #             subject="Booking Updated",
-        #             recipients=[current_user.email],
-        #             body=(
-        #                 f"Your booking for {resource_name} has been updated.\n"
-        #                 f"New Title: {booking.title}\n"
-        #                 f"New Start Time: {booking.start_time.strftime('%Y-%m-%d %H:%M')}\n"
-        #                 f"New End Time: {booking.end_time.strftime('%Y-%m-%d %H:%M')}\n"
-        #             ),
-        #             sender=current_app.config.get('MAIL_DEFAULT_SENDER')
-        #         )
-        #         mail.send(msg)
-        #         current_app.logger.info(f"Booking update email sent to {current_user.email} via Flask-Mail.")
-        #     except Exception as mail_e:
-        #         current_app.logger.exception(f"[API PUT /api/bookings/{booking_id}] Failed to send booking update email to {current_user.email} via Flask-Mail: {mail_e}")
+        # Send update email notification
+        if current_user.email:
+            try:
+                resource_for_email = booking.resource_booked
+                floor_map_location = "N/A"
+                floor_map_floor = "N/A"
+                floor_map_name = "N/A" # Added for completeness, though not directly in template
+                if resource_for_email and resource_for_email.floor_map_id:
+                    floor_map = FloorMap.query.get(resource_for_email.floor_map_id)
+                    if floor_map:
+                        floor_map_location = floor_map.location
+                        floor_map_floor = floor_map.floor
+                        floor_map_name = floor_map.name # Added
+                    else:
+                        current_app.logger.warning(f"FloorMap {resource_for_email.floor_map_id} not found for resource {resource_for_email.id} during update email prep for booking {booking.id}.")
+
+                check_in_url = None
+                if booking.check_in_token: # Use existing token if available
+                    check_in_url = url_for('api_bookings.qr_check_in', token=booking.check_in_token, _external=True)
+                else: # Or generate a new one if it makes sense for updates (e.g. if time changed significantly)
+                    # For now, let's assume existing token or None is sufficient.
+                    # If a new token is needed upon update, logic similar to create_booking would be here.
+                    current_app.logger.info(f"No check_in_token found or regenerated for updated booking {booking.id}. Check-in URL will be None in email.")
+
+
+                update_summary_for_email = f"Your booking for '{resource_name}' was updated. "
+                if any("title from" in change for change in change_details_list):
+                    update_summary_for_email += f"The title is now '{booking.title}'. "
+                if any("time from" in change for change in change_details_list):
+                    update_summary_for_email += f"The new time is {booking.start_time.strftime('%Y-%m-%d %H:%M')} to {booking.end_time.strftime('%Y-%m-%d %H:%M')}. "
+
+                email_data = {
+                    'user_name': current_user.username,
+                    'booking_title': booking.title,
+                    'resource_name': resource_name,
+                    'start_time': booking.start_time.strftime('%Y-%m-%d %H:%M'),
+                    'end_time': booking.end_time.strftime('%Y-%m-%d %H:%M'),
+                    'location': floor_map_location,
+                    'floor': floor_map_floor,
+                    'floor_map_name': floor_map_name, # Added
+                    'check_in_url': check_in_url,
+                    'update_summary': update_summary_for_email.strip()
+                }
+
+                processed_image_path = None
+                if resource_for_email and resource_for_email.map_coordinates and resource_for_email.floor_map_id:
+                    processed_image_path = generate_booking_image(
+                        resource_for_email.id,
+                        resource_for_email.map_coordinates,
+                        resource_for_email.name
+                    )
+                elif resource_for_email and resource_for_email.image_filename:
+                     current_app.logger.info(f"Booking update {booking.id}: Resource image available but no map_coordinates for resource {resource_for_email.id}. No attachment image generated.")
+                else:
+                    current_app.logger.info(f"Booking update {booking.id}: No resource image or map_coordinates for resource {resource_for_email.id if resource_for_email else 'N/A'}. No attachment image generated.")
+
+
+                html_email_body = render_template('email/booking_update_notification.html', **email_data)
+                plain_text_body = (
+                    f"Hello {email_data['user_name']},\n\n"
+                    f"{email_data['update_summary']}\n\n"
+                    f"New Booking Details:\n"
+                    f"- Title: {email_data['booking_title']}\n"
+                    f"- Resource: {email_data['resource_name']}\n"
+                    f"- Date & Time: {email_data['start_time']} - {email_data['end_time']}\n"
+                    f"- Location: {email_data['location']}\n"
+                    f"- Floor: {email_data['floor']}\n\n"
+                    f"Check-in URL (if applicable): {email_data['check_in_url']}\n\n"
+                    f"Thank you!"
+                )
+
+                send_email(
+                    to_address=current_user.email,
+                    subject=_("Booking Updated: %(resource_name)s - %(booking_title)s", resource_name=email_data['resource_name'], booking_title=email_data['booking_title']),
+                    body=plain_text_body,
+                    html_body=html_email_body,
+                    attachment_path=processed_image_path
+                )
+                current_app.logger.info(f"Booking update email initiated for booking {booking.id} to {current_user.email}.")
+
+            except Exception as e_email:
+                current_app.logger.error(f"Error sending update email for booking {booking.id} to {current_user.email}: {e_email}", exc_info=True)
+        else:
+            current_app.logger.warning(f"User {current_user.username} (booking {booking.id}) has no email address. Skipping update email.")
+
 
         change_summary_text = '; '.join(change_details_list)
         add_audit_log(
@@ -1082,52 +1148,150 @@ def delete_booking_by_user(booking_id):
 
         # For audit log: get resource name before deleting booking
         resource_name = "Unknown Resource"
+        original_booking_title = booking.title # Capture before deletion
+        original_start_time = booking.start_time
+        original_end_time = booking.end_time
+        original_user_name = booking.user_name # Should be current_user.username
+        original_resource_id = booking.resource_id
+
         if booking.resource_booked: # Check if backref is populated
             resource_name = booking.resource_booked.name
+            resource_obj = booking.resource_booked # Keep a reference for floor map details
 
-        booking_start = booking.start_time
-        booking_end = booking.end_time
         booking_details_for_log = (
             f"Booking ID: {booking.id}, "
-            f"Resource: {resource_name} (ID: {booking.resource_id}), "
-            f"Title: '{booking.title}', "
-            f"Original User: '{booking.user_name}', "
-            f"Time: {booking_start.isoformat()} to {booking_end.isoformat()}"
+            f"Resource: {resource_name} (ID: {original_resource_id}), "
+            f"Title: '{original_booking_title}', "
+            f"Original User: '{original_user_name}', "
+            f"Time: {original_start_time.isoformat()} to {original_end_time.isoformat()}"
         )
+
+        # Store user email before booking object is potentially altered by deletion context
+        user_email_for_cancellation = current_user.email
+
 
         db.session.delete(booking)
         db.session.commit()
+        current_app.logger.info(f"Booking ID {booking_id} deleted from DB by user '{current_user.username}'.")
 
-        if current_user.email:
+
+        # Send cancellation email to the user
+        if user_email_for_cancellation:
+            try:
+                floor_map_location = "N/A"
+                floor_map_floor = "N/A"
+                floor_map_name = "N/A"
+                # Try to get FloorMap details from the resource_obj captured earlier
+                if resource_obj and resource_obj.floor_map_id:
+                    floor_map = FloorMap.query.get(resource_obj.floor_map_id)
+                    if floor_map:
+                        floor_map_location = floor_map.location
+                        floor_map_floor = floor_map.floor
+                        floor_map_name = floor_map.name
+                    else:
+                        current_app.logger.warning(f"FloorMap {resource_obj.floor_map_id} not found for resource {resource_obj.id} during cancellation email prep for former booking {booking_id}.")
+
+                email_data = {
+                    'user_name': original_user_name,
+                    'booking_title': original_booking_title,
+                    'resource_name': resource_name,
+                    'start_time': original_start_time.strftime('%Y-%m-%d %H:%M'),
+                    'end_time': original_end_time.strftime('%Y-%m-%d %H:%M'),
+                    'location': floor_map_location,
+                    'floor': floor_map_floor,
+                    'floor_map_name': floor_map_name
+                }
+
+                html_email_body = render_template('email/booking_cancellation_notification.html', **email_data)
+                plain_text_body = (
+                    f"Hello {email_data['user_name']},\n\n"
+                    f"This email confirms that your booking for resource {email_data['resource_name']} has been cancelled.\n\n"
+                    f"Cancelled Booking Details:\n"
+                    f"- Title: {email_data['booking_title']}\n"
+                    f"- Resource: {email_data['resource_name']}\n"
+                    f"- Original Date & Time: {email_data['start_time']} - {email_data['end_time']}\n"
+                    f"- Location: {email_data['location']}\n"
+                    f"- Floor: {email_data['floor']}\n\n"
+                    f"Thank you."
+                )
+
+                send_email(
+                    to_address=user_email_for_cancellation,
+                    subject=_("Booking Cancelled: %(resource_name)s - %(booking_title)s", resource_name=email_data['resource_name'], booking_title=email_data['booking_title']),
+                    body=plain_text_body,
+                    html_body=html_email_body
+                    # No attachment for cancellation
+                )
+                current_app.logger.info(f"Booking cancellation email initiated for former booking {booking_id} to {user_email_for_cancellation}.")
+
+            except Exception as e_email:
+                current_app.logger.error(f"Error sending cancellation email for former booking {booking_id} to {user_email_for_cancellation}: {e_email}", exc_info=True)
+        else:
+            current_app.logger.warning(f"User {original_user_name} (former booking {booking_id}) has no email address. Skipping cancellation email.")
+
+        # Existing Teams notification can remain if desired
+        if current_user.email: # This uses current_user.email, which should be same as user_email_for_cancellation
             send_teams_notification(
                 current_user.email,
                 "Booking Cancelled",
-                f"Your booking for {resource_name} starting at {booking_start.strftime('%Y-%m-%d %H:%M')} has been cancelled."
+                f"Your booking for {resource_name} starting at {original_start_time.strftime('%Y-%m-%d %H:%M')} has been cancelled."
             )
 
-
         # Notify next user on waitlist, if any
+        # This logic should use original_resource_id
         next_entry = (
-            WaitlistEntry.query.filter_by(resource_id=booking.resource_id)
+            WaitlistEntry.query.filter_by(resource_id=original_resource_id) # Use original_resource_id
             .order_by(WaitlistEntry.timestamp.asc())
             .first()
         )
         if next_entry:
             user_to_notify = User.query.get(next_entry.user_id)
+            # Resource name for waitlist notification should be the same 'resource_name' as used above
             db.session.delete(next_entry)
+            # It's better to commit waitlist changes separately or ensure the main transaction is robust.
+            # For now, let's assume it will be committed.
             db.session.commit() # Commit deletion of waitlist entry
-            if user_to_notify:
-                send_email( # Assuming send_email is imported
-                    user_to_notify.email,
-                    f"Slot available for {resource_name}",
-                    f"The slot you requested for {resource_name} is now available.",
-                )
-                if user_to_notify.email: # Ensure user_to_notify.email is not None or empty before sending Teams notification
-                    send_teams_notification( # Assuming send_teams_notification is imported
+            current_app.logger.info(f"Removed user {next_entry.user_id} from waitlist for resource {original_resource_id} after booking {booking_id} cancellation.")
+            if user_to_notify and user_to_notify.email: # Check email exists
+                try:
+                    # For waitlist, a simpler email without image might be fine.
+                    # Or generate a generic image for the resource if desired.
+                    waitlist_email_data = {
+                        'user_name': user_to_notify.username,
+                        'resource_name': resource_name, # Name of the resource that became available
+                        'notification_message': f"A slot for the resource '{resource_name}' that you were waitlisted for has become available. Please try booking it again if you are still interested."
+                    }
+                    # Using booking_confirmation as a generic template here, ideally a dedicated waitlist_notification.html
+                    html_waitlist_body = render_template('email/booking_confirmation.html', # Consider a specific template
+                                                        user_name=user_to_notify.username,
+                                                        booking_title=f"Slot Available for {resource_name}",
+                                                        resource_name=resource_name,
+                                                        start_time="N/A (Slot now open)", # Specific times not relevant for waitlist notification
+                                                        end_time="",
+                                                        location=floor_map_location if 'floor_map_location' in locals() else "N/A", # Use details if available
+                                                        floor=floor_map_floor if 'floor_map_floor' in locals() else "N/A",
+                                                        booking_confirmation_message=waitlist_email_data['notification_message']
+                                                        )
+                    plain_waitlist_body = f"Hello {user_to_notify.username},\n\n{waitlist_email_data['notification_message']}\n\nThank you."
+
+                    send_email(
+                        to_address=user_to_notify.email,
+                        subject=f"Slot Available: {resource_name}",
+                        body=plain_waitlist_body,
+                        html_body=html_waitlist_body
+                    )
+                    current_app.logger.info(f"Sent waitlist availability email to {user_to_notify.email} for resource {resource_name}.")
+
+                    # Optional: Send Teams notification for waitlist as well
+                    send_teams_notification(
                         user_to_notify.email,
                         "Waitlist Slot Released",
-                        f"A slot for {resource_name} is now available to book."
+                        f"A slot for {resource_name} that you were waitlisted for is now available to book."
                     )
+                except Exception as e_waitlist_email:
+                    current_app.logger.error(f"Error sending waitlist notification email to {user_to_notify.email} for resource {resource_name}: {e_waitlist_email}", exc_info=True)
+            elif user_to_notify:
+                current_app.logger.warning(f"User {user_to_notify.username} (ID: {user_to_notify.id}) on waitlist for resource {original_resource_id} has no email. Skipping email notification.")
 
 
         add_audit_log(
@@ -1135,7 +1299,7 @@ def delete_booking_by_user(booking_id):
             details=f"User '{current_user.username}' cancelled their booking. {booking_details_for_log}"
         )
         # Assuming socketio is imported
-        socketio.emit('booking_updated', {'action': 'deleted', 'booking_id': booking_id, 'resource_id': booking.resource_id})
+        socketio.emit('booking_updated', {'action': 'deleted', 'booking_id': booking_id, 'resource_id': original_resource_id}) # Use original_resource_id
         current_app.logger.info(f"User '{current_user.username}' successfully deleted booking ID: {booking_id}. Details: {booking_details_for_log}")
         return jsonify({'message': 'Booking cancelled successfully.'}), 200
 
