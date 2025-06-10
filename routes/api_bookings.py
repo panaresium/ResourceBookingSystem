@@ -1084,9 +1084,12 @@ def update_booking_by_user(booking_id):
                     f"Thank you!"
                 )
 
+                translated_update_subject_format = _("Booking Updated: %(resource_name)s - %(booking_title)s")
+                update_subject = translated_update_subject_format % {'resource_name': email_data['resource_name'], 'booking_title': email_data['booking_title']}
+
                 send_email(
                     to_address=current_user.email,
-                    subject=_("Booking Updated: %(resource_name)s - %(booking_title)s", resource_name=email_data['resource_name'], booking_title=email_data['booking_title']),
+                    subject=update_subject,
                     body=plain_text_body,
                     html_body=html_email_body,
                     attachment_path=processed_image_path
@@ -1215,9 +1218,12 @@ def delete_booking_by_user(booking_id):
                     f"Thank you."
                 )
 
+                translated_subject_format = _("Booking Cancelled: %(resource_name)s - %(booking_title)s")
+                subject=translated_subject_format % {'resource_name': email_data['resource_name'], 'booking_title': email_data['booking_title']},
+
                 send_email(
                     to_address=user_email_for_cancellation,
-                    subject=_("Booking Cancelled: %(resource_name)s - %(booking_title)s", resource_name=email_data['resource_name'], booking_title=email_data['booking_title']),
+                    subject=subject,
                     body=plain_text_body,
                     html_body=html_email_body
                     # No attachment for cancellation
