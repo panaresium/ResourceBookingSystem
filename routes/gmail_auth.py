@@ -63,11 +63,11 @@ def authorize_gmail_sending():
     except ValueError as ve:
         current_app.logger.error(f"Configuration error during Gmail auth initiation: {str(ve)}")
         flash(f"Configuration error: {str(ve)}. Please check server logs and config.", "danger")
-        return redirect(url_for('admin_ui.serve_system_settings_page')) # Redirect to a relevant admin page
+        return redirect(url_for('admin_ui.system_settings_page')) # Corrected route name
     except Exception as e:
         current_app.logger.exception(f"Error initiating Gmail sending authorization: {e}")
         flash("An unexpected error occurred while initiating Gmail authorization. Please try again.", "danger")
-        return redirect(url_for('admin_ui.serve_system_settings_page'))
+        return redirect(url_for('admin_ui.system_settings_page')) # Corrected route name
 
 
 @gmail_auth_bp.route('/authorize_callback')
@@ -83,7 +83,7 @@ def authorize_gmail_callback():
     if not state or state != request.args.get('state'):
         current_app.logger.error("OAuth state mismatch in Gmail authorization callback. Potential CSRF.")
         flash("Authorization failed due to a state mismatch. Please try again.", "error")
-        return redirect(url_for('admin_ui.serve_system_settings_page')) # Or a more specific error page
+        return redirect(url_for('admin_ui.system_settings_page')) # Corrected route name
 
     try:
         flow = get_gmail_oauth_flow()
@@ -126,12 +126,12 @@ def authorize_gmail_callback():
             )
             flash(flash_message, "warning")
             current_app.logger.warning(f"Gmail authorization for {current_user.username} did not yield a refresh token. Access token: {access_token}")
-            return redirect(url_for('admin_ui.serve_system_settings_page'))
+            return redirect(url_for('admin_ui.system_settings_page')) # Corrected route name
 
     except OAuthError as oe:
         current_app.logger.error(f"OAuthError during Gmail token exchange: {str(oe)}", exc_info=True)
         flash(f"OAuth error during token exchange: {str(oe)}. Please ensure your client ID/secret and redirect URI are correct.", "danger")
-        return redirect(url_for('admin_ui.serve_system_settings_page'))
+        return redirect(url_for('admin_ui.system_settings_page')) # Corrected route name
     except Exception as e:
         current_app.logger.exception(f"Error in Gmail authorization callback: {e}")
         flash("An unexpected error occurred during the Gmail authorization callback.", "danger")
