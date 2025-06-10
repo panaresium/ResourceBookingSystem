@@ -547,7 +547,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 initializeCalendar(); // Initialize calendar after API call attempt
             });
     } else {
-        console.warn('User ID not found for this calendar instance. Skipping fetching unavailable dates. This is normal for "My Calendar" view.');
+        console.info('User ID not found for this calendar instance. Skipping fetching unavailable dates. This is normal for "My Calendar" view.');
         initializeCalendar(); // Initialize calendar immediately if no user ID
     }
 
