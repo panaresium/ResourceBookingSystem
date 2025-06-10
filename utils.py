@@ -20,7 +20,7 @@ from email.mime.application import MIMEApplication # For generic attachments
 from google.oauth2.credentials import Credentials as UserCredentials # Added for OAuth 2.0 Client ID
 import socket # Added for specific network error handling
 import httplib2 # Added for specific network error handling
-import time # Added for retry mechanism
+import time as time_module # Added for retry mechanism
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -554,7 +554,7 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
                 email_log_entry['error_type'] = type(e_retryable).__name__
                 if attempt < max_retries - 1:
                     logger.info(f"Waiting {retry_delay} seconds before next attempt...")
-                    time.sleep(retry_delay)
+                    time_module.sleep(retry_delay)
                 else:
                     logger.error(f"Max retries ({max_retries}) reached for email to {to_address}. Final error: {type(e_retryable).__name__}", exc_info=True)
                     email_log_entry['status'] = f'failed_api_max_retries_reached' # More specific final status
@@ -1591,8 +1591,8 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
             # from sqlalchemy import func
             # func.date(Booking.start_time) == target_date
             # For now, let's assume direct comparison works or adjust if needed
-            Booking.start_time >= datetime.combine(target_date, datetime.time.min),
-            Booking.start_time <= datetime.combine(target_date, datetime.time.max),
+            Booking.start_time >= datetime.combine(target_date, time.min),
+            Booking.start_time <= datetime.combine(target_date, time.max),
             sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_booking_statuses_for_conflict)
         ).all()
     except Exception as e:
