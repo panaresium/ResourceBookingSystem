@@ -313,28 +313,24 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
 
         if map_coordinates_str:
             try:
-                logger.info(f"DRAWING DIAGNOSTIC - Resource ID {resource_id} - Base image dimensions before drawing: {img.width}x{img.height}")
                 coords = json.loads(map_coordinates_str)
                 # Handle Fabric.js 'left'/'top' or direct 'x'/'y'
                 x = coords.get('x', coords.get('left'))
                 y = coords.get('y', coords.get('top'))
                 width = coords.get('width')
                 height = coords.get('height')
-                logger.info(f"DRAWING DIAGNOSTIC - Resource ID {resource_id} - Parsed coords: x={x}, y={y}, width={width}, height={height}")
 
                 if x is not None and y is not None and width is not None and height is not None:
                     try:
                         x0, y0 = float(x), float(y)
                         x1, y1 = float(x) + float(width), float(y) + float(height)
-                        logger.info(f"DRAWING DIAGNOSTIC - Resource ID {resource_id} - Calculated rect points: x0={x0}, y0={y0}, x1={x1}, y1={y1}")
 
                         outline_color = (255, 0, 0, 255)  # Opaque Red
                         fill_color = (255, 0, 0, 180)    # More Opaque Red (approx 70% opacity)
-                        stroke_width_pil = 3
+                        stroke_width_pil = 20 # Increased stroke width
 
                         draw.rectangle([(x0, y0), (x1, y1)], outline=outline_color, fill=fill_color, width=stroke_width_pil)
-                        logger.info(f"DRAWING DIAGNOSTIC - Resource ID {resource_id} - draw.rectangle executed.")
-                        # logger.info(f"Drew rectangle on image at ({x0},{y0})-({x1},{y1}) for resource ID {resource_id} using floor map {base_image_filename}") # Original log, can be removed or kept
+                        logger.info(f"Drew rectangle on image at ({x0},{y0})-({x1},{y1}) for resource ID {resource_id} using floor map {base_image_filename}")
                     except (ValueError, TypeError) as e_coords:
                         logger.warning(f"Invalid coordinate values for drawing on floor map {base_image_filename} for resource ID {resource_id}: {e_coords}. Coords string: {map_coordinates_str}")
                 else:
