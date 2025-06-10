@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone, time
 
 # Local imports
 # Assuming extensions.py contains db, socketio, mail
-from extensions import db, socketio, mail
+from extensions import db, socketio # Removed mail
 # Assuming models.py contains these model definitions
 from models import Booking, Resource, User, WaitlistEntry, BookingSettings, ResourcePIN, FloorMap # Added ResourcePIN & FloorMap
 # Assuming utils.py contains these helper functions
@@ -1012,25 +1012,25 @@ def update_booking_by_user(booking_id):
 
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
 
-        # Email sending logic
-        if mail and current_user.email and any("time from" in change for change in change_details_list):
-            try:
-                from flask_mail import Message # Ensure Message is available
-                msg = Message(
-                    subject="Booking Updated",
-                    recipients=[current_user.email],
-                    body=(
-                        f"Your booking for {resource_name} has been updated.\n"
-                        f"New Title: {booking.title}\n"
-                        f"New Start Time: {booking.start_time.strftime('%Y-%m-%d %H:%M')}\n"
-                        f"New End Time: {booking.end_time.strftime('%Y-%m-%d %H:%M')}\n"
-                    ),
-                    sender=current_app.config.get('MAIL_DEFAULT_SENDER')
-                )
-                mail.send(msg)
-                current_app.logger.info(f"Booking update email sent to {current_user.email} via Flask-Mail.")
-            except Exception as mail_e:
-                current_app.logger.exception(f"[API PUT /api/bookings/{booking_id}] Failed to send booking update email to {current_user.email} via Flask-Mail: {mail_e}")
+        # Email sending logic - REMOVED as per subtask instructions
+        # if mail and current_user.email and any("time from" in change for change in change_details_list):
+        #     try:
+        #         from flask_mail import Message # Ensure Message is available
+        #         msg = Message(
+        #             subject="Booking Updated",
+        #             recipients=[current_user.email],
+        #             body=(
+        #                 f"Your booking for {resource_name} has been updated.\n"
+        #                 f"New Title: {booking.title}\n"
+        #                 f"New Start Time: {booking.start_time.strftime('%Y-%m-%d %H:%M')}\n"
+        #                 f"New End Time: {booking.end_time.strftime('%Y-%m-%d %H:%M')}\n"
+        #             ),
+        #             sender=current_app.config.get('MAIL_DEFAULT_SENDER')
+        #         )
+        #         mail.send(msg)
+        #         current_app.logger.info(f"Booking update email sent to {current_user.email} via Flask-Mail.")
+        #     except Exception as mail_e:
+        #         current_app.logger.exception(f"[API PUT /api/bookings/{booking_id}] Failed to send booking update email to {current_user.email} via Flask-Mail: {mail_e}")
 
         change_summary_text = '; '.join(change_details_list)
         add_audit_log(
