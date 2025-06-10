@@ -239,19 +239,33 @@ The script will verify the schema of the existing `site.db` file. If it doesn't
 match the current models, the old database is deleted and rebuilt. Make sure you
 back up any important data before running the script in these situations.
 
-### Email Configuration
+### Email Configuration (Gmail API with OAuth 2.0)
 
-Flask-Mail is used to send email notifications when bookings are created, updated or cancelled. Configure your SMTP credentials through environment variables before running the application:
+The application sends email notifications (e.g., booking confirmations, alerts) using the Gmail API with OAuth 2.0. This method requires a one-time authorization by the owner of the Gmail account that will be used for sending emails.
 
-* `MAIL_SERVER` – SMTP server address
-* `MAIL_PORT` – SMTP port number
-* `MAIL_USERNAME` – SMTP username
-* `MAIL_PASSWORD` – SMTP password
-* `MAIL_USE_TLS` – set to `true` to enable TLS
-* `MAIL_USE_SSL` – set to `true` to enable SSL
-* `MAIL_DEFAULT_SENDER` – address used as the default sender
+**Required Environment Variables:**
 
-If these variables are not provided, placeholder values from `app.py` will be used.
+*   `GOOGLE_CLIENT_ID`: Your Google Cloud OAuth 2.0 Client ID (typically used for user login, and reused here).
+*   `GOOGLE_CLIENT_SECRET`: Your Google Cloud OAuth 2.0 Client Secret.
+*   `GMAIL_SENDER_ADDRESS`: The Gmail account the application will send emails *from* (e.g., `your-app-notifications@gmail.com`).
+*   `GMAIL_OAUTH_REDIRECT_URI`: The application's redirect URI for the Gmail authorization flow. Example: `http://localhost:5000/admin/gmail_auth/authorize_callback`.
+    *   **Important**: You MUST add this exact URI to the "Authorized redirect URIs" list for your OAuth 2.0 Client ID in the Google Cloud Console.
+*   `GMAIL_REFRESH_TOKEN`: The refresh token obtained after the one-time authorization process (see below). This token allows the application to continuously send emails without further manual intervention. Store this securely.
+*   `MAIL_DEFAULT_SENDER`: Fallback sender email address if `GMAIL_SENDER_ADDRESS` is not determined for some reason (e.g., `fallback@example.com`).
+
+**One-Time Authorization to Obtain Refresh Token:**
+
+To enable email sending, an administrator must perform a one-time authorization:
+1.  Ensure all the above environment variables (except `GMAIL_REFRESH_TOKEN` initially) are set.
+2.  Start the application.
+3.  In a web browser, log in to the Gmail account that will be used as the `GMAIL_SENDER_ADDRESS`.
+4.  Navigate to the `/admin/gmail_auth/authorize_sending` route in the application.
+5.  You will be redirected to a Google consent screen. Grant the requested permissions (to send emails).
+6.  Upon successful authorization, Google will redirect you back to the application's `GMAIL_OAUTH_REDIRECT_URI`, and the application will display the **Refresh Token**.
+7.  Copy this Refresh Token and set it as the `GMAIL_REFRESH_TOKEN` environment variable for your application.
+8.  Restart the application. It should now be able to send emails.
+
+The old SMTP `MAIL_*` variables (like `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, etc.) are no longer used for the primary email sending mechanism when using the Gmail API with OAuth 2.0.
 
 ### Teams Notifications
 

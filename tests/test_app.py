@@ -8193,122 +8193,131 @@ if __name__ == '__main__':
     unittest.main()
 
 # Added TestGmailAPIEmailSending class - START
+# This class is now adapted for OAuth 2.0 Client ID (Refresh Token) flow
 class TestGmailAPIEmailSending(AppTests):
 
     @patch('utils.build')
-    @patch('utils.ServiceAccountCredentials')
-    def test_send_email_gmail_api_plain_text(self, MockServiceAccountCredentials, mock_utils_build):
-        # Setup mocks for Gmail API client and its methods
+    @patch('utils.UserCredentials') # Changed from ServiceAccountCredentials
+    def test_send_email_oauth_client_id_success(self, MockUserCredentials, mock_utils_build):
+        # Setup mocks
+        mock_creds_instance = MagicMock(spec=UserCredentials)
+        mock_creds_instance.token = "fake_access_token"
+        mock_creds_instance.valid = True
+        MockUserCredentials.return_value = mock_creds_instance
+
         mock_service_instance = MagicMock()
         mock_messages_service = MagicMock()
         mock_send_method = MagicMock()
-        mock_send_method.execute.return_value = {'id': 'test_message_id_plain'}
+        mock_send_method.execute.return_value = {'id': 'test_message_id_oauth_client'}
         mock_messages_service.send.return_value = mock_send_method
         mock_service_instance.users.return_value.messages.return_value = mock_messages_service
         mock_utils_build.return_value = mock_service_instance
 
-        mock_creds_instance = MagicMock()
-        MockServiceAccountCredentials.from_service_account_info.return_value = mock_creds_instance
-
         with self.app_context:
-            # Configure app.config for service account details
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_TYPE'] = "service_account"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_PROJECT_ID'] = "test-project"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_ID'] = "test_pk_id"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY'] = "test_pk_value\nline_two"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL'] = "sa@example.com"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_CLIENT_ID'] = "sa_client_id"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_AUTH_URI'] = "auth_uri"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_TOKEN_URI'] = "token_uri"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_AUTH_PROVIDER_X509_CERT_URL'] = "provider_cert_url"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_CLIENT_X509_CERT_URL'] = "client_cert_url"
-            current_app.config['GMAIL_API_IMPERSONATED_EMAIL'] = "impersonated@example.com"
-            current_app.config['MAIL_DEFAULT_SENDER'] = "default_sender@example.com"
+            # Configure app.config for OAuth Client ID flow
+            current_app.config['GOOGLE_CLIENT_ID'] = "test_client_id"
+            current_app.config['GOOGLE_CLIENT_SECRET'] = "test_client_secret"
+            current_app.config['GMAIL_REFRESH_TOKEN'] = "test_refresh_token"
+            current_app.config['GMAIL_SENDER_ADDRESS'] = "sender@example.com"
             current_app.config['MAIL_SUPPRESS_SEND'] = False
 
-            utils_send_email("recipient@example.com", "Test Subject Plain", body="Hello there plain text")
+            utils.email_log.clear()
+            utils_send_email("recipient@example.com", "OAuth Client Test", body="Hello OAuth Client")
 
         # Assertions
-        MockServiceAccountCredentials.from_service_account_info.assert_called_once()
-        sa_info_arg = MockServiceAccountCredentials.from_service_account_info.call_args[0][0]
-        self.assertEqual(sa_info_arg['private_key'], "test_pk_value\nline_two")
-
-        mock_creds_instance.with_subject.assert_called_once_with("impersonated@example.com")
-        mock_utils_build.assert_called_once_with('gmail', 'v1', credentials=mock_creds_instance.with_subject.return_value, cache_discovery=False)
+        MockUserCredentials.assert_called_once_with(
+            None,
+            refresh_token="test_refresh_token",
+            token_uri='https://oauth2.googleapis.com/token',
+            client_id="test_client_id",
+            client_secret="test_client_secret",
+            scopes=['https://www.googleapis.com/auth/gmail.send']
+        )
+        mock_utils_build.assert_called_once_with('gmail', 'v1', credentials=mock_creds_instance, cache_discovery=False)
         mock_messages_service.send.assert_called_once()
 
+        self.assertTrue(any(log['status'] == 'sent_api_success' and log['to'] == "recipient@example.com" for log in utils.email_log))
+
     @patch('utils.build')
-    @patch('utils.ServiceAccountCredentials')
+    @patch('utils.UserCredentials')
     @patch('utils.os.path.exists')
     @patch('builtins.open', new_callable=mock_open, read_data=b'attachment_content')
-    def test_send_email_gmail_api_with_html_and_attachment(self, mock_file_open, mock_os_exists, MockServiceAccountCredentials, mock_utils_build):
+    def test_send_email_gmail_api_with_html_and_attachment(self, mock_file_open, mock_os_exists, MockUserCredentials, mock_utils_build): # Renamed from test_send_email_gmail_api_with_html_and_attachment
         mock_os_exists.return_value = True
+
+        mock_creds_instance = MagicMock(spec=UserCredentials) # For OAuth Client ID
+        mock_creds_instance.token = "fake_access_token"
+        mock_creds_instance.valid = True
+        MockUserCredentials.return_value = mock_creds_instance
+
         mock_service_instance = MagicMock()
         mock_messages_service = MagicMock()
         mock_send_method = MagicMock()
-        mock_send_method.execute.return_value = {'id': 'test_message_id_html_attach'}
+        mock_send_method.execute.return_value = {'id': 'test_message_id_html_attach_oauth'}
         mock_messages_service.send.return_value = mock_send_method
         mock_service_instance.users.return_value.messages.return_value = mock_messages_service
         mock_utils_build.return_value = mock_service_instance
-        MockServiceAccountCredentials.from_service_account_info.return_value = MagicMock()
 
         with self.app_context:
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_TYPE'] = "service_account"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_PROJECT_ID'] = "test-project"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_ID'] = "test_pk_id"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY'] = "test_pk_value\nline_two"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL'] = "sa@example.com"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_CLIENT_ID'] = "sa_client_id"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_AUTH_URI'] = "auth_uri"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_TOKEN_URI'] = "token_uri"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_AUTH_PROVIDER_X509_CERT_URL'] = "provider_cert_url"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_CLIENT_X509_CERT_URL'] = "client_cert_url"
-            current_app.config['GMAIL_API_IMPERSONATED_EMAIL'] = "impersonated@example.com"
-            current_app.config['MAIL_DEFAULT_SENDER'] = "default_sender@example.com"
+            current_app.config['GOOGLE_CLIENT_ID'] = "test_client_id_attach"
+            current_app.config['GOOGLE_CLIENT_SECRET'] = "test_client_secret_attach"
+            current_app.config['GMAIL_REFRESH_TOKEN'] = "test_refresh_token_attach"
+            current_app.config['GMAIL_SENDER_ADDRESS'] = "sender_attach@example.com"
             current_app.config['MAIL_SUPPRESS_SEND'] = False
 
-            utils_send_email("recipient@example.com", "Test HTML & Attach",
-                            body="Plain fallback", html_body="<h1>Hello HTML</h1>",
+            utils_send_email("recipient_attach@example.com", "OAuth Client Test HTML & Attach",
+                            body="Plain fallback", html_body="<h1>Hello HTML OAuth</h1>",
                             attachment_path="/fake/path/attach.png")
 
+        MockUserCredentials.assert_called_once()
+        mock_utils_build.assert_called_once_with('gmail', 'v1', credentials=mock_creds_instance, cache_discovery=False)
         mock_messages_service.send.assert_called_once()
         mock_os_exists.assert_called_with("/fake/path/attach.png")
         mock_file_open.assert_called_with("/fake/path/attach.png", "rb")
 
     @patch('utils.build')
-    @patch('utils.ServiceAccountCredentials')
-    def test_send_email_gmail_api_http_error(self, MockServiceAccountCredentials, mock_utils_build):
-        mock_service_instance = MagicMock()
-        http_error_response = MagicMock()
-        http_error_response.status = 403
-        http_error_response._get_reason = MagicMock(return_value="Forbidden by API")
-
-        mock_send_method = MagicMock()
-        mock_send_method.execute.side_effect = HttpError(resp=http_error_response, content=b'Forbidden detail')
-        mock_service_instance.users.return_value.messages.return_value.send.return_value = mock_send_method
-
-        mock_utils_build.return_value = mock_service_instance
-        MockServiceAccountCredentials.from_service_account_info.return_value = MagicMock()
-
+    @patch('utils.UserCredentials')
+    def test_send_email_oauth_client_id_missing_refresh_token(self, MockUserCredentials, mock_utils_build): # Renamed from test_send_email_gmail_api_http_error
         with self.app_context:
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_TYPE'] = "service_account"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_PROJECT_ID'] = "test-project" # Added
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_ID'] = "test_pk_id" # Added
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY'] = "test_pk_value\nline_two" # Added
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL'] = "sa@example.com" # Added
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_CLIENT_ID'] = "sa_client_id" # Added
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_AUTH_URI'] = "auth_uri" # Added
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_TOKEN_URI'] = "token_uri" # Added
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_AUTH_PROVIDER_X509_CERT_URL'] = "provider_cert_url" # Added
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_CLIENT_X509_CERT_URL'] = "client_cert_url" # Added
-            current_app.config['GMAIL_API_IMPERSONATED_EMAIL'] = "impersonated@example.com"
-            current_app.config['MAIL_DEFAULT_SENDER'] = "default_sender@example.com"
+            current_app.config['GOOGLE_CLIENT_ID'] = "test_client_id"
+            current_app.config['GOOGLE_CLIENT_SECRET'] = "test_client_secret"
+            current_app.config['GMAIL_REFRESH_TOKEN'] = None # Simulate missing token
+            current_app.config['GMAIL_SENDER_ADDRESS'] = "sender@example.com"
             current_app.config['MAIL_SUPPRESS_SEND'] = False
 
             utils.email_log.clear()
-            utils_send_email("recipient@example.com", "Test HTTP Error", body="Test error handling")
+            utils_send_email("recipient@example.com", "Test Missing Token", body="This should not send")
 
-        self.assertTrue(any(log_entry['status'] == 'failed_api_http_error_403' for log_entry in utils.email_log))
+        MockUserCredentials.assert_not_called()
+        mock_utils_build.assert_not_called()
+        self.assertTrue(any(log['status'] == 'failed_oauth_config_missing' for log in utils.email_log))
+
+    @patch('utils.build')
+    @patch('utils.UserCredentials')
+    def test_send_email_oauth_client_id_api_http_error(self, MockUserCredentials, mock_utils_build):
+        mock_creds_instance = MagicMock(spec=UserCredentials)
+        mock_creds_instance.token = "fake_access_token"
+        mock_creds_instance.valid = True
+        MockUserCredentials.return_value = mock_creds_instance
+
+        mock_service_instance = MagicMock()
+        http_error_response = MagicMock()
+        http_error_response.status = 403
+        http_error_response._get_reason = MagicMock(return_value="Gmail API permission denied")
+        mock_service_instance.users.return_value.messages.return_value.send.return_value.execute.side_effect = HttpError(resp=http_error_response, content=b'Permission denied detail')
+        mock_utils_build.return_value = mock_service_instance
+
+        with self.app_context:
+            current_app.config['GOOGLE_CLIENT_ID'] = "test_client_id_http_err"
+            current_app.config['GOOGLE_CLIENT_SECRET'] = "test_client_secret_http_err"
+            current_app.config['GMAIL_REFRESH_TOKEN'] = "test_refresh_token_http_err"
+            current_app.config['GMAIL_SENDER_ADDRESS'] = "sender_http_err@example.com"
+            current_app.config['MAIL_SUPPRESS_SEND'] = False
+
+            utils.email_log.clear()
+            utils_send_email("recipient@example.com", "Test API HTTP Error OAuth", body="Test API error OAuth")
+
+        self.assertTrue(any(log['status'] == 'failed_api_http_error_403' for log in utils.email_log))
 
 # Added TestGmailAPIEmailSending class - END
 
@@ -8476,10 +8485,15 @@ class TestEmailNotifications(AppTests):
 
     # Integration Test for create_booking email sending
     @patch('utils.build')
-    @patch('utils.ServiceAccountCredentials')
+    @patch('utils.UserCredentials') # Changed from ServiceAccountCredentials
     @patch('utils.generate_booking_image')
-    def test_create_booking_sends_confirmation_email(self, mock_generate_image, MockServiceAccountCredentials, mock_utils_build):
-        # Setup mocks for Gmail API call chain
+    def test_create_booking_sends_confirmation_email(self, mock_generate_image, MockUserCredentials, mock_utils_build): # Changed MockServiceAccountCredentials to MockUserCredentials
+        # Setup mocks for OAuth Client ID flow
+        mock_creds_instance = MagicMock(spec=UserCredentials)
+        mock_creds_instance.token = "fake_access_token"
+        mock_creds_instance.valid = True
+        MockUserCredentials.return_value = mock_creds_instance
+
         mock_service_instance = MagicMock()
         mock_messages_service = MagicMock()
         mock_send_method = MagicMock()
@@ -8488,25 +8502,17 @@ class TestEmailNotifications(AppTests):
         mock_service_instance.users.return_value.messages.return_value = mock_messages_service
         mock_utils_build.return_value = mock_service_instance
 
-        MockServiceAccountCredentials.from_service_account_info.return_value = MagicMock()
-        mock_generate_image.return_value = '/tmp/mock_booking_image.png' # Dummy path for the generated image
+        mock_generate_image.return_value = '/tmp/mock_booking_image.png'
 
-        with self.app_context: # Ensure app context for config
-            # Configure app.config for Gmail API (as in new unit tests)
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_TYPE'] = "service_account"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_PROJECT_ID'] = "test-project"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_ID'] = "test_pk_id"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY'] = "test_pk_value\nline_two"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL'] = "sa@example.com"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_CLIENT_ID'] = "sa_client_id"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_AUTH_URI'] = "auth_uri"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_TOKEN_URI'] = "token_uri"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_AUTH_PROVIDER_X509_CERT_URL'] = "provider_cert_url"
-            current_app.config['GOOGLE_SERVICE_ACCOUNT_CLIENT_X509_CERT_URL'] = "client_cert_url"
-            current_app.config['GMAIL_API_IMPERSONATED_EMAIL'] = self.email_user.email
+        with self.app_context:
+            # Configure app.config for OAuth Client ID flow
+            current_app.config['GOOGLE_CLIENT_ID'] = "test_client_id_for_booking"
+            current_app.config['GOOGLE_CLIENT_SECRET'] = "test_client_secret_for_booking"
+            current_app.config['GMAIL_REFRESH_TOKEN'] = "fake_refresh_token_for_booking"
+            current_app.config['GMAIL_SENDER_ADDRESS'] = self.email_user.email # Or a system sender email
             current_app.config['MAIL_DEFAULT_SENDER'] = self.email_user.email
             current_app.config['MAIL_SUPPRESS_SEND'] = False
-            current_app.config['RESOURCE_IMAGE_UPLOAD_FOLDER'] = 'static/resource_uploads' # Ensure this is set
+            current_app.config['RESOURCE_IMAGE_UPLOAD_FOLDER'] = 'static/resource_uploads'
 
             self.login(self.email_user.username, 'password')
 
@@ -8533,17 +8539,6 @@ class TestEmailNotifications(AppTests):
             self.resource1.map_coordinates
         )
 
-        # Assert send_email was called (now utils_send_email which is the Gmail API version)
-        # Assertions need to check the mock_utils_build chain
+        MockUserCredentials.assert_called_once()
         mock_utils_build.assert_called_once()
-        service_instance_mock = mock_utils_build.return_value
-        service_instance_mock.users().messages().send.assert_called_once()
-
-        # Optionally, inspect arguments of the send call
-        # send_call_args = service_instance_mock.users().messages().send.call_args
-        # sent_to_address = send_call_args[1]['body']['to'] # This is not how MIME message is structured for 'to'
-        # For more detailed check, you'd inspect the raw message in send_call_args[1]['body']['raw']
-        # and decode it to check headers.
-
-        # For this test, confirming the API call was made is the primary goal.
-        # The new unit tests for utils_send_email cover specific content generation.
+        mock_service_instance.users().messages().send.assert_called_once()
