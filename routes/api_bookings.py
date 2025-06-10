@@ -465,9 +465,19 @@ def create_booking():
                 }
                 # current_app.logger.info(f"Email data for booking {new_booking.id}: {email_data}") # Old log line
 
+                # ADD DIAGNOSTIC LOGGING HERE:
+                current_app.logger.info(f"Booking {new_booking.id} - DIAGNOSTIC - Resource ID: {resource_for_email.id}")
+                current_app.logger.info(f"Booking {new_booking.id} - DIAGNOSTIC - Resource Name: {resource_for_email.name}")
+                current_app.logger.info(f"Booking {new_booking.id} - DIAGNOSTIC - Raw map_coordinates: '{resource_for_email.map_coordinates}'")
+                current_app.logger.info(f"Booking {new_booking.id} - DIAGNOSTIC - Type of map_coordinates: {type(resource_for_email.map_coordinates)}")
+                current_app.logger.info(f"Booking {new_booking.id} - DIAGNOSTIC - Raw floor_map_id: {resource_for_email.floor_map_id}")
+                current_app.logger.info(f"Booking {new_booking.id} - DIAGNOSTIC - Type of floor_map_id: {type(resource_for_email.floor_map_id)}")
+                current_app.logger.info(f"Booking {new_booking.id} - DIAGNOSTIC - bool(map_coordinates): {bool(resource_for_email.map_coordinates)}")
+                current_app.logger.info(f"Booking {new_booking.id} - DIAGNOSTIC - bool(floor_map_id): {bool(resource_for_email.floor_map_id)}")
+
                 # Generate image with resource area marked
                 processed_image_path = None # Initialize
-                if resource_for_email.image_filename and resource_for_email.map_coordinates: # Check resource_for_email directly
+                if resource_for_email and resource_for_email.map_coordinates and resource_for_email.floor_map_id:
                     # generate_booking_image now sources its own logger via current_app
                     processed_image_path = generate_booking_image(
                         resource_for_email.id, # Pass resource ID
