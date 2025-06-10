@@ -487,84 +487,84 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
                     # Do not return immediately, allow cleanup logic to run
                     break # Break from retry loop as this is a config error
 
-            try:
-                creds = UserCredentials(
-                    None, refresh_token=refresh_token, token_uri='https://oauth2.googleapis.com/token',
-                    client_id=client_id, client_secret=client_secret,
-                    scopes=['https://www.googleapis.com/auth/gmail.send']
-                )
-            except Exception as e_creds:
-                logger.error(f"Failed to create/refresh Google OAuth credentials on attempt {attempt + 1}: {str(e_creds)}", exc_info=True)
-                email_log_entry['status'] = 'failed_oauth_credential_creation'
-                email_log_entry['error_detail'] = str(e_creds)
-                # Do not return immediately, allow cleanup logic to run
-                break # Break from retry loop as this is likely a persistent auth issue
+                try: # This is the try block around line 490 (now ~494)
+                    creds = UserCredentials( # This was line 491 in a previous version
+                        None, refresh_token=refresh_token, token_uri='https://oauth2.googleapis.com/token',
+                        client_id=client_id, client_secret=client_secret,
+                        scopes=['https://www.googleapis.com/auth/gmail.send']
+                    )
+                except Exception as e_creds:
+                    logger.error(f"Failed to create/refresh Google OAuth credentials on attempt {attempt + 1}: {str(e_creds)}", exc_info=True)
+                    email_log_entry['status'] = 'failed_oauth_credential_creation'
+                    email_log_entry['error_detail'] = str(e_creds)
+                    # Do not return immediately, allow cleanup logic to run
+                    break # Break from retry loop as this is likely a persistent auth issue
 
-            service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
-            message = MIMEMultipart('mixed')
-            if html_body and attachment_path:
-                 message = MIMEMultipart('mixed')
-            elif html_body or attachment_path:
+                service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
                 message = MIMEMultipart('mixed')
-            else:
-                message = MIMEText(body, 'plain', 'utf-8')
+                if html_body and attachment_path:
+                     message = MIMEMultipart('mixed')
+                elif html_body or attachment_path:
+                    message = MIMEMultipart('mixed')
+                else:
+                    message = MIMEText(body, 'plain', 'utf-8')
 
-            message['to'] = to_address
-            message['from'] = from_email
-            message['subject'] = subject
+                message['to'] = to_address
+                message['from'] = from_email
+                message['subject'] = subject
 
-            if isinstance(message, MIMEMultipart):
-                alt_part = MIMEMultipart('alternative')
-                if body:
-                    alt_part.attach(MIMEText(body, 'plain', 'utf-8'))
-                if html_body:
-                    alt_part.attach(MIMEText(html_body, 'html', 'utf-8'))
-                message.attach(alt_part)
+                if isinstance(message, MIMEMultipart):
+                    alt_part = MIMEMultipart('alternative')
+                    if body:
+                        alt_part.attach(MIMEText(body, 'plain', 'utf-8'))
+                    if html_body:
+                        alt_part.attach(MIMEText(html_body, 'html', 'utf-8'))
+                    message.attach(alt_part)
 
-            if attachment_path:
-                file_ext = os.path.splitext(attachment_path)[1].lower()
-                maintype, subtype = 'application', 'octet-stream'
-                if file_ext == '.png': maintype, subtype = 'image', 'png'
-                elif file_ext in ['.jpg', '.jpeg']: maintype, subtype = 'image', 'jpeg'
-                elif file_ext == '.pdf': maintype, subtype = 'application', 'pdf'
-                elif file_ext == '.txt': maintype, subtype = 'text', 'plain'
+                if attachment_path:
+                    file_ext = os.path.splitext(attachment_path)[1].lower()
+                    maintype, subtype = 'application', 'octet-stream'
+                    if file_ext == '.png': maintype, subtype = 'image', 'png'
+                    elif file_ext in ['.jpg', '.jpeg']: maintype, subtype = 'image', 'jpeg'
+                    elif file_ext == '.pdf': maintype, subtype = 'application', 'pdf'
+                    elif file_ext == '.txt': maintype, subtype = 'text', 'plain'
 
-                with open(attachment_path, 'rb') as fp:
-                    if maintype == 'image': msg_attach = MIMEImage(fp.read(), _subtype=subtype, name=os.path.basename(attachment_path))
-                    elif maintype == 'text': msg_attach = MIMEText(fp.read().decode('utf-8'), _subtype=subtype, _charset='utf-8')
-                    else: msg_attach = MIMEApplication(fp.read(), _subtype=subtype, name=os.path.basename(attachment_path))
+                    with open(attachment_path, 'rb') as fp:
+                        if maintype == 'image': msg_attach = MIMEImage(fp.read(), _subtype=subtype, name=os.path.basename(attachment_path))
+                        elif maintype == 'text': msg_attach = MIMEText(fp.read().decode('utf-8'), _subtype=subtype, _charset='utf-8')
+                        else: msg_attach = MIMEApplication(fp.read(), _subtype=subtype, name=os.path.basename(attachment_path))
 
-                msg_attach.add_header('Content-Disposition', 'attachment', filename=os.path.basename(attachment_path))
-                message.attach(msg_attach)
-                logger.info(f"Attachment {attachment_path} prepared for Gmail API on attempt {attempt + 1}.")
+                    msg_attach.add_header('Content-Disposition', 'attachment', filename=os.path.basename(attachment_path))
+                    message.attach(msg_attach)
+                    logger.info(f"Attachment {attachment_path} prepared for Gmail API on attempt {attempt + 1}.")
 
-            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
-            create_message_body = {'raw': raw_message}
-            sent_message = service.users().messages().send(userId='me', body=create_message_body).execute()
-            logger.info(f"Email sent successfully via Gmail API to {to_address} on attempt {attempt + 1}. Message ID: {sent_message.get('id')}")
-            email_log_entry['status'] = 'sent_api_success'
-            email_log_entry['message_id'] = sent_message.get('id')
-            email_log_entry['attempts'] = attempt + 1
-            break  # Exit loop on success
+                raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+                create_message_body = {'raw': raw_message}
+                sent_message = service.users().messages().send(userId='me', body=create_message_body).execute()
+                logger.info(f"Email sent successfully via Gmail API to {to_address} on attempt {attempt + 1}. Message ID: {sent_message.get('id')}")
+                email_log_entry['status'] = 'sent_api_success'
+                email_log_entry['message_id'] = sent_message.get('id')
+                email_log_entry['attempts'] = attempt + 1
+                break  # Exit loop on success
 
-        except (socket.gaierror, httplib2.error.ServerNotFoundError, HttpError) as e_retryable:
-            logger.warning(f"Retryable error on attempt {attempt + 1}/{max_retries} sending email to {to_address}: {type(e_retryable).__name__} - {str(e_retryable)}", exc_info=True)
-            email_log_entry['status'] = f'failed_api_retryable_error_attempt_{attempt + 1}'
-            email_log_entry['error_detail'] = str(e_retryable)
-            email_log_entry['error_type'] = type(e_retryable).__name__
-            if attempt < max_retries - 1:
-                logger.info(f"Waiting {retry_delay} seconds before next attempt...")
-                time.sleep(retry_delay)
-            else:
-                logger.error(f"Max retries ({max_retries}) reached for email to {to_address}. Final error: {type(e_retryable).__name__}", exc_info=True)
-                email_log_entry['status'] = f'failed_api_max_retries_reached' # More specific final status
-        except Exception as e_non_retryable:
-            logger.error(f"A non-retryable error occurred sending email to {to_address} on attempt {attempt + 1}: {e_non_retryable}", exc_info=True)
-            email_log_entry['status'] = 'failed_api_non_retryable_error'
-            email_log_entry['error_detail'] = str(e_non_retryable)
-            email_log_entry['error_type'] = type(e_non_retryable).__name__
-            break # Exit loop for non-retryable errors (e.g., bad request, auth, unexpected)
-            # No 'finally' block inside the loop's try needed for attachment cleanup, handled by outer finally.
+            except (socket.gaierror, httplib2.error.ServerNotFoundError, HttpError) as e_retryable:
+                logger.warning(f"Retryable error on attempt {attempt + 1}/{max_retries} sending email to {to_address}: {type(e_retryable).__name__} - {str(e_retryable)}", exc_info=True)
+                email_log_entry['status'] = f'failed_api_retryable_error_attempt_{attempt + 1}'
+                email_log_entry['error_detail'] = str(e_retryable)
+                email_log_entry['error_type'] = type(e_retryable).__name__
+                if attempt < max_retries - 1:
+                    logger.info(f"Waiting {retry_delay} seconds before next attempt...")
+                    time.sleep(retry_delay)
+                else:
+                    logger.error(f"Max retries ({max_retries}) reached for email to {to_address}. Final error: {type(e_retryable).__name__}", exc_info=True)
+                    email_log_entry['status'] = f'failed_api_max_retries_reached' # More specific final status
+            except Exception as e_non_retryable:
+                logger.error(f"A non-retryable error occurred sending email to {to_address} on attempt {attempt + 1}: {e_non_retryable}", exc_info=True)
+                email_log_entry['status'] = 'failed_api_non_retryable_error'
+                email_log_entry['error_detail'] = str(e_non_retryable)
+                email_log_entry['error_type'] = type(e_non_retryable).__name__
+                break # Exit loop for non-retryable errors (e.g., bad request, auth, unexpected)
+                # No 'finally' block inside the loop's try needed for attachment cleanup, handled by outer finally.
     finally:
         # This finally block is now correctly associated with the outer try,
         # ensuring cleanup happens after all attempts or if an unexpected error occurs before/during the loop.
@@ -1686,3 +1686,5 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
 
     logger_instance.info(f"Detailed availability for user {user.username} on {target_date}: Total Primary Slots={total_primary_slots}, Available for User={available_primary_slots_for_user} across {len(resources_list)} resources.")
     return {'total_primary_slots': total_primary_slots, 'available_primary_slots_for_user': available_primary_slots_for_user}
+
+[end of utils.py]
