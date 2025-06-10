@@ -1686,5 +1686,3 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
 
     logger_instance.info(f"Detailed availability for user {user.username} on {target_date}: Total Primary Slots={total_primary_slots}, Available for User={available_primary_slots_for_user} across {len(resources_list)} resources.")
     return {'total_primary_slots': total_primary_slots, 'available_primary_slots_for_user': available_primary_slots_for_user}
-
-[end of utils.py]
