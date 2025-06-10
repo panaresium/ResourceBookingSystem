@@ -63,35 +63,34 @@ SCOPES = ['openid', 'https://www.googleapis.com/auth/userinfo.email', 'https://w
 # Optional: Path to client_secret.json if that method is preferred over direct env vars for ID/Secret
 # CLIENT_SECRET_FILE = basedir / 'client_secret.json'
 
-# --- Email (Flask-Mail) Configuration ---
-MAIL_SERVER = os.environ.get('MAIL_SERVER', 'localhost') # Default SMTP server
-MAIL_PORT = int(os.environ.get('MAIL_PORT', 25)) # Default SMTP port
-MAIL_USE_TLS = os.environ.get('MAIL_USE_TLS', 'false').lower() in ['true', '1', 'yes']
-MAIL_USE_SSL = os.environ.get('MAIL_USE_SSL', 'false').lower() in ['true', '1', 'yes']
-MAIL_USERNAME = os.environ.get('MAIL_USERNAME', '')
-MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', '')
-# Default sender email, uses MAIL_USERNAME if MAIL_DEFAULT_SENDER is not set
-MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER', MAIL_USERNAME or 'noreply@example.com')
+# --- Email Configuration ---
+# Old Flask-Mail variables (removed as Flask-Mail is no longer used)
+# MAIL_SERVER = os.environ.get('MAIL_SERVER', 'localhost')
+# MAIL_PORT = int(os.environ.get('MAIL_PORT', 25))
+# MAIL_USE_TLS = os.environ.get('MAIL_USE_TLS', 'false').lower() in ['true', '1', 'yes']
+# MAIL_USE_SSL = os.environ.get('MAIL_USE_SSL', 'false').lower() in ['true', '1', 'yes']
+# MAIL_USERNAME = os.environ.get('MAIL_USERNAME', '')
+# MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', '')
+MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER', 'fallback_sender@example.com') # Keep a default sender for other purposes or direct use in utils
 
-# --- Gmail API Service Account Configuration (for sending email via OAuth2) ---
-# These are used if you prefer loading service account details from individual environment variables
-# instead of a JSON file path (GOOGLE_APPLICATION_CREDENTIALS).
-GOOGLE_SERVICE_ACCOUNT_TYPE = os.environ.get('GOOGLE_SERVICE_ACCOUNT_TYPE')
-GOOGLE_SERVICE_ACCOUNT_PROJECT_ID = os.environ.get('GOOGLE_SERVICE_ACCOUNT_PROJECT_ID')
-GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_ID = os.environ.get('GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_ID')
-# For the private key, ensure newlines are correctly handled if setting via env var
-# Example: export GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY="$(cat key.json | jq -r .private_key | awk '{printf "%s\n", $0}')"
-GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY = os.environ.get('GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY')
-GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL = os.environ.get('GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL')
-GOOGLE_SERVICE_ACCOUNT_CLIENT_ID = os.environ.get('GOOGLE_SERVICE_ACCOUNT_CLIENT_ID') # Also used for user OAuth, but distinct if service account is different
-GOOGLE_SERVICE_ACCOUNT_AUTH_URI = os.environ.get('GOOGLE_SERVICE_ACCOUNT_AUTH_URI')
-GOOGLE_SERVICE_ACCOUNT_TOKEN_URI = os.environ.get('GOOGLE_SERVICE_ACCOUNT_TOKEN_URI')
-GOOGLE_SERVICE_ACCOUNT_AUTH_PROVIDER_X509_CERT_URL = os.environ.get('GOOGLE_SERVICE_ACCOUNT_AUTH_PROVIDER_X509_CERT_URL')
-GOOGLE_SERVICE_ACCOUNT_CLIENT_X509_CERT_URL = os.environ.get('GOOGLE_SERVICE_ACCOUNT_CLIENT_X509_CERT_URL')
+# --- Gmail API OAuth 2.0 Client ID Configuration (for sending application emails) ---
+# GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are already defined above for user OAuth.
+# They will be reused here for authorizing the application to send mail via a specific Gmail account.
 
-# Email address of the user the service account will impersonate for sending emails
-# This is required if using domain-wide delegation.
-GMAIL_API_IMPERSONATED_EMAIL = os.environ.get('GMAIL_API_IMPERSONATED_EMAIL') # e.g., rmsunicef@gmail.com
+# The GMAIL_SENDER_ADDRESS is the email account (e.g., rmsunicef@gmail.com)
+# that will be authorized to send emails.
+GMAIL_SENDER_ADDRESS = os.environ.get('GMAIL_SENDER_ADDRESS') # e.g., 'rmsunicef@gmail.com'
+
+# The Redirect URI for the Gmail authorization flow.
+# This MUST be added to your Google Cloud Console "Authorized redirect URIs" for the OAuth 2.0 Client ID.
+# Example: 'http://localhost:5000/authorize_gmail_callback' or 'https://yourdomain.com/authorize_gmail_callback'
+GMAIL_OAUTH_REDIRECT_URI = os.environ.get('GMAIL_OAUTH_REDIRECT_URI')
+
+# The Refresh Token obtained after the one-time authorization for GMAIL_SENDER_ADDRESS.
+# This should be stored securely, e.g., as an environment variable.
+GMAIL_REFRESH_TOKEN = os.environ.get('GMAIL_REFRESH_TOKEN')
+
+# Old Gmail API Service Account Configuration variables removed.
 
 # --- Booking and Check-in Behavior ---
 CHECK_IN_GRACE_MINUTES = int(os.environ.get('CHECK_IN_GRACE_MINUTES', 15)) # Grace period for check-in in minutes

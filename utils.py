@@ -15,7 +15,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
 from email.mime.application import MIMEApplication # For generic attachments
-from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+# from google.oauth2.service_account import Credentials as ServiceAccountCredentials # Removed
+from google.oauth2.credentials import Credentials as UserCredentials # Added for OAuth 2.0 Client ID
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -357,56 +358,41 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
     logger.info(f"Attempting to send email via Gmail API to {to_address}: {subject} {'with attachment' if attachment_path else ''}")
 
     try:
-        # --- Retrieve Service Account Config ---
-        sa_info = {
-            "type": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_TYPE'),
-            "project_id": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_PROJECT_ID'),
-            "private_key_id": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_ID'),
-            "private_key": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY'),
-            "client_email": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL'),
-            "client_id": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_CLIENT_ID'),
-            "auth_uri": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_AUTH_URI'),
-            "token_uri": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_TOKEN_URI'),
-            "auth_provider_x509_cert_url": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_AUTH_PROVIDER_X509_CERT_URL'),
-            "client_x509_cert_url": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_CLIENT_X509_CERT_URL')
-        }
-        impersonated_email = current_app.config.get('GMAIL_API_IMPERSONATED_EMAIL') # This is the 'From' address
-        default_sender = current_app.config.get('MAIL_DEFAULT_SENDER') # Fallback if impersonation not set
+        # --- Load New OAuth 2.0 Client ID Config ---
+        client_id = current_app.config.get('GOOGLE_CLIENT_ID')
+        client_secret = current_app.config.get('GOOGLE_CLIENT_SECRET')
+        refresh_token = current_app.config.get('GMAIL_REFRESH_TOKEN')
+        from_email = current_app.config.get('GMAIL_SENDER_ADDRESS') # This is the authorized sender
 
-        # Ensure private_key exists before trying to replace (it's checked in all())
-        private_key_from_config = sa_info.get('private_key')
-        if not all(sa_info.values()) or not private_key_from_config: # Check all values, specifically private_key
-            logger.error("Service account environment variables for Gmail API are not fully configured.")
-            email_log_entry['status'] = 'failed_config_missing'
-            # Fallback to Flask-Mail SMTP if configured? For now, just fail.
-            # smtp_fallback(to_address, subject, body, html_body, attachment_path, logger)
+        if not all([client_id, client_secret, refresh_token, from_email]):
+            logger.error("Gmail API OAuth 2.0 Client ID credentials (client_id, client_secret, refresh_token, or sender_address) are not fully configured.")
+            email_log_entry['status'] = 'failed_oauth_config_missing'
             return
 
-        # Correct private key newlines
-        sa_info['private_key'] = private_key_from_config.replace('\\n', '\n')
+        # --- Build User Credentials ---
+        try:
+            creds = UserCredentials(
+                None,  # Access token is None, it will be refreshed by the library
+                refresh_token=refresh_token,
+                token_uri='https://oauth2.googleapis.com/token', # Standard Google token URI
+                client_id=client_id,
+                client_secret=client_secret,
+                scopes=['https://www.googleapis.com/auth/gmail.send']
+            )
+            # The google-auth library will automatically handle refreshing the access token
+            # when a request is made if the current access token is missing or expired.
 
-        # --- Build Credentials & Service ---
-        creds = ServiceAccountCredentials.from_service_account_info(
-            sa_info,
-            scopes=['https://www.googleapis.com/auth/gmail.send']
-        )
-
-        from_email = default_sender # Default from address
-        if impersonated_email:
-            creds = creds.with_subject(impersonated_email)
-            from_email = impersonated_email
-        elif sa_info.get('client_email'): # Fallback to service account's own email if no impersonation
-             from_email = sa_info['client_email']
-        # If from_email is still None here, it's an issue. Default sender is a good overall fallback.
-        if not from_email: # Final check for a sender address
-            logger.error("No sender email address could be determined (impersonation, service account, or default). Cannot send email.")
-            email_log_entry['status'] = 'failed_sender_missing'
+        except Exception as e_creds:
+            logger.error(f"Failed to create/refresh Google OAuth credentials: {str(e_creds)}", exc_info=True)
+            email_log_entry['status'] = 'failed_oauth_credential_creation'
+            email_log_entry['error_detail'] = str(e_creds)
             return
 
-
-        service = build('gmail', 'v1', credentials=creds, cache_discovery=False) # Disable cache_discovery for potential serverless environments
+        # --- Build Gmail API Service ---
+        service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
 
         # --- Create Email Message (MIME) ---
+        # Note: from_email is now GMAIL_SENDER_ADDRESS, Service Account and impersonation logic removed.
         if html_body and attachment_path:
             message = MIMEMultipart('related') # Use 'related' for HTML with embedded images, or 'mixed' if images are just attachments.
                                             # For general attachments with HTML body, 'mixed' is usually preferred.
