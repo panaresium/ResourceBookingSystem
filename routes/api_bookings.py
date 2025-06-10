@@ -467,14 +467,15 @@ def create_booking():
 
                 # Generate image with resource area marked
                 processed_image_path = None # Initialize
-                if email_data.get('resource_image_filename') and email_data.get('map_coordinates'):
+                if resource_for_email.image_filename and resource_for_email.map_coordinates: # Check resource_for_email directly
                     # generate_booking_image now sources its own logger via current_app
                     processed_image_path = generate_booking_image(
-                        email_data['resource_image_filename'],
-                        email_data['map_coordinates']
+                        resource_for_email.id, # Pass resource ID
+                        resource_for_email.map_coordinates, # Pass map_coordinates string
+                        resource_for_email.name # Pass resource name
                     )
-                elif email_data.get('resource_image_filename'):
-                    current_app.logger.info(f"Booking {new_booking.id}: Image filename present but no map coordinates. No image will be generated or attached.")
+                elif resource_for_email.image_filename: # Check resource_for_email directly
+                    current_app.logger.info(f"Booking {new_booking.id}: Resource image filename present but no map coordinates for resource {resource_for_email.id}. No attachment image will be generated.")
                 else:
                     current_app.logger.info(f"Booking {new_booking.id}: No resource image filename. No image will be generated or attached.")
 
