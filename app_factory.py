@@ -44,7 +44,8 @@ from utils import (
     _import_map_configuration_data,
     _import_resource_configurations_data,
     _import_user_configurations_data,
-    add_audit_log
+    add_audit_log,
+    send_email
 )
 
 # For SQLite pragmas - these functions will be moved here
@@ -343,12 +344,11 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     app.logger.info("Attempting to send test email from app_factory.py...")
     with app.app_context():
         try:
-            # from flask_mail import Message # Ensure Message is imported (already added at top)
-            msg = Message("Test Email from App Factory",
-                          sender=app.config.get('MAIL_DEFAULT_SENDER', 'default_sender@example.com'), # Added a fallback for sender
-                          recipients=["debug@example.com"]) # Use a dummy recipient
-            msg.body = "This is a test email sent from app_factory.py after mail.init_app()."
-            mail.send(msg)
+            send_email(
+                to_address="debug@example.com",
+                subject="Test Email from App Factory (via Gmail API)",
+                body="This is a test email sent from app_factory.py using the Gmail API."
+            )
             app.logger.info("Test email from factory sent successfully.")
         except Exception as e_factory_mail:
             app.logger.error(f"Test email from factory FAILED. Error: {e_factory_mail}", exc_info=True)
