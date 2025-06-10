@@ -482,10 +482,10 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
                 from_email = current_app.config.get('GMAIL_SENDER_ADDRESS')
 
                 if not all([client_id, client_secret, refresh_token, from_email]):
-                logger.error("Gmail API OAuth 2.0 Client ID credentials not fully configured.")
-                email_log_entry['status'] = 'failed_oauth_config_missing'
-                # Do not return immediately, allow cleanup logic to run
-                break # Break from retry loop as this is a config error
+                    logger.error("Gmail API OAuth 2.0 Client ID credentials not fully configured.")
+                    email_log_entry['status'] = 'failed_oauth_config_missing'
+                    # Do not return immediately, allow cleanup logic to run
+                    break # Break from retry loop as this is a config error
 
             try:
                 creds = UserCredentials(
