@@ -323,8 +323,8 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
                         x0, y0 = float(x), float(y)
                         x1, y1 = float(x) + float(width), float(y) + float(height)
 
-                        outline_color = (255, 0, 0, 200)  # Red, mostly opaque
-                        fill_color = (255, 0, 0, 100)    # Red, more transparent
+                        outline_color = (255, 0, 0, 255)  # Opaque Red
+                        fill_color = (255, 0, 0, 180)    # More Opaque Red (approx 70% opacity)
                         stroke_width_pil = 3
 
                         draw.rectangle([(x0, y0), (x1, y1)], outline=outline_color, fill=fill_color, width=stroke_width_pil)
@@ -356,6 +356,13 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
             logger.debug(f"Image mode is {img.mode}, converting to RGB before saving as JPG for resource ID {resource_id}.")
             img = img.convert('RGB')
 
+        # Resize image if it's too large
+        MAX_DIMENSION = 1200 # Or get from app.config if desired for more flexibility
+        if img.width > MAX_DIMENSION or img.height > MAX_DIMENSION:
+            logger.info(f"Image for resource ID {resource_id} ('{resource_name}') was large ({img.width}x{img.height}), resizing to fit within {MAX_DIMENSION}px on its largest side.")
+            img.thumbnail((MAX_DIMENSION, MAX_DIMENSION)) # Resizes in place
+            logger.info(f"Image for resource ID {resource_id} ('{resource_name}') resized to {img.width}x{img.height}.")
+
         # Sanitize resource_name and construct output path
         # Basic sanitization: replace spaces with underscores, remove non-alphanumeric (except underscore, hyphen, dot)
         sanitized_name_base = re.sub(r'[^\w.-]', '', resource_name.replace(' ', '_'))
@@ -376,7 +383,7 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
             except OSError as e_remove:
                 logger.warning(f"Could not remove existing temp file {output_path} before saving: {e_remove}")
 
-        img.save(output_path, "JPEG", quality=80, optimize=True)
+        img.save(output_path, "JPEG", quality=70, optimize=True) # Adjusted quality to 70
 
         logger.info(f"Saved modified image for resource ID {resource_id} ('{resource_name}') to temporary JPG file at {output_path}")
         return output_path
