@@ -472,11 +472,12 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
     max_retries = 5
     retry_delay = 15  # seconds
 
-    for attempt in range(max_retries):
-        logger.info(f"Attempt {attempt + 1}/{max_retries} to send email via Gmail API to {to_address}: {subject} {'with attachment' if attachment_path else ''}")
-        try:
-            client_id = current_app.config.get('GOOGLE_CLIENT_ID')
-            client_secret = current_app.config.get('GOOGLE_CLIENT_SECRET')
+    try: # Wrap the loop and potentially error-prone operations in a try
+        for attempt in range(max_retries):
+            logger.info(f"Attempt {attempt + 1}/{max_retries} to send email via Gmail API to {to_address}: {subject} {'with attachment' if attachment_path else ''}")
+            try:
+                client_id = current_app.config.get('GOOGLE_CLIENT_ID')
+                client_secret = current_app.config.get('GOOGLE_CLIENT_SECRET')
             refresh_token = current_app.config.get('GMAIL_REFRESH_TOKEN')
             from_email = current_app.config.get('GMAIL_SENDER_ADDRESS')
 
@@ -563,11 +564,10 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
             email_log_entry['error_detail'] = str(e_non_retryable)
             email_log_entry['error_type'] = type(e_non_retryable).__name__
             break # Exit loop for non-retryable errors (e.g., bad request, auth, unexpected)
-        # No 'finally' block needed here for attachment cleanup if the main 'finally' handles it.
-
-    # This finally block is outside the loop and will execute once after the loop finishes or breaks.
-    # It's responsible for cleaning up the attachment if it exists and is temporary.
+            # No 'finally' block inside the loop's try needed for attachment cleanup, handled by outer finally.
     finally:
+        # This finally block is now correctly associated with the outer try,
+        # ensuring cleanup happens after all attempts or if an unexpected error occurs before/during the loop.
         if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
             try:
                 os.remove(attachment_path)
