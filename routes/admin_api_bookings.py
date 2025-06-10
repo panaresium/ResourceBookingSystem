@@ -3,7 +3,7 @@ from flask_login import login_required, current_user
 from datetime import timezone # Added timezone
 
 # Assuming extensions.py contains db, socketio, mail
-from extensions import db, socketio, mail
+from extensions import db, socketio # Removed mail
 # Assuming models.py contains these model definitions
 from models import Booking, User, Resource # Added Resource
 # Assuming utils.py contains these helper functions
