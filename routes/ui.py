@@ -33,9 +33,12 @@ def serve_index():
         # Define valid statuses for upcoming bookings
         valid_statuses = ['approved', 'checked_in', 'confirmed']
         # Assuming Booking model has a query attribute from db.Model
+        now = datetime.now(timezone.utc)
+        three_days_from_now = now + timedelta(days=3)
         upcoming_bookings = Booking.query.filter(
             Booking.user_name == current_user.username,
-            Booking.start_time > datetime.now(timezone.utc),
+            Booking.start_time > now,
+            Booking.start_time <= three_days_from_now,
             Booking.status.in_(valid_statuses)  # Filter by valid statuses
         ).order_by(Booking.start_time.asc()).all()
         return render_template("index.html", upcoming_bookings=upcoming_bookings)
