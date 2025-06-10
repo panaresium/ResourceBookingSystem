@@ -47,6 +47,9 @@ def get_gmail_oauth_flow():
 @login_required
 @permission_required('manage_system') # Ensure only admins can initiate this
 def authorize_gmail_sending():
+    # For development/testing with http, allow insecure transport
+    if current_app.debug: # Check if app is in debug mode
+        os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
     try:
         flow = get_gmail_oauth_flow()
         # Generate authorization URL & store state for CSRF protection
@@ -72,6 +75,9 @@ def authorize_gmail_sending():
 @login_required # Ensure an admin is still logged in, though state also protects
 @permission_required('manage_system')
 def authorize_gmail_callback():
+    # For development/testing with http, allow insecure transport
+    if current_app.debug: # Check if app is in debug mode
+        os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
     state = session.pop('oauth_gmail_state', None)
     # Verify state parameter to prevent CSRF
     if not state or state != request.args.get('state'):
@@ -129,7 +135,7 @@ def authorize_gmail_callback():
     except Exception as e:
         current_app.logger.exception(f"Error in Gmail authorization callback: {e}")
         flash("An unexpected error occurred during the Gmail authorization callback.", "danger")
-        return redirect(url_for('admin_ui.serve_system_settings_page'))
+        return redirect(url_for('admin_ui.system_settings_page')) # Corrected route name
 
 def init_gmail_auth_routes(app):
     app.register_blueprint(gmail_auth_bp)
