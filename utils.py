@@ -264,10 +264,6 @@ def resource_to_dict(resource: Resource) -> dict:
     return resource_dict
 
 def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_name: str) -> str | None:
-    """
-    Generates an image with booking details, possibly highlighting an area on a map, using the floor map as base.
-    Returns the path to the temporary image file, or None if an error occurs.
-    """
     logger = current_app.logger if current_app else logging.getLogger(__name__)
 
     resource = Resource.query.get(resource_id)
@@ -302,8 +298,23 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
         return None
 
     try:
-        img = Image.open(base_image_path).convert("RGBA")
-        draw = ImageDraw.Draw(img, "RGBA")
+        img = Image.open(base_image_path)
+
+        # Initial Resize
+        original_width, original_height = img.size
+        if original_width == 0:
+            logger.error(f"generate_booking_image: Original image width is 0 for {base_image_path} (Resource ID {resource_id}). Cannot resize.")
+            return None
+        aspect_ratio = original_height / original_width
+        target_width = 800
+        target_height = int(target_width * aspect_ratio)
+        if target_height == 0: target_height = 1 # Ensure height is at least 1 pixel
+
+        logger.info(f"generate_booking_image: Resizing base image for Resource ID {resource_id} from {original_width}x{original_height} to {target_width}x{target_height} for drawing.")
+        img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+
+        img = img.convert("RGBA") # Ensure RGBA for drawing with alpha
+        draw = ImageDraw.Draw(img) # Pillow handles RGBA context for Draw
 
         if map_coordinates_str:
             try:
@@ -314,37 +325,25 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
                 height = coords.get('height')
 
                 if x is not None and y is not None and width is not None and height is not None:
-                    try:
-                        x0, y0 = float(x), float(y)
-                        x1, y1 = float(x) + float(width), float(y) + float(height)
+                    x0, y0 = float(x), float(y)
+                    x1, y1 = float(x) + float(width), float(y) + float(height)
 
-                        outline_color = (255, 0, 0, 255)  # Opaque Red
-                        fill_color = (255, 0, 0, 255)    # Fully Opaque Red
-                        stroke_width_pil = 20
+                    outline_color = (255, 0, 0, 255)
+                    fill_color = (255, 0, 0, 255)
+                    stroke_width_pil = 3
 
-                        draw.rectangle([(x0, y0), (x1, y1)], outline=outline_color, fill=fill_color, width=stroke_width_pil)
-                        logger.info(f"Drew rectangle on image at ({x0},{y0})-({x1},{y1}) for resource ID {resource_id} using floor map {base_image_filename}")
-
-                        # Stage 1: After Drawing
-                        debug_filename_s1 = f"debug_resource_{resource_id}_1_after_draw.png"
-                        debug_path_s1 = os.path.join(tempfile.gettempdir(), debug_filename_s1)
-                        try:
-                            img.save(debug_path_s1, "PNG")
-                            logger.info(f"DEBUG IMAGE Stage 1 (After Draw) saved: {debug_path_s1}")
-                        except Exception as e_debug_save:
-                            logger.error(f"Failed to save DEBUG IMAGE {debug_path_s1}: {e_debug_save}")
-
-                    except (ValueError, TypeError) as e_coords:
-                        logger.warning(f"Invalid coordinate values for drawing on floor map {base_image_filename} for resource ID {resource_id}: {e_coords}. Coords string: {map_coordinates_str}")
+                    draw.rectangle([(x0, y0), (x1, y1)], outline=outline_color, fill=fill_color, width=stroke_width_pil)
+                    logger.info(f"Drew rectangle on image at ({x0},{y0})-({x1},{y1}) for resource ID {resource_id} (working size {img.width}x{img.height})")
                 else:
-                    logger.warning(f"Incomplete coordinates for drawing on floor map {base_image_filename} for resource ID {resource_id}. Coords string: {map_coordinates_str}")
+                    logger.warning(f"Incomplete coordinates for drawing on {base_image_filename} for resource ID {resource_id}. Coords string: {map_coordinates_str}")
             except json.JSONDecodeError as e_json:
-                logger.warning(f"Could not decode map_coordinates JSON for floor map {base_image_filename} for resource ID {resource_id}: {e_json}. Coords string: {map_coordinates_str}")
-            except Exception as e_draw:
-                logger.error(f"Error drawing coordinates on floor map {base_image_filename} for resource ID {resource_id}: {e_draw}", exc_info=True)
+                logger.warning(f"Could not decode map_coordinates JSON for {base_image_filename} for resource ID {resource_id}: {e_json}. Coords string: {map_coordinates_str}")
+            except Exception as e_draw_block:
+                 logger.error(f"Error in drawing block for resource ID {resource_id}: {e_draw_block}", exc_info=True)
 
+        # Convert to RGB for JPG
         if img.mode == 'RGBA' or (img.mode == 'P' and 'transparency' in img.info):
-            logger.debug(f"Image mode is {img.mode}, converting to RGB with white background before saving as JPG for resource ID {resource_id}.")
+            logger.debug(f"Image mode is {img.mode}, converting to RGB with white background for resource ID {resource_id}.")
             background = Image.new("RGB", img.size, (255, 255, 255))
             if img.mode != 'RGBA':
                 img = img.convert('RGBA')
@@ -352,32 +351,15 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
             background.paste(img, (0,0), mask=alpha_channel)
             img = background
         elif img.mode != 'RGB':
-            logger.debug(f"Image mode is {img.mode}, converting to RGB before saving as JPG for resource ID {resource_id}.")
+            logger.debug(f"Image mode is {img.mode}, converting to RGB for resource ID {resource_id}.")
             img = img.convert('RGB')
 
-        # Stage 2: After RGB Conversion
-        debug_filename_s2 = f"debug_resource_{resource_id}_2_after_rgb_conversion.png"
-        debug_path_s2 = os.path.join(tempfile.gettempdir(), debug_filename_s2)
-        try:
-            img.save(debug_path_s2, "PNG")
-            logger.info(f"DEBUG IMAGE Stage 2 (After RGB Conversion) saved: {debug_path_s2}")
-        except Exception as e_debug_save:
-            logger.error(f"Failed to save DEBUG IMAGE {debug_path_s2}: {e_debug_save}")
-
-        MAX_DIMENSION = 1200
-        if img.width > MAX_DIMENSION or img.height > MAX_DIMENSION:
-            logger.info(f"Image for resource ID {resource_id} ('{resource_name}') was large ({img.width}x{img.height}), resizing to fit within {MAX_DIMENSION}px on its largest side.")
-            img.thumbnail((MAX_DIMENSION, MAX_DIMENSION))
-            logger.info(f"Image for resource ID {resource_id} ('{resource_name}') resized to {img.width}x{img.height}.")
-
-            # Stage 3: After Thumbnailing (Resizing)
-            debug_filename_s3 = f"debug_resource_{resource_id}_3_after_thumbnail.png"
-            debug_path_s3 = os.path.join(tempfile.gettempdir(), debug_filename_s3)
-            try:
-                img.save(debug_path_s3, "PNG")
-                logger.info(f"DEBUG IMAGE Stage 3 (After Thumbnail) saved: {debug_path_s3}")
-            except Exception as e_debug_save:
-                logger.error(f"Failed to save DEBUG IMAGE {debug_path_s3}: {e_debug_save}")
+        # Final Thumbnail if still too large
+        MAX_DIMENSION_FINAL = 1200
+        if img.width > MAX_DIMENSION_FINAL or img.height > MAX_DIMENSION_FINAL:
+            logger.info(f"Image for resource ID {resource_id} ('{resource_name}') still large ({img.width}x{img.height}) after drawing, thumbnailing to fit {MAX_DIMENSION_FINAL}px.")
+            img.thumbnail((MAX_DIMENSION_FINAL, MAX_DIMENSION_FINAL))
+            logger.info(f"Image for resource ID {resource_id} ('{resource_name}') final size {img.width}x{img.height}.")
 
         sanitized_name_base = re.sub(r'[^\w.-]', '', resource_name.replace(' ', '_'))
         sanitized_name_base = sanitized_name_base[:100]
@@ -395,13 +377,13 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
             except OSError as e_remove:
                 logger.warning(f"Could not remove existing temp file {output_path} before saving: {e_remove}")
 
-        img.save(output_path, "JPEG", quality=70, optimize=True)
+        img.save(output_path, "JPEG", quality=75, optimize=True)
 
         logger.info(f"Saved modified image for resource ID {resource_id} ('{resource_name}') to temporary JPG file at {output_path}")
         return output_path
 
     except Exception as e_outer:
-        logger.error(f"Error in generate_booking_image for resource ID {resource_id} using floor map {base_image_filename}: {e_outer}", exc_info=True)
+        logger.error(f"Error in generate_booking_image for resource ID {resource_id}: {e_outer}", exc_info=True)
         return None
 
 def send_email(to_address: str, subject: str, body: str = None, html_body: str = None, attachment_path: str = None):
@@ -456,11 +438,11 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
 
         service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
         message = MIMEMultipart('mixed')
-        if html_body and attachment_path: # This case was not correctly handled before, it should be 'mixed' not 'related' for general attachments.
-             message = MIMEMultipart('mixed') # Corrected
+        if html_body and attachment_path:
+             message = MIMEMultipart('mixed')
         elif html_body or attachment_path:
             message = MIMEMultipart('mixed')
-        else: # Plain text only
+        else:
             message = MIMEText(body, 'plain', 'utf-8')
 
         message['to'] = to_address
