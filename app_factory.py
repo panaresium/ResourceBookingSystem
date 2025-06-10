@@ -5,8 +5,8 @@ import logging
 
 # Import configurations, extensions, and initialization functions
 import config
-from extensions import db, login_manager, oauth, mail, csrf, socketio, migrate
-from flask_mail import Message # Added for test email
+from extensions import db, login_manager, oauth, csrf, socketio, migrate # Removed mail
+# from flask_mail import Message # Removed: Added for test email - no longer needed by factory
 from models import User # Needed for load_user, others loaded via db object
 
 from translations import init_translations # SimpleTranslator is used internally by init_translations now
@@ -140,8 +140,8 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     # For immediate critical output if needed, standard print() or logging.warning() could be used
     # before app.logger is reliably configured. However, standard practice is to use app.logger.
     app.logger.error("ERROR_DIAG: APP_FACTORY - create_app function entered.")
-    # from extensions import mail # mail is already imported at the top level
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Initial mail object ID in create_app: {id(mail)}")
+    # from extensions import mail # mail has been removed from imports
+    # app.logger.error(f"ERROR_DIAG: APP_FACTORY - Initial mail object ID in create_app: {id(mail)}") # mail removed
 
     # 1. Load Configuration
     app.config.from_object(config_object)
@@ -320,26 +320,13 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
     # 3. Initialize Extensions
     # db.init_app(app) has been moved to earlier in the factory function
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_SERVER: {app.config.get('MAIL_SERVER')}")
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_PORT: {app.config.get('MAIL_PORT')}")
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_USE_TLS: {app.config.get('MAIL_USE_TLS')}")
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_USE_SSL: {app.config.get('MAIL_USE_SSL')}")
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_USERNAME: {'<present>' if app.config.get('MAIL_USERNAME') else '<not present>'}")
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_PASSWORD: {'<present>' if app.config.get('MAIL_PASSWORD') else '<not present>'}") # Added password presence check
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Config MAIL_DEFAULT_SENDER: {app.config.get('MAIL_DEFAULT_SENDER')}")
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - app.extensions before mail.init_app: {list(app.extensions.keys())}")
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Attempting mail.init_app(app). App object: {app}")
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Mail object ID before init: {id(mail)}")
-    mail.init_app(app)
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Mail object ID after init: {id(mail)}")
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - app.extensions after mail.init_app: {list(app.extensions.keys())}")
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - app.extensions.get('mail') object after init: {app.extensions.get('mail')}")
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - mail.state.app after init: {mail.state.app if hasattr(mail, 'state') and mail.state and hasattr(mail.state, 'app') else 'mail.state.app is None or mail.state is None'}")
+    # Removed Flask-Mail related diagnostic logs and mail.init_app(app)
+    # mail.init_app(app) # Removed
 
-    # Test email sending block
-    mail_state_for_test = getattr(mail, 'state', None)
-    app_from_state_for_test = getattr(mail_state_for_test, 'app', None)
-    app.logger.error(f"ERROR_DIAG: APP_FACTORY - Test email check: mail.state: {mail_state_for_test}, mail.state.app: {app_from_state_for_test}") # New log
+    # Test email sending block - mail object and its state are no longer relevant here
+    # mail_state_for_test = getattr(mail, 'state', None) # mail removed
+    # app_from_state_for_test = getattr(mail_state_for_test, 'app', None) # mail removed
+    # app.logger.error(f"ERROR_DIAG: APP_FACTORY - Test email check: mail.state: {mail_state_for_test}, mail.state.app: {app_from_state_for_test}") # mail removed
 
     app.logger.info("Attempting to send test email from app_factory.py...")
     with app.app_context():
