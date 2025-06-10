@@ -1591,8 +1591,8 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
             # from sqlalchemy import func
             # func.date(Booking.start_time) == target_date
             # For now, let's assume direct comparison works or adjust if needed
-            Booking.start_time >= datetime.combine(target_date, time.min),
-            Booking.start_time <= datetime.combine(target_date, time.max),
+            Booking.start_time >= datetime.combine(target_date, datetime.time.min),
+            Booking.start_time <= datetime.combine(target_date, datetime.time.max),
             sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_booking_statuses_for_conflict)
         ).all()
     except Exception as e:
