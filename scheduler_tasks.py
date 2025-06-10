@@ -83,13 +83,12 @@ def cancel_unchecked_bookings(app):
                             f"has been automatically cancelled due to no check-in within the grace period."
                         )
 
-                        # Check if mail is configured before trying to send
-                        if current_app.extensions.get('mail') and hasattr(current_app.extensions['mail'], 'send'):
-                            try:
-                                send_email(user.email, subject, body_text)
-                                logger.info(f"Sent auto-cancellation email to {user.email} for booking ID {details['booking_id']}")
-                            except Exception as mail_e:
-                                logger.error(f"Failed to send auto-cancellation email to {user.email} for booking {details['booking_id']}: {mail_e}")
+                        # (The old if current_app.extensions.get('mail')... line is removed)
+                        try:
+                            send_email(user.email, subject, body_text)
+                            logger.info(f"Sent auto-cancellation email to {user.email} for booking ID {details['booking_id']}")
+                        except Exception as mail_e:
+                            logger.error(f"Failed to send auto-cancellation email to {user.email} for booking {details['booking_id']}: {mail_e}")
 
                         # Check if Teams webhook is configured
                         if current_app.config.get('TEAMS_WEBHOOK_URL'):

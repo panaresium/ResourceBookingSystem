@@ -7,12 +7,20 @@ import requests
 from datetime import datetime, date, timedelta, time, timezone
 from flask import url_for, jsonify, current_app # current_app already here, ensure it's used
 from flask_login import current_user
-from flask_mail import Message # For send_email
+# from flask_mail import Message # For send_email - No longer used
 import csv
 import io
+import base64
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.image import MIMEImage
+from email.mime.application import MIMEApplication # For generic attachments
+from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 # Assuming db and mail are initialized in extensions.py
-from extensions import db, mail # mail is now fetched from current_app.extensions
+from extensions import db # mail is now fetched from current_app.extensions - mail removed
 # Assuming models are defined in models.py
 from models import AuditLog, User, Resource, FloorMap, Role, Booking # Added Booking
 from sqlalchemy import func # Ensure func is imported
@@ -319,85 +327,166 @@ def generate_booking_image(resource_image_filename: str, map_coordinates_str: st
         return None
 
 def send_email(to_address: str, subject: str, body: str = None, html_body: str = None, attachment_path: str = None):
-    # mail_instance = current_app.extensions.get('mail') # Removed
     logger = current_app.logger if current_app else logging.getLogger(__name__)
 
     if not body and not html_body:
         logger.error(f"Email to {to_address} has no body or html_body. Not sending.")
-        # Clean up attachment if it's a temp file, as email won't be sent
+        # Attachment cleanup if needed
         if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
             try:
                 os.remove(attachment_path)
-                logger.info(f"Cleaned up temporary attachment (no email body): {attachment_path}")
-            except Exception as e_clean_body:
-                logger.error(f"Error cleaning up temporary attachment (no email body) {attachment_path}: {e_clean_body}", exc_info=True)
+            except Exception: pass # Logged later if important
         return
 
     if current_app.config.get('MAIL_SUPPRESS_SEND'):
-        logger.info(f"Email sending is suppressed by MAIL_SUPPRESS_SEND. Intent: To='{to_address}', Subject='{subject}'.")
-        # Cleanup attachment if necessary, then return
+        logger.info(f"Email sending is suppressed (MAIL_SUPPRESS_SEND). Intent: To='{to_address}', Subject='{subject}'.")
+        # Attachment cleanup
         if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
             try:
                 os.remove(attachment_path)
-                logger.info(f"Cleaned up temporary attachment (MAIL_SUPPRESS_SEND): {attachment_path}")
-            except Exception as e_clean_suppress:
-                logger.error(f"Error cleaning up temporary attachment (MAIL_SUPPRESS_SEND) {attachment_path}: {e_clean_suppress}", exc_info=True)
+            except Exception: pass
         return
 
-    email_entry = {
-        'to': to_address,
-        'subject': subject,
-        'body': body, # Log basic body, not potentially long HTML
-        'html_body_present': bool(html_body),
-        'attachment_path': attachment_path,
-        'timestamp': datetime.now(timezone.utc).isoformat(),
+    # Log intent
+    email_log_entry = {
+        'to': to_address, 'subject': subject, 'body_present': bool(body),
+        'html_body_present': bool(html_body), 'attachment_path': attachment_path,
+        'timestamp': datetime.now(timezone.utc).isoformat(), 'status': 'pending_api'
     }
-    email_log.append(email_entry) # Keep simple log entry
-    logger.info(f"Attempting to send email to {to_address}: {subject} {'with attachment' if attachment_path else ''}")
+    email_log.append(email_log_entry)
+    logger.info(f"Attempting to send email via Gmail API to {to_address}: {subject} {'with attachment' if attachment_path else ''}")
 
     try:
-        msg = Message(
-            subject=subject,
-            recipients=[to_address],
-            body=body,
-            html=html_body, # Add html_body to Message
-            sender=current_app.config.get('MAIL_DEFAULT_SENDER')
+        # --- Retrieve Service Account Config ---
+        sa_info = {
+            "type": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_TYPE'),
+            "project_id": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_PROJECT_ID'),
+            "private_key_id": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_ID'),
+            "private_key": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY'),
+            "client_email": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL'),
+            "client_id": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_CLIENT_ID'),
+            "auth_uri": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_AUTH_URI'),
+            "token_uri": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_TOKEN_URI'),
+            "auth_provider_x509_cert_url": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_AUTH_PROVIDER_X509_CERT_URL'),
+            "client_x509_cert_url": current_app.config.get('GOOGLE_SERVICE_ACCOUNT_CLIENT_X509_CERT_URL')
+        }
+        impersonated_email = current_app.config.get('GMAIL_API_IMPERSONATED_EMAIL') # This is the 'From' address
+        default_sender = current_app.config.get('MAIL_DEFAULT_SENDER') # Fallback if impersonation not set
+
+        # Ensure private_key exists before trying to replace (it's checked in all())
+        private_key_from_config = sa_info.get('private_key')
+        if not all(sa_info.values()) or not private_key_from_config: # Check all values, specifically private_key
+            logger.error("Service account environment variables for Gmail API are not fully configured.")
+            email_log_entry['status'] = 'failed_config_missing'
+            # Fallback to Flask-Mail SMTP if configured? For now, just fail.
+            # smtp_fallback(to_address, subject, body, html_body, attachment_path, logger)
+            return
+
+        # Correct private key newlines
+        sa_info['private_key'] = private_key_from_config.replace('\\n', '\n')
+
+        # --- Build Credentials & Service ---
+        creds = ServiceAccountCredentials.from_service_account_info(
+            sa_info,
+            scopes=['https://www.googleapis.com/auth/gmail.send']
         )
 
+        from_email = default_sender # Default from address
+        if impersonated_email:
+            creds = creds.with_subject(impersonated_email)
+            from_email = impersonated_email
+        elif sa_info.get('client_email'): # Fallback to service account's own email if no impersonation
+             from_email = sa_info['client_email']
+        # If from_email is still None here, it's an issue. Default sender is a good overall fallback.
+        if not from_email: # Final check for a sender address
+            logger.error("No sender email address could be determined (impersonation, service account, or default). Cannot send email.")
+            email_log_entry['status'] = 'failed_sender_missing'
+            return
+
+
+        service = build('gmail', 'v1', credentials=creds, cache_discovery=False) # Disable cache_discovery for potential serverless environments
+
+        # --- Create Email Message (MIME) ---
+        if html_body and attachment_path:
+            message = MIMEMultipart('related') # Use 'related' for HTML with embedded images, or 'mixed' if images are just attachments.
+                                            # For general attachments with HTML body, 'mixed' is usually preferred.
+                                            # Let's assume 'mixed' is more general here unless specific inline images are used in HTML.
+            message = MIMEMultipart('mixed')
+        elif html_body or attachment_path: # If only one of them
+            message = MIMEMultipart('mixed')
+        else: # Plain text only
+            message = MIMEText(body, 'plain', 'utf-8')
+
+        message['to'] = to_address
+        message['from'] = from_email
+        message['subject'] = subject
+
+        if isinstance(message, MIMEMultipart):
+            # Create a MIMEMultipart 'alternative' part for text/html. This is important.
+            alt_part = MIMEMultipart('alternative')
+            if body: # Attach plain text part first
+                alt_part.attach(MIMEText(body, 'plain', 'utf-8'))
+            if html_body: # Attach HTML part
+                alt_part.attach(MIMEText(html_body, 'html', 'utf-8'))
+            message.attach(alt_part) # Attach this 'alternative' part to the main 'mixed' message
+
         if attachment_path:
-            try:
-                with open(attachment_path, 'rb') as fp:
-                    file_ext = os.path.splitext(attachment_path)[1].lower()
-                    content_type = 'application/octet-stream' # Default
-                    if file_ext == '.png':
-                        content_type = 'image/png'
-                    elif file_ext in ['.jpg', '.jpeg']:
-                        content_type = 'image/jpeg'
+            file_ext = os.path.splitext(attachment_path)[1].lower()
+            # Default MIME type
+            maintype, subtype = 'application', 'octet-stream'
 
-                    msg.attach(
-                        filename=os.path.basename(attachment_path),
-                        content_type=content_type,
-                        data=fp.read()
-                    )
-                logger.info(f"Successfully attached {attachment_path} to email for {to_address}.")
-            except Exception as e_attach:
-                logger.error(f"Failed to attach {attachment_path} to email for {to_address}: {e_attach}", exc_info=True)
-                # Decide if email should still be sent without attachment or not. For now, it will.
+            if file_ext == '.png':
+                maintype, subtype = 'image', 'png'
+            elif file_ext in ['.jpg', '.jpeg']:
+                maintype, subtype = 'image', 'jpeg'
+            elif file_ext == '.pdf':
+                maintype, subtype = 'application', 'pdf'
+            elif file_ext == '.txt':
+                maintype, subtype = 'text', 'plain'
+            # Add more MIME types as needed (e.g., DOCX, XLSX)
+            # For DOCX: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+            # For XLSX: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
 
-        mail.send(msg)
-        logger.info(f"Email successfully sent to {to_address} via Flask-Mail.")
+            with open(attachment_path, 'rb') as fp:
+                if maintype == 'image':
+                    msg_attach = MIMEImage(fp.read(), _subtype=subtype, name=os.path.basename(attachment_path))
+                elif maintype == 'text':
+                    # MIMEText needs string, not bytes for text/* types
+                    msg_attach = MIMEText(fp.read().decode('utf-8'), _subtype=subtype, _charset='utf-8')
+                    # MIMEText doesn't take 'name' in constructor, add filename to Content-Disposition
+                else: # Default to MIMEApplication for 'application/*' or other types
+                    msg_attach = MIMEApplication(fp.read(), _subtype=subtype, name=os.path.basename(attachment_path))
+
+            # Ensure filename is set for all attachment types, including text/plain
+            msg_attach.add_header('Content-Disposition', 'attachment', filename=os.path.basename(attachment_path))
+            message.attach(msg_attach)
+            logger.info(f"Attachment {attachment_path} prepared for Gmail API.")
+
+
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        create_message_body = {'raw': raw_message}
+
+        # --- Send Email ---
+        sent_message = service.users().messages().send(userId='me', body=create_message_body).execute()
+        logger.info(f"Email sent successfully via Gmail API to {to_address}. Message ID: {sent_message.get('id')}")
+        email_log_entry['status'] = 'sent_api_success'
+        email_log_entry['message_id'] = sent_message.get('id')
+
+    except HttpError as error:
+        logger.error(f"An HTTP error occurred sending email to {to_address} via Gmail API: {error.resp.status} - {error._get_reason()}", exc_info=True)
+        email_log_entry['status'] = f'failed_api_http_error_{error.resp.status}'
+        email_log_entry['error_detail'] = error._get_reason()
     except Exception as e:
-        logger.error(f"Email to {to_address} subject '{subject}' was NOT sent due to an error during send operation: {e}", exc_info=True)
-        logger.error(f"Failed to send email to {to_address} via Flask-Mail: {e}", exc_info=True)
+        logger.error(f"An unexpected error occurred sending email to {to_address} via Gmail API: {e}", exc_info=True)
+        email_log_entry['status'] = 'failed_api_unexpected_error'
+        email_log_entry['error_detail'] = str(e)
     finally:
-        # Cleanup temporary attachment if it exists and is in the temp directory
         if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
             try:
                 os.remove(attachment_path)
                 logger.info(f"Cleaned up temporary attachment: {attachment_path}")
-            except Exception as e_clean_final:
-                logger.error(f"Error cleaning up temporary attachment {attachment_path}: {e_clean_final}", exc_info=True)
-
+            except Exception as e_clean:
+                logger.error(f"Error cleaning up temporary attachment {attachment_path}: {e_clean}", exc_info=True)
 
 def send_slack_notification(text: str):
     logger = current_app.logger if current_app else logging.getLogger(__name__)

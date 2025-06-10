@@ -73,6 +73,26 @@ MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', '')
 # Default sender email, uses MAIL_USERNAME if MAIL_DEFAULT_SENDER is not set
 MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER', MAIL_USERNAME or 'noreply@example.com')
 
+# --- Gmail API Service Account Configuration (for sending email via OAuth2) ---
+# These are used if you prefer loading service account details from individual environment variables
+# instead of a JSON file path (GOOGLE_APPLICATION_CREDENTIALS).
+GOOGLE_SERVICE_ACCOUNT_TYPE = os.environ.get('GOOGLE_SERVICE_ACCOUNT_TYPE')
+GOOGLE_SERVICE_ACCOUNT_PROJECT_ID = os.environ.get('GOOGLE_SERVICE_ACCOUNT_PROJECT_ID')
+GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_ID = os.environ.get('GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY_ID')
+# For the private key, ensure newlines are correctly handled if setting via env var
+# Example: export GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY="$(cat key.json | jq -r .private_key | awk '{printf "%s\n", $0}')"
+GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY = os.environ.get('GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY')
+GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL = os.environ.get('GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL')
+GOOGLE_SERVICE_ACCOUNT_CLIENT_ID = os.environ.get('GOOGLE_SERVICE_ACCOUNT_CLIENT_ID') # Also used for user OAuth, but distinct if service account is different
+GOOGLE_SERVICE_ACCOUNT_AUTH_URI = os.environ.get('GOOGLE_SERVICE_ACCOUNT_AUTH_URI')
+GOOGLE_SERVICE_ACCOUNT_TOKEN_URI = os.environ.get('GOOGLE_SERVICE_ACCOUNT_TOKEN_URI')
+GOOGLE_SERVICE_ACCOUNT_AUTH_PROVIDER_X509_CERT_URL = os.environ.get('GOOGLE_SERVICE_ACCOUNT_AUTH_PROVIDER_X509_CERT_URL')
+GOOGLE_SERVICE_ACCOUNT_CLIENT_X509_CERT_URL = os.environ.get('GOOGLE_SERVICE_ACCOUNT_CLIENT_X509_CERT_URL')
+
+# Email address of the user the service account will impersonate for sending emails
+# This is required if using domain-wide delegation.
+GMAIL_API_IMPERSONATED_EMAIL = os.environ.get('GMAIL_API_IMPERSONATED_EMAIL') # e.g., rmsunicef@gmail.com
+
 # --- Booking and Check-in Behavior ---
 CHECK_IN_GRACE_MINUTES = int(os.environ.get('CHECK_IN_GRACE_MINUTES', 15)) # Grace period for check-in in minutes
 # How often the background job checks for bookings to auto-cancel if not checked in
