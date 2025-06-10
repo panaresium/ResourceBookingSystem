@@ -1,4 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
+    let calendarInstance;
     const calendarEl = document.getElementById('calendar');
     const calendarStatusFilterSelect = document.getElementById('calendar-status-filter'); // Changed ID
 
@@ -52,7 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.warn('API call for resource slots returned no data, or resource might be generally unavailable. Proceeding with predefined slots and user conflict check.');
             }
 
-            const allCalendarEvents = calendar.getEvents();
+            const allCalendarEvents = calendarInstance.getEvents();
             const currentEditingBookingId = document.getElementById('cebm-booking-id').value;
 
             // PROACTIVE FIX APPLIED HERE based on prompt's suggestion
@@ -204,13 +205,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 calendarEventToUpdate.setStart(localStartDate.toISOString());
                 calendarEventToUpdate.setEnd(localEndDate.toISOString());
             }
-            // calendar.refetchEvents();
+            // calendarInstance.refetchEvents(); // Corrected, but the original instruction implies this was a standalone line to change
 
             cebmStatusMessage.textContent = response.message || 'Booking updated successfully!';
             cebmStatusMessage.className = 'status-message success-message'; // Ensure you have .success-message CSS
 
             allUserEvents = []; // Clear the cache to force a fresh fetch
-            calendar.refetchEvents(); // Refresh calendar events
+            calendarInstance.refetchEvents(); // Refresh calendar events
 
             // Close modal and clear message after a short delay
             setTimeout(() => {
@@ -227,7 +228,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 cebmStatusMessage.className = 'status-message success-message'; // Treat as success
 
                 allUserEvents = []; // Clear the cache
-                calendar.refetchEvents(); // Refresh calendar events
+                calendarInstance.refetchEvents(); // Refresh calendar events
 
                 setTimeout(() => {
                     calendarEditBookingModal.style.display = 'none';
@@ -250,7 +251,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Logic to initialize and render the calendar ---
     const initializeCalendar = () => {
-        const calendar = new FullCalendar.Calendar(calendarEl, {
+        calendarInstance = new FullCalendar.Calendar(calendarEl, {
             initialView: 'dayGridMonth',
             timeZone: 'UTC', // Keep timezone as UTC for consistency with server
             selectAllow: function(selectInfo) {
@@ -373,7 +374,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     cebmStatusMessage.className = 'status-message success-message';
 
                                     // Remove event from calendar
-                                    const eventToRemove = calendar.getEventById(bookingId);
+                                    const eventToRemove = calendarInstance.getEventById(bookingId);
                                     if (eventToRemove) {
                                         eventToRemove.remove();
                                     }
@@ -507,14 +508,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 return { html: `<b>${arg.event.title}</b>` };
             }
         });
-        calendar.render();
-        console.log('FullCalendar effective timeZone:', calendar.getOption('timeZone')); // Log effective timezone
+        calendarInstance.render();
+        console.log('FullCalendar effective timeZone:', calendarInstance.getOption('timeZone')); // Log effective timezone
 
         // Attach event listeners that depend on the calendar object here, after it's rendered.
         if (calendarStatusFilterSelect) {
             calendarStatusFilterSelect.addEventListener('change', () => {
-                if (calendar) {
-                     calendar.refetchEvents();
+                if (calendarInstance) {
+                     calendarInstance.refetchEvents();
                 }
             });
         }
