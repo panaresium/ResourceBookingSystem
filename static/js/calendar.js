@@ -320,16 +320,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 calendarEditBookingModal.style.display = 'block';
 
                 // Re-assign to the new button for the current scope
-                let currentSaveBtn = cebmSaveChangesBtn; // Initialize with the original button
+                // let currentSaveBtn = cebmSaveChangesBtn; // Initialize with the original button // Will be assigned after cloning
+
+                const currentSaveBtnElement = document.getElementById('cebm-save-changes-btn');
+                const currentDeleteBtnElement = document.getElementById('cebm-delete-booking-btn');
+                let currentSaveBtn; // Will hold the (potentially new) save button
 
                 // Remove previous event listener to avoid multiple bindings if any
-                if (cebmSaveChangesBtn && cebmSaveChangesBtn.parentNode) {
-                    const newSaveBtn = cebmSaveChangesBtn.cloneNode(true);
-                    cebmSaveChangesBtn.parentNode.replaceChild(newSaveBtn, cebmSaveChangesBtn);
+                if (currentSaveBtnElement && currentSaveBtnElement.parentNode) {
+                    const newSaveBtn = currentSaveBtnElement.cloneNode(true);
+                    currentSaveBtnElement.parentNode.replaceChild(newSaveBtn, currentSaveBtnElement);
                     currentSaveBtn = newSaveBtn; // Assign the new button to currentSaveBtn
                 } else {
-                    console.error("Error: Could not find 'cebm-save-changes-btn' or its parent node. Cannot re-attach event listener for save button.");
-                    // Optionally, disable the button or show a user-facing error if this state is critical
+                    console.error("Error: Could not find 'currentSaveBtnElement' (ID: cebm-save-changes-btn) or its parent node. Cannot re-attach event listener for save button.");
+                    currentSaveBtn = currentSaveBtnElement; // Fallback to original if not found or no parent, though problematic
                 }
 
                 // Ensure currentSaveBtn is valid before attaching onclick
@@ -345,13 +349,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     // This case should ideally not be reached if cebmSaveChangesBtn was initially found.
                     // If it is reached, it means the original button was also null.
-                    console.error("Error: Save changes button ('cebm-save-changes-btn') not found. Save functionality will be unavailable.");
+                    console.error("Error: Save changes button ('currentSaveBtnElement', ID: cebm-save-changes-btn) not found. Save functionality will be unavailable.");
                 }
 
                 // Logic for delete button
-                if (cebmDeleteBookingBtn && cebmDeleteBookingBtn.parentNode) {
-                    const newDeleteBtn = cebmDeleteBookingBtn.cloneNode(true);
-                    cebmDeleteBookingBtn.parentNode.replaceChild(newDeleteBtn, cebmDeleteBookingBtn);
+                if (currentDeleteBtnElement && currentDeleteBtnElement.parentNode) {
+                    const newDeleteBtn = currentDeleteBtnElement.cloneNode(true);
+                    currentDeleteBtnElement.parentNode.replaceChild(newDeleteBtn, currentDeleteBtnElement);
 
                     newDeleteBtn.onclick = () => {
                         if (confirm("Are you sure you want to delete this booking?")) {
@@ -399,7 +403,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     };
                 } else {
-                    console.error("Error: Could not find 'cebm-delete-booking-btn' or its parent node.");
+                    console.error("Error: Could not find 'currentDeleteBtnElement' (ID: cebm-delete-booking-btn) or its parent node.");
                 }
             },
             eventSources: [
