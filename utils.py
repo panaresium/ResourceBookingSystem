@@ -327,15 +327,18 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
                 height = coords.get('height')
 
                 if x is not None and y is not None and width is not None and height is not None:
-                    x0, y0 = float(x), float(y)
-                    x1, y1 = float(x) + float(width), float(y) + float(height)
+                    try:
+                        x0, y0 = float(x), float(y)
+                        x1, y1 = float(x) + float(width), float(y) + float(height)
 
-                    outline_color = (255, 0, 0, 255)
-                    fill_color = (255, 0, 0, 255)
-                    stroke_width_pil = 3
+                        outline_color = (255, 0, 0, 255)
+                        fill_color = (255, 0, 0, 255)
+                        stroke_width_pil = 3
 
-                    draw.rectangle([(x0, y0), (x1, y1)], outline=outline_color, fill=fill_color, width=stroke_width_pil)
-                    logger.info(f"Drew rectangle on image at ({x0},{y0})-({x1},{y1}) for resource ID {resource_id} (working size {img.width}x{img.height})")
+                        draw.rectangle([(x0, y0), (x1, y1)], outline=outline_color, fill=fill_color, width=stroke_width_pil)
+                        logger.info(f"Drew rectangle on image at ({x0},{y0})-({x1},{y1}) for resource ID {resource_id} (working size {img.width}x{img.height})")
+                    except (ValueError, TypeError) as e_coords:
+                        logger.warning(f"Invalid coordinate values for drawing on floor map {base_image_filename} for resource ID {resource_id}: {e_coords}. Coords string: {map_coordinates_str}")
                 else:
                     logger.warning(f"Incomplete coordinates for drawing on {base_image_filename} for resource ID {resource_id}. Coords string: {map_coordinates_str}")
             except json.JSONDecodeError as e_json:
@@ -1618,3 +1621,5 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
 
     logger_instance.info(f"Detailed availability for user {user.username} on {target_date}: Total Primary Slots={total_primary_slots}, Available for User={available_primary_slots_for_user} across {len(resources_list)} resources.")
     return {'total_primary_slots': total_primary_slots, 'available_primary_slots_for_user': available_primary_slots_for_user}
+
+[end of utils.py]
