@@ -1219,7 +1219,7 @@ def delete_booking_by_user(booking_id):
                 )
 
                 translated_subject_format = _("Booking Cancelled: %(resource_name)s - %(booking_title)s")
-                subject=translated_subject_format % {'resource_name': email_data['resource_name'], 'booking_title': email_data['booking_title']},
+                subject=translated_subject_format % {'resource_name': email_data['resource_name'], 'booking_title': email_data['booking_title']}
 
                 send_email(
                     to_address=user_email_for_cancellation,
