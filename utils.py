@@ -2,6 +2,7 @@ import os
 import json
 import logging # Added for fallback logger
 import tempfile # Added for image generation and email attachment
+import re # Added for filename sanitization
 from PIL import Image, ImageDraw # Added for image generation
 import requests
 from datetime import datetime, date, timedelta, time, timezone
@@ -23,7 +24,7 @@ from googleapiclient.errors import HttpError
 # Assuming db and mail are initialized in extensions.py
 from extensions import db # mail is now fetched from current_app.extensions - mail removed
 # Assuming models are defined in models.py
-from models import AuditLog, User, Resource, FloorMap, Role, Booking # Added Booking
+from models import AuditLog, User, Resource, FloorMap, Role, Booking # Added Booking, Resource, FloorMap
 from sqlalchemy import func # Ensure func is imported
 from sqlalchemy.sql import func as sqlfunc # Added for explicit use
 
@@ -187,6 +188,7 @@ def add_audit_log(action: str, details: str, user_id: int = None, username: str 
         db.session.rollback()
 
 def resource_to_dict(resource: Resource) -> dict:
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
     try:
         # Assuming url_for is available in the context this function is called
         image_url = url_for('static', filename=f'resource_uploads/{resource.image_filename}') if resource.image_filename else None
@@ -236,7 +238,7 @@ def resource_to_dict(resource: Resource) -> dict:
         try:
             parsed_coords = json.loads(resource.map_coordinates)
         except json.JSONDecodeError:
-            # Optional: current_app.logger.warning(f"Invalid JSON in map_coordinates for resource {resource.id}: {resource.map_coordinates}")
+            logger.warning(f"Invalid JSON in map_coordinates for resource {resource.id}: {resource.map_coordinates}")
             pass # parsed_coords remains None if JSON is invalid
 
     parsed_map_roles = []
@@ -248,41 +250,60 @@ def resource_to_dict(resource: Resource) -> dict:
                 # Further validation could be added here to ensure it's a list of integers if necessary
                 parsed_map_roles = loaded_roles
         except json.JSONDecodeError:
-            # Optional: Log this warning if appropriate for your application
-            # current_app.logger.warning(f"Invalid JSON in map_allowed_role_ids for resource {resource.id}: {resource.map_allowed_role_ids}")
+            logger.warning(f"Invalid JSON in map_allowed_role_ids for resource {resource.id}: {resource.map_allowed_role_ids}")
             pass # Defaults to empty list if JSON is invalid or field is empty
 
     if parsed_coords is not None and isinstance(parsed_coords, dict): # Ensure parsed_coords is a dict before adding keys
         parsed_coords['allowed_role_ids'] = parsed_map_roles
     elif parsed_coords is not None:
-        # current_app.logger.warning(f"Resource {resource.id} map_coordinates was not a dict after parsing: {type(parsed_coords)}")
+        logger.warning(f"Resource {resource.id} map_coordinates was not a dict after parsing: {type(parsed_coords)}")
         pass
 
     resource_dict['map_coordinates'] = parsed_coords
 
     return resource_dict
 
-def generate_booking_image(resource_image_filename: str, map_coordinates_str: str) -> str | None:
+def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_name: str) -> str | None:
     """
-    Generates an image with booking details, possibly highlighting an area on a map.
+    Generates an image with booking details, possibly highlighting an area on a map, using the floor map as base.
     Returns the path to the temporary image file, or None if an error occurs.
     """
     logger = current_app.logger if current_app else logging.getLogger(__name__)
 
-    if not resource_image_filename:
-        logger.warning("generate_booking_image: No resource_image_filename provided.")
+    resource = Resource.query.get(resource_id)
+    if not resource:
+        logger.error(f"generate_booking_image: Resource with ID {resource_id} not found.")
         return None
 
-    upload_folder = current_app.config.get('RESOURCE_IMAGE_UPLOAD_FOLDER')
+    if not resource.floor_map_id:
+        logger.error(f"generate_booking_image: Resource ID {resource_id} ('{resource.name}') has no associated floor_map_id.")
+        return None
+
+    floor_map = FloorMap.query.get(resource.floor_map_id)
+    if not floor_map:
+        logger.error(f"generate_booking_image: FloorMap with ID {resource.floor_map_id} not found for Resource ID {resource_id}.")
+        return None
+
+    if not floor_map.image_filename:
+        logger.error(f"generate_booking_image: FloorMap ID {floor_map.id} ('{floor_map.name}') has no image_filename set.")
+        return None
+
+    base_image_filename = floor_map.image_filename
+    upload_folder = current_app.config.get('FLOOR_MAP_UPLOAD_FOLDER')
+
     if not upload_folder:
-        logger.error("generate_booking_image: RESOURCE_IMAGE_UPLOAD_FOLDER not configured.")
+        logger.error("generate_booking_image: FLOOR_MAP_UPLOAD_FOLDER not configured.")
         return None
 
-    base_image_path = os.path.join(upload_folder, resource_image_filename)
+    base_image_path = os.path.join(upload_folder, base_image_filename)
 
     if not os.path.exists(base_image_path):
-        logger.error(f"generate_booking_image: Base image not found at {base_image_path}")
+        logger.error(f"generate_booking_image: Base image not found at {base_image_path} (derived from FloorMap ID {floor_map.id}).")
         return None
+
+    # ... rest of the image processing logic (drawing rectangle, saving) ...
+    # For this step, the existing PNG saving logic can remain.
+    # It will be modified in subsequent plan steps.
 
     try:
         img = Image.open(base_image_path).convert("RGBA")
@@ -304,27 +325,64 @@ def generate_booking_image(resource_image_filename: str, map_coordinates_str: st
 
                         outline_color = (255, 0, 0, 200)  # Red, mostly opaque
                         fill_color = (255, 0, 0, 100)    # Red, more transparent
-                        stroke_width_pil = 3 # Pillow uses 'width' for stroke width in rectangle
+                        stroke_width_pil = 3
 
                         draw.rectangle([(x0, y0), (x1, y1)], outline=outline_color, fill=fill_color, width=stroke_width_pil)
-                        logger.info(f"Drew rectangle on image at ({x0},{y0})-({x1},{y1}) for resource image {resource_image_filename}")
+                        logger.info(f"Drew rectangle on image at ({x0},{y0})-({x1},{y1}) for resource ID {resource_id} using floor map {base_image_filename}")
                     except (ValueError, TypeError) as e_coords:
-                        logger.warning(f"Invalid coordinate values for drawing on {resource_image_filename}: {e_coords}. Coords string: {map_coordinates_str}")
+                        logger.warning(f"Invalid coordinate values for drawing on floor map {base_image_filename} for resource ID {resource_id}: {e_coords}. Coords string: {map_coordinates_str}")
                 else:
-                    logger.warning(f"Incomplete coordinates for drawing on {resource_image_filename}. Coords string: {map_coordinates_str}")
+                    logger.warning(f"Incomplete coordinates for drawing on floor map {base_image_filename} for resource ID {resource_id}. Coords string: {map_coordinates_str}")
             except json.JSONDecodeError as e_json:
-                logger.warning(f"Could not decode map_coordinates JSON for {resource_image_filename}: {e_json}. Coords string: {map_coordinates_str}")
-            except Exception as e_draw: # Catch other potential errors during drawing
-                logger.error(f"Error drawing coordinates on {resource_image_filename}: {e_draw}", exc_info=True)
+                logger.warning(f"Could not decode map_coordinates JSON for floor map {base_image_filename} for resource ID {resource_id}: {e_json}. Coords string: {map_coordinates_str}")
+            except Exception as e_draw:
+                logger.error(f"Error drawing coordinates on floor map {base_image_filename} for resource ID {resource_id}: {e_draw}", exc_info=True)
 
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-        img.save(temp_file.name, "PNG")
-        temp_file.close() # Close the file handle so it can be opened by `open()` in send_email
-        logger.info(f"Saved modified image for {resource_image_filename} to temporary file {temp_file.name}")
-        return temp_file.name
+        # Convert to RGB if necessary (e.g., RGBA or P mode with transparency) before saving as JPG
+        if img.mode == 'RGBA' or (img.mode == 'P' and 'transparency' in img.info):
+            logger.debug(f"Image mode is {img.mode}, converting to RGB with white background before saving as JPG for resource ID {resource_id}.")
+            # Create a white background image
+            background = Image.new("RGB", img.size, (255, 255, 255))
+            # Paste the image (which might have transparency) onto the white background
+            # The alpha channel of img itself is used as the mask
+            # Ensure img is RGBA before trying to split alpha, P mode needs conversion first
+            if img.mode != 'RGBA':
+                img = img.convert('RGBA') # Convert P with transparency (or other modes) to RGBA
+
+            alpha_channel = img.split()[-1] # Get the alpha channel
+            background.paste(img, (0,0), mask=alpha_channel) # Paste using alpha as mask
+            img = background # Replace img with the RGB version
+        elif img.mode != 'RGB': # If it's not RGBA but also not RGB (e.g. P without transparency, LA, L)
+            logger.debug(f"Image mode is {img.mode}, converting to RGB before saving as JPG for resource ID {resource_id}.")
+            img = img.convert('RGB')
+
+        # Sanitize resource_name and construct output path
+        # Basic sanitization: replace spaces with underscores, remove non-alphanumeric (except underscore, hyphen, dot)
+        sanitized_name_base = re.sub(r'[^\w.-]', '', resource_name.replace(' ', '_'))
+        sanitized_name_base = sanitized_name_base[:100] # Limit length
+        if not sanitized_name_base:
+            sanitized_name_base = f"resource_{resource_id}" # Fallback
+
+        output_filename = f"{sanitized_name_base}.jpg"
+
+        temp_dir = tempfile.gettempdir()
+        output_path = os.path.join(temp_dir, output_filename)
+
+        # Remove existing file if any, to prevent errors or serving old data
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+                logger.debug(f"Removed existing temporary file at {output_path} before saving new one.")
+            except OSError as e_remove:
+                logger.warning(f"Could not remove existing temp file {output_path} before saving: {e_remove}")
+
+        img.save(output_path, "JPEG", quality=80, optimize=True)
+
+        logger.info(f"Saved modified image for resource ID {resource_id} ('{resource_name}') to temporary JPG file at {output_path}")
+        return output_path
 
     except Exception as e_outer:
-        logger.error(f"Error in generate_booking_image for {resource_image_filename}: {e_outer}", exc_info=True)
+        logger.error(f"Error in generate_booking_image for resource ID {resource_id} using floor map {base_image_filename}: {e_outer}", exc_info=True)
         return None
 
 def send_email(to_address: str, subject: str, body: str = None, html_body: str = None, attachment_path: str = None):
