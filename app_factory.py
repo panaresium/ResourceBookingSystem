@@ -329,21 +329,21 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     # app_from_state_for_test = getattr(mail_state_for_test, 'app', None) # mail removed
     # app.logger.error(f"ERROR_DIAG: APP_FACTORY - Test email check: mail.state: {mail_state_for_test}, mail.state.app: {app_from_state_for_test}") # mail removed
 
-    app.logger.info("Attempting to send test email from app_factory.py...")
-    with app.app_context():
-        try:
-            # utils.send_email now handles its own detailed success/failure logging.
-            # The factory's role is just to trigger the test email.
-            send_email(
-                to_address="debug@example.com",
-                subject="Test Email from App Factory (Startup Check)",
-                body="This is a test email sent from app_factory.py during application startup to check email functionality."
-            )
-            # Success message is now primarily handled within send_email or by observing logs from utils.py
-            app.logger.info("Test email dispatch attempt from factory completed. Check logs for success/failure details from utils.send_email.")
-        except Exception as e_factory_mail:
-            # This will catch unexpected errors if the send_email call itself fails catastrophically.
-            app.logger.error(f"Test email dispatch from factory FAILED due to an unexpected error: {e_factory_mail}", exc_info=True)
+    # app.logger.info("Attempting to send test email from app_factory.py...")
+    # with app.app_context():
+    #     try:
+    #         # utils.send_email now handles its own detailed success/failure logging.
+    #         # The factory's role is just to trigger the test email.
+    #         send_email(
+    #             to_address="debug@example.com",
+    #             subject="Test Email from App Factory (Startup Check)",
+    #             body="This is a test email sent from app_factory.py during application startup to check email functionality."
+    #         )
+    #         # Success message is now primarily handled within send_email or by observing logs from utils.py
+    #         app.logger.info("Test email dispatch attempt from factory completed. Check logs for success/failure details from utils.send_email.")
+    #     except Exception as e_factory_mail:
+    #         # This will catch unexpected errors if the send_email call itself fails catastrophically.
+    #         app.logger.error(f"Test email dispatch from factory FAILED due to an unexpected error: {e_factory_mail}", exc_info=True)
 
     csrf.init_app(app)
     socketio.init_app(app, message_queue=app.config.get('SOCKETIO_MESSAGE_QUEUE')) # Add message_queue from config

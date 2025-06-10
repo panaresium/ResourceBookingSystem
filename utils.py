@@ -326,7 +326,7 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
                         x1, y1 = float(x) + float(width), float(y) + float(height)
 
                         outline_color = (255, 0, 0, 255)  # Opaque Red
-                        fill_color = (255, 0, 0, 180)    # More Opaque Red (approx 70% opacity)
+                        fill_color = (255, 0, 0, 255)    # Fully Opaque Red
                         stroke_width_pil = 20 # Increased stroke width
 
                         draw.rectangle([(x0, y0), (x1, y1)], outline=outline_color, fill=fill_color, width=stroke_width_pil)
