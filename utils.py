@@ -303,10 +303,6 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
         logger.error(f"generate_booking_image: Base image not found at {base_image_path} (derived from FloorMap ID {floor_map.id}).")
         return None
 
-    # ... rest of the image processing logic (drawing rectangle, saving) ...
-    # For this step, the existing PNG saving logic can remain.
-    # It will be modified in subsequent plan steps.
-
     try:
         img = Image.open(base_image_path).convert("RGBA")
         draw = ImageDraw.Draw(img, "RGBA")
@@ -314,7 +310,6 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
         if map_coordinates_str:
             try:
                 coords = json.loads(map_coordinates_str)
-                # Handle Fabric.js 'left'/'top' or direct 'x'/'y'
                 x = coords.get('x', coords.get('left'))
                 y = coords.get('y', coords.get('top'))
                 width = coords.get('width')
@@ -327,10 +322,20 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
 
                         outline_color = (255, 0, 0, 255)  # Opaque Red
                         fill_color = (255, 0, 0, 255)    # Fully Opaque Red
-                        stroke_width_pil = 20 # Increased stroke width
+                        stroke_width_pil = 20
 
                         draw.rectangle([(x0, y0), (x1, y1)], outline=outline_color, fill=fill_color, width=stroke_width_pil)
                         logger.info(f"Drew rectangle on image at ({x0},{y0})-({x1},{y1}) for resource ID {resource_id} using floor map {base_image_filename}")
+
+                        # Stage 1: After Drawing
+                        debug_filename_s1 = f"debug_resource_{resource_id}_1_after_draw.png"
+                        debug_path_s1 = os.path.join(tempfile.gettempdir(), debug_filename_s1)
+                        try:
+                            img.save(debug_path_s1, "PNG")
+                            logger.info(f"DEBUG IMAGE Stage 1 (After Draw) saved: {debug_path_s1}")
+                        except Exception as e_debug_save:
+                            logger.error(f"Failed to save DEBUG IMAGE {debug_path_s1}: {e_debug_save}")
+
                     except (ValueError, TypeError) as e_coords:
                         logger.warning(f"Invalid coordinate values for drawing on floor map {base_image_filename} for resource ID {resource_id}: {e_coords}. Coords string: {map_coordinates_str}")
                 else:
@@ -340,44 +345,51 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
             except Exception as e_draw:
                 logger.error(f"Error drawing coordinates on floor map {base_image_filename} for resource ID {resource_id}: {e_draw}", exc_info=True)
 
-        # Convert to RGB if necessary (e.g., RGBA or P mode with transparency) before saving as JPG
         if img.mode == 'RGBA' or (img.mode == 'P' and 'transparency' in img.info):
             logger.debug(f"Image mode is {img.mode}, converting to RGB with white background before saving as JPG for resource ID {resource_id}.")
-            # Create a white background image
             background = Image.new("RGB", img.size, (255, 255, 255))
-            # Paste the image (which might have transparency) onto the white background
-            # The alpha channel of img itself is used as the mask
-            # Ensure img is RGBA before trying to split alpha, P mode needs conversion first
             if img.mode != 'RGBA':
-                img = img.convert('RGBA') # Convert P with transparency (or other modes) to RGBA
-
-            alpha_channel = img.split()[-1] # Get the alpha channel
-            background.paste(img, (0,0), mask=alpha_channel) # Paste using alpha as mask
-            img = background # Replace img with the RGB version
-        elif img.mode != 'RGB': # If it's not RGBA but also not RGB (e.g. P without transparency, LA, L)
+                img = img.convert('RGBA')
+            alpha_channel = img.split()[-1]
+            background.paste(img, (0,0), mask=alpha_channel)
+            img = background
+        elif img.mode != 'RGB':
             logger.debug(f"Image mode is {img.mode}, converting to RGB before saving as JPG for resource ID {resource_id}.")
             img = img.convert('RGB')
 
-        # Resize image if it's too large
-        MAX_DIMENSION = 1200 # Or get from app.config if desired for more flexibility
+        # Stage 2: After RGB Conversion
+        debug_filename_s2 = f"debug_resource_{resource_id}_2_after_rgb_conversion.png"
+        debug_path_s2 = os.path.join(tempfile.gettempdir(), debug_filename_s2)
+        try:
+            img.save(debug_path_s2, "PNG")
+            logger.info(f"DEBUG IMAGE Stage 2 (After RGB Conversion) saved: {debug_path_s2}")
+        except Exception as e_debug_save:
+            logger.error(f"Failed to save DEBUG IMAGE {debug_path_s2}: {e_debug_save}")
+
+        MAX_DIMENSION = 1200
         if img.width > MAX_DIMENSION or img.height > MAX_DIMENSION:
             logger.info(f"Image for resource ID {resource_id} ('{resource_name}') was large ({img.width}x{img.height}), resizing to fit within {MAX_DIMENSION}px on its largest side.")
-            img.thumbnail((MAX_DIMENSION, MAX_DIMENSION)) # Resizes in place
+            img.thumbnail((MAX_DIMENSION, MAX_DIMENSION))
             logger.info(f"Image for resource ID {resource_id} ('{resource_name}') resized to {img.width}x{img.height}.")
 
-        # Sanitize resource_name and construct output path
-        # Basic sanitization: replace spaces with underscores, remove non-alphanumeric (except underscore, hyphen, dot)
+            # Stage 3: After Thumbnailing (Resizing)
+            debug_filename_s3 = f"debug_resource_{resource_id}_3_after_thumbnail.png"
+            debug_path_s3 = os.path.join(tempfile.gettempdir(), debug_filename_s3)
+            try:
+                img.save(debug_path_s3, "PNG")
+                logger.info(f"DEBUG IMAGE Stage 3 (After Thumbnail) saved: {debug_path_s3}")
+            except Exception as e_debug_save:
+                logger.error(f"Failed to save DEBUG IMAGE {debug_path_s3}: {e_debug_save}")
+
         sanitized_name_base = re.sub(r'[^\w.-]', '', resource_name.replace(' ', '_'))
-        sanitized_name_base = sanitized_name_base[:100] # Limit length
+        sanitized_name_base = sanitized_name_base[:100]
         if not sanitized_name_base:
-            sanitized_name_base = f"resource_{resource_id}" # Fallback
+            sanitized_name_base = f"resource_{resource_id}"
 
         output_filename = f"{sanitized_name_base}.jpg"
-
         temp_dir = tempfile.gettempdir()
         output_path = os.path.join(temp_dir, output_filename)
 
-        # Remove existing file if any, to prevent errors or serving old data
         if os.path.exists(output_path):
             try:
                 os.remove(output_path)
@@ -385,7 +397,7 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
             except OSError as e_remove:
                 logger.warning(f"Could not remove existing temp file {output_path} before saving: {e_remove}")
 
-        img.save(output_path, "JPEG", quality=70, optimize=True) # Adjusted quality to 70
+        img.save(output_path, "JPEG", quality=70, optimize=True)
 
         logger.info(f"Saved modified image for resource ID {resource_id} ('{resource_name}') to temporary JPG file at {output_path}")
         return output_path
@@ -399,23 +411,20 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
 
     if not body and not html_body:
         logger.error(f"Email to {to_address} has no body or html_body. Not sending.")
-        # Attachment cleanup if needed
-        if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
-            try:
-                os.remove(attachment_path)
-            except Exception: pass # Logged later if important
-        return
-
-    if current_app.config.get('MAIL_SUPPRESS_SEND'):
-        logger.info(f"Email sending is suppressed (MAIL_SUPPRESS_SEND). Intent: To='{to_address}', Subject='{subject}'.")
-        # Attachment cleanup
         if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
             try:
                 os.remove(attachment_path)
             except Exception: pass
         return
 
-    # Log intent
+    if current_app.config.get('MAIL_SUPPRESS_SEND'):
+        logger.info(f"Email sending is suppressed (MAIL_SUPPRESS_SEND). Intent: To='{to_address}', Subject='{subject}'.")
+        if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
+            try:
+                os.remove(attachment_path)
+            except Exception: pass
+        return
+
     email_log_entry = {
         'to': to_address, 'subject': subject, 'body_present': bool(body),
         'html_body_present': bool(html_body), 'attachment_path': attachment_path,
@@ -425,47 +434,33 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
     logger.info(f"Attempting to send email via Gmail API to {to_address}: {subject} {'with attachment' if attachment_path else ''}")
 
     try:
-        # --- Load New OAuth 2.0 Client ID Config ---
         client_id = current_app.config.get('GOOGLE_CLIENT_ID')
         client_secret = current_app.config.get('GOOGLE_CLIENT_SECRET')
         refresh_token = current_app.config.get('GMAIL_REFRESH_TOKEN')
-        from_email = current_app.config.get('GMAIL_SENDER_ADDRESS') # This is the authorized sender
+        from_email = current_app.config.get('GMAIL_SENDER_ADDRESS')
 
         if not all([client_id, client_secret, refresh_token, from_email]):
-            logger.error("Gmail API OAuth 2.0 Client ID credentials (client_id, client_secret, refresh_token, or sender_address) are not fully configured.")
+            logger.error("Gmail API OAuth 2.0 Client ID credentials not fully configured.")
             email_log_entry['status'] = 'failed_oauth_config_missing'
             return
 
-        # --- Build User Credentials ---
         try:
             creds = UserCredentials(
-                None,  # Access token is None, it will be refreshed by the library
-                refresh_token=refresh_token,
-                token_uri='https://oauth2.googleapis.com/token', # Standard Google token URI
-                client_id=client_id,
-                client_secret=client_secret,
+                None, refresh_token=refresh_token, token_uri='https://oauth2.googleapis.com/token',
+                client_id=client_id, client_secret=client_secret,
                 scopes=['https://www.googleapis.com/auth/gmail.send']
             )
-            # The google-auth library will automatically handle refreshing the access token
-            # when a request is made if the current access token is missing or expired.
-
         except Exception as e_creds:
             logger.error(f"Failed to create/refresh Google OAuth credentials: {str(e_creds)}", exc_info=True)
             email_log_entry['status'] = 'failed_oauth_credential_creation'
             email_log_entry['error_detail'] = str(e_creds)
             return
 
-        # --- Build Gmail API Service ---
         service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
-
-        # --- Create Email Message (MIME) ---
-        # Note: from_email is now GMAIL_SENDER_ADDRESS, Service Account and impersonation logic removed.
-        if html_body and attachment_path:
-            message = MIMEMultipart('related') # Use 'related' for HTML with embedded images, or 'mixed' if images are just attachments.
-                                            # For general attachments with HTML body, 'mixed' is usually preferred.
-                                            # Let's assume 'mixed' is more general here unless specific inline images are used in HTML.
-            message = MIMEMultipart('mixed')
-        elif html_body or attachment_path: # If only one of them
+        message = MIMEMultipart('mixed')
+        if html_body and attachment_path: # This case was not correctly handled before, it should be 'mixed' not 'related' for general attachments.
+             message = MIMEMultipart('mixed') # Corrected
+        elif html_body or attachment_path:
             message = MIMEMultipart('mixed')
         else: # Plain text only
             message = MIMEText(body, 'plain', 'utf-8')
@@ -475,51 +470,32 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
         message['subject'] = subject
 
         if isinstance(message, MIMEMultipart):
-            # Create a MIMEMultipart 'alternative' part for text/html. This is important.
             alt_part = MIMEMultipart('alternative')
-            if body: # Attach plain text part first
+            if body:
                 alt_part.attach(MIMEText(body, 'plain', 'utf-8'))
-            if html_body: # Attach HTML part
+            if html_body:
                 alt_part.attach(MIMEText(html_body, 'html', 'utf-8'))
-            message.attach(alt_part) # Attach this 'alternative' part to the main 'mixed' message
+            message.attach(alt_part)
 
         if attachment_path:
             file_ext = os.path.splitext(attachment_path)[1].lower()
-            # Default MIME type
             maintype, subtype = 'application', 'octet-stream'
-
-            if file_ext == '.png':
-                maintype, subtype = 'image', 'png'
-            elif file_ext in ['.jpg', '.jpeg']:
-                maintype, subtype = 'image', 'jpeg'
-            elif file_ext == '.pdf':
-                maintype, subtype = 'application', 'pdf'
-            elif file_ext == '.txt':
-                maintype, subtype = 'text', 'plain'
-            # Add more MIME types as needed (e.g., DOCX, XLSX)
-            # For DOCX: application/vnd.openxmlformats-officedocument.wordprocessingml.document
-            # For XLSX: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+            if file_ext == '.png': maintype, subtype = 'image', 'png'
+            elif file_ext in ['.jpg', '.jpeg']: maintype, subtype = 'image', 'jpeg'
+            elif file_ext == '.pdf': maintype, subtype = 'application', 'pdf'
+            elif file_ext == '.txt': maintype, subtype = 'text', 'plain'
 
             with open(attachment_path, 'rb') as fp:
-                if maintype == 'image':
-                    msg_attach = MIMEImage(fp.read(), _subtype=subtype, name=os.path.basename(attachment_path))
-                elif maintype == 'text':
-                    # MIMEText needs string, not bytes for text/* types
-                    msg_attach = MIMEText(fp.read().decode('utf-8'), _subtype=subtype, _charset='utf-8')
-                    # MIMEText doesn't take 'name' in constructor, add filename to Content-Disposition
-                else: # Default to MIMEApplication for 'application/*' or other types
-                    msg_attach = MIMEApplication(fp.read(), _subtype=subtype, name=os.path.basename(attachment_path))
+                if maintype == 'image': msg_attach = MIMEImage(fp.read(), _subtype=subtype, name=os.path.basename(attachment_path))
+                elif maintype == 'text': msg_attach = MIMEText(fp.read().decode('utf-8'), _subtype=subtype, _charset='utf-8')
+                else: msg_attach = MIMEApplication(fp.read(), _subtype=subtype, name=os.path.basename(attachment_path))
 
-            # Ensure filename is set for all attachment types, including text/plain
             msg_attach.add_header('Content-Disposition', 'attachment', filename=os.path.basename(attachment_path))
             message.attach(msg_attach)
             logger.info(f"Attachment {attachment_path} prepared for Gmail API.")
 
-
         raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
         create_message_body = {'raw': raw_message}
-
-        # --- Send Email ---
         sent_message = service.users().messages().send(userId='me', body=create_message_body).execute()
         logger.info(f"Email sent successfully via Gmail API to {to_address}. Message ID: {sent_message.get('id')}")
         email_log_entry['status'] = 'sent_api_success'
