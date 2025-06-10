@@ -18,6 +18,8 @@ from email.mime.image import MIMEImage
 from email.mime.application import MIMEApplication # For generic attachments
 # from google.oauth2.service_account import Credentials as ServiceAccountCredentials # Removed
 from google.oauth2.credentials import Credentials as UserCredentials # Added for OAuth 2.0 Client ID
+import socket # Added for specific network error handling
+import httplib2 # Added for specific network error handling
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -516,6 +518,14 @@ def send_email(to_address: str, subject: str, body: str = None, html_body: str =
         email_log_entry['status'] = 'sent_api_success'
         email_log_entry['message_id'] = sent_message.get('id')
 
+    except socket.gaierror as e_gaierror:
+        logger.error(f"Network error (socket.gaierror) occurred sending email to {to_address} via Gmail API: {e_gaierror}. This often indicates a DNS resolution or network connectivity problem.", exc_info=True)
+        email_log_entry['status'] = 'failed_api_socket_error'
+        email_log_entry['error_detail'] = str(e_gaierror)
+    except httplib2.error.ServerNotFoundError as e_servernotfound:
+        logger.error(f"Network error (httplib2.error.ServerNotFoundError) occurred sending email to {to_address} via Gmail API: {e_servernotfound}. This often indicates a DNS resolution or network connectivity problem.", exc_info=True)
+        email_log_entry['status'] = 'failed_api_servernotfound_error'
+        email_log_entry['error_detail'] = str(e_servernotfound)
     except HttpError as error:
         logger.error(f"An HTTP error occurred sending email to {to_address} via Gmail API: {error.resp.status} - {error._get_reason()}", exc_info=True)
         email_log_entry['status'] = f'failed_api_http_error_{error.resp.status}'
