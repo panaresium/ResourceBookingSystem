@@ -12,8 +12,8 @@ from models import Booking, Resource, User, FloorMap, BookingSettings # Added Fl
 from extensions import db, socketio # Try to import socketio
 # Assuming permission_required is in auth.py
 from auth import permission_required # Corrected: auth.py is at root
-from datetime import datetime, timedelta # Add datetime imports
-from utils import load_scheduler_settings, save_scheduler_settings, DEFAULT_FULL_BACKUP_SCHEDULE, DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE
+from datetime import datetime, timedelta, timezone # Add datetime imports
+from utils import load_scheduler_settings, save_scheduler_settings, DEFAULT_FULL_BACKUP_SCHEDULE, DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE, add_audit_log # Ensure add_audit_log is imported
 
 # Import backup/restore functions
 from azure_backup import (
@@ -784,11 +784,61 @@ def analytics_dashboard():
     current_app.logger.info(f"User {current_user.username} accessed analytics dashboard.")
     return render_template('analytics.html')
 
-@admin_ui_bp.route('/system-settings', methods=['GET'])
+@admin_ui_bp.route('/system-settings', methods=['GET', 'POST'])
 @login_required
-@permission_required('manage_system_settings') # Or a more specific view permission if created
+@permission_required('manage_system_settings') # Or 'manage_system' if 'manage_system_settings' is not defined
 def system_settings_page():
-    return render_template('admin/system_settings.html')
+    settings = BookingSettings.query.first()
+    if not settings:
+        settings = BookingSettings(global_time_offset_hours=0)
+        db.session.add(settings)
+        # Commit immediately if it's new to ensure it's in DB for GET request display
+        try:
+            db.session.commit()
+        except Exception as e:
+            current_app.logger.error(f"Error creating default BookingSettings: {e}")
+            db.session.rollback()
+            flash(_('Error initializing system settings. Please try again.'), 'danger')
+            # Fallback to a temporary object if DB commit fails for the GET request
+            settings = BookingSettings(global_time_offset_hours=0) # Temporary for display
+
+    if request.method == 'POST':
+        try:
+            new_offset_str = request.form.get('global_time_offset_hours')
+            if new_offset_str is None or new_offset_str.strip() == "":
+                flash(_('Time offset value must be provided and cannot be empty.'), 'danger')
+            else:
+                new_offset = int(new_offset_str)
+                if not (-24 < new_offset < 24): # Basic sanity check
+                    flash(_('Time offset must be a reasonable integer, e.g., between -23 and +23 hours.'), 'danger')
+                else:
+                    settings.global_time_offset_hours = new_offset
+                    db.session.commit()
+                    flash(_('Global time offset updated successfully.'), 'success')
+                    add_audit_log(action="UPDATE_TIME_OFFSET", details=f"Global time offset set to {new_offset} hours by {current_user.username}.")
+        except ValueError:
+            db.session.rollback()
+            flash(_('Invalid input for time offset. Please enter a whole number (integer).'), 'danger')
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"Error updating time offset: {e}", exc_info=True)
+            flash(_('An error occurred while updating the time offset. Please check logs.'), 'danger')
+        return redirect(url_for('admin_ui.system_settings_page'))
+
+    # For GET request, prepare display times
+    current_offset_hours = settings.global_time_offset_hours
+    if current_offset_hours is None: # Should have a default, but safeguard
+        current_offset_hours = 0
+
+    # Use timezone.utc for explicit UTC time
+    utc_now = datetime.now(timezone.utc)
+    # Calculate effective time by adding offset
+    effective_time = utc_now + timedelta(hours=current_offset_hours)
+
+    return render_template('admin/system_settings.html',
+                           current_offset_hours=current_offset_hours,
+                           current_utc_time_str=utc_now.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                           effective_operational_time_str=effective_time.strftime('%Y-%m-%d %H:%M:%S %Z (Effective)'))
 
 @admin_ui_bp.route('/analytics/data') # New route for analytics data
 @login_required

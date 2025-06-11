@@ -13,7 +13,7 @@ from extensions import db, socketio # Removed mail
 # Assuming models.py contains these model definitions
 from models import Booking, Resource, User, WaitlistEntry, BookingSettings, ResourcePIN, FloorMap # Added ResourcePIN & FloorMap
 # Assuming utils.py contains these helper functions
-from utils import add_audit_log, parse_simple_rrule, send_email, send_teams_notification, check_booking_permission, generate_booking_image
+from utils import add_audit_log, parse_simple_rrule, send_email, send_teams_notification, check_booking_permission, generate_booking_image, get_current_effective_time # Added get_current_effective_time
 # Assuming auth.py contains permission_required decorator
 from auth import permission_required
 
@@ -64,7 +64,7 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
         all_user_bookings_from_db = base_query.all()
 
         relevant_bookings_dicts = []
-        now_utc = datetime.now(timezone.utc)
+        effective_now = get_current_effective_time()
 
         for booking in all_user_bookings_from_db:
             resource = Resource.query.get(booking.resource_id)
@@ -76,7 +76,7 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
             check_in_window_start = effective_check_in_base_time - timedelta(minutes=check_in_minutes_before)
             check_in_window_end = effective_check_in_base_time + timedelta(minutes=check_in_minutes_after)
 
-            is_upcoming = actual_start_time_utc >= now_utc # Based on actual start time
+            is_upcoming = actual_start_time_utc >= effective_now # Based on actual start time
 
             if (booking_type == 'upcoming' and not is_upcoming) or \
                (booking_type == 'past' and is_upcoming):
@@ -86,7 +86,7 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
                 enable_check_in_out and
                 booking.checked_in_at is None and
                 booking.status == 'approved' and
-                (check_in_window_start <= now_utc <= check_in_window_end)
+                (check_in_window_start <= effective_now <= check_in_window_end)
             )
 
             display_check_in_token = None
@@ -99,7 +99,7 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
                 if booking_end_time_aware.tzinfo is None:
                     booking_end_time_aware = booking_end_time_aware.replace(tzinfo=timezone.utc)
 
-                if token_expires_at_aware and token_expires_at_aware > now_utc and booking_end_time_aware > now_utc:
+                if token_expires_at_aware and token_expires_at_aware > effective_now and booking_end_time_aware > effective_now:
                     display_check_in_token = booking.check_in_token
 
             resource_has_active_pin = False
@@ -280,6 +280,11 @@ def create_booking():
     max_bookings_per_user_effective = booking_settings.max_bookings_per_user if booking_settings and booking_settings.max_bookings_per_user is not None else None
     # enable_check_in_out_effective = booking_settings.enable_check_in_out if booking_settings else False # Not used in this function directly
 
+    # Get the global offset for converting to UTC for storage
+    current_offset_hours = 0
+    if booking_settings and booking_settings.global_time_offset_hours is not None:
+        current_offset_hours = booking_settings.global_time_offset_hours
+
     # Permission Enforcement Logic
     can_book, permission_error_message = check_booking_permission(current_user, resource, current_app.logger)
     if not can_book:
@@ -299,7 +304,9 @@ def create_booking():
         current_app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} with invalid date/time format: {date_str} {start_time_str}-{end_time_str}")
         return jsonify({'error': 'Invalid date or time format.'}), 400
 
-    now_utc = datetime.utcnow() # Consistent reference for "now"
+    effective_now = get_current_effective_time()
+    # For comparisons with naive new_booking_start_time, and for date() operations like in max_booking_days_in_future
+    now_for_logic = effective_now.replace(tzinfo=None)
 
     if allow_past_bookings_effective:
         # Past bookings are allowed.
@@ -314,19 +321,19 @@ def create_booking():
         # This means effective_past_booking_hours determines how many hours "ago" is the cutoff.
         # A positive value allows bookings slightly in the past.
         # A zero or negative value means bookings must be now or in the future relative to the adjustment.
-        past_booking_cutoff_time = now_utc - timedelta(hours=effective_past_booking_hours)
+        past_booking_cutoff_time = now_for_logic - timedelta(hours=effective_past_booking_hours)
 
         if new_booking_start_time < past_booking_cutoff_time:
             current_app.logger.warning(
                 f"Booking attempt by {current_user.username} for resource {resource_id} at {new_booking_start_time} "
                 f"is before the allowed cutoff time of {past_booking_cutoff_time} "
-                f"(current time: {now_utc}, adjustment: {effective_past_booking_hours} hours, and past bookings are generally disabled)."
+                f"(current time (effective): {now_for_logic}, adjustment: {effective_past_booking_hours} hours, and past bookings are generally disabled)."
             )
             return jsonify({'error': 'Booking time is outside the allowed window for past or future bookings as per current settings.'}), 400
 
     # Enforce max_booking_days_in_future
     if max_booking_days_in_future_effective is not None:
-        max_allowed_date = now_utc.date() + timedelta(days=max_booking_days_in_future_effective)
+        max_allowed_date = now_for_logic.date() + timedelta(days=max_booking_days_in_future_effective)
         if new_booking_start_time.date() > max_allowed_date:
             current_app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} too far in future ({new_booking_start_time.date()}), limit is {max_booking_days_in_future_effective} days.")
             return jsonify({'error': f'Bookings cannot be made more than {max_booking_days_in_future_effective} days in advance.'}), 400
@@ -349,10 +356,9 @@ def create_booking():
     # Enforce max_bookings_per_user
     if max_bookings_per_user_effective is not None and occurrences:
         # Count active (non-past, non-cancelled/rejected) bookings for the user
-        # Ensure datetime.utcnow() is used for comparison with end_time
         user_booking_count = Booking.query.filter(
             Booking.user_name == current_user.username, # Assuming current_user.username is the correct field
-            Booking.end_time > datetime.utcnow(),      # Booking has not ended yet
+            Booking.end_time > now_for_logic,      # Booking has not ended yet (compare naive to naive)
             sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_quota_statuses) # Booking is active
         ).count()
 
@@ -410,11 +416,15 @@ def create_booking():
 
     try:
         created_bookings = []
-        for occ_start, occ_end in occurrences:
+        for occ_start_local, occ_end_local in occurrences: # occ_start_local, occ_end_local are from user's perspective (effective local time)
+            # Convert to UTC for storage
+            occ_start_utc = occ_start_local - timedelta(hours=current_offset_hours)
+            occ_end_utc = occ_end_local - timedelta(hours=current_offset_hours)
+
             new_booking = Booking(
                 resource_id=resource_id,
-                start_time=occ_start,
-                end_time=occ_end,
+                start_time=occ_start_utc, # Use UTC version for DB
+                end_time=occ_end_utc,     # Use UTC version for DB
                 title=title,
                 user_name=user_name_for_record,
                 recurrence_rule=recurrence_rule_str
@@ -613,7 +623,7 @@ def get_my_bookings():
 
         all_upcoming_bookings_dicts = []
         all_past_bookings_dicts = []
-        now_utc = datetime.now(timezone.utc)
+        effective_now = get_current_effective_time()
 
         for booking in all_user_bookings_from_db:
             resource = Resource.query.get(booking.resource_id)
@@ -629,7 +639,7 @@ def get_my_bookings():
                 enable_check_in_out and # Only if feature is enabled
                 booking.checked_in_at is None and
                 booking.status == 'approved' and # Only for approved bookings
-                (check_in_window_start <= now_utc <= check_in_window_end)
+                (check_in_window_start <= effective_now <= check_in_window_end)
             )
 
             display_check_in_token = None
@@ -642,7 +652,7 @@ def get_my_bookings():
                 if booking_end_time_aware.tzinfo is None:
                     booking_end_time_aware = booking_end_time_aware.replace(tzinfo=timezone.utc)
 
-                if token_expires_at_aware and token_expires_at_aware > now_utc and booking_end_time_aware > now_utc:
+                if token_expires_at_aware and token_expires_at_aware > effective_now and booking_end_time_aware > effective_now:
                     display_check_in_token = booking.check_in_token
 
             booking_dict = {
@@ -662,7 +672,7 @@ def get_my_bookings():
                 'check_in_token': display_check_in_token
             }
 
-            if actual_start_time_utc >= now_utc: # Compare with actual_start_time_utc
+            if actual_start_time_utc >= effective_now: # Compare with actual_start_time_utc
                 all_upcoming_bookings_dicts.append(booking_dict)
             else:
                 all_past_bookings_dicts.append(booking_dict)
@@ -1379,7 +1389,7 @@ def check_in_booking(booking_id):
         else:
             current_app.logger.warning(f"BookingSettings not found for check_in_booking {booking_id}, using defaults.")
 
-        now_utc = datetime.now(timezone.utc)
+        effective_now = get_current_effective_time()
 
         actual_start_time_utc = booking.start_time.replace(tzinfo=timezone.utc) if booking.start_time.tzinfo is None else booking.start_time
         effective_check_in_base_time = actual_start_time_utc + timedelta(hours=past_booking_adjustment_hours)
@@ -1387,8 +1397,8 @@ def check_in_booking(booking_id):
         check_in_window_start = effective_check_in_base_time - timedelta(minutes=check_in_minutes_before)
         check_in_window_end = effective_check_in_base_time + timedelta(minutes=check_in_minutes_after)
 
-        if not (check_in_window_start <= now_utc <= check_in_window_end):
-            current_app.logger.warning(f"User {current_user.username} check-in attempt for booking {booking_id} outside of allowed window. Actual start: {actual_start_time_utc.isoformat()}, Effective base: {effective_check_in_base_time.isoformat()}, Window: {check_in_window_start.isoformat()} to {check_in_window_end.isoformat()}, Current time: {now_utc.isoformat()}")
+        if not (check_in_window_start <= effective_now <= check_in_window_end):
+            current_app.logger.warning(f"User {current_user.username} check-in attempt for booking {booking_id} outside of allowed window. Actual start: {actual_start_time_utc.isoformat()}, Effective base: {effective_check_in_base_time.isoformat()}, Window: {check_in_window_start.isoformat()} to {check_in_window_end.isoformat()}, Current time: {effective_now.isoformat()}")
             return jsonify({'error': f'Check-in is only allowed from {check_in_minutes_before} minutes before to {check_in_minutes_after} minutes after the effective booking start time (considering adjustments).'}), 403
 
         resource = booking.resource_booked # Assuming backref is 'resource_booked'
@@ -1420,7 +1430,7 @@ def check_in_booking(booking_id):
 
         # If allow_check_in_without_pin_setting is True, we bypass all the above PIN checks.
 
-        booking.checked_in_at = now_utc.replace(tzinfo=None) # Store as naive UTC
+        booking.checked_in_at = effective_now.replace(tzinfo=None) # Store as naive UTC
         db.session.commit()
 
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
@@ -1429,8 +1439,8 @@ def check_in_booking(booking_id):
             audit_details += f" Using PIN."
         add_audit_log(action="CHECK_IN_SUCCESS", details=audit_details)
 
-        socketio.emit('booking_updated', {'action': 'checked_in', 'booking_id': booking.id, 'checked_in_at': now_utc.isoformat(), 'resource_id': booking.resource_id})
-        current_app.logger.info(f"User '{current_user.username}' successfully checked into booking ID: {booking_id} at {now_utc.isoformat()}{' using PIN' if provided_pin else ''}.")
+        socketio.emit('booking_updated', {'action': 'checked_in', 'booking_id': booking.id, 'checked_in_at': effective_now.isoformat(), 'resource_id': booking.resource_id})
+        current_app.logger.info(f"User '{current_user.username}' successfully checked into booking ID: {booking_id} at {effective_now.isoformat()}{' using PIN' if provided_pin else ''}.")
 
         # Send Email Notification for Check-in
         user = User.query.filter_by(username=booking.user_name).first()
@@ -1505,12 +1515,12 @@ def check_in_booking(booking_id):
             send_teams_notification(
                 current_user.email,
                 "Booking Checked In",
-                f"You have successfully checked into your booking for {resource_name} at {now_utc.strftime('%Y-%m-%d %H:%M')}."
+                f"You have successfully checked into your booking for {resource_name} at {effective_now.strftime('%Y-%m-%d %H:%M')}."
             )
 
         return jsonify({
             'message': 'Check-in successful.',
-            'checked_in_at': now_utc.isoformat(), # Send aware UTC time
+            'checked_in_at': effective_now.isoformat(), # Send aware UTC time
             'booking_id': booking.id
         }), 200
 
@@ -1545,17 +1555,17 @@ def check_out_booking(booking_id):
             current_app.logger.info(f"User {current_user.username} attempt to check-out of already checked-out booking {booking_id} at {booking.checked_out_at.isoformat()}")
             return jsonify({'message': 'Already checked out.', 'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat()}), 200 # Or 409 Conflict
 
-        now = datetime.now(timezone.utc)
-        booking.checked_out_at = now
+        effective_now = get_current_effective_time()
+        booking.checked_out_at = effective_now.replace(tzinfo=None) # Store as naive UTC
         booking.status = 'completed' # Set status to completed
         # Optional: Adjust booking end_time if an early check-out should free up the resource.
-        # booking.end_time = now
+        # booking.end_time = effective_now.replace(tzinfo=None)
         db.session.commit()
 
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
         add_audit_log(action="CHECK_OUT_SUCCESS", details=f"User '{current_user.username}' checked out of booking ID {booking.id} for resource '{resource_name}'. Status set to completed.")
-        socketio.emit('booking_updated', {'action': 'checked_out', 'booking_id': booking.id, 'checked_out_at': now.isoformat(), 'resource_id': booking.resource_id, 'status': 'completed'})
-        current_app.logger.info(f"User '{current_user.username}' successfully checked out of booking ID: {booking_id} at {now.isoformat()}. Status set to completed.")
+        socketio.emit('booking_updated', {'action': 'checked_out', 'booking_id': booking.id, 'checked_out_at': effective_now.isoformat(), 'resource_id': booking.resource_id, 'status': 'completed'})
+        current_app.logger.info(f"User '{current_user.username}' successfully checked out of booking ID: {booking_id} at {effective_now.isoformat()}. Status set to completed.")
 
         # Send Email Notification for Check-out
         user = User.query.filter_by(username=booking.user_name).first()
@@ -1629,12 +1639,12 @@ def check_out_booking(booking_id):
              send_teams_notification(
                 current_user.email,
                 "Booking Checked Out",
-                f"You have successfully checked out of your booking for {resource_name} at {now.strftime('%Y-%m-%d %H:%M')}."
+                f"You have successfully checked out of your booking for {resource_name} at {effective_now.strftime('%Y-%m-%d %H:%M')}."
             )
 
         return jsonify({
             'message': 'Check-out successful.',
-            'checked_out_at': now.replace(tzinfo=timezone.utc).isoformat(),
+            'checked_out_at': effective_now.isoformat(), # Send aware UTC time
             'booking_id': booking.id
         }), 200
 
@@ -1656,15 +1666,15 @@ def qr_check_in(token):
         current_app.logger.warning(f"QR Check-in attempt with invalid token: {token}")
         return jsonify({'error': 'Invalid or expired check-in token.'}), 404
 
-    now_utc = datetime.now(timezone.utc)
+    effective_now = get_current_effective_time()
 
     # Ensure booking.check_in_token_expires_at is treated as UTC if naive
     token_expires_at_utc = booking.check_in_token_expires_at
     if token_expires_at_utc and token_expires_at_utc.tzinfo is None: # Check if not None before accessing tzinfo
         token_expires_at_utc = token_expires_at_utc.replace(tzinfo=timezone.utc)
 
-    if booking.check_in_token_expires_at is None or token_expires_at_utc < now_utc:
-        current_app.logger.warning(f"QR Check-in attempt with expired token ID {token} for booking {booking.id}. Token expiry: {booking.check_in_token_expires_at}, Now: {now_utc}")
+    if booking.check_in_token_expires_at is None or token_expires_at_utc < effective_now:
+        current_app.logger.warning(f"QR Check-in attempt with expired token ID {token} for booking {booking.id}. Token expiry: {booking.check_in_token_expires_at}, Now: {effective_now.isoformat()}")
         # Invalidate the token to prevent reuse if it's just expired
         booking.check_in_token = None
         booking.check_in_token_expires_at = None
@@ -1700,12 +1710,12 @@ def qr_check_in(token):
     check_in_window_start = effective_check_in_base_time - timedelta(minutes=check_in_minutes_before)
     check_in_window_end = effective_check_in_base_time + timedelta(minutes=check_in_minutes_after)
 
-    if not (check_in_window_start <= now_utc <= check_in_window_end):
-        current_app.logger.warning(f"QR Check-in for booking {booking.id} (token {token}) outside allowed window. Actual Start: {actual_start_time_utc.isoformat()}, Effective Base: {effective_check_in_base_time.isoformat()}, Window: {check_in_window_start.isoformat()} to {check_in_window_end.isoformat()}, Now: {now_utc.isoformat()}")
-        return jsonify({'error': f'Check-in is only allowed from {check_in_minutes_before} minutes before to {check_in_minutes_after} minutes after the effective booking start time (considering adjustments). (Current time: {now_utc.strftime("%H:%M:%S %Z")}, Effective start: {effective_check_in_base_time.strftime("%H:%M:%S %Z")})'}), 403
+    if not (check_in_window_start <= effective_now <= check_in_window_end): # Corrected indentation
+        current_app.logger.warning(f"QR Check-in for booking {booking.id} (token {token}) outside allowed window. Actual Start: {actual_start_time_utc.isoformat()}, Effective Base: {effective_check_in_base_time.isoformat()}, Window: {check_in_window_start.isoformat()} to {check_in_window_end.isoformat()}, Now: {effective_now.isoformat()}")
+        return jsonify({'error': f'Check-in is only allowed from {check_in_minutes_before} minutes before to {check_in_minutes_after} minutes after the effective booking start time (considering adjustments). (Current time: {effective_now.strftime("%H:%M:%S %Z")}, Effective start: {effective_check_in_base_time.strftime("%H:%M:%S %Z")})'}), 403
 
     try:
-        booking.checked_in_at = now_utc.replace(tzinfo=None) # Store as naive UTC
+        booking.checked_in_at = effective_now.replace(tzinfo=None) # Store as naive UTC
         booking.check_in_token = None # Invalidate token after use
         booking.check_in_token_expires_at = None # Clear expiry too
         db.session.commit()
@@ -1726,7 +1736,7 @@ def qr_check_in(token):
             socketio.emit('booking_updated', {
                 'action': 'checked_in',
                 'booking_id': booking.id,
-                'checked_in_at': now_utc.isoformat(), # Send aware UTC time
+                'checked_in_at': effective_now.isoformat(), # Send aware UTC time
                 'resource_id': booking.resource_id
             })
         current_app.logger.info(f"Booking {booking.id} successfully checked in via QR token {token} by user {booking.user_name}")
@@ -1737,7 +1747,7 @@ def qr_check_in(token):
             'booking_title': booking.title,
             'user_name': booking.user_name, # Include the original user_name for context
             'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
-            'checked_in_at': now_utc.isoformat() # Send aware UTC time
+            'checked_in_at': effective_now.isoformat() # Send aware UTC time
         }), 200
 
     except Exception as e:
@@ -1811,7 +1821,7 @@ def resource_pin_check_in(resource_id):
 
     # Find the booking to check in
     target_booking = None
-    now_utc = datetime.now(timezone.utc) # Use a single 'now' for all comparisons in this block
+    effective_now = get_current_effective_time() # Use a single 'now' for all comparisons in this block
 
     potential_bookings_query = Booking.query.filter(
         Booking.resource_id == resource_id,
@@ -1833,13 +1843,13 @@ def resource_pin_check_in(resource_id):
         check_in_window_start = effective_check_in_base_time - timedelta(minutes=check_in_minutes_before)
         check_in_window_end = effective_check_in_base_time + timedelta(minutes=check_in_minutes_after)
 
-        if check_in_window_start <= now_utc <= check_in_window_end:
+        if check_in_window_start <= effective_now <= check_in_window_end:
             target_booking = b
             break
 
     if not target_booking:
         user_identifier_for_log = current_user.username if current_user.is_authenticated else "anonymous/public"
-        logger.warning(f"PIN check-in for resource {resource_id} (PIN: {pin_value}): No active booking found within adjusted check-in window for user '{user_identifier_for_log}'. Window based on effective start after adjustment.")
+        logger.warning(f"PIN check-in for resource {resource_id} (PIN: {pin_value}): No active booking found within adjusted check-in window for user '{user_identifier_for_log}'. Window based on effective start after adjustment. Current effective time: {effective_now.isoformat()}")
         return render_template('check_in_status_public.html', message=_('No active booking found for this resource within the check-in window for your session.'), status='error'), 404
 
     if target_booking.checked_in_at:
@@ -1857,7 +1867,7 @@ def resource_pin_check_in(resource_id):
 
     # Perform Check-in
     try:
-        target_booking.checked_in_at = datetime.utcnow() # Stored as naive UTC
+        target_booking.checked_in_at = effective_now.replace(tzinfo=None) # Stored as naive UTC
         # Optional: Deactivate PIN if single-use
         # verified_pin.is_active = False
         db.session.commit()

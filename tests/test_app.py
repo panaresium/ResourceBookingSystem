@@ -395,14 +395,16 @@ class TestAutoCheckoutTask(AppTests):
 class TestPastBookingLogic(AppTests):
     common_error_message = 'Booking time is outside the allowed window for past or future bookings as per current settings.'
 
-    def _set_booking_settings(self, allow_past, adjustment_hours):
+    def _set_booking_settings(self, allow_past, adjustment_hours, global_offset_hours=0):
         settings = BookingSettings.query.first()
         if not settings:
             settings = BookingSettings()
         settings.allow_past_bookings = allow_past
         settings.past_booking_time_adjustment_hours = adjustment_hours
+        settings.global_time_offset_hours = global_offset_hours # New
         db.session.add(settings)
         db.session.commit()
+        return settings # Return settings to access the offset in the test
 
     def _create_payload(self, booking_start_dt):
         booking_end_dt = booking_start_dt + timedelta_original(hours=1)
@@ -415,19 +417,18 @@ class TestPastBookingLogic(AppTests):
             'title': 'Test Past Booking Logic'
         }
 
-    @patch('routes.api_bookings.datetime')
-    def test_allow_past_true_deep_past(self, mock_api_datetime):
+    @patch('routes.api_bookings.get_current_effective_time')
+    def test_allow_past_true_deep_past(self, mock_get_effective_time):
         self.login('testuser', 'password')
-        self._set_booking_settings(allow_past=True, adjustment_hours=0) # Adjustment hours irrelevant
+        settings = self._set_booking_settings(allow_past=True, adjustment_hours=0, global_offset_hours=0)
 
-        mocked_current_time = datetime_original(2025, 6, 11, 16, 0, 0)
-        mock_api_datetime.utcnow.return_value = mocked_current_time
-        mock_api_datetime.strptime = datetime_original.strptime
-        mock_api_datetime.combine = datetime_original.combine
-        mock_api_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_current_time
+        mocked_underlying_utc_now = datetime_original(2025, 6, 11, 16, 0, 0, tzinfo=timezone_original.utc)
+        mocked_effective_current_time = mocked_underlying_utc_now + timedelta_original(hours=settings.global_time_offset_hours)
+        mock_get_effective_time.return_value = mocked_effective_current_time
 
-
-        booking_start_dt = mocked_current_time - timedelta_original(hours=32) # Deep past
+        # User perceives time as mocked_effective_current_time (naive version for payload)
+        user_perceived_now_naive = mocked_effective_current_time.replace(tzinfo=None)
+        booking_start_dt = user_perceived_now_naive - timedelta_original(hours=32) # Deep past from user's perspective
         payload = self._create_payload(booking_start_dt)
 
         response = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
@@ -435,19 +436,17 @@ class TestPastBookingLogic(AppTests):
         self.assertEqual(response.status_code, 201, response.get_json())
         self.logout()
 
-    @patch('routes.api_bookings.datetime')
-    def test_allow_past_true_slight_past(self, mock_api_datetime):
+    @patch('routes.api_bookings.get_current_effective_time')
+    def test_allow_past_true_slight_past(self, mock_get_effective_time):
         self.login('testuser', 'password')
-        self._set_booking_settings(allow_past=True, adjustment_hours=5) # Adjustment hours irrelevant
+        settings = self._set_booking_settings(allow_past=True, adjustment_hours=5, global_offset_hours=0) # Adjustment hours irrelevant
 
-        mocked_current_time = datetime_original(2025, 6, 11, 16, 0, 0)
-        mock_api_datetime.utcnow.return_value = mocked_current_time
-        mock_api_datetime.strptime = datetime_original.strptime
-        mock_api_datetime.combine = datetime_original.combine
-        mock_api_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_current_time
+        mocked_underlying_utc_now = datetime_original(2025, 6, 11, 16, 0, 0, tzinfo=timezone_original.utc)
+        mocked_effective_current_time = mocked_underlying_utc_now + timedelta_original(hours=settings.global_time_offset_hours)
+        mock_get_effective_time.return_value = mocked_effective_current_time
 
-
-        booking_start_dt = mocked_current_time - timedelta_original(hours=1) # Slight past
+        user_perceived_now_naive = mocked_effective_current_time.replace(tzinfo=None)
+        booking_start_dt = user_perceived_now_naive - timedelta_original(hours=1) # Slight past
         payload = self._create_payload(booking_start_dt)
 
         response = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
@@ -455,114 +454,167 @@ class TestPastBookingLogic(AppTests):
         self.assertEqual(response.status_code, 201, response.get_json())
         self.logout()
 
-    @patch('routes.api_bookings.datetime')
-    def test_allow_past_false_adj_2_book_1_hr_ago_success(self, mock_api_datetime):
+    @patch('routes.api_bookings.get_current_effective_time')
+    def test_allow_past_false_adj_2_book_1_hr_ago_success(self, mock_get_effective_time):
         self.login('testuser', 'password')
-        self._set_booking_settings(allow_past=False, adjustment_hours=2)
+        settings = self._set_booking_settings(allow_past=False, adjustment_hours=2, global_offset_hours=0)
 
-        mocked_current_time = datetime_original(2025, 6, 11, 16, 0, 0)
-        mock_api_datetime.utcnow.return_value = mocked_current_time
-        mock_api_datetime.strptime = datetime_original.strptime
-        mock_api_datetime.combine = datetime_original.combine
-        mock_api_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_current_time
+        mocked_underlying_utc_now = datetime_original(2025, 6, 11, 16, 0, 0, tzinfo=timezone_original.utc)
+        mocked_effective_current_time = mocked_underlying_utc_now + timedelta_original(hours=settings.global_time_offset_hours)
+        mock_get_effective_time.return_value = mocked_effective_current_time
 
-        # Booking 1 hour ago. Cutoff is current_time - 2 hours = 14:00. Booking at 15:00. Should be allowed.
-        booking_start_dt = mocked_current_time - timedelta_original(hours=1)
+        user_perceived_now_naive = mocked_effective_current_time.replace(tzinfo=None)
+        # Booking 1 hour ago. Cutoff is effective_now - 2 hours = 14:00. Booking at 15:00. Should be allowed.
+        booking_start_dt = user_perceived_now_naive - timedelta_original(hours=1)
         payload = self._create_payload(booking_start_dt)
         response = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
         self.assertEqual(response.status_code, 201, response.get_json())
         self.logout()
 
-    @patch('routes.api_bookings.datetime')
-    def test_allow_past_false_adj_2_book_3_hr_ago_fail(self, mock_api_datetime):
+    @patch('routes.api_bookings.get_current_effective_time')
+    def test_allow_past_false_adj_2_book_3_hr_ago_fail(self, mock_get_effective_time):
         self.login('testuser', 'password')
-        self._set_booking_settings(allow_past=False, adjustment_hours=2)
+        settings = self._set_booking_settings(allow_past=False, adjustment_hours=2, global_offset_hours=0)
 
-        mocked_current_time = datetime_original(2025, 6, 11, 16, 0, 0)
-        mock_api_datetime.utcnow.return_value = mocked_current_time
-        mock_api_datetime.strptime = datetime_original.strptime
-        mock_api_datetime.combine = datetime_original.combine
-        mock_api_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_current_time
+        mocked_underlying_utc_now = datetime_original(2025, 6, 11, 16, 0, 0, tzinfo=timezone_original.utc)
+        mocked_effective_current_time = mocked_underlying_utc_now + timedelta_original(hours=settings.global_time_offset_hours)
+        mock_get_effective_time.return_value = mocked_effective_current_time
 
-        # Booking 3 hours ago. Cutoff is current_time - 2 hours = 14:00. Booking at 13:00. Should fail.
-        booking_start_dt = mocked_current_time - timedelta_original(hours=3)
+        user_perceived_now_naive = mocked_effective_current_time.replace(tzinfo=None)
+        # Booking 3 hours ago. Cutoff is effective_now - 2 hours = 14:00. Booking at 13:00. Should fail.
+        booking_start_dt = user_perceived_now_naive - timedelta_original(hours=3)
         payload = self._create_payload(booking_start_dt)
         response = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
         self.assertEqual(response.status_code, 400, response.get_json())
         self.assertEqual(response.get_json()['error'], self.common_error_message)
         self.logout()
 
-    @patch('routes.api_bookings.datetime')
-    def test_allow_past_false_adj_0_book_1_min_ago_fail(self, mock_api_datetime):
+    @patch('routes.api_bookings.get_current_effective_time')
+    def test_allow_past_false_adj_0_book_1_min_ago_fail(self, mock_get_effective_time):
         self.login('testuser', 'password')
-        self._set_booking_settings(allow_past=False, adjustment_hours=0)
+        settings = self._set_booking_settings(allow_past=False, adjustment_hours=0, global_offset_hours=0)
 
-        mocked_current_time = datetime_original(2025, 6, 11, 16, 0, 0)
-        mock_api_datetime.utcnow.return_value = mocked_current_time
-        mock_api_datetime.strptime = datetime_original.strptime
-        mock_api_datetime.combine = datetime_original.combine
-        mock_api_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_current_time
+        mocked_underlying_utc_now = datetime_original(2025, 6, 11, 16, 0, 0, tzinfo=timezone_original.utc)
+        mocked_effective_current_time = mocked_underlying_utc_now + timedelta_original(hours=settings.global_time_offset_hours)
+        mock_get_effective_time.return_value = mocked_effective_current_time
 
-        # Booking 1 min ago. Cutoff is current_time - 0 hours = 16:00. Booking at 15:59. Should fail.
-        booking_start_dt = mocked_current_time - timedelta_original(minutes=1)
+        user_perceived_now_naive = mocked_effective_current_time.replace(tzinfo=None)
+        # Booking 1 min ago. Cutoff is effective_now - 0 hours = 16:00. Booking at 15:59. Should fail.
+        booking_start_dt = user_perceived_now_naive - timedelta_original(minutes=1)
         payload = self._create_payload(booking_start_dt)
         response = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
         self.assertEqual(response.status_code, 400, response.get_json())
         self.assertEqual(response.get_json()['error'], self.common_error_message)
         self.logout()
 
-    @patch('routes.api_bookings.datetime')
-    def test_allow_past_false_adj_0_book_now_success(self, mock_api_datetime):
+    @patch('routes.api_bookings.get_current_effective_time')
+    def test_allow_past_false_adj_0_book_now_success(self, mock_get_effective_time):
         self.login('testuser', 'password')
-        self._set_booking_settings(allow_past=False, adjustment_hours=0)
+        settings = self._set_booking_settings(allow_past=False, adjustment_hours=0, global_offset_hours=0)
 
-        mocked_current_time = datetime_original(2025, 6, 11, 16, 0, 0)
-        mock_api_datetime.utcnow.return_value = mocked_current_time
-        mock_api_datetime.strptime = datetime_original.strptime
-        mock_api_datetime.combine = datetime_original.combine
-        mock_api_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_current_time
+        mocked_underlying_utc_now = datetime_original(2025, 6, 11, 16, 0, 0, tzinfo=timezone_original.utc)
+        mocked_effective_current_time = mocked_underlying_utc_now + timedelta_original(hours=settings.global_time_offset_hours)
+        mock_get_effective_time.return_value = mocked_effective_current_time
 
-        # Booking for current mock time. Cutoff is current_time - 0 hours = 16:00. Booking at 16:00. Should succeed.
-        booking_start_dt = mocked_current_time
+        user_perceived_now_naive = mocked_effective_current_time.replace(tzinfo=None)
+        # Booking for current mock time. Cutoff is effective_now - 0 hours = 16:00. Booking at 16:00. Should succeed.
+        booking_start_dt = user_perceived_now_naive
         payload = self._create_payload(booking_start_dt)
         response = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
         self.assertEqual(response.status_code, 201, response.get_json())
         self.logout()
 
-    @patch('routes.api_bookings.datetime')
-    def test_allow_past_false_adj_neg_2_book_1_hr_future_fail(self, mock_api_datetime):
+    @patch('routes.api_bookings.get_current_effective_time')
+    def test_allow_past_false_adj_neg_2_book_1_hr_future_fail(self, mock_get_effective_time):
         self.login('testuser', 'password')
-        self._set_booking_settings(allow_past=False, adjustment_hours=-2) # Must be 2hr in future
+        settings = self._set_booking_settings(allow_past=False, adjustment_hours=-2, global_offset_hours=0) # Must be 2hr in future
 
-        mocked_current_time = datetime_original(2025, 6, 11, 16, 0, 0)
-        mock_api_datetime.utcnow.return_value = mocked_current_time
-        mock_api_datetime.strptime = datetime_original.strptime
-        mock_api_datetime.combine = datetime_original.combine
-        mock_api_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_current_time
+        mocked_underlying_utc_now = datetime_original(2025, 6, 11, 16, 0, 0, tzinfo=timezone_original.utc)
+        mocked_effective_current_time = mocked_underlying_utc_now + timedelta_original(hours=settings.global_time_offset_hours)
+        mock_get_effective_time.return_value = mocked_effective_current_time
 
-        # Booking 1 hour in future. Cutoff is current_time - (-2 hours) = 18:00. Booking at 17:00. Should fail.
-        booking_start_dt = mocked_current_time + timedelta_original(hours=1)
+        user_perceived_now_naive = mocked_effective_current_time.replace(tzinfo=None)
+        # Booking 1 hour in future. Cutoff is effective_now - (-2 hours) = 18:00. Booking at 17:00. Should fail.
+        booking_start_dt = user_perceived_now_naive + timedelta_original(hours=1)
         payload = self._create_payload(booking_start_dt)
         response = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
         self.assertEqual(response.status_code, 400, response.get_json())
         self.assertEqual(response.get_json()['error'], self.common_error_message)
         self.logout()
 
-    @patch('routes.api_bookings.datetime')
-    def test_allow_past_false_adj_neg_2_book_2_hr_future_success(self, mock_api_datetime):
+    @patch('routes.api_bookings.get_current_effective_time')
+    def test_allow_past_false_adj_neg_2_book_2_hr_future_success(self, mock_get_effective_time):
         self.login('testuser', 'password')
-        self._set_booking_settings(allow_past=False, adjustment_hours=-2) # Must be 2hr in future
+        settings = self._set_booking_settings(allow_past=False, adjustment_hours=-2, global_offset_hours=0) # Must be 2hr in future
 
-        mocked_current_time = datetime_original(2025, 6, 11, 16, 0, 0)
-        mock_api_datetime.utcnow.return_value = mocked_current_time
-        mock_api_datetime.strptime = datetime_original.strptime
-        mock_api_datetime.combine = datetime_original.combine
-        mock_api_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_current_time
+        mocked_underlying_utc_now = datetime_original(2025, 6, 11, 16, 0, 0, tzinfo=timezone_original.utc)
+        mocked_effective_current_time = mocked_underlying_utc_now + timedelta_original(hours=settings.global_time_offset_hours)
+        mock_get_effective_time.return_value = mocked_effective_current_time
 
-        # Booking 2 hours in future. Cutoff is current_time - (-2 hours) = 18:00. Booking at 18:00. Should succeed.
-        booking_start_dt = mocked_current_time + timedelta_original(hours=2)
+        user_perceived_now_naive = mocked_effective_current_time.replace(tzinfo=None)
+        # Booking 2 hours in future. Cutoff is effective_now - (-2 hours) = 18:00. Booking at 18:00. Should succeed.
+        booking_start_dt = user_perceived_now_naive + timedelta_original(hours=2)
         payload = self._create_payload(booking_start_dt)
         response = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
+        self.assertEqual(response.status_code, 201, response.get_json())
+        self.logout()
+
+    # New tests for global_time_offset_hours
+    @patch('routes.api_bookings.get_current_effective_time')
+    def test_booking_with_positive_global_offset(self, mock_get_effective_time):
+        self.login('testuser', 'password')
+        # Effective time is UTC + 2 hours. Booking for 1 hour before effective 'now' should fail.
+        settings = self._set_booking_settings(allow_past=False, adjustment_hours=0, global_offset_hours=2)
+
+        mocked_underlying_utc_now = datetime_original(2025, 6, 11, 14, 0, 0, tzinfo=timezone_original.utc) # Actual UTC is 14:00
+        mocked_effective_current_time = mocked_underlying_utc_now + timedelta_original(hours=settings.global_time_offset_hours) # Effective 'now' is 16:00
+        mock_get_effective_time.return_value = mocked_effective_current_time
+
+        # User attempts to book for 15:00 (effective local time)
+        booking_start_dt_user_perception = datetime_original(2025, 6, 11, 15, 0, 0)
+        payload = self._create_payload(booking_start_dt_user_perception)
+        response = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
+
+        self.assertEqual(response.status_code, 400, response.get_json())
+        self.assertEqual(response.get_json()['error'], self.common_error_message)
+        self.logout()
+
+    @patch('routes.api_bookings.get_current_effective_time')
+    def test_booking_with_negative_global_offset(self, mock_get_effective_time):
+        self.login('testuser', 'password')
+        # Effective time is UTC - 2 hours. Booking for 1 hour before effective 'now' should fail.
+        settings = self._set_booking_settings(allow_past=False, adjustment_hours=0, global_offset_hours=-2)
+
+        mocked_underlying_utc_now = datetime_original(2025, 6, 11, 18, 0, 0, tzinfo=timezone_original.utc) # Actual UTC is 18:00
+        mocked_effective_current_time = mocked_underlying_utc_now + timedelta_original(hours=settings.global_time_offset_hours) # Effective 'now' is 16:00
+        mock_get_effective_time.return_value = mocked_effective_current_time
+
+        # User attempts to book for 15:00 (effective local time)
+        booking_start_dt_user_perception = datetime_original(2025, 6, 11, 15, 0, 0)
+        payload = self._create_payload(booking_start_dt_user_perception)
+        response = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
+
+        self.assertEqual(response.status_code, 400, response.get_json())
+        self.assertEqual(response.get_json()['error'], self.common_error_message)
+        self.logout()
+
+    @patch('routes.api_bookings.get_current_effective_time')
+    def test_booking_with_positive_global_offset_allowed_by_past_adjustment(self, mock_get_effective_time):
+        self.login('testuser', 'password')
+        # Effective time is UTC + 2 hours. past_adjustment_hours = 3.
+        # Effective 'now' is 16:00. User can book back to effective 13:00.
+        settings = self._set_booking_settings(allow_past=False, adjustment_hours=3, global_offset_hours=2)
+
+        mocked_underlying_utc_now = datetime_original(2025, 6, 11, 14, 0, 0, tzinfo=timezone_original.utc) # Actual UTC is 14:00
+        mocked_effective_current_time = mocked_underlying_utc_now + timedelta_original(hours=settings.global_time_offset_hours) # Effective 'now' is 16:00
+        mock_get_effective_time.return_value = mocked_effective_current_time
+
+        # User attempts to book for 15:00 (effective local time). This is 1 hour before effective 16:00.
+        # Since past_adjustment_hours = 3, this should be allowed.
+        booking_start_dt_user_perception = datetime_original(2025, 6, 11, 15, 0, 0)
+        payload = self._create_payload(booking_start_dt_user_perception)
+        response = self.client.post('/api/bookings', data=json.dumps(payload), content_type='application/json')
+
         self.assertEqual(response.status_code, 201, response.get_json())
         self.logout()
 

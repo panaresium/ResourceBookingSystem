@@ -100,6 +100,11 @@ class BookingSettings(db.Model):
     enable_auto_checkout = db.Column(db.Boolean, default=False, nullable=False)
     auto_checkout_delay_hours = db.Column(db.Integer, default=1, nullable=False)
 
+    # Global offset in hours to adjust "current time" perception for booking logic.
+    # Positive values make "now" seem earlier (allowing bookings further in the past if past bookings are enabled, or requiring future bookings to be even further out).
+    # Negative values make "now" seem later (restricting past bookings more, or allowing future bookings sooner).
+    global_time_offset_hours = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+
     def __repr__(self):
         return f"<BookingSettings {self.id}>"
 
