@@ -128,32 +128,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Actions (buttons)
         const actionsContainer = bookingCardDiv.querySelector('.booking-actions');
-        actionsContainer.innerHTML = ''; // Clear any default/template buttons
+        // actionsContainer.innerHTML = ''; // Clear any default/template buttons - REMOVED
 
+        // Locate existing controls
+        const checkInControls = bookingCardDiv.querySelector('.check-in-controls');
+        const pinInput = checkInControls ? checkInControls.querySelector('.booking-pin-input') : null;
+        const checkInBtnExisting = checkInControls ? checkInControls.querySelector('.check-in-btn') : null;
+        const checkOutBtnExisting = bookingCardDiv.querySelector('.check-out-btn');
+        const cancelBtnExisting = bookingCardDiv.querySelector('.cancel-booking-btn');
+
+        // Control Visibility and Attributes
         const terminalStatuses = ['completed', 'cancelled', 'rejected', 'cancelled_by_admin', 'cancelled_admin_acknowledged'];
-        if (!terminalStatuses.includes(booking.status)) {
-            if (checkInOutEnabled) {
-                if (booking.can_check_in && !booking.checked_in_at) {
-                    const checkInBtn = document.createElement('button');
-                    checkInBtn.className = 'btn btn-sm btn-success me-1 check-in-btn';
-                    checkInBtn.textContent = 'Check In';
-                    checkInBtn.dataset.bookingId = booking.id;
-                    actionsContainer.appendChild(checkInBtn);
-                    // PIN input could be added here if needed for check-in
-                }
-                if (booking.checked_in_at && !booking.checked_out_at) {
-                    const checkOutBtn = document.createElement('button');
-                    checkOutBtn.className = 'btn btn-sm btn-warning me-1 check-out-btn';
-                    checkOutBtn.textContent = 'Check Out';
-                    checkOutBtn.dataset.bookingId = booking.id;
-                    actionsContainer.appendChild(checkOutBtn);
-                }
+
+        // Check-In Controls
+        if (checkInControls && pinInput && checkInBtnExisting) {
+            if (checkInOutEnabled && booking.can_check_in && !booking.checked_in_at) {
+                checkInControls.style.display = 'inline-block';
+                pinInput.dataset.bookingId = booking.id;
+                checkInBtnExisting.dataset.bookingId = booking.id;
+            } else {
+                checkInControls.style.display = 'none';
             }
-            const cancelBtn = document.createElement('button');
-            cancelBtn.className = 'btn btn-sm btn-danger cancel-booking-btn';
-            cancelBtn.textContent = 'Cancel';
-            cancelBtn.dataset.bookingId = booking.id;
-            actionsContainer.appendChild(cancelBtn);
+        }
+
+        // Check-Out Button
+        if (checkOutBtnExisting) {
+            if (checkInOutEnabled && booking.checked_in_at && !booking.checked_out_at) {
+                checkOutBtnExisting.style.display = 'inline-block';
+                checkOutBtnExisting.dataset.bookingId = booking.id;
+            } else {
+                checkOutBtnExisting.style.display = 'none';
+            }
+        }
+
+        // Cancel Button
+        if (cancelBtnExisting) {
+            if (!terminalStatuses.includes(booking.status)) {
+                cancelBtnExisting.style.display = 'inline-block'; // Or 'block' or '' depending on desired layout
+                cancelBtnExisting.dataset.bookingId = booking.id;
+            } else {
+                cancelBtnExisting.style.display = 'none';
+            }
         }
         // The following lines are removed as the edit button is now conditionally added above.
         // const editTitleBtn = bookingCardDiv.querySelector('.edit-title-btn');
