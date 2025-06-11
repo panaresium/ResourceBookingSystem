@@ -68,23 +68,38 @@ function enablePageInteractions() {
     });
 }
 
-// --- UTC Clock ---
+// --- UTC Clock / Server Time Clock ---
 function updateUtcClock() {
     const clockElement = document.getElementById('utc-clock');
     if (clockElement) {
-        const now = new Date();
-        const year = now.getUTCFullYear();
-        const month = String(now.getUTCMonth() + 1).padStart(2, '0');
-        const day = String(now.getUTCDate()).padStart(2, '0');
-        const hours = String(now.getUTCHours()).padStart(2, '0');
-        const minutes = String(now.getUTCMinutes()).padStart(2, '0');
-        const seconds = String(now.getUTCSeconds()).padStart(2, '0');
-        const customUtcString = `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
-        clockElement.textContent = customUtcString;
+        const offsetHours = parseInt(clockElement.dataset.offset) || 0;
+
+        const nowUtc = new Date();
+        // Calculate server time by applying the offset to UTC time
+        const serverTime = new Date(nowUtc.getTime() + offsetHours * 60 * 60 * 1000);
+
+        // Format the serverTime using UTC methods to reflect the offset time correctly
+        const year = serverTime.getUTCFullYear();
+        const month = String(serverTime.getUTCMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+        const day = String(serverTime.getUTCDate()).padStart(2, '0');
+        const hours = String(serverTime.getUTCHours()).padStart(2, '0');
+        const minutes = String(serverTime.getUTCMinutes()).padStart(2, '0');
+        const seconds = String(serverTime.getUTCSeconds()).padStart(2, '0');
+
+        const formattedTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+
+        let offsetString = "(UTC)"; // Default to UTC if offset is 0
+        if (offsetHours > 0) {
+            offsetString = `(UTC+${offsetHours})`;
+        } else if (offsetHours < 0) {
+            offsetString = `(UTC${offsetHours})`; // Negative sign is included by offsetHours
+        }
+
+        clockElement.textContent = `${formattedTime} ${offsetString}`;
     }
 }
 setInterval(updateUtcClock, 1000);
-// updateUtcClock(); // Call once immediately if not relying on DOMContentLoaded for initial call
+// updateUtcClock(); // Initial call is at the end of the script
 
 // --- Log Appending ---
 function appendLog(logAreaId, message, detail, type = 'info', specificStatusEl = null) {
