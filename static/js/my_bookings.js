@@ -8,8 +8,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusFilterSelect = document.getElementById('my-bookings-status-filter'); // Corrected ID as per subtask
     const resourceNameFilterInput = document.getElementById('resource-name-filter'); // New filter
     const dateFilterTypeSelect = document.getElementById('my-bookings-date-filter-type');
-    const datePickerContainer = document.getElementById('my-bookings-datepicker-container');
-    const datePickerInput = document.getElementById('my-bookings-specific-date-filter');
+    const datePickerContainer = document.getElementById('my-bookings-date-picker-container');
+    const datePickerInput = document.getElementById('my-bookings-date-picker');
     const applyFiltersBtn = document.getElementById('apply-my-bookings-filters-btn');
     const clearFiltersBtn = document.getElementById('clear-my-bookings-filters-btn');
     // Visibility Toggles
