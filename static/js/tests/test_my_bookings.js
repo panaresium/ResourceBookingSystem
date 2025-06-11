@@ -130,9 +130,10 @@ describe('My Bookings Date Filter', () => {
     describe('Date filter type change', () => {
         beforeEach(() => {
             loadScript(); // Ensure event listeners from my_bookings.js are active
+            mockApiCall.mockClear(); // Clear API calls before each test in this suite
         });
 
-        test('should show date picker and initialize flatpickr when type changes to "specific"', () => {
+        test('should show date picker, initialize flatpickr, and refresh list when type changes to "specific"', () => {
             const dateFilterTypeSelect = document.getElementById('my-bookings-date-filter-type');
             const datePickerContainer = document.getElementById('my-bookings-datepicker-container');
             const datePickerInput = document.getElementById('my-bookings-specific-date-filter');
@@ -145,12 +146,18 @@ describe('My Bookings Date Filter', () => {
             dateFilterTypeSelect.value = 'specific';
             dateFilterTypeSelect.dispatchEvent(new Event('change'));
 
+            // UI assertions
             expect(datePickerContainer.classList.contains('d-none')).toBe(false);
             expect(datePickerContainer.style.display).toBe('flex');
             expect(mockFlatpickr).toHaveBeenCalledWith(datePickerInput, expect.any(Object));
+
+            // API call assertions (auto-refresh)
+            expect(mockApiCall).toHaveBeenCalledWith(expect.stringContaining('/api/bookings/upcoming'), expect.anything(), expect.anything());
+            expect(mockApiCall).toHaveBeenCalledWith(expect.stringContaining('/api/bookings/past'), expect.anything(), expect.anything());
+            expect(mockApiCall.mock.calls.length).toBeGreaterThanOrEqual(2);
         });
 
-        test('should hide date picker when type changes back to "any"', () => {
+        test('should hide date picker and refresh list when type changes back to "any"', () => {
             const dateFilterTypeSelect = document.getElementById('my-bookings-date-filter-type');
             const datePickerContainer = document.getElementById('my-bookings-datepicker-container');
 
@@ -159,16 +166,23 @@ describe('My Bookings Date Filter', () => {
             dateFilterTypeSelect.dispatchEvent(new Event('change'));
             expect(datePickerContainer.classList.contains('d-none')).toBe(false);
             expect(datePickerContainer.style.display).toBe('flex');
+            mockApiCall.mockClear(); // Clear calls from the first change
 
             // Change back to "any"
             dateFilterTypeSelect.value = 'any';
             dateFilterTypeSelect.dispatchEvent(new Event('change'));
 
+            // UI assertions
             expect(datePickerContainer.classList.contains('d-none')).toBe(true);
             expect(datePickerContainer.style.display).toBe('none');
+
+            // API call assertions (auto-refresh)
+            expect(mockApiCall).toHaveBeenCalledWith(expect.stringContaining('/api/bookings/upcoming'), expect.anything(), expect.anything());
+            expect(mockApiCall).toHaveBeenCalledWith(expect.stringContaining('/api/bookings/past'), expect.anything(), expect.anything());
+            expect(mockApiCall.mock.calls.length).toBeGreaterThanOrEqual(2);
         });
 
-        test('should only initialize flatpickr once even if "specific" is selected multiple times', () => {
+        test('should only initialize flatpickr once and refresh list on each type change', () => {
             const dateFilterTypeSelect = document.getElementById('my-bookings-date-filter-type');
             loadScript(); // Load script to attach listeners
 
