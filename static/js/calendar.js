@@ -499,7 +499,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (endTimeDisplay && endTimeDisplay !== startTimeDisplay) {
                                 fullTimeString += ` - ${endTimeDisplay}`;
                             }
-                            // Removed ' UTC' suffix
+
                         }
 
                         if (fullTimeString) {
@@ -509,6 +509,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                             eventHtml += `<br>${displayTime}`;
                         }
+                    }
+                    // Add resource name
+                    if (arg.event.extendedProps && arg.event.extendedProps.resource_name) {
+                        eventHtml += `<br><b>${arg.event.extendedProps.resource_name}</b>`;
                     }
                     return { html: eventHtml };
                 }
