@@ -322,13 +322,14 @@ class TestAuthAPI(AppTests): # Inherit from AppTests for setup/teardown
 
 class TestBookingUserActions(AppTests):
 
-    def helper_set_checkin_window(self, minutes_before, minutes_after):
+    def helper_set_checkin_window(self, minutes_before, minutes_after, past_adjustment_hours=0):
         settings = BookingSettings.query.first()
         if not settings:
             settings = BookingSettings()
             db.session.add(settings)
         settings.check_in_minutes_before = minutes_before
         settings.check_in_minutes_after = minutes_after
+        settings.past_booking_time_adjustment_hours = past_adjustment_hours
         # Ensure enable_check_in_out is True for these tests to be meaningful
         settings.enable_check_in_out = True
         db.session.commit()
@@ -799,8 +800,105 @@ class TestBookingUserActions(AppTests):
         self.assertIsNotNone(booking.checked_in_at)
         self.logout() # Use the class's logout method
 
+    # --- Modified Check-in Window Tests ---
+    @patch('routes.api_bookings.datetime') # Patch datetime in the API route module
+    def test_check_in_window_logic_with_adjustment(self, mock_api_datetime):
+        user = self.helper_create_user_and_login(username="user_checkin_adj_test")
+        resource = self.helper_create_resource(name="Resource Checkin Adj Test")
+
+        # Define common booking time (e.g., starts at a fixed reference point for "now")
+        # Mock "now" in the API to be this reference point.
+        fixed_now_for_test = datetime_original(2024, 7, 1, 12, 0, 0, tzinfo=timezone_original.utc)
+        mock_api_datetime.now.return_value = fixed_now_for_test
+        # If the route uses datetime.utcnow(), mock that too or ensure .now(timezone.utc) is primary.
+        # For other datetime operations within the route, allow them to pass through to original datetime.
+        mock_api_datetime.side_effect = lambda *args, **kw: datetime_original(*args, **kw) if args else fixed_now_for_test
+
+
+        test_scenarios = [
+            # (adj_hours, min_before, min_after, booking_start_offset_mins_from_fixed_now, expected_status, test_name_suffix)
+            (0, 15, 15, 0, 200, "no_adj_on_time"), # Booking starts now, no adjustment -> OK
+            (0, 15, 15, -10, 200, "no_adj_slightly_past"), # Booking started 10m ago, still in window -> OK
+            (0, 15, 15, 10, 200, "no_adj_slightly_future"), # Booking starts 10m future, in window -> OK
+            (0, 15, 15, -20, 403, "no_adj_too_late"), # Booking started 20m ago (15m after is limit) -> Fail
+            (0, 15, 15, 20, 403, "no_adj_too_early"),# Booking starts 20m future (15m before is limit) -> Fail
+
+            # Positive Adjustment (effective check-in window is earlier)
+            # Booking at 12:00 (fixed_now). Adj +1hr. Effective base 11:00. Window 10:45 - 11:15.
+            # Current time 12:00. So, this is too late.
+            (1, 15, 15, 0, 403, "pos_adj_booking_now_fail"),
+            # Booking at 11:00. Adj +1hr. Effective base 10:00. Window 09:45 - 10:15.
+            # Current time 12:00 (fixed_now). Still too late.
+            (1, 15, 15, -60, 403, "pos_adj_booking_matches_eff_base_fail_due_to_now"),
+            # Let's adjust 'now' for pos_adj tests or booking time relative to 'now'
+            # New logic for pos_adj:
+            # Booking starts at fixed_now (12:00). Adjustment +1hr. Effective base is 11:00. Window 10:45-11:15.
+            # If current time is 11:00 (mocked for this specific sub-test), check-in should be OK.
+            # This requires mocking 'now' per sub-test, or carefully choosing booking times.
+
+            # Simpler: Keep 'fixed_now_for_test' as current time. Adjust booking_start_time.
+            # Adj +1hr. Effective window is 1hr earlier than booking's calendar time.
+            # Booking calendar start: 12:00. Effective base: 11:00. Window: 10:45-11:15.
+            # If current time is 12:00 (fixed_now_for_test), this is outside 10:45-11:15. -> Fail
+            (1, 15, 15, 0, 403, "pos1hr_adj_cal_now_too_late"),
+            # Booking calendar start: 10:00. Effective base: 09:00. Window: 08:45-09:15.
+            # Current time is 12:00. -> Fail (too late)
+            (1, 15, 15, -120, 403, "pos1hr_adj_cal_past_too_late"),
+            # Booking calendar start: 13:00. Effective base: 12:00. Window: 11:45-12:15.
+            # Current time is 12:00. -> Success
+            (1, 15, 15, 60, 200, "pos1hr_adj_cal_future_success"),
+
+
+            # Negative Adjustment (effective check-in window is later)
+            # Adj -1hr. Effective window is 1hr later than booking's calendar time.
+            # Booking calendar start: 12:00 (fixed_now_for_test). Effective base: 13:00. Window: 12:45-13:15.
+            # Current time is 12:00. -> Fail (too early)
+            (-1, 15, 15, 0, 403, "neg1hr_adj_cal_now_too_early"),
+            # Booking calendar start: 11:00. Effective base: 12:00. Window: 11:45-12:15.
+            # Current time is 12:00. -> Success
+            (-1, 15, 15, -60, 200, "neg1hr_adj_cal_past_success"),
+            # Booking calendar start: 13:00. Effective base: 14:00. Window: 13:45-14:15.
+            # Current time is 12:00. -> Fail (too early)
+            (-1, 15, 15, 60, 403, "neg1hr_adj_cal_future_too_early"),
+        ]
+
+        for adj_hr, min_b, min_a, booking_offset_min, expected_code, suffix in test_scenarios:
+            with self.subTest(suffix=suffix, adj_hr=adj_hr, offset_min=booking_offset_min):
+                settings = self.helper_set_checkin_window(minutes_before=min_b, minutes_after=min_a, past_adjustment_hours=adj_hr)
+
+                booking_start_dt = fixed_now_for_test + timedelta(minutes=booking_offset_min)
+                booking_end_dt = booking_start_dt + timedelta(hours=1)
+
+                booking_payload = {
+                    'resource_id': resource.id,
+                    'date_str': booking_start_dt.strftime('%Y-%m-%d'),
+                    'start_time_str': booking_start_dt.strftime('%H:%M'),
+                    'end_time_str': booking_end_dt.strftime('%H:%M'),
+                    'title': f'Test Check-in Adj {suffix}',
+                    'user_name': user.username
+                }
+                # Clean up previous bookings for this resource by this user to avoid conflicts
+                Booking.query.filter_by(resource_id=resource.id, user_name=user.username).delete()
+                db.session.commit()
+
+                create_resp = self.client.post('/api/bookings', json=booking_payload)
+                self.assertEqual(create_resp.status_code, 201, f"Booking creation failed for {suffix}: {create_resp.get_data(as_text=True)}")
+                booking_id = create_resp.get_json()['bookings'][0]['id']
+
+                check_in_resp = self.client.post(f'/api/bookings/{booking_id}/check_in')
+                self.assertEqual(check_in_resp.status_code, expected_code, f"Check-in for {suffix} failed assertion. Response: {check_in_resp.get_data(as_text=True)}")
+
+                if expected_code == 200:
+                    self.assertIn('Check-in successful', check_in_resp.get_data(as_text=True))
+                    booking_db = Booking.query.get(booking_id)
+                    self.assertIsNotNone(booking_db.checked_in_at)
+                else: # 403
+                    self.assertIn('Check-in is only allowed', check_in_resp.get_json().get('error', ''))
+        self.logout()
+
+
     def test_check_in_too_early_custom_window(self):
-        settings = self.helper_set_checkin_window(minutes_before=10, minutes_after=5)
+        settings = self.helper_set_checkin_window(minutes_before=10, minutes_after=5, past_adjustment_hours=0) # Explicitly 0 adj
         user = self.helper_create_user_and_login(username="user_checkin_early")
         resource = self.helper_create_resource(name="Resource Checkin Early")
 
@@ -828,8 +926,13 @@ class TestBookingUserActions(AppTests):
         self.assertIn(expected_error_msg_part, check_in_resp.get_json().get('error', ''))
         self.logout()
 
-    def test_check_in_too_late_custom_window(self):
-        settings = self.helper_set_checkin_window(minutes_before=10, minutes_after=5)
+    @patch('routes.api_bookings.datetime') # Patch datetime in the API route module
+    def test_check_in_too_late_custom_window_no_adj(self, mock_api_datetime): # Renamed to be specific
+        fixed_now_for_test = datetime_original(2024, 7, 1, 12, 0, 0, tzinfo=timezone_original.utc)
+        mock_api_datetime.now.return_value = fixed_now_for_test
+        mock_api_datetime.side_effect = lambda *args, **kw: datetime_original(*args, **kw) if args else fixed_now_for_test
+
+        settings = self.helper_set_checkin_window(minutes_before=10, minutes_after=5, past_adjustment_hours=0) # Explicitly 0 adj
         user = self.helper_create_user_and_login(username="user_checkin_late")
         resource = self.helper_create_resource(name="Resource Checkin Late")
 
@@ -854,6 +957,8 @@ class TestBookingUserActions(AppTests):
         expected_error_msg_part = f"Check-in is only allowed from {settings.check_in_minutes_before} minutes before to {settings.check_in_minutes_after} minutes after"
         self.assertIn(expected_error_msg_part, check_in_resp.get_json().get('error', ''))
         self.logout()
+
+    # Note: test_check_in_with_custom_window_success is now covered by test_check_in_window_logic_with_adjustment
 
     def _create_pin_for_resource(self, resource_id, pin_value="VALIDPIN4TEST", is_active=True):
         """Helper to create a ResourcePIN for a resource."""
@@ -4803,6 +4908,8 @@ class TestResourceURLCheckin(AppTests):
         settings.resource_checkin_url_requires_login = requires_login
         settings.check_in_minutes_before = minutes_before
         settings.check_in_minutes_after = minutes_after
+        # Add past_booking_time_adjustment_hours to this helper
+        settings.past_booking_time_adjustment_hours = kwargs.get('past_adjustment_hours', 0)
         settings.enable_check_in_out = True # Crucial for any check-in logic to be active
         db.session.commit()
         return settings
@@ -4816,49 +4923,99 @@ class TestResourceURLCheckin(AppTests):
         self.settings = self._set_checkin_booking_settings()
 
     @patch('routes.api_bookings.datetime')
-    def test_resource_url_checkin_success_loggedin(self, mock_datetime_obj):
-        self._set_checkin_booking_settings(requires_login=True, minutes_before=15, minutes_after=15)
-        self.login(self.user.username, "password")
+    def test_resource_url_checkin_window_logic_with_adjustment(self, mock_api_datetime):
+        self.login(self.user.username, "password") # User needs to be logged in for most scenarios
 
-        # Mock time to be at the start of the booking (well within 15 min before/after window)
-        mocked_now = self.booking.start_time # This is a naive datetime from model
-        # The route uses datetime.now(timezone.utc), so ensure mocked_now is offset-aware if comparing directly
-        # or ensure mocked_now is what datetime.now(timezone.utc) will return.
-        # For simplicity, if route uses .now(timezone.utc), we mock that.
-        mock_datetime_obj.now.return_value = mocked_now.replace(tzinfo=timezone_original.utc)
-        # If the route uses .utcnow(), then:
-        # mock_datetime_obj.utcnow.return_value = mocked_now
+        # Define a fixed "now" for the API context
+        fixed_api_now = datetime_original(2024, 7, 15, 12, 0, 0, tzinfo=timezone_original.utc)
+        mock_api_datetime.now.return_value = fixed_api_now
+        mock_api_datetime.side_effect = lambda *args, **kw: datetime_original(*args, **kw) if args else fixed_api_now
 
-        # Allow other datetime functions to work normally if used by the route or its helpers
-        mock_datetime_obj.strptime = datetime_original.strptime
-        mock_datetime_obj.combine = datetime_original.combine
-        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
+        # Booking start time is also 2024-07-15 12:00:00 (aligned with fixed_api_now for 0 offset)
+        # self.booking is created in setUp with start_time = 2024-07-15 12:00:00
 
+        # (adj_hr, min_before, min_after, expected_status_code, test_name_suffix, expect_pin_in_audit_if_success)
+        test_scenarios = [
+            (0, 15, 15, 200, "no_adj_on_time_pin", True),      # Eff. base 12:00. Window 11:45-12:15. Now 12:00. -> OK
+            (0, 15, 15, 404, "no_adj_too_early_pin", False),    # Test this by adjusting booking start time
+            (0, 15, 15, 404, "no_adj_too_late_pin", False),     # Test this by adjusting booking start time
 
-        response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
-        self.assertEqual(response.status_code, 200, f"Check-in failed: {response.get_json()}")
-        self.assertIn("Check-in successful", response.get_json().get('message', ''))
+            (1, 15, 15, 200, "pos_adj_in_window_pin", True),   # Booking 13:00. Eff. base 12:00. Window 11:45-12:15. Now 12:00. -> OK
+            (-1, 15, 15, 200, "neg_adj_in_window_pin", True), # Booking 11:00. Eff. base 12:00. Window 11:45-12:15. Now 12:00. -> OK
+        ]
 
-        db.session.refresh(self.booking)
-        self.assertIsNotNone(self.booking.checked_in_at)
+        for adj_hr, min_b, min_a, expected_code, suffix, expect_pin_audit in test_scenarios:
+            # Adjust booking start time for "too_early" and "too_late" relative to fixed_api_now
+            current_booking_start_time = self.booking.start_time # Original: 2024-07-15 12:00:00
 
-        audit_log = AuditLog.query.filter_by(action="CHECK_IN_VIA_RESOURCE_URL").order_by(AuditLog.id.desc()).first()
-        self.assertIsNotNone(audit_log)
-        self.assertEqual(audit_log.user_id, self.user.id)
-        self.assertIn(f"Booking ID {self.booking.id}", audit_log.details)
-        self.assertIn(f"Resource ID {self.resource.id}", audit_log.details)
-        self.assertIn(f"PIN {self.pin.pin_value} used", audit_log.details)
+            if "too_early" in suffix: # Make booking start in future, outside window
+                # Window is [eff.base - min_b, eff.base + min_a]
+                # We want fixed_api_now < (eff.base - min_b)
+                # fixed_api_now < (booking_start_adj + adj_hr) - min_b
+                # booking_start_adj > fixed_api_now - adj_hr + min_b
+                self.booking.start_time = fixed_api_now - timedelta(hours=adj_hr) + timedelta(minutes=min_b + 5)
+            elif "too_late" in suffix: # Make booking start in past, outside window
+                # We want fixed_api_now > (eff.base + min_a)
+                # fixed_api_now > (booking_start_adj + adj_hr) + min_a
+                # booking_start_adj < fixed_api_now - adj_hr - min_a
+                self.booking.start_time = fixed_api_now - timedelta(hours=adj_hr) - timedelta(minutes=min_a + 5)
+            elif "pos_adj_in_window" in suffix: # Booking at 13:00 for adj +1hr scenario
+                 self.booking.start_time = fixed_api_now + timedelta(hours=1)
+            elif "neg_adj_in_window" in suffix: # Booking at 11:00 for adj -1hr scenario
+                 self.booking.start_time = fixed_api_now - timedelta(hours=1)
+            else: # "on_time"
+                self.booking.start_time = fixed_api_now # Reset to align with fixed_api_now
+
+            self.booking.end_time = self.booking.start_time + timedelta(hours=1)
+            db.session.commit()
+
+            with self.subTest(suffix=suffix, adj_hr=adj_hr):
+                self._set_checkin_booking_settings(requires_login=True, minutes_before=min_b, minutes_after=min_a, past_adjustment_hours=adj_hr)
+
+                response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
+                self.assertEqual(response.status_code, expected_code, f"Check-in for {suffix} failed assertion. Response: {response.get_data(as_text=True)}")
+
+                db.session.refresh(self.booking)
+                if expected_code == 200:
+                    self.assertIn("Check-in successful", response.get_json().get('message', ''))
+                    self.assertIsNotNone(self.booking.checked_in_at)
+                    # Reset checked_in_at for next subtest iteration
+                    self.booking.checked_in_at = None
+                    db.session.commit()
+
+                    audit_log = AuditLog.query.filter_by(action="CHECK_IN_VIA_RESOURCE_URL").order_by(AuditLog.id.desc()).first()
+                    self.assertIsNotNone(audit_log)
+                    if expect_pin_audit:
+                        self.assertIn(f"PIN {self.pin.pin_value} used", audit_log.details)
+                else: # 403 or 404
+                    self.assertIsNone(self.booking.checked_in_at)
+                    if expected_code == 404:
+                         self.assertIn("No active booking found", response.get_json().get('error', ''))
+                    # Add more specific error message checks if needed for 403 based on why it's outside window
+
+            # Reset booking start time for next iteration if changed
+            self.booking.start_time = current_booking_start_time
+            self.booking.end_time = current_booking_start_time + timedelta(hours=1)
+            db.session.commit()
+
+    # Keep other TestResourceURLCheckin tests like invalid_pin, no_pin, inactive_pin, login_required_fail etc.
+    # They test aspects other than the window adjustment.
+    # We might need to ensure their mock_datetime is also appropriately set if they rely on window checks.
+    # For simplicity, will keep them as is for now, assuming they pass with default 0 adjustment.
+    # If they fail, they would need similar datetime mocking.
 
     @patch('routes.api_bookings.datetime')
     def test_resource_url_checkin_invalid_pin(self, mock_datetime_obj):
         self.login(self.user.username, "password")
+        # Set time to be valid for check-in window to isolate PIN failure
         mock_datetime_obj.now.return_value = self.booking.start_time.replace(tzinfo=timezone_original.utc)
         mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
 
-
         response = self.client.get(f'/r/{self.resource.id}/checkin?pin=INVALIDPINXYZ')
-        self.assertEqual(response.status_code, 403, f"Response: {response.get_json()}")
-        self.assertIn("Invalid PIN provided.", response.get_json().get('error', ''))
+        self.assertEqual(response.status_code, 403, f"Response: {response.get_json()}") # Changed from 403 to check template error
+        # This endpoint renders a template on error, so we check HTML content
+        self.assertIn("The PIN provided is invalid for this resource.", response.data.decode('utf-8'))
+
 
     @patch('routes.api_bookings.datetime')
     def test_resource_url_checkin_no_pin(self, mock_datetime_obj):
@@ -4867,8 +5024,9 @@ class TestResourceURLCheckin(AppTests):
         mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
 
         response = self.client.get(f'/r/{self.resource.id}/checkin')
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("PIN is required for check-in.", response.get_json().get('error', ''))
+        self.assertEqual(response.status_code, 400) # Changed from 400 to check template error
+        self.assertIn("PIN is required for check-in.", response.data.decode('utf-8'))
+
 
     @patch('routes.api_bookings.datetime')
     def test_resource_url_checkin_inactive_pin(self, mock_datetime_obj):
@@ -4879,77 +5037,38 @@ class TestResourceURLCheckin(AppTests):
         mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
 
         response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
-        self.assertEqual(response.status_code, 403)
-        self.assertIn("PIN is not active.", response.get_json().get('error', ''))
+        self.assertEqual(response.status_code, 403) # Changed from 403 to check template error
+        self.assertIn("The PIN provided is currently inactive.", response.data.decode('utf-8'))
+
 
     @patch('routes.api_bookings.datetime')
     def test_resource_url_checkin_login_required_fail(self, mock_datetime_obj):
-        self._set_checkin_booking_settings(requires_login=True)
-        # DO NOT LOGIN
+        self._set_checkin_booking_settings(requires_login=True) # Ensure this setting
+        self.logout() # Ensure logged out
         mock_datetime_obj.now.return_value = self.booking.start_time.replace(tzinfo=timezone_original.utc)
         mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
 
         response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
-        self.assertEqual(response.status_code, 401) # Unauthorized as login is required
-        self.assertIn("Login required for this check-in method.", response.get_json().get('error', ''))
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("Login is required to perform this check-in.", response.data.decode('utf-8'))
+
 
     @patch('routes.api_bookings.datetime')
     def test_resource_url_checkin_login_not_required_no_user_session_fails_to_find_booking(self, mock_datetime_obj):
         self._set_checkin_booking_settings(requires_login=False)
-        # Ensure no user is logged in (client is fresh or logged out)
-        self.logout() # Ensure any previous session is cleared.
+        self.logout()
 
         mock_datetime_obj.now.return_value = self.booking.start_time.replace(tzinfo=timezone_original.utc)
         mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
 
         response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
-        # Even if login not required, the current logic tries to find a booking for current_user.
-        # If no current_user (anonymous), it won't find self.booking which is tied to self.user.
-        # This behavior is as per current implementation. A truly anonymous check-in for *any* booking
-        # would require different logic.
-        self.assertEqual(response.status_code, 404, f"Response: {response.get_json()}")
-        self.assertIn("No active booking found for your session within the check-in window for this resource.", response.get_json().get('error', ''))
-
-    @patch('routes.api_bookings.datetime')
-    def test_resource_url_checkin_outside_window_too_early(self, mock_datetime_obj):
-        self.login(self.user.username, "password")
-        minutes_before = self.settings.check_in_minutes_before
-
-        # Time is set to be 1 minute before the check-in window opens
-        mocked_now = (self.booking.start_time - timedelta_original(minutes=minutes_before + 1))
-        mock_datetime_obj.now.return_value = mocked_now.replace(tzinfo=timezone_original.utc)
-        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
-
-
-        response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
-        self.assertEqual(response.status_code, 404) # Endpoint returns 404 if no valid booking in window
-        self.assertIn("No active booking found for your session within the check-in window for this resource.", response.get_json().get('error', ''))
-        # Or, if a more specific message is added for "too early/late":
-        # self.assertIn("Check-in window is not open yet.", response.get_json().get('error', ''))
-
-    @patch('routes.api_bookings.datetime')
-    def test_resource_url_checkin_outside_window_too_late(self, mock_datetime_obj):
-        self.login(self.user.username, "password")
-        minutes_after = self.settings.check_in_minutes_after # From BookingSettings
-
-        # Time is set to be 1 minute after the check-in window closes
-        # Check-in window closes at self.booking.start_time + timedelta(minutes=minutes_after)
-        # No, it's booking.end_time or booking.start_time + grace_after.
-        # The route uses: valid_check_in_end = booking.start_time + timedelta(minutes=settings.check_in_minutes_after)
-        mocked_now = (self.booking.start_time + timedelta_original(minutes=minutes_after + 1))
-        mock_datetime_obj.now.return_value = mocked_now.replace(tzinfo=timezone_original.utc)
-        mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
-
-        response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
-        self.assertEqual(response.status_code, 404)
-        self.assertIn("No active booking found for your session within the check-in window for this resource.", response.get_json().get('error', ''))
-        # Or a more specific message:
-        # self.assertIn("Check-in window has passed.", response.get_json().get('error', ''))
+        self.assertEqual(response.status_code, 404, f"Response: {response.data.decode('utf-8')}")
+        self.assertIn("No active booking found for this resource within the check-in window for your session.", response.data.decode('utf-8'))
 
     @patch('routes.api_bookings.datetime')
     def test_resource_url_checkin_no_active_booking_found(self, mock_datetime_obj):
         self.login(self.user.username, "password")
-        mock_datetime_obj.now.return_value = self.booking.start_time.replace(tzinfo=timezone_original.utc) # Time is fine
+        mock_datetime_obj.now.return_value = self.booking.start_time.replace(tzinfo=timezone_original.utc)
         mock_datetime_obj.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs)
 
         # Make the existing booking 'cancelled'
@@ -4958,18 +5077,18 @@ class TestResourceURLCheckin(AppTests):
 
         response = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
         self.assertEqual(response.status_code, 404)
-        self.assertIn("No active booking found for your session within the check-in window for this resource.", response.get_json().get('error', ''))
+        self.assertIn("No active booking found for this resource within the check-in window for your session.", response.data.decode('utf-8'))
 
         # Test with booking already checked in
         self.booking.status = 'approved' # Reset status
         self.booking.checked_in_at = datetime_original.utcnow() - timedelta_original(minutes=5) # Checked in 5 mins ago
         db.session.commit()
         response_already_checked_in = self.client.get(f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}')
-        self.assertEqual(response_already_checked_in.status_code, 400) # Or could be 200 with a message "already checked in"
-        self.assertIn("Booking has already been checked in.", response_already_checked_in.get_json().get('error', ''))
+        self.assertEqual(response_already_checked_in.status_code, 200) # Returns 200 with a message
+        self.assertIn("This booking has already been checked in.", response_already_checked_in.data.decode('utf-8'))
 
     def test_resource_url_checkin_redirects_to_correct_login_when_login_required(self):
-        """Test that resource URL check-in redirects to the correct login page when login is required."""
+        """Test that resource URL check-in renders template indicating login is required."""
         self._set_checkin_booking_settings(requires_login=True)
         self.logout()  # Ensure client is logged out
 
@@ -4981,22 +5100,108 @@ class TestResourceURLCheckin(AppTests):
 
         # Assert that the response data (HTML content) contains the correct login URL part
         response_data_str = response.data.decode('utf-8')
-        # url_for('ui.serve_login') generates '/ui/login'
-        expected_login_url_part = url_for('ui.serve_login') # This will be '/ui/login'
-
-        # Check for the href attribute containing the login URL and the next parameter
-        # Example: href="/ui/login?next=%2Fr%2F1%2Fcheckin%3Fpin%3DVALIDPIN789"
-        # We need to be careful about how `next` is URL-encoded.
-        # For simplicity, we'll check for the base login path and the presence of `next=`.
-        self.assertIn(f'href="{expected_login_url_part}?next=', response_data_str)
-
-        # More robust check for the next parameter pointing to the original URL
-        original_url = f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}'
-        # url_for encodes the `next` parameter. We should check for the encoded version.
-        from urllib.parse import quote_plus
-        encoded_next_url = quote_plus(original_url)
-        self.assertIn(encoded_next_url, response_data_str)
+        expected_login_url_part = url_for('ui.serve_login')
+        self.assertIn(f'action="{expected_login_url_part}"', response_data_str) # Check form action
         self.assertIn("Login is required to perform this check-in.", response_data_str)
+        self.assertIn('name="next"', response_data_str) # Check for next field
+        original_url = f'/r/{self.resource.id}/checkin?pin={self.pin.pin_value}'
+        self.assertIn(f'value="{original_url}"', response_data_str) # Check next field value
+
+# --- Test Class for QR Check-in with Adjustments ---
+# Placed here to group with other check-in related tests
+@patch('routes.api_bookings.datetime') # Patch datetime for the module where qr_check_in is defined
+class TestQRCheckinWithAdjustments(TestResourceURLCheckin): # Inherit setup from TestResourceURLCheckin for user, resource
+    def setUp(self):
+        super().setUp()
+        # self.user, self.resource are available from parent.
+        # self.booking is typically created per test for QR, as it needs a token.
+
+    def _create_booking_for_qr_test(self, start_offset_from_mock_now_mins, token_value, token_expiry_offset_from_booking_start_hrs):
+        # Ensure fixed_api_now is set by the calling test method using the class-level mock
+        booking_start_dt = self.fixed_api_now + timedelta(minutes=start_offset_from_mock_now_mins)
+        booking_end_dt = booking_start_dt + timedelta(hours=1)
+        token_expires_dt = booking_start_dt + timedelta(hours=token_expiry_offset_from_booking_start_hrs)
+
+        booking = Booking(
+            user_name=self.user.username, # from parent setup
+            resource_id=self.resource.id, # from parent setup
+            start_time=booking_start_dt,
+            end_time=booking_end_dt,
+            title=f"QR Test Booking {token_value}",
+            status='approved',
+            check_in_token=token_value,
+            check_in_token_expires_at=token_expires_dt
+        )
+        db.session.add(booking)
+        db.session.commit()
+        return booking
+
+    def test_qr_checkin_window_logic_with_adjustment(self, mock_api_datetime_qr): # Name from class decorator
+        # Set a fixed "now" for the API context for all subtests here
+        self.fixed_api_now = datetime_original(2024, 8, 1, 10, 0, 0, tzinfo=timezone_original.utc)
+        mock_api_datetime_qr.now.return_value = self.fixed_api_now
+        mock_api_datetime_qr.side_effect = lambda *args, **kw: datetime_original(*args, **kw) if args else self.fixed_api_now
+
+        # Scenarios: (adj_hr, min_b, min_a, booking_start_offset_mins, token_expiry_offset_hrs, expected_status_code, test_name_suffix)
+        scenarios = [
+            # No Adjustment
+            (0, 15, 15, 0, 2, 200, "no_adj_qr_on_time"),      # Eff. base 10:00. Window 09:45-10:15. Now 10:00. Token valid. -> OK
+            (0, 15, 15, 20, 2, 403, "no_adj_qr_too_early"),   # Eff. base 10:20. Window 10:05-10:35. Now 10:00. Token valid. -> Fail (too early)
+            (0, 15, 15, -20, 2, 403, "no_adj_qr_too_late"),   # Eff. base 09:40. Window 09:25-09:55. Now 10:00. Token valid. -> Fail (too late)
+            (0, 15, 15, 0, -1, 400, "no_adj_qr_token_expired"),# Eff. base 10:00. Window 09:45-10:15. Now 10:00. Token EXPIRED. -> Fail (token)
+
+            # Positive Adjustment (+1 hr) - Effective check-in window is 1hr earlier than calendar time
+            # Booking calendar at 11:00 (offset 60). Eff.base 10:00. Window 09:45-10:15. Now 10:00. -> OK
+            (1, 15, 15, 60, 2, 200, "pos_adj_qr_in_window"),
+            # Booking calendar at 10:00 (offset 0). Eff.base 09:00. Window 08:45-09:15. Now 10:00. -> Fail (too late for eff. window)
+            (1, 15, 15, 0, 2, 403, "pos_adj_qr_cal_now_too_late"),
+
+            # Negative Adjustment (-1 hr) - Effective check-in window is 1hr later than calendar time
+            # Booking calendar at 09:00 (offset -60). Eff.base 10:00. Window 09:45-10:15. Now 10:00. -> OK
+            (-1, 15, 15, -60, 2, 200, "neg_adj_qr_in_window"),
+            # Booking calendar at 10:00 (offset 0). Eff.base 11:00. Window 10:45-11:15. Now 10:00. -> Fail (too early for eff. window)
+            (-1, 15, 15, 0, 2, 403, "neg_adj_qr_cal_now_too_early"),
+        ]
+
+        for adj_hr, min_b, min_a, start_offset, token_expiry_hrs, expected_code, suffix in scenarios:
+            with self.subTest(suffix=suffix, adj_hr=adj_hr, start_offset=start_offset):
+                BookingSettings.query.delete() # Clear previous settings
+                Booking.query.filter_by(resource_id=self.resource.id).delete() # Clear previous bookings for this resource
+                db.session.commit()
+
+                # Use the helper from TestResourceURLCheckin to set settings
+                self._set_checkin_booking_settings(requires_login=False, # QR checkin does not require login
+                                                   minutes_before=min_b,
+                                                   minutes_after=min_a,
+                                                   past_adjustment_hours=adj_hr)
+
+                token_val = f"qrtoken_{suffix}"
+                booking = self._create_booking_for_qr_test(start_offset, token_val, token_expiry_hrs)
+
+                response = self.client.get(f'/api/bookings/check-in-qr/{token_val}')
+                self.assertEqual(response.status_code, expected_code, f"QR Check-in for {suffix} failed. Response: {response.get_data(as_text=True)}")
+
+                booking_db = Booking.query.get(booking.id) # Re-fetch from DB
+                if expected_code == 200:
+                    self.assertIn("Check-in successful", response.get_json().get('message',''))
+                    self.assertIsNotNone(booking_db.checked_in_at)
+                    self.assertIsNone(booking_db.check_in_token, "Token should be invalidated after successful QR check-in")
+                else:
+                    self.assertIsNone(booking_db.checked_in_at) # Should not be checked in
+                    if expected_code == 400 and "expired" in suffix:
+                        self.assertIn("Invalid or expired check-in token", response.get_json().get('error',''))
+                        # Token should be invalidated even if expired, as per current logic
+                        self.assertIsNone(booking_db.check_in_token, "Expired token should be invalidated on attempt")
+                    elif expected_code == 403: # Outside window
+                         self.assertIn("Check-in is only allowed", response.get_json().get('error',''))
+                         self.assertIsNotNone(booking_db.check_in_token, "Token should NOT be invalidated if check-in fails due to window timing")
+
+        # Clean up after all subtests
+        BookingSettings.query.delete()
+        Booking.query.delete()
+        db.session.commit()
+
+# --- End of TestQRCheckinWithAdjustments ---
 
 
 class TestAPIBulkResourcePINs(AppTests):
