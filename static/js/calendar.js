@@ -487,7 +487,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (endTimeUTC && endTimeUTC !== startTimeUTC) {
                                 fullTimeString += ` - ${endTimeUTC}`;
                             }
-                            fullTimeString += ' UTC';
+                            // fullTimeString += ' UTC'; // Removed ' UTC'
                         }
 
                         if (fullTimeString) {
@@ -497,6 +497,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                             eventHtml += `<br>${displayTime}`;
                         }
+                    }
+                    // Add resource name
+                    if (arg.event.extendedProps && arg.event.extendedProps.resource_name) {
+                        eventHtml += `<br><b>${arg.event.extendedProps.resource_name}</b>`;
                     }
                     return { html: eventHtml };
                 }
