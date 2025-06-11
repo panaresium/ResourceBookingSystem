@@ -925,9 +925,19 @@ def _import_resource_configurations_data(resources_data_list: list) -> tuple[int
                 resource.floor_map_id = None
             # If 'floor_map_id' key is not in res_data at all, resource.floor_map_id remains unchanged (existing value)
 
-            # Always update map_coordinates if present in res_data
-            if 'map_coordinates' in res_data:
-                resource.map_coordinates = res_data.get('map_coordinates')
+            # Handle map_coordinates assignment
+            raw_map_coordinates = res_data.get('map_coordinates')
+            if raw_map_coordinates is not None: # Check if key was present in res_data
+                if isinstance(raw_map_coordinates, dict):
+                    resource.map_coordinates = json.dumps(raw_map_coordinates)
+                else:
+                    # Catches strings, or pre-serialized JSON strings, or numbers/booleans (though less common for coords)
+                    # If it's meant to be JSON but isn't a dict here, it's assumed to be an already stringified JSON or a simple string.
+                    resource.map_coordinates = raw_map_coordinates
+            elif 'map_coordinates' in res_data and raw_map_coordinates is None:
+                # If 'map_coordinates' was explicitly provided as null/None in res_data
+                resource.map_coordinates = None
+            # If 'map_coordinates' key was not in res_data at all, resource.map_coordinates remains unchanged (previous value)
 
             # Revised role assignment logic
             if 'role_ids' in res_data and isinstance(res_data['role_ids'], list):
