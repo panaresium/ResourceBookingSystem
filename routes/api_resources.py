@@ -264,17 +264,32 @@ def get_unavailable_dates():
 
                     # Conflict Check 2: User's Own Schedule Conflicts with this Potential Slot?
                     user_schedule_conflicts = False
-                    for user_booking in user_bookings_on_this_date:
-                        if user_booking.resource_id != resource_to_check.id:
-                            user_booking_start_dt = user_booking.start_time.replace(tzinfo=timezone.utc) if user_booking.start_time.tzinfo is None else user_booking.start_time
-                            user_booking_end_dt = user_booking.end_time.replace(tzinfo=timezone.utc) if user_booking.end_time.tzinfo is None else user_booking.end_time
+                    # Only perform this check if the user is NOT allowed to book multiple resources at the same time.
+                    if not booking_settings.allow_multiple_resources_same_time:
+                        for user_booking in user_bookings_on_this_date:
+                            # Important: only check conflicts with *other* resources
+                            if user_booking.resource_id != resource_to_check.id:
+                                # Ensure datetime objects are timezone-aware for comparison (assuming UTC)
+                                user_booking_start_dt = user_booking.start_time.replace(tzinfo=timezone.utc) if user_booking.start_time.tzinfo is None else user_booking.start_time
+                                user_booking_end_dt = user_booking.end_time.replace(tzinfo=timezone.utc) if user_booking.end_time.tzinfo is None else user_booking.end_time
 
-                            if user_booking_start_dt < slot_end_dt and user_booking_end_dt > slot_start_dt:
-                                user_schedule_conflicts = True
-                                logger.debug(f"User {target_user.username} has conflict for slot {slot_def['start']}-{slot_def['end']} on {current_processing_date} due to booking ID {user_booking.id} on resource ID {user_booking.resource_id}.")
-                                break
+                                if user_booking_start_dt < slot_end_dt and user_booking_end_dt > slot_start_dt:
+                                    user_schedule_conflicts = True
+                                    logger.debug(
+                                        f"User {target_user.username} has a conflicting booking (ID: {user_booking.id} "
+                                        f"on resource {user_booking.resource_id}) with slot {slot_def['start']}-{slot_def['end']} "
+                                        f"on {current_processing_date} for resource {resource_to_check.name}. "
+                                        "Multiple bookings at the same time are disallowed by settings."
+                                    )
+                                    break # Found a conflict
 
                     if user_schedule_conflicts:
+                        # This condition is now only met if allow_multiple_resources_same_time is False AND a conflict exists.
+                        logger.debug(
+                            f"User schedule conflict (allow_multiple_resources_same_time is False) "
+                            f"for slot {slot_def['start']}-{slot_def['end']} on {resource_to_check.name} "
+                            f"for {current_processing_date}. Skipping this slot."
+                        )
                         continue # Next slot
 
                     any_slot_bookable_for_user_this_date = True
