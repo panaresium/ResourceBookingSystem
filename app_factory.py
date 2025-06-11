@@ -454,21 +454,22 @@ def create_app(config_object=config, testing=False): # Added testing parameter
                     app.logger.info("Scheduled booking CSV backup is disabled in settings. Job not added.")
 
             # Add the new auto_checkout_overdue_bookings job
+            # Add the new auto_checkout_overdue_bookings job
             if auto_checkout_overdue_bookings:
-                # Use constants defined in scheduler_tasks.py for config keys and defaults
-                from scheduler_tasks import AUTO_CHECKOUT_INTERVAL_MINUTES_CONFIG_KEY, DEFAULT_AUTO_CHECKOUT_INTERVAL_MINUTES
-                checkout_interval = app.config.get(AUTO_CHECKOUT_INTERVAL_MINUTES_CONFIG_KEY, DEFAULT_AUTO_CHECKOUT_INTERVAL_MINUTES)
+                # Using a default interval of 15 minutes as per prompt example.
+                # Replace with app.config.get if a config key is established later.
+                checkout_interval = 15
                 scheduler.add_job(
-                    auto_checkout_overdue_bookings,
-                    'interval',
+                    id='auto_checkout_overdue', # Using the ID from the prompt
+                    func=auto_checkout_overdue_bookings,
+                    trigger='interval',
                     minutes=checkout_interval,
-                    id='auto_checkout_overdue_bookings_job', # Ensure job ID is consistent
-                    args=[app]
+                    replace_existing=True, # Good practice
+                    args=[app] # Pass app context
                 )
-                app.logger.info(f"Scheduled auto-checkout job added: Interval {checkout_interval} minutes.")
+                app.logger.info(f"Scheduled auto_checkout_overdue_bookings job: Interval {checkout_interval} minutes.")
             else:
                 app.logger.warning("auto_checkout_overdue_bookings function not found in scheduler_tasks. Job not added.")
-
 
             if azure_backup_if_changed: # Legacy Azure backup, check if function exists
                  scheduler.add_job(azure_backup_if_changed, 'interval', minutes=app.config.get('AZURE_BACKUP_INTERVAL_MINUTES', 60))
