@@ -5,13 +5,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusDiv = document.getElementById('my-bookings-status');
 
     // Filter Elements
-    const statusFilterSelect = document.getElementById('status-filter-my-bookings'); // Corrected ID
+    const statusFilterSelect = document.getElementById('my-bookings-status-filter');
     const resourceNameFilterInput = document.getElementById('resource-name-filter'); // New filter
+    const dateFilterTypeSelect = document.getElementById('my-bookings-date-filter-type');
+    const datePickerContainer = document.getElementById('my-bookings-datepicker-container');
+    const datePickerInput = document.getElementById('my-bookings-specific-date-filter');
     const applyFiltersBtn = document.getElementById('apply-my-bookings-filters-btn');
     const clearFiltersBtn = document.getElementById('clear-my-bookings-filters-btn');
     // Visibility Toggles
     const toggleUpcomingCheckbox = document.getElementById('toggle-upcoming-bookings');
     const togglePastCheckbox = document.getElementById('toggle-past-bookings');
+
+    // --- Flatpickr Instance ---
+    let flatpickrInstance = null;
 
     // --- Pagination State (Common) ---
     const myBookingsItemsPerPageOptions = [5, 10, 25, 50];
@@ -216,8 +222,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const currentStatusFilter = statusFilterSelect ? statusFilterSelect.value : '';
         const currentResourceFilter = resourceNameFilterInput ? resourceNameFilterInput.value : '';
+        const currentDateFilterType = dateFilterTypeSelect ? dateFilterTypeSelect.value : 'any';
+        const currentDateFilterValue = (flatpickrInstance && flatpickrInstance.selectedDates.length > 0) ? flatpickrInstance.selectedDates[0] : null;
 
-        if (totalItems === 0 && !currentStatusFilter && !currentResourceFilter) {
+        if (totalItems === 0 && !currentStatusFilter && !currentResourceFilter && (currentDateFilterType === 'any' || !currentDateFilterValue)) {
              paginationContainer.style.display = 'none';
              return;
         }
@@ -341,6 +349,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const resourceName = resourceNameFilterInput ? resourceNameFilterInput.value.trim() : '';
         if (status) url += `&status_filter=${encodeURIComponent(status)}`;
         if (resourceName) url += `&resource_name_filter=${encodeURIComponent(resourceName)}`;
+
+        if (dateFilterTypeSelect && dateFilterTypeSelect.value === 'specific' && flatpickrInstance && flatpickrInstance.selectedDates.length > 0) {
+            const selectedDate = flatpickrInstance.selectedDates[0];
+            // Format date as YYYY-MM-DD
+            const year = selectedDate.getFullYear();
+            const month = ('0' + (selectedDate.getMonth() + 1)).slice(-2);
+            const day = ('0' + selectedDate.getDate()).slice(-2);
+            const formattedDate = `${year}-${month}-${day}`;
+            url += `&date_filter=${formattedDate}`;
+        }
+
         try {
             const data = await apiCall(url, {}, statusDiv);
             if (data.success === false) {
@@ -384,6 +403,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const resourceName = resourceNameFilterInput ? resourceNameFilterInput.value.trim() : '';
         if (status) url += `&status_filter=${encodeURIComponent(status)}`;
         if (resourceName) url += `&resource_name_filter=${encodeURIComponent(resourceName)}`;
+
+        if (dateFilterTypeSelect && dateFilterTypeSelect.value === 'specific' && flatpickrInstance && flatpickrInstance.selectedDates.length > 0) {
+            const selectedDate = flatpickrInstance.selectedDates[0];
+            // Format date as YYYY-MM-DD
+            const year = selectedDate.getFullYear();
+            const month = ('0' + (selectedDate.getMonth() + 1)).slice(-2);
+            const day = ('0' + selectedDate.getDate()).slice(-2);
+            const formattedDate = `${year}-${month}-${day}`;
+            url += `&date_filter=${formattedDate}`;
+        }
+
         try {
             const data = await apiCall(url, {}, statusDiv);
              if (data.success === false) {
@@ -511,9 +541,48 @@ document.addEventListener('DOMContentLoaded', () => {
         clearFiltersBtn.addEventListener('click', () => {
             if(statusFilterSelect) statusFilterSelect.value = '';
             if(resourceNameFilterInput) resourceNameFilterInput.value = '';
+            if(dateFilterTypeSelect) dateFilterTypeSelect.value = 'any';
+            if(datePickerContainer) datePickerContainer.style.display = 'none';
+            if(flatpickrInstance) flatpickrInstance.clear();
             handleFilterOrToggleChange();
         });
     }
+
+    if (dateFilterTypeSelect && datePickerContainer && datePickerInput) {
+        dateFilterTypeSelect.addEventListener('change', () => {
+            if (dateFilterTypeSelect.value === 'specific') {
+                datePickerContainer.style.display = 'block';
+                if (!flatpickrInstance) {
+                    flatpickrInstance = flatpickr(datePickerInput, {
+                        dateFormat: "Y-m-d",
+                        altInput: true,
+                        altFormat: "F j, Y",
+                    });
+                }
+            } else {
+                datePickerContainer.style.display = 'none';
+                // Optionally clear date when switching to "any"
+                // if (flatpickrInstance) {
+                //     flatpickrInstance.clear();
+                // }
+            }
+            // No automatic filter application on date type change, user clicks "Apply Filters"
+        });
+        // Initial state based on select value (e.g. if "specific" is pre-selected)
+        if (dateFilterTypeSelect.value === 'specific') {
+            datePickerContainer.style.display = 'block';
+            if (!flatpickrInstance) {
+                 flatpickrInstance = flatpickr(datePickerInput, {
+                    dateFormat: "Y-m-d",
+                    altInput: true,
+                    altFormat: "F j, Y",
+                });
+            }
+        } else {
+            datePickerContainer.style.display = 'none';
+        }
+    }
+
     if (toggleUpcomingCheckbox) {
         toggleUpcomingCheckbox.addEventListener('change', handleFilterOrToggleChange);
     }
