@@ -591,8 +591,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (dateFilterTypeSelect) { // Check if the main select exists
         dateFilterTypeSelect.addEventListener('change', function() {
-            setupInitialDateFilterState.call(this);
-            // Note: Filters are applied by clicking "Apply Filters", not directly on change here.
+            setupInitialDateFilterState.call(this); // Updates UI for datepicker
+            handleFilterOrToggleChange();         // Refreshes the booking list
         });
     }
 
