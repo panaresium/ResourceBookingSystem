@@ -419,11 +419,11 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
             # Add jobs from scheduler_tasks.py
             if cancel_unchecked_bookings: # Check if function exists before adding
-                scheduler.add_job(cancel_unchecked_bookings, 'interval', minutes=app.config.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', 5), args=[app])
+                scheduler.add_job(cancel_unchecked_bookings, 'interval', minutes=app.config.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', 5)) # Removed args=[app]
             if apply_scheduled_resource_status_changes: # Check if function exists
-                scheduler.add_job(apply_scheduled_resource_status_changes, 'interval', minutes=1, args=[app])
+                scheduler.add_job(apply_scheduled_resource_status_changes, 'interval', minutes=1) # Removed args=[app]
             if run_scheduled_backup_job: # Check if function exists
-                scheduler.add_job(run_scheduled_backup_job, 'interval', minutes=app.config.get('SCHEDULER_BACKUP_JOB_INTERVAL_MINUTES', 60), args=[app]) # New config option
+                scheduler.add_job(run_scheduled_backup_job, 'interval', minutes=app.config.get('SCHEDULER_BACKUP_JOB_INTERVAL_MINUTES', 60)) # Removed args=[app]
 
             if run_scheduled_booking_csv_backup: # Check if the function exists
                 booking_schedule_settings = app.config['BOOKING_CSV_SCHEDULE_SETTINGS']
@@ -446,8 +446,8 @@ def create_app(config_object=config, testing=False): # Added testing parameter
                         run_scheduled_booking_csv_backup,
                         'interval',
                         id='scheduled_booking_csv_backup_job', # Add an ID for later modification/removal
-                        **job_kwargs,
-                        args=[app] # Pass the app instance itself
+                        **job_kwargs
+                        # Removed args=[app]
                     )
                     app.logger.info(f"Scheduled booking CSV backup job added: Interval {interval_value} {interval_unit}, Range: {booking_schedule_settings.get('range_type')}.")
                 else:
@@ -464,8 +464,8 @@ def create_app(config_object=config, testing=False): # Added testing parameter
                     func=auto_checkout_overdue_bookings,
                     trigger='interval',
                     minutes=checkout_interval,
-                    replace_existing=True, # Good practice
-                    args=[app] # Pass app context
+                    replace_existing=True # Good practice
+                    # Removed args=[app]
                 )
                 app.logger.info(f"Scheduled auto_checkout_overdue_bookings job: Interval {checkout_interval} minutes.")
             else:
