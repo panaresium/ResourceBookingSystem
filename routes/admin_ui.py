@@ -729,7 +729,43 @@ def update_booking_settings():
         settings.resource_checkin_url_requires_login = request.form.get('resource_checkin_url_requires_login') == 'on'
         settings.allow_check_in_without_pin = request.form.get('allow_check_in_without_pin') == 'on'
 
+        # Auto Check-out Settings
+        settings.enable_auto_checkout = request.form.get('enable_auto_checkout') == 'on'
+        auto_checkout_delay_hours_str = request.form.get('auto_checkout_delay_hours', '1')
+        try:
+            auto_checkout_delay_hours_val = int(auto_checkout_delay_hours_str) if auto_checkout_delay_hours_str.strip() else 1
+            if auto_checkout_delay_hours_val < 1:
+                raise ValueError("Auto Check-out Delay must be at least 1 hour.")
+            settings.auto_checkout_delay_hours = auto_checkout_delay_hours_val
+        except ValueError as ve_auto_checkout:
+            db.session.rollback()
+            flash(f'{_("Invalid Auto Check-out Delay")}: {str(ve_auto_checkout)}', 'danger')
+            return redirect(url_for('admin_ui.serve_booking_settings_page'))
+
         db.session.commit()
+        # Log changed settings
+        changed_settings_log = (
+            f"allow_past_bookings={settings.allow_past_bookings}, "
+            f"max_booking_days_in_future={settings.max_booking_days_in_future}, "
+            f"allow_multiple_resources_same_time={settings.allow_multiple_resources_same_time}, "
+            f"max_bookings_per_user={settings.max_bookings_per_user}, "
+            f"enable_check_in_out={settings.enable_check_in_out}, "
+            f"check_in_minutes_before={settings.check_in_minutes_before}, "
+            f"check_in_minutes_after={settings.check_in_minutes_after}, "
+            f"past_booking_time_adjustment_hours={settings.past_booking_time_adjustment_hours}, "
+            f"pin_auto_generation_enabled={settings.pin_auto_generation_enabled}, "
+            f"pin_length={settings.pin_length}, "
+            f"pin_allow_manual_override={settings.pin_allow_manual_override}, "
+            f"resource_checkin_url_requires_login={settings.resource_checkin_url_requires_login}, "
+            f"allow_check_in_without_pin={settings.allow_check_in_without_pin}, "
+            f"enable_auto_checkout={settings.enable_auto_checkout}, "
+            f"auto_checkout_delay_hours={settings.auto_checkout_delay_hours}"
+        )
+        # Assuming add_audit_log is available and imported
+        # from utils import add_audit_log # Ensure this import is at the top of the file
+        from utils import add_audit_log # Added here for clarity, ensure it's at the top
+        add_audit_log(action="UPDATE_BOOKING_SETTINGS", details=f"Booking settings updated by {current_user.username}. New values: {changed_settings_log}")
+
         flash(_('Booking settings updated successfully.'), 'success')
     except ValueError:
         db.session.rollback()

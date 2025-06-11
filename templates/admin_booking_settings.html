@@ -86,6 +86,20 @@
             </div>
         </fieldset>
 
+        <fieldset style="margin-top: 20px; margin-bottom: 20px; padding-top: 10px; border-top: 1px solid #ccc;">
+            <legend>{{ _('Auto Check-out Settings') }}</legend>
+            <div class="form-group">
+                <label for="enable_auto_checkout" class="form-check-label">Enable Auto Check-out</label>
+                <input type="checkbox" class="form-check-input" id="enable_auto_checkout" name="enable_auto_checkout" {% if settings.enable_auto_checkout %}checked{% endif %}>
+                <small class="form-text text-muted">Automatically check out bookings that are overdue by the specified delay.</small>
+            </div>
+            <div class="form-group">
+                <label for="auto_checkout_delay_hours">Auto Check-out Delay (Hours)</label>
+                <input type="number" class="form-control" id="auto_checkout_delay_hours" name="auto_checkout_delay_hours" value="{{ settings.auto_checkout_delay_hours if settings.auto_checkout_delay_hours is not none else 1 }}" min="1">
+                <small class="form-text text-muted">Number of hours after booking end time to wait before auto check-out.</small>
+            </div>
+        </fieldset>
+
         <div style="margin-top: 20px;">
             <button type="submit" class="button primary-button">{{ _('Save Settings') }}</button>
         </div>

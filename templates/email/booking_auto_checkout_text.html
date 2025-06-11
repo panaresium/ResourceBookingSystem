@@ -1,8 +1,23 @@
 Dear {{ user_name }},
 
-Your booking for resource '{{ resource_name }}' (Title: '{{ booking_title }}') which ended at {{ original_end_time }} has been automatically checked out at {{ auto_checkout_time }} as it was found to be overdue.
+Your booking for "{{ booking_title }}" for the resource "{{ resource_name }}" has been automatically checked out.
 
-If you believe this was an error, please contact an administrator.
+Details:
+- Resource: {{ resource_name }}
+- Title: {{ booking_title }}
+- Original Start Time: {{ start_time }}
+- Original End Time: {{ end_time }}
+- Automatically Checked Out At: {{ auto_checked_out_at_time }}
+
+{{ explanation }}
+
+{% if location and location != "N/A" and floor and floor != "N/A" %}
+Location: {{ location }} - Floor: {{ floor }}
+{% elif location and location != "N/A" %}
+Location: {{ location }}
+{% elif floor and floor != "N/A" %}
+Floor: {{ floor }}
+{% endif %}
 
 Thank you,
 The System

@@ -97,6 +97,8 @@ class BookingSettings(db.Model):
     allow_check_in_without_pin = db.Column(db.Boolean, default=True, nullable=False, server_default='true')
     resource_checkin_url_requires_login = db.Column(db.Boolean, default=True, nullable=False)
     map_resource_opacity = db.Column(db.Float, nullable=False, default=0.7)
+    enable_auto_checkout = db.Column(db.Boolean, default=False, nullable=False)
+    auto_checkout_delay_hours = db.Column(db.Integer, default=1, nullable=False)
 
     def __repr__(self):
         return f"<BookingSettings {self.id}>"
