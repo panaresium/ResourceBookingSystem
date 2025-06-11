@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from flask import current_app, render_template
 from extensions import db
 from models import Booking, User, Resource, FloorMap, BookingSettings
-from utils import add_audit_log, send_email, _get_map_configuration_data, _get_resource_configurations_data, _get_user_configurations_data
+from utils import add_audit_log, send_email, _get_map_configuration_data, _get_resource_configurations_data, _get_user_configurations_data, get_current_effective_time
 from azure_backup import backup_bookings_csv, create_full_backup
 # Ensure current_app is available if not passed directly
 # from flask import current_app # current_app is already imported by the other functions
@@ -34,13 +34,16 @@ def auto_checkout_overdue_bookings(app): # app is now a required argument
             logger.info("Scheduler: Auto-checkout feature is disabled in settings. Task will not run.")
             return
 
-        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=auto_checkout_delay_hours)
+        effective_now = get_current_effective_time()
+        # Convert effective_now to naive UTC for comparison with Booking.end_time (naive UTC)
+        effective_now_naive_utc = effective_now.replace(tzinfo=None)
+        cutoff_time = effective_now_naive_utc - timedelta(hours=auto_checkout_delay_hours)
 
         try:
             overdue_bookings = Booking.query.filter(
                 Booking.status == 'checked_in',
                 Booking.checked_out_at.is_(None),
-                Booking.end_time < cutoff_time
+                Booking.end_time < cutoff_time # Booking.end_time is naive UTC
             ).all()
         except Exception as e_query:
             logger.error(f"Scheduler: Error querying for overdue bookings: {e_query}", exc_info=True)
@@ -181,13 +184,15 @@ def apply_scheduled_resource_status_changes(app=None):
     with app.app_context():
         logger = app.logger # Corrected: use app.logger after context
         logger.info("Scheduler: Starting apply_scheduled_resource_status_changes task...")
-        now_utc = datetime.now(timezone.utc)
+        effective_now = get_current_effective_time()
+        # Convert effective_now to naive UTC for comparison with Resource.scheduled_status_at (naive UTC)
+        now_for_comparison = effective_now.replace(tzinfo=None)
 
         try:
             resources_to_update = Resource.query.filter(
                 Resource.scheduled_status.isnot(None),
                 Resource.scheduled_status_at.isnot(None),
-                Resource.scheduled_status_at <= now_utc
+                Resource.scheduled_status_at <= now_for_comparison # Resource.scheduled_status_at is naive UTC
             ).all()
 
             if not resources_to_update:

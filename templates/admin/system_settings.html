@@ -34,6 +34,35 @@
         </div>
     </div>
 
+    <div class="card mt-3">
+        <div class="card-header">
+            {{ _('Time Settings') }}
+        </div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('admin_ui.system_settings_page') }}">
+                {# Add CSRF token if standard in other forms, e.g., using form.hidden_tag() or a specific macro #}
+                {# For this subtask, omitting explicit CSRF token field based on previous analysis #}
+                <div class="form-group row">
+                    <label for="global_time_offset_hours" class="col-sm-5 col-form-label">{{ _('Global Time Offset (hours from UTC)') }}</label>
+                    <div class="col-sm-4">
+                        <input type="number" class="form-control" id="global_time_offset_hours"
+                               name="global_time_offset_hours" value="{{ current_offset_hours | default(0) }}" required step="1">
+                        <small class="form-text text-muted">
+                            {{ _('Enter the integer number of hours to offset from UTC. E.g., -5 for EST, +8 for SGT.') }}
+                        </small>
+                    </div>
+                    <div class="col-sm-3">
+                        <button type="submit" class="btn btn-primary">{{ _('Save Offset') }}</button>
+                    </div>
+                </div>
+            </form>
+            <hr>
+            <h5>{{ _('Current Server Time Interpretation') }}</h5>
+            <p><strong>{{ _('Current Server UTC Time:') }}</strong> <span id="current-utc-time">{{ current_utc_time_str | default('N/A') }}</span></p>
+            <p><strong>{{ _('Effective Operational Time (UTC + Offset):') }}</strong> <span id="effective-local-time">{{ effective_operational_time_str | default('N/A') }}</span></p>
+        </div>
+    </div>
+
     <!-- Other system settings can be added here in future -->
 
 </div>

@@ -27,7 +27,7 @@ from googleapiclient.errors import HttpError
 # Assuming db and mail are initialized in extensions.py
 from extensions import db # mail is now fetched from current_app.extensions - mail removed
 # Assuming models are defined in models.py
-from models import AuditLog, User, Resource, FloorMap, Role, Booking # Added Booking, Resource, FloorMap
+from models import AuditLog, User, Resource, FloorMap, Role, Booking, BookingSettings # Added Booking, Resource, FloorMap, BookingSettings
 from sqlalchemy import func # Ensure func is imported
 from sqlalchemy.sql import func as sqlfunc # Added for explicit use
 
@@ -1781,3 +1781,33 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
 
     logger_instance.info(f"Detailed availability for user {user.username} on {target_date}: Total Primary Slots={total_primary_slots}, Available for User={available_primary_slots_for_user} across {len(resources_list)} resources.")
     return {'total_primary_slots': total_primary_slots, 'available_primary_slots_for_user': available_primary_slots_for_user}
+
+
+def get_current_effective_time():
+    """
+    Calculates the effective current time by applying the global time offset
+    from BookingSettings to the current UTC time.
+    """
+    offset_hours = 0
+    try:
+        # This query needs an active app context.
+        settings = BookingSettings.query.first()
+        if settings and settings.global_time_offset_hours is not None:
+            offset_hours = settings.global_time_offset_hours
+        # Optional: log if settings are missing or offset is None, defaults to 0 anyway.
+        # else:
+        #     if current_app:
+        #         current_app.logger.debug("BookingSettings not found or global_time_offset_hours not set, using offset 0.")
+    except Exception as e:
+        # In case of DB error or other issues accessing settings
+        if current_app:
+            current_app.logger.error(f"Error fetching time offset from BookingSettings: {e}. Defaulting offset to 0.")
+        else:
+            # Fallback logger if no app context (e.g., called from a script)
+            # Consider a basic logger setup if this utility is often used outside app context.
+            print(f"Error fetching time offset (no app context or logger not configured): {e}. Defaulting offset to 0.")
+        offset_hours = 0 # Safeguard if settings fetch fails
+
+    utc_now = datetime.now(timezone.utc)
+    effective_time = utc_now + timedelta(hours=offset_hours)
+    return effective_time
