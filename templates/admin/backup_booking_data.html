@@ -59,7 +59,7 @@
 <div class="container mt-4">
     <h1>{{ _('Booking Data Management') }}</h1>
     <hr>
-    <p>{{ _('Current UTC Time:') }} <span id="utc-clock">Loading...</span></p>
+    <p>{{ _('Current Server Time:') }} <span id="utc-clock" data-offset="{{ global_time_offset_hours | default(0) }}">Loading...</span></p>
     <hr>
 
     <!-- Selective Booking Restore Card -->
