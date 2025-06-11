@@ -574,6 +574,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     dateFormat: "Y-m-d",
                     altInput: true,
                     altFormat: "F j, Y",
+                    onClose: function(selectedDates, dateStr, instance) {
+                        // Check if a date was actually selected or cleared
+                        // Calling handleFilterOrToggleChange unconditionally might be fine,
+                        // as it fetches based on current filter states.
+                        handleFilterOrToggleChange();
+                    }
                 });
             }
         } else { // 'any' or other

@@ -307,6 +307,74 @@ describe('My Bookings Date Filter', () => {
             expect(mockApiCall.mock.calls.length).toBeGreaterThanOrEqual(2);
         });
     });
+
+    describe('Flatpickr Interaction - Auto-refresh on date selection', () => {
+        beforeEach(() => {
+            loadScript(); // Load my_bookings.js to attach its event listeners
+
+            // Ensure Flatpickr is initialized for these tests
+            const dateFilterTypeSelect = document.getElementById('my-bookings-date-filter-type');
+            dateFilterTypeSelect.value = 'specific';
+            dateFilterTypeSelect.dispatchEvent(new Event('change')); // This should trigger flatpickr initialization
+
+            // Clear any API calls that might have happened during setup (e.g., initial load)
+            mockApiCall.mockClear();
+        });
+
+        test('should call handleFilterOrToggleChange when Flatpickr onClose is triggered', () => {
+            // Ensure flatpickr was called and we can get its options
+            expect(mockFlatpickr).toHaveBeenCalled();
+            const flatpickrOptions = mockFlatpickr.mock.calls[0][1]; // Get options from the first call
+
+            if (flatpickrOptions && typeof flatpickrOptions.onClose === 'function') {
+                // Simulate Flatpickr's onClose being called
+                // Parameters for onClose: selectedDates, dateStr, instance
+                // The actual values might not matter if onClose always calls handleFilterOrToggleChange
+                mockFlatpickrInstance.selectedDates = [new Date(2024, 0, 15)]; // Simulate a date is selected
+                flatpickrOptions.onClose(mockFlatpickrInstance.selectedDates, '2024-01-15', mockFlatpickrInstance);
+            } else {
+                throw new Error('Flatpickr onClose callback not captured or not a function. Check mockFlatpickr setup and script logic.');
+            }
+
+            // Verify handleFilterOrToggleChange was called (indirectly, by checking apiCall)
+            // Expect calls for both upcoming and past bookings
+            expect(mockApiCall).toHaveBeenCalledWith(
+                expect.stringContaining('/api/bookings/upcoming'),
+                expect.anything(),
+                expect.anything()
+            );
+            expect(mockApiCall).toHaveBeenCalledWith(
+                expect.stringContaining('/api/bookings/past'),
+                expect.anything(),
+                expect.anything()
+            );
+            expect(mockApiCall.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+            // Also check if the date_filter parameter is now part of the URL
+             const upcomingCall = mockApiCall.mock.calls.find(call => call[0].includes('/api/bookings/upcoming'));
+             expect(upcomingCall[0]).toContain('date_filter=2024-01-15');
+             const pastCall = mockApiCall.mock.calls.find(call => call[0].includes('/api/bookings/past'));
+             expect(pastCall[0]).toContain('date_filter=2024-01-15');
+        });
+
+        test('should still call handleFilterOrToggleChange if Flatpickr onClose is triggered with no date selected (cleared)', () => {
+            expect(mockFlatpickr).toHaveBeenCalled();
+            const flatpickrOptions = mockFlatpickr.mock.calls[0][1];
+
+            if (flatpickrOptions && typeof flatpickrOptions.onClose === 'function') {
+                mockFlatpickrInstance.selectedDates = []; // Simulate date cleared
+                flatpickrOptions.onClose([], '', mockFlatpickrInstance);
+            } else {
+                throw new Error('Flatpickr onClose callback not captured or not a function.');
+            }
+
+            expect(mockApiCall.mock.calls.length).toBeGreaterThanOrEqual(2); // Fetches should still occur
+            const upcomingCall = mockApiCall.mock.calls.find(call => call[0].includes('/api/bookings/upcoming'));
+            expect(upcomingCall[0]).not.toContain('date_filter='); // Date filter should not be present
+            const pastCall = mockApiCall.mock.calls.find(call => call[0].includes('/api/bookings/past'));
+            expect(pastCall[0]).not.toContain('date_filter='); // Date filter should not be present
+        });
+    });
 });
 
 // Note: To run these tests, you'd typically use a test runner like Jest.
