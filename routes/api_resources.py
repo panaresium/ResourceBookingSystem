@@ -213,13 +213,8 @@ def get_unavailable_dates():
                     logger.debug(f"Date {current_processing_date} is past and allow_past_bookings is false. Added to unavailable.")
                     current_iter_date += timedelta(days=1)
                     continue
-
-                effective_cutoff = datetime.combine(current_processing_date + timedelta(days=1), time.min, tzinfo=timezone.utc) - timedelta(hours=booking_settings.past_booking_time_adjustment_hours)
-                if now > effective_cutoff:
-                    unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
-                    logger.debug(f"Date {current_processing_date} is past. Now: {now}, Effective Cutoff: {effective_cutoff}. Added to unavailable.")
-                    current_iter_date += timedelta(days=1)
-                    continue
+                else: # This means date_is_past is true AND booking_settings.allow_past_bookings is true.
+                    logger.debug(f"Date {current_processing_date} is past and allow_past_bookings is true. Proceeding to check slot availability for this date.")
 
             # b. User's Existing Bookings for the Day (for conflict checking against other resources)
             user_bookings_on_this_date = Booking.query.filter(
