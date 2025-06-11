@@ -205,8 +205,33 @@ def serve_backup_settings_page():
     current_app.logger.info(f"User {current_user.username} accessed Backup General Settings page.")
     scheduler_settings = load_scheduler_settings()
     auto_restore_booking_records_on_startup = scheduler_settings.get('auto_restore_booking_records_on_startup', False)
+
+    # Get global_time_offset_hours from BookingSettings
+    booking_settings = BookingSettings.query.first()
+    if not booking_settings:
+        current_app.logger.info("No BookingSettings found, creating default with global_time_offset_hours = 0.")
+        booking_settings = BookingSettings(global_time_offset_hours=0)
+        db.session.add(booking_settings)
+        try:
+            db.session.commit()
+            current_app.logger.info("Default BookingSettings committed to database.")
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"Error committing default BookingSettings: {e}", exc_info=True)
+            # If commit fails, we still proceed with the default value in memory for this request
+            # but it won't be persisted, which is a potential issue for subsequent operations.
+            # For this specific read-only operation in the GET request, it's acceptable.
+
+    global_time_offset_hours = booking_settings.global_time_offset_hours if booking_settings else 0
+    # Ensure global_time_offset_hours is not None, default to 0 if it is (should be handled by model default)
+    if global_time_offset_hours is None:
+        global_time_offset_hours = 0
+        current_app.logger.warning("global_time_offset_hours was None, defaulted to 0.")
+
+
     return render_template('admin/backup_settings.html',
-                           auto_restore_booking_records_on_startup=auto_restore_booking_records_on_startup)
+                           auto_restore_booking_records_on_startup=auto_restore_booking_records_on_startup,
+                           global_time_offset_hours=global_time_offset_hours)
 
 
 @admin_ui_bp.route('/admin/restore_booking_csv/<timestamp_str>', methods=['POST']) # This URL might need to be adjusted if it's not blueprint relative
@@ -551,6 +576,59 @@ def save_auto_restore_booking_records_settings():
         current_app.logger.error(f"Error saving 'Auto Restore Booking Records on Startup' setting by {current_user.username}: {str(e)}", exc_info=True)
         flash(_('An error occurred while saving the auto restore setting. Please check the logs.'), 'danger')
     return redirect(url_for('admin_ui.serve_backup_settings_page')) # Redirect to settings tab
+
+
+@admin_ui_bp.route('/backup/settings/time_offset', methods=['POST'], endpoint='save_backup_time_offset')
+@login_required
+@permission_required('manage_system')
+def save_backup_time_offset_route():
+    current_app.logger.info(f"User {current_user.username} attempting to save Global Time Offset for backups.")
+    try:
+        new_offset_str = request.form.get('global_time_offset_hours')
+
+        if new_offset_str is None or new_offset_str.strip() == "":
+            flash(_('Time offset value must be provided and cannot be empty.'), 'danger')
+            return redirect(url_for('admin_ui.serve_backup_settings_page'))
+
+        try:
+            new_offset_value = int(new_offset_str)
+        except ValueError:
+            flash(_('Invalid input for time offset. Please enter a whole number (integer).'), 'danger')
+            return redirect(url_for('admin_ui.serve_backup_settings_page'))
+
+        if not (-23 <= new_offset_value <= 23): # Range check
+            flash(_('Time offset must be an integer between -23 and +23 hours.'), 'danger')
+            return redirect(url_for('admin_ui.serve_backup_settings_page'))
+
+        # If validation passes, proceed to save
+        settings = BookingSettings.query.first()
+        if not settings:
+            current_app.logger.info("No BookingSettings found, creating default instance before saving time offset.")
+            settings = BookingSettings(global_time_offset_hours=0) # Default other fields as per model
+            db.session.add(settings)
+            # Attempt to commit here to ensure 'settings' object is persistent for the next step
+            try:
+                db.session.commit()
+                current_app.logger.info("Created and committed default BookingSettings.")
+            except Exception as e_commit_default:
+                db.session.rollback()
+                current_app.logger.error(f"Error committing new default BookingSettings: {e_commit_default}", exc_info=True)
+                flash(_('Error initializing system settings. Could not save time offset.'), 'danger')
+                return redirect(url_for('admin_ui.serve_backup_settings_page'))
+
+        settings.global_time_offset_hours = new_offset_value
+        db.session.commit()
+
+        add_audit_log(action="UPDATE_GLOBAL_TIME_OFFSET", details=f"Global time offset for backups set to {new_offset_value} hours by {current_user.username}.")
+        flash(_('Global time offset saved successfully.'), 'success')
+        current_app.logger.info(f"Global time offset set to {new_offset_value} hours by {current_user.username}.")
+
+    except Exception as e:
+        db.session.rollback() # Rollback in case of other unexpected errors during the process
+        current_app.logger.error(f"Error saving Global Time Offset by {current_user.username}: {str(e)}", exc_info=True)
+        flash(_('An error occurred while saving the time offset. Please check the logs.'), 'danger')
+
+    return redirect(url_for('admin_ui.serve_backup_settings_page'))
 
 
 @admin_ui_bp.route('/admin/verify_booking_csv/<timestamp_str>', methods=['POST']) # This URL might need to be adjusted

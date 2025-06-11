@@ -62,6 +62,24 @@
     <p>{{ _('Current UTC Time:') }} <span id="utc-clock">Loading...</span></p>
     <hr>
 
+    <!-- Global Time Offset Configuration Card -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h2 class="card-title h5">{{ _('Global Time Offset Configuration') }}</h2>
+        </div>
+        <div class="card-body">
+            <p class="card-text"><small>{{ _('This setting adjusts how times are displayed and processed across the application, relative to UTC. For example, if your local time is UTC+2, enter 2. If UTC-5, enter -5.') }}</small></p>
+            <form method="POST" action="{{ url_for('admin_ui.save_backup_time_offset') }}" id="time-offset-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="form-group mb-3">
+                    <label for="global_time_offset_hours" class="form-label">{{ _('Global Time Offset (hours):') }}</label>
+                    <input type="number" class="form-control" id="global_time_offset_hours" name="global_time_offset_hours" value="{{ global_time_offset_hours | default(0) }}" min="-23" max="23" step="1">
+                </div>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> {{ _('Save Time Offset') }}</button>
+            </form>
+        </div>
+    </div>
+
     <!-- Startup Behavior Settings Card -->
     <div class="card mb-4">
         <div class="card-header">
