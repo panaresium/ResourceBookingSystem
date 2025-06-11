@@ -99,7 +99,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 inline: true,
                 static: true,
                 dateFormat: "Y-m-d",
-                minDate: "today",
                 disable: [
                     function(date) {
                         const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
