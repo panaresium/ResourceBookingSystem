@@ -881,8 +881,53 @@ def _import_resource_configurations_data(resources_data_list: list) -> tuple[int
             resource.scheduled_status = res_data.get('scheduled_status', resource.scheduled_status)
             scheduled_status_at_str = res_data.get('scheduled_status_at')
             resource.scheduled_status_at = datetime.fromisoformat(scheduled_status_at_str) if scheduled_status_at_str else None
-            resource.floor_map_id = res_data.get('floor_map_id', resource.floor_map_id)
-            resource.map_coordinates = res_data.get('map_coordinates', resource.map_coordinates)
+
+            # Handle floor_map_id and map_coordinates
+            new_floor_map_id = res_data.get('floor_map_id') # Use .get() to fetch, could be None
+
+            if new_floor_map_id is not None:
+                # Attempt to convert to integer if it's a string representation
+                try:
+                    processed_floor_map_id = int(new_floor_map_id)
+                except (ValueError, TypeError):
+                    # If conversion fails (e.g., it's an empty string or non-numeric)
+                    # Treat as if no valid floor_map_id was provided for lookup,
+                    # but log an error if it wasn't an intentional empty string.
+                    # If it was an empty string, it means "remove existing map link".
+                    if new_floor_map_id == '': # Explicitly clear
+                        resource.floor_map_id = None
+                        logger.info(f"Resource '{original_resource_name_for_log}' (ID: {res_data.get('id', resource.id)}): floor_map_id explicitly cleared.")
+                    elif new_floor_map_id is not None : # It was some other invalid value
+                        errors.append({
+                            'resource_name': original_resource_name_for_log,
+                            'id': res_data.get('id', resource.id),
+                            'error': f"Invalid non-integer floor_map_id value '{new_floor_map_id}' provided. floor_map_id was not updated."
+                        })
+                        # resource.floor_map_id remains unchanged in this specific error case.
+                    # If new_floor_map_id was None initially, this block is skipped.
+                    processed_floor_map_id = None # Ensure it's None if conversion failed or was empty string
+
+                if processed_floor_map_id is not None: # Only proceed if we have a valid integer ID
+                    floor_map_exists = db.session.query(FloorMap.id).filter_by(id=processed_floor_map_id).first()
+                    if floor_map_exists:
+                        resource.floor_map_id = processed_floor_map_id
+                    else:
+                        error_msg = f"Resource '{original_resource_name_for_log}' (ID: {res_data.get('id', resource.id)}) references FloorMap ID {processed_floor_map_id}, which does not exist. Map coordinates were imported, but will not function correctly until the corresponding FloorMap data is present/imported."
+                        errors.append({
+                            'resource_name': original_resource_name_for_log,
+                            'id': res_data.get('id', resource.id),
+                            'floor_map_id': processed_floor_map_id,
+                            'error': error_msg
+                        })
+                        resource.floor_map_id = None # Set to None as per requirement
+            elif 'floor_map_id' in res_data and res_data['floor_map_id'] is None:
+                # If 'floor_map_id' is explicitly provided as null/None in res_data
+                resource.floor_map_id = None
+            # If 'floor_map_id' key is not in res_data at all, resource.floor_map_id remains unchanged (existing value)
+
+            # Always update map_coordinates if present in res_data
+            if 'map_coordinates' in res_data:
+                resource.map_coordinates = res_data.get('map_coordinates')
 
             # Revised role assignment logic
             if 'role_ids' in res_data and isinstance(res_data['role_ids'], list):
