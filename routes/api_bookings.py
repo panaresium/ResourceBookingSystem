@@ -25,7 +25,7 @@ def init_api_bookings_routes(app):
     app.register_blueprint(api_bookings_bp)
 
 # Helper function to fetch and paginate user bookings
-def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_filter, resource_name_filter, logger):
+def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_filter, resource_name_filter, date_filter_str, logger):
     """
     Helper function to fetch, filter, sort, and paginate bookings for a user.
     """
@@ -49,6 +49,17 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
 
         if resource_name_filter:
             base_query = base_query.join(Resource).filter(Resource.name.ilike(f"%{resource_name_filter}%"))
+
+        if date_filter_str:
+            try:
+                selected_date = datetime.strptime(date_filter_str, '%Y-%m-%d').date()
+                # Filter bookings where the date of start_time (in UTC) matches selected_date
+                # Assuming Booking.start_time is stored as naive UTC DateTime
+                base_query = base_query.filter(sqlfunc.date(Booking.start_time) == selected_date)
+            except ValueError:
+                logger.warning(f"Invalid date_filter format: '{date_filter_str}'. Ignoring date filter.")
+                # Optionally, you could return an error or an empty list if date format is crucial
+                pass # Or handle error appropriately
 
         all_user_bookings_from_db = base_query.all()
 
@@ -157,6 +168,7 @@ def get_upcoming_bookings():
         per_page = request.args.get('per_page', current_app.config.get('DEFAULT_ITEMS_PER_PAGE', 5), type=int)
         status_filter = request.args.get('status_filter')
         resource_name_filter = request.args.get('resource_name_filter')
+        date_filter = request.args.get('date_filter') # Added date_filter
 
         my_bookings_per_page_options = current_app.config.get('MY_BOOKINGS_ITEMS_PER_PAGE_OPTIONS', [5, 10, 25, 50])
         if per_page not in my_bookings_per_page_options:
@@ -164,7 +176,7 @@ def get_upcoming_bookings():
 
 
         paginated_bookings, pagination_info, check_in_out_enabled, allow_check_in_without_pin = _fetch_user_bookings_data(
-            current_user.username, 'upcoming', page, per_page, status_filter, resource_name_filter, logger
+            current_user.username, 'upcoming', page, per_page, status_filter, resource_name_filter, date_filter, logger
         )
 
         pagination_info['per_page_options'] = my_bookings_per_page_options
@@ -193,13 +205,14 @@ def get_past_bookings():
         per_page = request.args.get('per_page', current_app.config.get('DEFAULT_ITEMS_PER_PAGE', 5), type=int)
         status_filter = request.args.get('status_filter')
         resource_name_filter = request.args.get('resource_name_filter')
+        date_filter = request.args.get('date_filter') # Added date_filter
 
         my_bookings_per_page_options = current_app.config.get('MY_BOOKINGS_ITEMS_PER_PAGE_OPTIONS', [5, 10, 25, 50])
         if per_page not in my_bookings_per_page_options:
              per_page = my_bookings_per_page_options[0]
 
         paginated_bookings, pagination_info, check_in_out_enabled, allow_check_in_without_pin = _fetch_user_bookings_data(
-            current_user.username, 'past', page, per_page, status_filter, resource_name_filter, logger
+            current_user.username, 'past', page, per_page, status_filter, resource_name_filter, date_filter, logger
         )
 
         pagination_info['per_page_options'] = my_bookings_per_page_options
