@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ _('Check-out Confirmed') }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333333; /* Darker grey for text */
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4; /* Light grey background for the page */
+        }
+        .container {
+            width: 90%;
+            max-width: 600px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #ffffff; /* White background for container */
+            border: 1px solid #dddddd;
+            border-radius: 8px; /* Slightly more rounded corners */
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); /* Subtle shadow */
+        }
+        .header {
+            color: #0056b3; /* Consistent header color */
+            font-size: 22px; /* Slightly larger header */
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eeeeee;
+        }
+        .content p, .content ul {
+            margin-bottom: 15px; /* More spacing between paragraphs/lists */
+        }
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+        li {
+            padding-bottom: 10px; /* More padding for list items */
+        }
+        strong {
+            color: #0056b3; /* Match header color for emphasis */
+        }
+        .footer {
+            margin-top: 25px;
+            padding-top: 15px;
+            font-size: 0.9em;
+            color: #777777;
+            border-top: 1px solid #eeeeee;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">{{ _('Check-out Confirmed') }}</div>
+        <div class="content">
+            <p>{{ _('Dear') }} {{ user_name }},</p>
+
+            <p>{{ _('You have successfully checked out from your booking.') }}</p>
+
+            <h3>{{ _('Booking Details') }}:</h3>
+            <ul>
+                <li><strong>{{ _('Resource') }}:</strong> {{ resource_name }}</li>
+                <li><strong>{{ _('Title') }}:</strong> {{ booking_title }}</li>
+                <li><strong>{{ _('Original Start Time') }}:</strong> {{ start_time }}</li>
+                <li><strong>{{ _('Original End Time') }}:</strong> {{ end_time }}</li>
+                <li><strong>{{ _('Actual Check-out Time') }}:</strong> {{ check_out_time }}</li>
+                {% if location and location != "N/A" %}
+                    <li><strong>{{ _('Location') }}:</strong> {{ location }}</li>
+                {% endif %}
+                {% if floor and floor != "N/A" %}
+                    <li><strong>{{ _('Floor') }}:</strong> {{ floor }}</li>
+                {% endif %}
+            </ul>
+        </div>
+
+        <div class="footer">
+            <p>{{ _('Thank you for using our booking system!') }}</p>
+            <p><small>{{ _('This is an automated notification. Please do not reply directly to this email.') }}</small></p>
+        </div>
+    </div>
+</body>
+</html>

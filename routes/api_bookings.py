@@ -1430,7 +1430,72 @@ def check_in_booking(booking_id):
         socketio.emit('booking_updated', {'action': 'checked_in', 'booking_id': booking.id, 'checked_in_at': now_utc.isoformat(), 'resource_id': booking.resource_id})
         current_app.logger.info(f"User '{current_user.username}' successfully checked into booking ID: {booking_id} at {now_utc.isoformat()}{' using PIN' if provided_pin else ''}.")
 
-        if current_user.email:
+        # Send Email Notification for Check-in
+        try:
+            user = User.query.filter_by(username=booking.user_name).first()
+            resource_details = Resource.query.get(booking.resource_id) # Renamed to avoid conflict
+
+            if user and user.email and resource_details:
+                floor_map_location = "N/A"
+                floor_map_floor = "N/A"
+                if resource_details.floor_map_id:
+                    floor_map = FloorMap.query.get(resource_details.floor_map_id)
+                    if floor_map:
+                        floor_map_location = floor_map.location
+                        floor_map_floor = floor_map.floor
+                    else:
+                        current_app.logger.warning(f"FloorMap {resource_details.floor_map_id} not found for resource {resource_details.id} during check-in email prep for booking {booking.id}.")
+
+                # Ensure checked_in_at is timezone-aware for display (it's stored naive UTC)
+                checked_in_at_aware = booking.checked_in_at.replace(tzinfo=timezone.utc)
+
+                email_data = {
+                    'user_name': user.username,
+                    'booking_title': booking.title,
+                    'resource_name': resource_details.name,
+                    'start_time': booking.start_time.strftime('%Y-%m-%d %H:%M'),
+                    'end_time': booking.end_time.strftime('%Y-%m-%d %H:%M'),
+                    'checked_in_at_time': checked_in_at_aware.strftime('%Y-%m-%d %H:%M:%S UTC'),
+                    'location': floor_map_location,
+                    'floor': floor_map_floor,
+                }
+
+                html_body = render_template('email/check_in_confirmation.html', **email_data)
+                # Basic plain text version
+                body = (
+                    f"Dear {email_data['user_name']},\n\n"
+                    f"You have successfully checked in for your booking.\n\n"
+                    f"Booking Details:\n"
+                    f"- Resource: {email_data['resource_name']}\n"
+                    f"- Title: {email_data['booking_title']}\n"
+                    f"- Original Start Time: {email_data['start_time']}\n"
+                    f"- Original End Time: {email_data['end_time']}\n"
+                    f"- Actual Check-in Time: {email_data['checked_in_at_time']}\n"
+                    f"- Location: {email_data['location']}\n"
+                    f"- Floor: {email_data['floor']}\n\n"
+                    f"Thank you for using our booking system!"
+                )
+                subject = f"Check-in Confirmed: {email_data['resource_name']} - {email_data['booking_title']}"
+
+                send_email(
+                    to_address=user.email,
+                    subject=subject,
+                    html_body=html_body,
+                    body=body
+                )
+                current_app.logger.info(f"Check-in confirmation email sent to {user.email} for booking {booking.id}.")
+            elif not user:
+                current_app.logger.warning(f"User {booking.user_name} not found. Skipping check-in email for booking {booking.id}.")
+            elif not user.email:
+                current_app.logger.warning(f"User {booking.user_name} has no email. Skipping check-in email for booking {booking.id}.")
+            elif not resource_details:
+                 current_app.logger.warning(f"Resource {booking.resource_id} not found. Skipping check-in email for booking {booking.id}.")
+
+        except Exception as e_email:
+            current_app.logger.error(f"Error sending check-in confirmation email for booking {booking.id}: {e_email}", exc_info=True)
+        # End of Email Notification Logic
+
+        if current_user.email: # Existing Teams notification
             send_teams_notification(
                 current_user.email,
                 "Booking Checked In",
@@ -1486,7 +1551,72 @@ def check_out_booking(booking_id):
         socketio.emit('booking_updated', {'action': 'checked_out', 'booking_id': booking.id, 'checked_out_at': now.isoformat(), 'resource_id': booking.resource_id, 'status': 'completed'})
         current_app.logger.info(f"User '{current_user.username}' successfully checked out of booking ID: {booking_id} at {now.isoformat()}. Status set to completed.")
 
-        if current_user.email:
+        # Send Email Notification for Check-out
+        try:
+            user = User.query.filter_by(username=booking.user_name).first()
+            resource_details = Resource.query.get(booking.resource_id) # Renamed
+
+            if user and user.email and resource_details:
+                floor_map_location = "N/A"
+                floor_map_floor = "N/A"
+                if resource_details.floor_map_id:
+                    floor_map = FloorMap.query.get(resource_details.floor_map_id)
+                    if floor_map:
+                        floor_map_location = floor_map.location
+                        floor_map_floor = floor_map.floor
+                    else:
+                        current_app.logger.warning(f"FloorMap {resource_details.floor_map_id} not found for resource {resource_details.id} during check-out email prep for booking {booking.id}.")
+
+                # Ensure checked_out_at is timezone-aware for display (it's stored naive UTC but 'now' is aware)
+                checked_out_at_aware = booking.checked_out_at # This is 'now' which is already UTC aware
+
+                email_data = {
+                    'user_name': user.username,
+                    'booking_title': booking.title,
+                    'resource_name': resource_details.name,
+                    'start_time': booking.start_time.strftime('%Y-%m-%d %H:%M'),
+                    'end_time': booking.end_time.strftime('%Y-%m-%d %H:%M'),
+                    'checked_out_at_time': checked_out_at_aware.strftime('%Y-%m-%d %H:%M:%S UTC'),
+                    'location': floor_map_location,
+                    'floor': floor_map_floor,
+                }
+
+                html_body = render_template('email/check_out_confirmation.html', **email_data)
+                # Basic plain text version
+                body = (
+                    f"Dear {email_data['user_name']},\n\n"
+                    f"You have successfully checked out from your booking.\n\n"
+                    f"Booking Details:\n"
+                    f"- Resource: {email_data['resource_name']}\n"
+                    f"- Title: {email_data['booking_title']}\n"
+                    f"- Original Start Time: {email_data['start_time']}\n"
+                    f"- Original End Time: {email_data['end_time']}\n"
+                    f"- Actual Check-out Time: {email_data['checked_out_at_time']}\n"
+                    f"- Location: {email_data['location']}\n"
+                    f"- Floor: {email_data['floor']}\n\n"
+                    f"Thank you for using our booking system!"
+                )
+                subject = f"Check-out Confirmed: {email_data['resource_name']} - {email_data['booking_title']}"
+
+                send_email(
+                    to_address=user.email,
+                    subject=subject,
+                    html_body=html_body,
+                    body=body
+                )
+                current_app.logger.info(f"Check-out confirmation email sent to {user.email} for booking {booking.id}.")
+            elif not user:
+                current_app.logger.warning(f"User {booking.user_name} not found. Skipping check-out email for booking {booking.id}.")
+            elif not user.email:
+                current_app.logger.warning(f"User {booking.user_name} has no email. Skipping check-out email for booking {booking.id}.")
+            elif not resource_details:
+                current_app.logger.warning(f"Resource {booking.resource_id} not found. Skipping check-out email for booking {booking.id}.")
+
+        except Exception as e_email:
+            current_app.logger.error(f"Error sending check-out confirmation email for booking {booking.id}: {e_email}", exc_info=True)
+        # End of Email Notification Logic
+
+        if current_user.email: # Existing Teams notification
              send_teams_notification(
                 current_user.email,
                 "Booking Checked Out",
