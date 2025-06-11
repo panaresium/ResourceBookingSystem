@@ -11,13 +11,13 @@ from azure_backup import backup_bookings_csv, create_full_backup
 AUTO_CHECKOUT_INTERVAL_MINUTES_CONFIG_KEY = 'AUTO_CHECKOUT_INTERVAL_MINUTES'
 DEFAULT_AUTO_CHECKOUT_INTERVAL_MINUTES = 15
 
-def auto_checkout_overdue_bookings():
+def auto_checkout_overdue_bookings(app): # app is now a required argument
     """
     Automatically checks out bookings that are still 'checked_in'
     and whose end_time is past a configured delay.
     """
-    with current_app.app_context():
-        logger = current_app.logger
+    with app.app_context():
+        logger = app.logger # Logger obtained from the passed app, inside context
         logger.info("Scheduler: Starting auto_checkout_overdue_bookings task...")
 
         booking_settings = BookingSettings.query.first()
@@ -131,24 +131,23 @@ def run_scheduled_booking_csv_backup(app=None):
     Scheduled task entry point to run the booking CSV backup.
     Uses the provided app context or gets it from current_app.
     """
-    effective_app = app if app else current_app._get_current_object()
-    logger = effective_app.logger # Use logger from the effective_app
-
-    logger.info("Scheduler: Starting run_scheduled_booking_csv_backup task...")
-    try:
-        # The backup_bookings_csv function itself needs an app instance.
-        # It will internally determine the range based on its schedule settings.
-        # For a scheduled task, socketio_instance and task_id are typically None.
-        success = backup_bookings_csv(
-            app=effective_app,
-            socketio_instance=None,
-            task_id=None,
-            start_date_dt=None, # Explicitly None, backup_bookings_csv will use its schedule settings
-            end_date_dt=None,   # Explicitly None
-            range_label="scheduled_auto" # Label to indicate it's from the scheduler
-        )
-        if success:
-            logger.info("Scheduler: run_scheduled_booking_csv_backup completed successfully.")
+    with app.app_context():
+        logger = app.logger
+        logger.info("Scheduler: Starting run_scheduled_booking_csv_backup task...")
+        try:
+            # The backup_bookings_csv function itself needs an app instance.
+            # It will internally determine the range based on its schedule settings.
+            # For a scheduled task, socketio_instance and task_id are typically None.
+            success = backup_bookings_csv(
+                app=app, # Use the passed app directly
+                socketio_instance=None,
+                task_id=None,
+                start_date_dt=None, # Explicitly None, backup_bookings_csv will use its schedule settings
+                end_date_dt=None,   # Explicitly None
+                range_label="scheduled_auto" # Label to indicate it's from the scheduler
+            )
+            if success:
+                logger.info("Scheduler: run_scheduled_booking_csv_backup completed successfully.")
         else:
             logger.warning("Scheduler: run_scheduled_booking_csv_backup encountered issues (see previous logs from backup_bookings_csv).")
     except Exception as e:
@@ -160,12 +159,11 @@ def cancel_unchecked_bookings(app=None):
     Placeholder for the scheduled task to cancel bookings that were not checked in
     within the allowed window.
     """
-    effective_app = app if app else current_app._get_current_object()
-    logger = effective_app.logger
-
-    logger.info("Scheduler: Task 'cancel_unchecked_bookings' called.")
-    logger.warning("Scheduler: The logic for 'cancel_unchecked_bookings' is not yet fully implemented. This is a placeholder.")
-    # TODO: Implement logic to query 'approved' bookings where:
+    with app.app_context():
+        logger = app.logger
+        logger.info("Scheduler: Task 'cancel_unchecked_bookings' called.")
+        logger.warning("Scheduler: The logic for 'cancel_unchecked_bookings' is not yet fully implemented. This is a placeholder.")
+        # TODO: Implement logic to query 'approved' bookings where:
     # - check_in_out is enabled (BookingSettings)
     # - current_time > booking.start_time + check_in_minutes_after (grace period)
     # - booking.checked_in_at is NULL
@@ -179,9 +177,8 @@ def apply_scheduled_resource_status_changes(app=None):
     """
     Scheduled task to apply pending scheduled status changes to resources.
     """
-    effective_app = app if app else current_app._get_current_object()
-    logger = effective_app.logger
-    with effective_app.app_context():
+    with app.app_context():
+        logger = app.logger
         logger.info("Scheduler: Starting apply_scheduled_resource_status_changes task...")
         now_utc = datetime.now(timezone.utc)
 
@@ -231,9 +228,8 @@ def run_scheduled_backup_job(app=None):
     """
     Scheduled task entry point to run a full system backup.
     """
-    effective_app = app if app else current_app._get_current_object()
-    logger = effective_app.logger
-    with effective_app.app_context():
+    with app.app_context():
+        logger = app.logger
         logger.info("Scheduler: Starting run_scheduled_backup_job (full system backup)...")
 
         try:
