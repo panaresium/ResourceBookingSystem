@@ -50,7 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 
-    function createBookingCardElement(booking, checkInOutEnabled) {
+    function createBookingCardElement(booking, checkInOutEnabled, allow_check_in_without_pin) {
         if (!bookingItemTemplate) {
             console.error("Booking item template not found!");
             return document.createElement('div'); // Return an empty div or handle error appropriately
@@ -93,18 +93,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const statusBadge = bookingCardDiv.querySelector('.booking-status-value');
         if (statusBadge) {
             statusBadge.textContent = booking.status ? booking.status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Unknown';
-            // Note: The class name for styling the badge itself (e.g., 'booking-status') might be different from the value span.
-            // Assuming 'booking-status-value' is for the text content and it might also have general badge styling.
-            // If 'booking-status' was also meant for styling the badge container, that might need to be preserved or handled differently.
-            // For now, aligning with the pattern of other ".xxxx-value" selectors for text content.
-            // The original line for class name was: statusBadge.className = `booking-status badge bg-${getBootstrapStatusColor(booking.status)}`;
-            // This might need to be:
-            // statusBadge.className = `booking-status-value badge bg-${getBootstrapStatusColor(booking.status)}`;
-            // or the template might have a separate element for the badge background and this span is just for text.
-            // Based on template structure, booking-status-value is likely just for text.
-            // The template has: <strong>Status:</strong> <span class="booking-status-value"></span>
-            // So, the badge color/background should be applied to this span or its parent if needed.
-            // Let's assume for now that `booking-status-value` is the target for text and styling.
             statusBadge.className = `booking-status-value badge bg-${getBootstrapStatusColor(booking.status)}`;
         }
 
@@ -144,8 +132,18 @@ document.addEventListener('DOMContentLoaded', () => {
         if (checkInControls && pinInput && checkInBtnExisting) {
             if (checkInOutEnabled && booking.can_check_in && !booking.checked_in_at) {
                 checkInControls.style.display = 'inline-block';
-                pinInput.dataset.bookingId = booking.id;
-                checkInBtnExisting.dataset.bookingId = booking.id;
+                checkInBtnExisting.dataset.bookingId = booking.id; // Set for button regardless of PIN field
+
+                // PIN Input specific logic
+                if (pinInput) {
+                    pinInput.dataset.bookingId = booking.id; // Set bookingId on PIN input
+                    // Use booking.resource_has_active_pin (boolean) from backend now
+                    if (allow_check_in_without_pin === true || !booking.resource_has_active_pin) {
+                        pinInput.style.display = 'none';
+                    } else {
+                        pinInput.style.display = 'inline-block'; // Or its default display style
+                    }
+                }
             } else {
                 checkInControls.style.display = 'none';
             }
@@ -164,17 +162,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // Cancel Button
         if (cancelBtnExisting) {
             if (!terminalStatuses.includes(booking.status)) {
-                cancelBtnExisting.style.display = 'inline-block'; // Or 'block' or '' depending on desired layout
+                cancelBtnExisting.style.display = 'inline-block';
                 cancelBtnExisting.dataset.bookingId = booking.id;
             } else {
                 cancelBtnExisting.style.display = 'none';
             }
         }
-        // The following lines are removed as the edit button is now conditionally added above.
-        // const editTitleBtn = bookingCardDiv.querySelector('.edit-title-btn');
-        // if(editTitleBtn) editTitleBtn.dataset.bookingId = booking.id;
-
-
         return bookingCardDiv;
     }
 
@@ -191,18 +184,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Generic initializePerPageSelect
     function initializeMyBookingsPerPageSelect(prefix, selectElement, itemsPerPageVarSetter, currentPageSetter, fetchDataFunction, currentItemsPerPage) {
         if (!selectElement) return;
-        selectElement.innerHTML = ''; // Clear existing
+        selectElement.innerHTML = '';
         myBookingsItemsPerPageOptions.forEach(optionValue => {
             const option = new Option(optionValue, optionValue);
-            if (optionValue === currentItemsPerPage) { // Use passed currentItemsPerPage
+            if (optionValue === currentItemsPerPage) {
                 option.selected = true;
             }
             selectElement.add(option);
         });
-        // Remove existing listener to prevent duplicates
         const changeHandlerKey = `${prefix}_perPageChangeHandler`;
         if (selectElement[changeHandlerKey]) {
             selectElement.removeEventListener('change', selectElement[changeHandlerKey]);
@@ -215,77 +206,55 @@ document.addEventListener('DOMContentLoaded', () => {
         selectElement.addEventListener('change', selectElement[changeHandlerKey]);
     }
 
-    // Generic renderMyBookingsPaginationControls
     function renderMyBookingsPaginationControls(prefix, paginationUl, paginationContainer, currentPage, totalPages, totalItems, itemsPerPage, fetchDataFunction, currentPageSetter, itemsPerPageVarSetter) {
         if (!paginationUl || !paginationContainer) {
             console.warn(`Pagination UL or Container for prefix ${prefix} not found.`);
             return;
         }
-        paginationUl.innerHTML = ''; // Clear existing content
+        paginationUl.innerHTML = '';
         paginationUl.classList.add('d-flex', 'flex-wrap', 'align-items-baseline');
 
-
-        const currentStatusFilter = statusFilterSelect ? statusFilterSelect.value : ''; // Assuming statusFilterSelect is globally accessible or passed
-        const currentResourceFilter = resourceNameFilterInput ? resourceNameFilterInput.value : ''; // Assuming resourceNameFilterInput is globally accessible or passed
+        const currentStatusFilter = statusFilterSelect ? statusFilterSelect.value : '';
+        const currentResourceFilter = resourceNameFilterInput ? resourceNameFilterInput.value : '';
 
         if (totalItems === 0 && !currentStatusFilter && !currentResourceFilter) {
              paginationContainer.style.display = 'none';
-             // No totalResultsDisplay element to clear text from directly here anymore
              return;
         }
         paginationContainer.style.display = 'block';
 
-        // --- Create "Total Results" Element (as an <li>) ---
         const totalResultsLi = document.createElement('li');
-        // Assuming 'total-results-li' class might be used for specific styling of this non-interactive item.
-        // Not using ms-auto here as it's the first element now.
         totalResultsLi.className = 'page-item total-results-li';
-
         const totalDiv = document.createElement('div');
         totalDiv.id = `${prefix}total_results_display`;
         totalDiv.className = 'text-muted p-2';
         totalDiv.textContent = totalItems > 0 ? `Total: ${totalItems} results` : 'No results for current filter.';
-        // TODO: Add localization for "Total: X results" and "No results for current filter."
-
         totalResultsLi.appendChild(totalDiv);
-
-        // New spacer inside totalResultsLi, after the text div
         const totalResultsSpacer = document.createElement('span');
         totalResultsSpacer.className = 'pagination-controls-spacer me-3';
         totalResultsLi.appendChild(totalResultsSpacer);
-
         paginationUl.appendChild(totalResultsLi);
 
-        // --- Create "Per Page" Element (as an <li>) ---
         const perPageLi = document.createElement('li');
-        perPageLi.className = 'page-item per-page-li'; // Added hypothetical class for styling
-
+        perPageLi.className = 'page-item per-page-li';
         const perPageWrapperSpan = document.createElement('span');
-        // This span does not get 'page-link' to avoid link-like styling for the whole per-page block
-
         const label = document.createElement('label');
         label.htmlFor = `${prefix}per_page_select`;
         label.className = 'form-label me-2';
-        label.textContent = 'Per Page:'; // TODO: Add localization if needed
-
+        label.textContent = 'Per Page:';
         const select = document.createElement('select');
         select.id = `${prefix}per_page_select`;
         select.className = 'form-select form-select-sm d-inline-block';
         select.style.width = 'auto';
-
         initializeMyBookingsPerPageSelect(prefix, select, itemsPerPageVarSetter, currentPageSetter, fetchDataFunction, itemsPerPage);
-
-        // This is the original spacer for "Per Page" that was inside perPageWrapperSpan
         const perPageOriginalSpacer = document.createElement('span');
         perPageOriginalSpacer.className = 'me-3 pagination-controls-spacer';
-
         perPageWrapperSpan.appendChild(label);
         perPageWrapperSpan.appendChild(select);
         perPageWrapperSpan.appendChild(perPageOriginalSpacer);
         perPageLi.appendChild(perPageWrapperSpan);
         paginationUl.appendChild(perPageLi);
 
-        // Helper for "Previous" and "Next" links
         const createOuterPageLink = (page, text, isDisabled = false) => {
             const li = document.createElement('li');
             li.className = `page-item ${isDisabled ? 'disabled' : ''}`;
@@ -304,22 +273,17 @@ document.addEventListener('DOMContentLoaded', () => {
             return li;
         };
 
-        if (totalPages > 1) { // Only show Prev/Next and page numbers if more than one page
+        if (totalPages > 1) {
             paginationUl.appendChild(createOuterPageLink(currentPage - 1, '&lt; Previous', currentPage <= 1));
-
-            // --- Create Page Numbers [1, ..., n] (as an <li>) ---
             const pageNumbersLi = document.createElement('li');
             pageNumbersLi.className = 'page-item';
-
             const innerSpan = document.createElement('span');
             innerSpan.className = 'page-link page-numbers-span-container';
             innerSpan.appendChild(document.createTextNode('['));
-
             const pageElements = [];
             const showPages = 3;
             let startPage = Math.max(1, currentPage - Math.floor(showPages / 2));
             let endPage = Math.min(totalPages, startPage + showPages - 1);
-
             if (endPage - startPage + 1 < showPages && totalPages >= showPages) {
                 if (currentPage <= Math.ceil(showPages / 2)) {
                     endPage = Math.min(totalPages, showPages);
@@ -332,61 +296,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 startPage = 1;
                 endPage = totalPages;
             }
-
             const createInternalPageLink = (page, textDisplay) => {
                 const a = document.createElement('a');
                 a.href = '#';
                 a.textContent = textDisplay || page;
                 a.className = 'internal-page-link';
-                if (page === currentPage) {
-                    a.classList.add('active-page-link');
-                }
+                if (page === currentPage) { a.classList.add('active-page-link'); }
                 a.addEventListener('click', (e) => {
                     e.preventDefault();
-                    if (page !== currentPage) {
-                        currentPageSetter(page);
-                        fetchDataFunction();
-                    }
+                    if (page !== currentPage) { currentPageSetter(page); fetchDataFunction(); }
                 });
                 return a;
             };
-
             if (startPage > 1) {
                 pageElements.push(createInternalPageLink(1, '1'));
-                if (startPage > 2) {
-                    pageElements.push(document.createTextNode('...'));
-                }
+                if (startPage > 2) { pageElements.push(document.createTextNode('...')); }
             }
-
-            for (let i = startPage; i <= endPage; i++) {
-                pageElements.push(createInternalPageLink(i, i.toString()));
-            }
-
+            for (let i = startPage; i <= endPage; i++) { pageElements.push(createInternalPageLink(i, i.toString())); }
             if (endPage < totalPages) {
-                if (endPage < totalPages - 1) {
-                    pageElements.push(document.createTextNode('...'));
-                }
+                if (endPage < totalPages - 1) { pageElements.push(document.createTextNode('...')); }
                 pageElements.push(createInternalPageLink(totalPages, totalPages.toString()));
             }
-
             pageElements.forEach((el, index) => {
                 innerSpan.appendChild(el);
-                if (index < pageElements.length - 1) {
-                    innerSpan.appendChild(document.createTextNode(', '));
-                }
+                if (index < pageElements.length - 1) { innerSpan.appendChild(document.createTextNode(', ')); }
             });
-
             innerSpan.appendChild(document.createTextNode(']'));
             pageNumbersLi.appendChild(innerSpan);
             paginationUl.appendChild(pageNumbersLi);
-
             paginationUl.appendChild(createOuterPageLink(currentPage + 1, 'Next &gt;', currentPage >= totalPages));
         }
-
-        // "Previous", Page Numbers, and "Next" are appended after "Per Page"
-        // and only if totalPages > 1
     }
-
 
     async function fetchUpcomingBookings() {
         if (!upcomingBookingsContainer) return;
@@ -396,42 +336,30 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         showLoading(upcomingBookingsContainer, 'Loading upcoming bookings...');
-
         let url = `/api/bookings/upcoming?page=${upcomingCurrentPage}&per_page=${upcomingItemsPerPage}`;
         const status = statusFilterSelect ? statusFilterSelect.value : '';
         const resourceName = resourceNameFilterInput ? resourceNameFilterInput.value.trim() : '';
         if (status) url += `&status_filter=${encodeURIComponent(status)}`;
         if (resourceName) url += `&resource_name_filter=${encodeURIComponent(resourceName)}`;
-
         try {
-            const data = await apiCall(url, {}, statusDiv); // Use global statusDiv for general API errors
+            const data = await apiCall(url, {}, statusDiv);
             if (data.success === false) {
                 showError(upcomingBookingsContainer, data.message || 'Failed to fetch upcoming bookings.');
                 if (upcomingPaginationContainer) upcomingPaginationContainer.style.display = 'none';
                 return;
             }
-
             upcomingTotalItems = data.pagination.total_items;
             upcomingTotalPages = data.pagination.total_pages;
-            upcomingCurrentPage = data.pagination.current_page; // Sync with server response
+            upcomingCurrentPage = data.pagination.current_page;
+            const allowCheckInWithoutPinUpcoming = data.allow_check_in_without_pin;
 
-            renderMyBookingsPaginationControls(
-                'upcoming_bk_pg_',
-                upcomingPaginationUl,
-                upcomingPaginationContainer,
-                upcomingCurrentPage,
-                upcomingTotalPages,
-                upcomingTotalItems,
-                upcomingItemsPerPage,
-                fetchUpcomingBookings,
-                (val) => upcomingCurrentPage = val,
-                (val) => upcomingItemsPerPage = val // Pass the setter for itemsPerPage
-            );
-
-            upcomingBookingsContainer.innerHTML = ''; // Clear loading
+            renderMyBookingsPaginationControls('upcoming_bk_pg_', upcomingPaginationUl, upcomingPaginationContainer,
+                upcomingCurrentPage, upcomingTotalPages, upcomingTotalItems, upcomingItemsPerPage,
+                fetchUpcomingBookings, (val) => upcomingCurrentPage = val, (val) => upcomingItemsPerPage = val);
+            upcomingBookingsContainer.innerHTML = '';
             if (data.bookings && data.bookings.length > 0) {
                 data.bookings.forEach(booking => {
-                    const bookingCard = createBookingCardElement(booking, data.check_in_out_enabled);
+                    const bookingCard = createBookingCardElement(booking, data.check_in_out_enabled, allowCheckInWithoutPinUpcoming);
                     upcomingBookingsContainer.appendChild(bookingCard);
                 });
             } else {
@@ -451,13 +379,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         showLoading(pastBookingsContainer, 'Loading past bookings...');
-
         let url = `/api/bookings/past?page=${pastCurrentPage}&per_page=${pastItemsPerPage}`;
         const status = statusFilterSelect ? statusFilterSelect.value : '';
         const resourceName = resourceNameFilterInput ? resourceNameFilterInput.value.trim() : '';
         if (status) url += `&status_filter=${encodeURIComponent(status)}`;
         if (resourceName) url += `&resource_name_filter=${encodeURIComponent(resourceName)}`;
-
         try {
             const data = await apiCall(url, {}, statusDiv);
              if (data.success === false) {
@@ -465,28 +391,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (pastPaginationContainer) pastPaginationContainer.style.display = 'none';
                 return;
             }
-
             pastTotalItems = data.pagination.total_items;
             pastTotalPages = data.pagination.total_pages;
             pastCurrentPage = data.pagination.current_page;
+            const allowCheckInWithoutPinPast = data.allow_check_in_without_pin;
 
-            renderMyBookingsPaginationControls(
-                'past_bk_pg_',
-                pastPaginationUl,
-                pastPaginationContainer,
-                pastCurrentPage,
-                pastTotalPages,
-                pastTotalItems,
-                pastItemsPerPage,
-                fetchPastBookings,
-                (val) => pastCurrentPage = val,
-                (val) => pastItemsPerPage = val // Pass the setter for itemsPerPage
-            );
-
-            pastBookingsContainer.innerHTML = ''; // Clear loading
+            renderMyBookingsPaginationControls('past_bk_pg_', pastPaginationUl, pastPaginationContainer,
+                pastCurrentPage, pastTotalPages, pastTotalItems, pastItemsPerPage,
+                fetchPastBookings, (val) => pastCurrentPage = val, (val) => pastItemsPerPage = val);
+            pastBookingsContainer.innerHTML = '';
             if (data.bookings && data.bookings.length > 0) {
                 data.bookings.forEach(booking => {
-                    const bookingCard = createBookingCardElement(booking, data.check_in_out_enabled);
+                    const bookingCard = createBookingCardElement(booking, data.check_in_out_enabled, allowCheckInWithoutPinPast);
                     pastBookingsContainer.appendChild(bookingCard);
                 });
             } else {
@@ -498,7 +414,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-
     function displayBookings(bookings, container, template, isUpcoming) {
         // This function is now largely superseded by fetchUpcomingBookings and fetchPastBookings
         // but its core logic for creating cards is now in createBookingCardElement.
@@ -509,7 +424,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Assume check_in_out_enabled is fetched globally or passed if needed here.
                 // For now, createBookingCardElement might need to fetch it or have it passed.
                 // The refactored fetch functions now pass it to createBookingCardElement.
-                const bookingCard = createBookingCardElement(booking, window.checkInOutEnabledGlobal || false); // Example global
+                // Also, allow_check_in_without_pin would need to be passed. Defaulting to true for this obsolete function.
+                const bookingCard = createBookingCardElement(booking, window.checkInOutEnabledGlobal || false, true);
                 container.appendChild(bookingCard);
             });
         } else {
@@ -517,14 +433,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-
-    // Original fetchAndDisplayBookings is effectively split into fetchUpcomingBookings and fetchPastBookings
-    // The filter application logic will now trigger both.
-
     document.addEventListener('click', async (event) => {
         const target = event.target;
-        const bookingItem = target.closest('.booking-card'); // Changed from .booking-item to .booking-card
-
+        const bookingItem = target.closest('.booking-card');
         if (target.classList.contains('cancel-booking-btn')) {
             const bookingId = target.dataset.bookingId;
             if (confirm(`Are you sure you want to cancel booking ID ${bookingId}?`)) {
@@ -532,7 +443,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     await apiCall(`/api/bookings/${bookingId}`, { method: 'DELETE' });
                     showSuccess(statusDiv, `Booking ${bookingId} cancelled successfully.`);
-                    // Re-fetch both sections as a cancelled booking might move or affect counts
                     fetchUpcomingBookings();
                     fetchPastBookings();
                 } catch (error) {
@@ -540,14 +450,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         }
-
         if (target.classList.contains('check-in-btn')) {
             const bookingId = target.dataset.bookingId;
-            const pinInput = bookingItem ? bookingItem.querySelector('.booking-pin-input') : null; // Not present in new card
+            const pinInput = bookingItem ? bookingItem.querySelector('.booking-pin-input') : null;
             const pinValue = pinInput ? pinInput.value.trim() : null;
             let payload = {};
-            if (pinValue) payload.pin = pinValue;
-
+            // Only include PIN in payload if the input field was visible and has a value.
+            // The visibility of pinInput is handled by createBookingCardElement.
+            // If pinInput.style.display is 'none', pinValue would likely be empty or not relevant.
+            if (pinInput && pinInput.style.display !== 'none' && pinValue) {
+                 payload.pin = pinValue;
+            }
             showLoading(statusDiv, 'Checking in...');
             try {
                 await apiCall(`/api/bookings/${bookingId}/check_in`, {
@@ -556,19 +469,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     body: JSON.stringify(payload)
                 });
                 showSuccess(statusDiv, 'Checked in successfully.');
-                fetchUpcomingBookings(); // Refresh to update status and buttons
+                fetchUpcomingBookings();
             } catch (error) {
                 showError(statusDiv, error.message || 'Check in failed.');
             }
         }
-
         if (target.classList.contains('check-out-btn')) {
             const bookingId = target.dataset.bookingId;
             showLoading(statusDiv, 'Checking out...');
             try {
                 await apiCall(`/api/bookings/${bookingId}/check_out`, { method: 'POST' });
                 showSuccess(statusDiv, 'Checked out successfully.');
-                fetchUpcomingBookings(); // Refresh
+                fetchUpcomingBookings();
             } catch (error) {
                 showError(statusDiv, error.message || 'Check out failed.');
             }
@@ -602,7 +514,6 @@ document.addEventListener('DOMContentLoaded', () => {
             handleFilterOrToggleChange();
         });
     }
-
     if (toggleUpcomingCheckbox) {
         toggleUpcomingCheckbox.addEventListener('change', handleFilterOrToggleChange);
     }
@@ -610,9 +521,8 @@ document.addEventListener('DOMContentLoaded', () => {
         togglePastCheckbox.addEventListener('change', handleFilterOrToggleChange);
     }
 
-    // Initial Load
     initializeMyBookingsPerPageSelect('upcoming_bk_pg_', upcomingPerPageSelect, (val) => upcomingItemsPerPage = val, (val) => upcomingCurrentPage = val, fetchUpcomingBookings, upcomingItemsPerPage);
     initializeMyBookingsPerPageSelect('past_bk_pg_', pastPerPageSelect, (val) => pastItemsPerPage = val, (val) => pastCurrentPage = val, fetchPastBookings, pastItemsPerPage);
     
-    handleFilterOrToggleChange(); // Initial fetch based on default filter and toggle states
+    handleFilterOrToggleChange();
 });

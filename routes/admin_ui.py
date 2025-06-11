@@ -727,6 +727,7 @@ def update_booking_settings():
 
         settings.pin_allow_manual_override = request.form.get('pin_allow_manual_override') == 'on'
         settings.resource_checkin_url_requires_login = request.form.get('resource_checkin_url_requires_login') == 'on'
+        settings.allow_check_in_without_pin = request.form.get('allow_check_in_without_pin') == 'on'
 
         db.session.commit()
         flash(_('Booking settings updated successfully.'), 'success')
