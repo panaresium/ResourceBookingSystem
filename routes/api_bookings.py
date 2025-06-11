@@ -31,12 +31,14 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
     """
     try:
         booking_settings = BookingSettings.query.first()
+        booking_settings = BookingSettings.query.first()
         enable_check_in_out = booking_settings.enable_check_in_out if booking_settings else False
+        allow_check_in_without_pin_setting = booking_settings.allow_check_in_without_pin if booking_settings and hasattr(booking_settings, 'allow_check_in_without_pin') else True # Default True
         check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings and booking_settings.check_in_minutes_before is not None else 15
         check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings and booking_settings.check_in_minutes_after is not None else 15
         past_booking_adjustment_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings and booking_settings.past_booking_time_adjustment_hours is not None else 0
         if not booking_settings:
-            logger.warning("BookingSettings not found, using default check-in window and adjustment for _fetch_user_bookings_data.")
+            logger.warning("BookingSettings not found, using default check-in window, adjustment, and allow_check_in_without_pin for _fetch_user_bookings_data.")
 
         base_query = Booking.query.filter_by(user_name=user_name)
 
@@ -89,14 +91,13 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
                 if token_expires_at_aware and token_expires_at_aware > now_utc and booking_end_time_aware > now_utc:
                     display_check_in_token = booking.check_in_token
 
-            pin_required_for_resource = False # Defaulting as the attribute doesn't exist on Resource model
-            # TODO: Revisit logic for determining if a resource generally requires a PIN for check-in,
-            # potentially by checking active ResourcePIN entries or a new field on Resource model.
+            resource_has_active_pin = False
+            if resource:
+                resource_has_active_pin = ResourcePIN.query.filter_by(resource_id=resource.id, is_active=True).first() is not None
 
-            # 'resource' is assumed to be populated (e.g., resource = Resource.query.get(booking.resource_id) or via booking.resource_booked)
-            current_resource_pin_value = resource.current_pin if resource else None
-            pin_is_set_on_resource = current_resource_pin_value is not None and current_resource_pin_value != ""
-
+            # Removed 'pin': current_resource_pin_value ... from here
+            # The old 'pin_required_for_resource' was also removed as it was not fully implemented.
+            # Replaced by 'resource_has_active_pin'.
 
             booking_dict = {
                 'id': booking.id,
@@ -112,9 +113,8 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
                 'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else None,
                 'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else None,
                 'can_check_in': can_check_in,
-                'check_in_token': display_check_in_token, # For QR code link primarily
-                'pin': current_resource_pin_value if pin_is_set_on_resource and enable_check_in_out else None,
-                'pin_required_for_resource': pin_required_for_resource, # Inform frontend if resource generally requires PIN
+                'check_in_token': display_check_in_token,
+                'resource_has_active_pin': resource_has_active_pin
             }
             relevant_bookings_dicts.append(booking_dict)
 
@@ -139,7 +139,7 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
             'total_pages': total_pages,
         }
 
-        return paginated_bookings, pagination_info, enable_check_in_out
+        return paginated_bookings, pagination_info, enable_check_in_out, allow_check_in_without_pin_setting
 
     except Exception as e:
         logger.exception(f"Error in _fetch_user_bookings_data for user {user_name}, type {booking_type}: {e}")
@@ -163,7 +163,7 @@ def get_upcoming_bookings():
              per_page = my_bookings_per_page_options[0]
 
 
-        paginated_bookings, pagination_info, check_in_out_enabled = _fetch_user_bookings_data(
+        paginated_bookings, pagination_info, check_in_out_enabled, allow_check_in_without_pin = _fetch_user_bookings_data(
             current_user.username, 'upcoming', page, per_page, status_filter, resource_name_filter, logger
         )
 
@@ -175,7 +175,8 @@ def get_upcoming_bookings():
             'success': True,
             'bookings': paginated_bookings,
             'pagination': pagination_info,
-            'check_in_out_enabled': check_in_out_enabled
+            'check_in_out_enabled': check_in_out_enabled,
+            'allow_check_in_without_pin': allow_check_in_without_pin
         }), 200
 
     except Exception as e:
@@ -197,7 +198,7 @@ def get_past_bookings():
         if per_page not in my_bookings_per_page_options:
              per_page = my_bookings_per_page_options[0]
 
-        paginated_bookings, pagination_info, check_in_out_enabled = _fetch_user_bookings_data(
+        paginated_bookings, pagination_info, check_in_out_enabled, allow_check_in_without_pin = _fetch_user_bookings_data(
             current_user.username, 'past', page, per_page, status_filter, resource_name_filter, logger
         )
 
@@ -208,7 +209,8 @@ def get_past_bookings():
             'success': True,
             'bookings': paginated_bookings,
             'pagination': pagination_info,
-            'check_in_out_enabled': check_in_out_enabled
+            'check_in_out_enabled': check_in_out_enabled,
+            'allow_check_in_without_pin': allow_check_in_without_pin
         }), 200
 
     except Exception as e:
@@ -564,11 +566,12 @@ def get_my_bookings():
 
         booking_settings = BookingSettings.query.first()
         enable_check_in_out = booking_settings.enable_check_in_out if booking_settings else False
+        allow_check_in_without_pin_setting = booking_settings.allow_check_in_without_pin if booking_settings else True # Default True
         check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings and booking_settings.check_in_minutes_before is not None else 15
         check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings and booking_settings.check_in_minutes_after is not None else 15
         past_booking_adjustment_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings and booking_settings.past_booking_time_adjustment_hours is not None else 0
         if not booking_settings:
-             logger.warning("BookingSettings not found, using default check-in window and adjustment for get_my_bookings.")
+             logger.warning("BookingSettings not found, using default check-in window, adjustment, and allow_check_in_without_pin for get_my_bookings.")
 
         user_bookings_query = Booking.query.filter_by(user_name=current_user.username)
 
@@ -698,7 +701,8 @@ def get_my_bookings():
             'success': False,
             'error': 'Failed to fetch your bookings due to a server error.',
             'upcoming_pagination': None, # Or default pagination objects
-            'past_pagination': None
+            'past_pagination': None,
+            'allow_check_in_without_pin': True # Default if error before settings are fetched
         }), 500
 
 
@@ -1349,12 +1353,16 @@ def check_in_booking(booking_id):
         check_in_minutes_before = 15
         check_in_minutes_after = 15
         past_booking_adjustment_hours = 0
+        allow_check_in_without_pin_setting = True # Default to true if no settings row
+
         if booking_settings:
             check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings.check_in_minutes_before is not None else 15
             check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings.check_in_minutes_after is not None else 15
             past_booking_adjustment_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings.past_booking_time_adjustment_hours is not None else 0
+            if hasattr(booking_settings, 'allow_check_in_without_pin'): # Check if attribute exists for older DBs
+                allow_check_in_without_pin_setting = booking_settings.allow_check_in_without_pin
         else:
-            current_app.logger.warning(f"BookingSettings not found for check_in_booking {booking_id}, using default window (15/15 mins) and 0 adjustment hours.")
+            current_app.logger.warning(f"BookingSettings not found for check_in_booking {booking_id}, using defaults.")
 
         now_utc = datetime.now(timezone.utc)
 
@@ -1368,26 +1376,34 @@ def check_in_booking(booking_id):
             current_app.logger.warning(f"User {current_user.username} check-in attempt for booking {booking_id} outside of allowed window. Actual start: {actual_start_time_utc.isoformat()}, Effective base: {effective_check_in_base_time.isoformat()}, Window: {check_in_window_start.isoformat()} to {check_in_window_end.isoformat()}, Current time: {now_utc.isoformat()}")
             return jsonify({'error': f'Check-in is only allowed from {check_in_minutes_before} minutes before to {check_in_minutes_after} minutes after the effective booking start time (considering adjustments).'}), 403
 
-        # PIN Validation if provided
-        if provided_pin:
-            resource = booking.resource_booked # Assuming backref is 'resource_booked'
-            if not resource:
-                current_app.logger.error(f"Resource not found for booking {booking_id} during PIN check-in attempt by {current_user.username}.")
-                return jsonify({'error': 'Associated resource not found for this booking.'}), 500
+        resource = booking.resource_booked # Assuming backref is 'resource_booked'
+        if not resource:
+            current_app.logger.error(f"Resource not found for booking {booking_id} during check-in attempt by {current_user.username}.")
+            return jsonify({'error': 'Associated resource not found for this booking.'}), 500
 
-            active_pin = ResourcePIN.query.filter_by(
-                resource_id=resource.id,
-                pin_value=provided_pin,
-                is_active=True
-            ).first()
+        if not allow_check_in_without_pin_setting:
+            # PIN is enforced by global setting
+            resource_has_active_pin = ResourcePIN.query.filter_by(resource_id=resource.id, is_active=True).first() is not None
 
-            if not active_pin:
-                current_app.logger.warning(f"User {current_user.username} failed PIN check-in for booking {booking_id}. Invalid PIN: {provided_pin} for resource {resource.id}")
-                add_audit_log(action="CHECK_IN_FAILED_INVALID_PIN", user_id=current_user.id, username=current_user.username, details=f"Booking ID {booking_id}, Resource ID {resource.id}, Attempted PIN: {provided_pin}")
-                return jsonify({'error': 'Invalid or inactive PIN provided.'}), 403
+            if resource_has_active_pin and not provided_pin:
+                current_app.logger.warning(f"User {current_user.username} check-in attempt for booking {booking_id} without PIN, but resource {resource.id} requires one and global setting enforces PINs.")
+                add_audit_log(action="CHECK_IN_FAILED_PIN_REQUIRED", user_id=current_user.id, username=current_user.username, details=f"Booking ID {booking_id}, Resource ID {resource.id}. PIN required but not provided.")
+                return jsonify({'error': 'A PIN is required for this resource and check-in method.'}), 403 # PIN required but not provided
 
-            current_app.logger.info(f"User {current_user.username} provided valid PIN {provided_pin} for check-in to booking {booking_id} for resource {resource.id}.")
-            # PIN is valid, proceed with check-in
+            if provided_pin: # If a PIN was provided, it must be validated (even if resource_has_active_pin was false, this implies an attempt to use a PIN)
+                active_pin_match = ResourcePIN.query.filter_by(
+                    resource_id=resource.id,
+                    pin_value=provided_pin,
+                    is_active=True
+                ).first()
+                if not active_pin_match:
+                    current_app.logger.warning(f"User {current_user.username} failed PIN check-in for booking {booking_id}. Invalid PIN: {provided_pin} for resource {resource.id} (Global PIN enforcement).")
+                    add_audit_log(action="CHECK_IN_FAILED_INVALID_PIN", user_id=current_user.id, username=current_user.username, details=f"Booking ID {booking_id}, Resource ID {resource.id}, Attempted PIN: {provided_pin}")
+                    return jsonify({'error': 'Invalid or inactive PIN provided.'}), 403
+                current_app.logger.info(f"User {current_user.username} provided valid PIN {provided_pin} for check-in to booking {booking_id} for resource {resource.id} (Global PIN enforcement).")
+            # If resource does not have an active PIN, and no PIN was provided, it's allowed to proceed here.
+
+        # If allow_check_in_without_pin_setting is True, we bypass all the above PIN checks.
 
         booking.checked_in_at = now_utc.replace(tzinfo=None) # Store as naive UTC
         db.session.commit()
@@ -1617,6 +1633,8 @@ def resource_pin_check_in(resource_id):
     check_in_minutes_before = 15 # Default
     check_in_minutes_after = 15 # Default
     past_booking_adjustment_hours = 0 # Default
+    allow_check_in_without_pin_setting = True # Default True
+
     if not booking_settings:
         logger.error("BookingSettings not found in DB! Using default values for PIN check-in.")
     else:
@@ -1624,6 +1642,8 @@ def resource_pin_check_in(resource_id):
         check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings.check_in_minutes_before is not None else 15
         check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings.check_in_minutes_after is not None else 15
         past_booking_adjustment_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings.past_booking_time_adjustment_hours is not None else 0
+        if hasattr(booking_settings, 'allow_check_in_without_pin'):
+            allow_check_in_without_pin_setting = booking_settings.allow_check_in_without_pin
 
     if requires_login and not current_user.is_authenticated:
         logger.info(f"PIN check-in for resource {resource_id} requires login.")

@@ -94,6 +94,7 @@ class BookingSettings(db.Model):
     pin_auto_generation_enabled = db.Column(db.Boolean, default=True, nullable=False)
     pin_length = db.Column(db.Integer, default=6, nullable=False)
     pin_allow_manual_override = db.Column(db.Boolean, default=True, nullable=False)
+    allow_check_in_without_pin = db.Column(db.Boolean, default=True, nullable=False, server_default='true')
     resource_checkin_url_requires_login = db.Column(db.Boolean, default=True, nullable=False)
     map_resource_opacity = db.Column(db.Float, nullable=False, default=0.7)
 
