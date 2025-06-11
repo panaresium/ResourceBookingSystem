@@ -299,32 +299,34 @@ def create_booking():
         current_app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} with invalid date/time format: {date_str} {start_time_str}-{end_time_str}")
         return jsonify({'error': 'Invalid date or time format.'}), 400
 
-    # Enforce allow_past_bookings
-    # The effective_past_booking_hours will be negative to restrict further, positive to allow more into the past.
-    # A value of 0 means standard behavior (booking up to current time if allow_past_bookings_effective is true).
-    # If allow_past_bookings_effective is false, this entire block is skipped, and past bookings are disallowed.
+    now_utc = datetime.utcnow() # Consistent reference for "now"
+
     if allow_past_bookings_effective:
-        # Calculate the cutoff time: current time MINUS the adjustment.
-        # If adjustment is positive (e.g., 2 hours), cutoff is 2 hours ago (allowing bookings up to 2 hours in past).
-        # If adjustment is negative (e.g., -1 hour), cutoff is 1 hour in the future (restricting bookings to start at least 1 hour from now).
-        past_booking_cutoff_time = datetime.utcnow() - timedelta(hours=effective_past_booking_hours)
+        # Past bookings are allowed.
+        # `past_booking_time_adjustment_hours` does not restrict how far in the past a booking can be made here.
+        # If new_booking_start_time is genuinely in the past (i.e., < now_utc), it's permitted.
+        # If new_booking_start_time is in the future, other rules (like max_booking_days_in_future) will apply.
+        # No specific error related to past booking limits is raised if allow_past_bookings_effective is true.
+        pass
+    else:
+        # allow_past_bookings_effective is FALSE.
+        # Past bookings are generally disallowed, but past_booking_time_adjustment_hours defines the precise boundary.
+        # This means effective_past_booking_hours determines how many hours "ago" is the cutoff.
+        # A positive value allows bookings slightly in the past.
+        # A zero or negative value means bookings must be now or in the future relative to the adjustment.
+        past_booking_cutoff_time = now_utc - timedelta(hours=effective_past_booking_hours)
+
         if new_booking_start_time < past_booking_cutoff_time:
             current_app.logger.warning(
                 f"Booking attempt by {current_user.username} for resource {resource_id} at {new_booking_start_time} "
                 f"is before the allowed cutoff time of {past_booking_cutoff_time} "
-                f"(current time: {datetime.utcnow()}, adjustment: {effective_past_booking_hours} hours)."
+                f"(current time: {now_utc}, adjustment: {effective_past_booking_hours} hours, and past bookings are generally disabled)."
             )
             return jsonify({'error': 'Booking time is outside the allowed window for past or future bookings as per current settings.'}), 400
-    elif new_booking_start_time < datetime.utcnow(): # If past bookings are generally disallowed
-        current_app.logger.warning(
-            f"Booking attempt by {current_user.username} for resource {resource_id} in the past ({new_booking_start_time}), "
-            f"and past bookings are disabled."
-        )
-        return jsonify({'error': 'Booking in the past is not allowed.'}), 400
 
     # Enforce max_booking_days_in_future
     if max_booking_days_in_future_effective is not None:
-        max_allowed_date = datetime.utcnow().date() + timedelta(days=max_booking_days_in_future_effective)
+        max_allowed_date = now_utc.date() + timedelta(days=max_booking_days_in_future_effective)
         if new_booking_start_time.date() > max_allowed_date:
             current_app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} too far in future ({new_booking_start_time.date()}), limit is {max_booking_days_in_future_effective} days.")
             return jsonify({'error': f'Bookings cannot be made more than {max_booking_days_in_future_effective} days in advance.'}), 400
