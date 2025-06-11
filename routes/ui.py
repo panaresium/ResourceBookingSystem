@@ -11,7 +11,7 @@ from flask_login import login_required, current_user, logout_user
 from datetime import datetime, timezone, timedelta
 
 # Assuming Booking model is in models.py
-from models import db, Booking, Resource, User # Added Resource, User, db
+from models import db, Booking, Resource, User, BookingSettings # Added Resource, User, db, BookingSettings
 # Assuming add_audit_log is in utils.py
 from utils import add_audit_log
 # Assuming socketio is in extensions.py
@@ -41,7 +41,20 @@ def serve_index():
             Booking.start_time <= three_days_from_now,
             Booking.status.in_(valid_statuses)  # Filter by valid statuses
         ).order_by(Booking.start_time.asc()).all()
-        return render_template("index.html", upcoming_bookings=upcoming_bookings)
+
+        # Get global_time_offset_hours
+        time_offset_value = 0 # Default
+        try:
+            booking_settings_record = BookingSettings.query.first()
+            if booking_settings_record and booking_settings_record.global_time_offset_hours is not None:
+                time_offset_value = booking_settings_record.global_time_offset_hours
+        except Exception as e:
+            current_app.logger.error(f"Error fetching BookingSettings for index page: {e}", exc_info=True)
+            # time_offset_value remains 0
+
+        return render_template("index.html",
+                               upcoming_bookings=upcoming_bookings,
+                               global_time_offset_hours=time_offset_value)
     else:
         # Redirect to the login page which is now also part of this ui_bp
         return redirect(url_for('ui.serve_login'))
@@ -91,13 +104,31 @@ def serve_edit_profile_page():
 @login_required
 def serve_my_bookings_page():
     current_app.logger.info(f"User {current_user.username} accessed My Bookings page.")
-    return render_template("my_bookings.html")
+    # Get global_time_offset_hours
+    time_offset_value = 0 # Default
+    try:
+        booking_settings_record = BookingSettings.query.first()
+        if booking_settings_record and booking_settings_record.global_time_offset_hours is not None:
+            time_offset_value = booking_settings_record.global_time_offset_hours
+    except Exception as e:
+        current_app.logger.error(f"Error fetching BookingSettings for my_bookings page: {e}", exc_info=True)
+        # time_offset_value remains 0
+    return render_template("my_bookings.html", global_time_offset_hours=time_offset_value)
 
 @ui_bp.route("/calendar")
 @login_required
 def serve_calendar():
     current_app.logger.info(f"User {current_user.username} accessed Calendar page.")
-    return render_template("calendar.html")
+    # Get global_time_offset_hours
+    time_offset_value = 0 # Default
+    try:
+        booking_settings_record = BookingSettings.query.first()
+        if booking_settings_record and booking_settings_record.global_time_offset_hours is not None:
+            time_offset_value = booking_settings_record.global_time_offset_hours
+    except Exception as e:
+        current_app.logger.error(f"Error fetching BookingSettings for calendar page: {e}", exc_info=True)
+        # time_offset_value remains 0
+    return render_template("calendar.html", global_time_offset_hours=time_offset_value)
 
 @ui_bp.route('/map_view/<int:map_id>')
 def serve_map_view(map_id):

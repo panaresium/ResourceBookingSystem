@@ -57,6 +57,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     function createBookingCardElement(booking, checkInOutEnabled, allow_check_in_without_pin) {
+        const bookingsListElement = document.getElementById('my-bookings-list');
+        const offsetHours = parseInt(bookingsListElement.dataset.globalOffset) || 0;
+
         if (!bookingItemTemplate) {
             console.error("Booking item template not found!");
             return document.createElement('div'); // Return an empty div or handle error appropriately
@@ -81,13 +84,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const resourceSpan = bookingCardDiv.querySelector('.resource-name-value');
         if (resourceSpan) resourceSpan.textContent = booking.resource_name || 'N/A';
 
-        const startDate = new Date(booking.start_time);
-        const endDate = new Date(booking.end_time);
+        const startDate = new Date(booking.start_time); // booking.start_time is ISO UTC
+        const endDate = new Date(booking.end_time);   // booking.end_time is ISO UTC
+
+        // Apply offset for time display
+        const displayStartDate = new Date(startDate.getTime() + offsetHours * 60 * 60 * 1000);
+        const displayEndDate = new Date(endDate.getTime() + offsetHours * 60 * 60 * 1000);
+
+        // Date part should be based on original UTC date to correctly represent the slot's calendar day
         const optionsDate = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' };
         const formattedDate = startDate.toLocaleDateString(undefined, optionsDate);
+
+        // Time part uses the displayStartDate/EndDate, but still formatted *as if* it's UTC
+        // because the offset has already been baked into its millisecond value.
         const optionsTime = { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' };
-        const formattedStartTime = startDate.toLocaleTimeString(undefined, optionsTime);
-        const formattedEndTime = endDate.toLocaleTimeString(undefined, optionsTime);
+        const formattedStartTime = displayStartDate.toLocaleTimeString(undefined, optionsTime);
+        const formattedEndTime = displayEndDate.toLocaleTimeString(undefined, optionsTime);
 
         const dateSpan = bookingCardDiv.querySelector('.booking-date-value');
         if (dateSpan) dateSpan.textContent = formattedDate;

@@ -16,7 +16,7 @@
     </select>
 </div>
 
-<div id="calendar"></div>
+<div id="calendar" data-global-offset="{{ global_time_offset_hours | default(0) }}"></div>
 
 <div id="calendar-edit-booking-modal" class="modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="cebm-title">
     <div class="modal-content">

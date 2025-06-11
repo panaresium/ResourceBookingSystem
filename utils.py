@@ -1811,3 +1811,33 @@ def get_current_effective_time():
     utc_now = datetime.now(timezone.utc)
     effective_time = utc_now + timedelta(hours=offset_hours)
     return effective_time
+
+def format_display_time_with_offset(utc_dt, offset_hours_int):
+    """
+    Formats a UTC datetime object to a HH:MM string, adjusted by an offset.
+    Intended for use as a Jinja filter.
+    """
+    if not isinstance(utc_dt, datetime):
+        return utc_dt # Return as is if not a datetime object
+    try:
+        # Ensure offset_hours_int is an integer
+        offset_val = int(offset_hours_int)
+        # Apply offset
+        # Ensure utc_dt is timezone-aware (UTC) before adding offset
+        if utc_dt.tzinfo is None:
+            aware_utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+        else:
+            aware_utc_dt = utc_dt.astimezone(timezone.utc)
+
+        display_dt = aware_utc_dt + timedelta(hours=offset_val)
+        # Format as HH:MM
+        return display_dt.strftime('%H:%M')
+    except (ValueError, TypeError) as e:
+        # Fallback if offset is invalid or utc_dt is problematic
+        # Consider logging the error: current_app.logger.warning(f"Error in time filter: {e}")
+        # Ensure utc_dt is timezone-aware for consistent fallback formatting
+        if utc_dt.tzinfo is None:
+            aware_utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+        else:
+            aware_utc_dt = utc_dt.astimezone(timezone.utc)
+        return aware_utc_dt.strftime('%H:%M') # Default to UTC HH:MM
