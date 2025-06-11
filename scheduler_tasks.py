@@ -3,6 +3,13 @@ from flask import current_app, render_template
 from extensions import db # Changed to absolute import
 from models import Booking, User, Resource, FloorMap, BookingSettings # Changed to absolute import
 from utils import add_audit_log, send_email # Changed to absolute import
+from azure_backup import backup_bookings_csv
+# Ensure current_app is available if not passed directly
+# from flask import current_app # current_app is already imported by the other functions
+
+# Constants for scheduler job configuration keys, can be used by app_factory
+AUTO_CHECKOUT_INTERVAL_MINUTES_CONFIG_KEY = 'AUTO_CHECKOUT_INTERVAL_MINUTES'
+DEFAULT_AUTO_CHECKOUT_INTERVAL_MINUTES = 15
 
 def auto_checkout_overdue_bookings():
     """
@@ -118,3 +125,32 @@ def auto_checkout_overdue_bookings():
                 )
 
         logger.info("Scheduler: Auto_checkout_overdue_bookings task finished.")
+
+def run_scheduled_booking_csv_backup(app=None):
+    """
+    Scheduled task entry point to run the booking CSV backup.
+    Uses the provided app context or gets it from current_app.
+    """
+    effective_app = app if app else current_app._get_current_object()
+    logger = effective_app.logger # Use logger from the effective_app
+
+    logger.info("Scheduler: Starting run_scheduled_booking_csv_backup task...")
+    try:
+        # The backup_bookings_csv function itself needs an app instance.
+        # It will internally determine the range based on its schedule settings.
+        # For a scheduled task, socketio_instance and task_id are typically None.
+        success = backup_bookings_csv(
+            app=effective_app,
+            socketio_instance=None,
+            task_id=None,
+            start_date_dt=None, # Explicitly None, backup_bookings_csv will use its schedule settings
+            end_date_dt=None,   # Explicitly None
+            range_label="scheduled_auto" # Label to indicate it's from the scheduler
+        )
+        if success:
+            logger.info("Scheduler: run_scheduled_booking_csv_backup completed successfully.")
+        else:
+            logger.warning("Scheduler: run_scheduled_booking_csv_backup encountered issues (see previous logs from backup_bookings_csv).")
+    except Exception as e:
+        logger.error(f"Scheduler: Error in run_scheduled_booking_csv_backup: {e}", exc_info=True)
+    logger.info("Scheduler: run_scheduled_booking_csv_backup task finished.")
