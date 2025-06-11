@@ -58,15 +58,21 @@
             </form>
             <hr>
             <h5>{{ _('Current Server Time Interpretation') }}</h5>
-            <p><strong>{{ _('Current Server UTC Time:') }}</strong> <span id="current-utc-time">{{ current_utc_time_str | default('N/A') }}</span></p>
-            <p><strong>{{ _('Effective Operational Time (UTC + Offset):') }}</strong> <span id="effective-local-time">{{ effective_operational_time_str | default('N/A') }}</span></p>
+            <p>{{ _('Current Server Time:') }} <span id="utc-clock" data-offset="{{ global_time_offset_hours | default(0) }}">Loading...</span></p>
+            <p><strong>{{ _('Effective Operational Time (based on saved offset):') }}</strong> <span id="effective-local-time">{{ effective_operational_time_str | default('N/A') }}</span></p>
         </div>
     </div>
 
     <!-- Other system settings can be added here in future -->
 
 </div>
+{% endblock %} {# End of content block #}
 
+{% block scripts %}
+{{ super() }} {# Ensures scripts from base.html are loaded first (like jQuery, Bootstrap, and potentially admin_backup_common.js if base.html handles it for this URL pattern) #}
+{# Explicitly load admin_backup_common.js to ensure utc-clock is updated, #}
+{# even if base.html might not load it for this specific page's URL pattern. #}
+<script src="{{ url_for('static', filename='js/admin_backup_common.js') }}" defer></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const opacityInput = document.getElementById('map_resource_opacity');
@@ -74,63 +80,67 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusMessage = document.getElementById('opacity-status-message');
 
     // Fetch current opacity and populate the input
-    fetch('{{ url_for("admin_api_system_settings.manage_map_opacity") }}')
-        .then(response => response.json())
-        .then(data => {
-            if (data.opacity !== undefined) {
-                opacityInput.value = data.opacity.toFixed(2);
-            } else {
-                showStatusMessage('Could not load current opacity.', true);
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching opacity:', error);
-            showStatusMessage('Error fetching current opacity.', true);
-        });
-
-    opacityForm.addEventListener('submit', function(event) {
-        event.preventDefault();
-        const newOpacity = parseFloat(opacityInput.value);
-
-        if (isNaN(newOpacity) || newOpacity < 0.0 || newOpacity > 1.0) {
-            showStatusMessage('Please enter a valid opacity value between 0.0 and 1.0.', true);
-            return;
-        }
-
-        statusMessage.textContent = 'Saving...';
-        statusMessage.className = 'text-info mt-2'; // Added mt-2 for consistency
-
-        fetch('{{ url_for("admin_api_system_settings.manage_map_opacity") }}', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': '{{ csrf_token() }}' // If CSRF is used for API POSTs
-            },
-            body: JSON.stringify({ opacity: newOpacity })
-        })
-        .then(response => response.json().then(data => ({ status: response.status, body: data })))
-        .then(({ status, body }) => {
-            if (status === 200) {
-                showStatusMessage(body.message || 'Opacity saved successfully!', false);
-                if (body.opacity !== undefined) { // Ensure opacity is in response
-                    opacityInput.value = body.opacity.toFixed(2);
+    if (opacityInput && opacityForm && statusMessage) { // Ensure elements exist before acting
+        fetch('{{ url_for("admin_api_system_settings.manage_map_opacity") }}')
+            .then(response => response.json())
+            .then(data => {
+                if (data.opacity !== undefined) {
+                    opacityInput.value = data.opacity.toFixed(2);
+                } else {
+                    showStatusMessage('Could not load current opacity.', true);
                 }
-            } else {
-                showStatusMessage(body.error || 'Failed to save opacity.', true);
+            })
+            .catch(error => {
+                console.error('Error fetching opacity:', error);
+                showStatusMessage('Error fetching current opacity.', true);
+            });
+
+        opacityForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const newOpacity = parseFloat(opacityInput.value);
+
+            if (isNaN(newOpacity) || newOpacity < 0.0 || newOpacity > 1.0) {
+                showStatusMessage('Please enter a valid opacity value between 0.0 and 1.0.', true);
+                return;
             }
-        })
-        .catch(error => {
-            console.error('Error saving opacity:', error);
-            showStatusMessage('An error occurred while saving opacity.', true);
+
+            statusMessage.textContent = 'Saving...';
+            statusMessage.className = 'text-info mt-2';
+
+            fetch('{{ url_for("admin_api_system_settings.manage_map_opacity") }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token() }}' // Ensure CSRF token is available if forms need it
+                },
+                body: JSON.stringify({ opacity: newOpacity })
+            })
+            .then(response => response.json().then(data => ({ status: response.status, body: data })))
+            .then(({ status, body }) => {
+                if (status === 200) {
+                    showStatusMessage(body.message || 'Opacity saved successfully!', false);
+                    if (body.opacity !== undefined) {
+                        opacityInput.value = body.opacity.toFixed(2);
+                    }
+                } else {
+                    showStatusMessage(body.error || 'Failed to save opacity.', true);
+                }
+            })
+            .catch(error => {
+                console.error('Error saving opacity:', error);
+                showStatusMessage('An error occurred while saving opacity.', true);
+            });
         });
-    });
+    } // End of check for opacity elements
 
     function showStatusMessage(message, isError) {
-        statusMessage.textContent = message;
-        if (isError) {
-            statusMessage.className = 'text-danger mt-2';
-        } else {
-            statusMessage.className = 'text-success mt-2';
+        if (statusMessage) { // Check if statusMessage element exists
+            statusMessage.textContent = message;
+            if (isError) {
+                statusMessage.className = 'text-danger mt-2';
+            } else {
+                statusMessage.className = 'text-success mt-2';
+            }
         }
     }
 });

@@ -159,9 +159,25 @@ def serve_backup_system_page():
     current_app.logger.info(f"User {current_user.username} accessed System Backup & Restore page.")
     scheduler_settings = load_scheduler_settings()
     full_backup_settings = scheduler_settings.get('full_backup', DEFAULT_FULL_BACKUP_SCHEDULE.copy())
+
+    # Get global_time_offset_hours
+    time_offset_value = 0 # Default
+    try:
+        booking_settings = BookingSettings.query.first()
+        if booking_settings and booking_settings.global_time_offset_hours is not None:
+            time_offset_value = booking_settings.global_time_offset_hours
+        elif not booking_settings:
+            current_app.logger.info("No BookingSettings found for system page, defaulting offset to 0. Consider creating a default record.")
+        else: # booking_settings exists but global_time_offset_hours is None
+            current_app.logger.warning("BookingSettings.global_time_offset_hours is None for system page, defaulting offset to 0.")
+    except Exception as e:
+        current_app.logger.error(f"Error fetching BookingSettings for system page: {e}", exc_info=True)
+        # time_offset_value remains 0
+
     # list_available_backups() is handled by JavaScript on the client-side now for this tab.
     return render_template('admin/backup_system.html',
-                           full_backup_settings=full_backup_settings)
+                           full_backup_settings=full_backup_settings,
+                           global_time_offset_hours=time_offset_value)
 
 @admin_ui_bp.route('/backup/booking_data', methods=['GET'])
 @login_required
@@ -190,13 +206,28 @@ def serve_backup_booking_data_page():
     # Other lists (full system backups for selective booking restore, incremental backups)
     # will be loaded client-side by JavaScript.
 
+    # Get global_time_offset_hours
+    time_offset_value = 0 # Default
+    try:
+        booking_settings = BookingSettings.query.first()
+        if booking_settings and booking_settings.global_time_offset_hours is not None:
+            time_offset_value = booking_settings.global_time_offset_hours
+        elif not booking_settings:
+            current_app.logger.info("No BookingSettings found for booking data page, defaulting offset to 0. Consider creating a default record.")
+        else: # booking_settings exists but global_time_offset_hours is None
+            current_app.logger.warning("BookingSettings.global_time_offset_hours is None for booking data page, defaulting offset to 0.")
+    except Exception as e:
+        current_app.logger.error(f"Error fetching BookingSettings for booking data page: {e}", exc_info=True)
+        # time_offset_value remains 0
+
     return render_template('admin/backup_booking_data.html',
                            booking_csv_backup_settings=booking_csv_backup_settings,
                            booking_csv_backups=paginated_booking_csv_backups,
                            booking_csv_page=page,
                            booking_csv_total_pages=total_pages,
                            booking_csv_has_prev=has_prev,
-                           booking_csv_has_next=has_next)
+                           booking_csv_has_next=has_next,
+                           global_time_offset_hours=time_offset_value)
 
 @admin_ui_bp.route('/backup/settings', methods=['GET'])
 @login_required
@@ -914,7 +945,7 @@ def system_settings_page():
     effective_time = utc_now + timedelta(hours=current_offset_hours)
 
     return render_template('admin/system_settings.html',
-                           current_offset_hours=current_offset_hours,
+                           global_time_offset_hours=current_offset_hours, # Pass as global_time_offset_hours for consistency
                            current_utc_time_str=utc_now.strftime('%Y-%m-%d %H:%M:%S %Z'),
                            effective_operational_time_str=effective_time.strftime('%Y-%m-%d %H:%M:%S %Z (Effective)'))
 
