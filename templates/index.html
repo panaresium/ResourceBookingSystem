@@ -14,8 +14,18 @@
                         <li>
                             <strong>{{ _('Resource:') }}</strong> {{ booking.resource_booked.name if booking.resource_booked else booking.title }}<br>
                             <strong>{{ _('Title:') }}</strong> {{ booking.title or _('N/A') }}<br>
-                            <strong>{{ _('Start:') }}</strong> {{ booking.start_time.strftime('%Y-%m-%d') }} {{ booking.start_time | display_local_slot_time(global_time_offset_hours) }}<br>
-                            <strong>{{ _('End:') }}</strong> {{ booking.end_time.strftime('%Y-%m-%d') }} {{ booking.end_time | display_local_slot_time(global_time_offset_hours) }}
+                            <strong>{{ _('Start:') }}</strong> {{ booking.start_time.strftime('%Y-%m-%d') }}
+                            {% if booking.booking_display_start_time %}
+                                {{ booking.booking_display_start_time.strftime('%H:%M') }}
+                            {% else %}
+                                {{ booking.start_time.strftime('%H:%M') }} UTC
+                            {% endif %}<br>
+                            <strong>{{ _('End:') }}</strong> {{ booking.end_time.strftime('%Y-%m-%d') }}
+                            {% if booking.booking_display_end_time %}
+                                {{ booking.booking_display_end_time.strftime('%H:%M') }}
+                            {% else %}
+                                {{ booking.end_time.strftime('%H:%M') }} UTC
+                            {% endif %}
                         </li>
                     {% endfor %}
                 </ul>

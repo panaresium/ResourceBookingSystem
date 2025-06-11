@@ -125,7 +125,9 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
                 'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else None,
                 'can_check_in': can_check_in,
                 'check_in_token': display_check_in_token,
-                'resource_has_active_pin': resource_has_active_pin
+                'resource_has_active_pin': resource_has_active_pin,
+                'booking_display_start_time': booking.booking_display_start_time.strftime('%H:%M') if booking.booking_display_start_time else None,
+                'booking_display_end_time': booking.booking_display_end_time.strftime('%H:%M') if booking.booking_display_end_time else None
             }
             relevant_bookings_dicts.append(booking_dict)
 
@@ -423,11 +425,13 @@ def create_booking():
 
             new_booking = Booking(
                 resource_id=resource_id,
-                start_time=occ_start_utc, # Use UTC version for DB
-                end_time=occ_end_utc,     # Use UTC version for DB
+                start_time=occ_start_utc, # This is the absolute UTC time
+                end_time=occ_end_utc,     # This is the absolute UTC time
                 title=title,
                 user_name=user_name_for_record,
-                recurrence_rule=recurrence_rule_str
+                recurrence_rule=recurrence_rule_str,
+                booking_display_start_time=occ_start_local.time(), # Store HH:MM of the local slot
+                booking_display_end_time=occ_end_local.time()      # Store HH:MM of the local slot
             )
             db.session.add(new_booking)
             created_bookings.append(new_booking)
@@ -552,10 +556,12 @@ def create_booking():
             'resource_id': b.resource_id,
             'title': b.title,
             'user_name': b.user_name,
-            'start_time': b.start_time.replace(tzinfo=timezone.utc).isoformat(),
-            'end_time': b.end_time.replace(tzinfo=timezone.utc).isoformat(),
-            'status': b.status,
-            'recurrence_rule': b.recurrence_rule
+                'start_time': b.start_time.replace(tzinfo=timezone.utc).isoformat(),
+                'end_time': b.end_time.replace(tzinfo=timezone.utc).isoformat(),
+                'status': b.status,
+                'recurrence_rule': b.recurrence_rule,
+                'booking_display_start_time': b.booking_display_start_time.strftime('%H:%M') if b.booking_display_start_time else None,
+                'booking_display_end_time': b.booking_display_end_time.strftime('%H:%M') if b.booking_display_end_time else None
         } for b in created_bookings]
         return jsonify({'bookings': created_data}), 201
 
@@ -822,7 +828,9 @@ def bookings_calendar():
                 'recurrence_rule': booking.recurrence_rule,
                 'resource_id': booking.resource_id,
                 'resource_name': resource_name, # Include resource name
-                'status': booking.status # Include status
+                'status': booking.status, # Include status
+                'booking_display_start_time': booking.booking_display_start_time.strftime('%H:%M') if booking.booking_display_start_time else None,
+                'booking_display_end_time': booking.booking_display_end_time.strftime('%H:%M') if booking.booking_display_end_time else None
             })
         return jsonify(events), 200
     except Exception as e:
@@ -1152,7 +1160,9 @@ def update_booking_by_user(booking_id):
             'user_name': booking.user_name,
             'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
             'end_time': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
-            'title': booking.title
+            'title': booking.title,
+            'booking_display_start_time': booking.booking_display_start_time.strftime('%H:%M') if booking.booking_display_start_time else None,
+            'booking_display_end_time': booking.booking_display_end_time.strftime('%H:%M') if booking.booking_display_end_time else None
         }
         current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] Sending successful response: {response_data}")
         return jsonify(response_data), 200

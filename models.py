@@ -175,6 +175,10 @@ class Booking(db.Model):
     check_in_token_expires_at = db.Column(db.DateTime, nullable=True) # New field
     last_modified = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
+    # New fields for storing the intended local display time (HH:MM:SS) of the booking slot
+    booking_display_start_time = db.Column(db.Time, nullable=True)
+    booking_display_end_time = db.Column(db.Time, nullable=True)
+
     def __repr__(self):
         return f"<Booking {self.title or self.id} for Resource {self.resource_id} from {self.start_time.strftime('%Y-%m-%d %H:%M')} to {self.end_time.strftime('%Y-%m-%d %H:%M')}>"
 
