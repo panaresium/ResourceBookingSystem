@@ -78,7 +78,7 @@
             </div>
 
             <div class="form-group">
-                <input type="checkbox" class="form-check-input" id="allow_check_in_without_pin" name="allow_check_in_without_pin" {% if settings and settings.allow_check_in_without_pin else '' %}>
+                <input type="checkbox" class="form-check-input" id="allow_check_in_without_pin" name="allow_check_in_without_pin" {% if settings and settings.allow_check_in_without_pin %}checked{% endif %}>
                 <label for="allow_check_in_without_pin" style="display: inline-block; margin-left: 5px;">{{ _('Allow check-in without PIN') }}</label>
                 <small class="form-text text-muted" style="margin-left: 25px;">
                     {{ _("If checked, users can check-in from 'My Bookings' without a PIN even if one is set for the resource. The PIN field will be hidden. For 'Resource URL Check-in', PIN validation will be skipped. If unchecked, PINs will be enforced if set on a resource.") }}
