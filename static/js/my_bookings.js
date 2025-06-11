@@ -377,9 +377,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetchUpcomingBookings, (val) => upcomingCurrentPage = val, (val) => upcomingItemsPerPage = val);
             upcomingBookingsContainer.innerHTML = '';
             if (data.bookings && data.bookings.length > 0) {
-                data.bookings.forEach(booking => {
+                data.bookings.forEach((booking, index) => {
                     const bookingCard = createBookingCardElement(booking, data.check_in_out_enabled, allowCheckInWithoutPinUpcoming);
                     upcomingBookingsContainer.appendChild(bookingCard);
+                    if (index < data.bookings.length - 1) {
+                        const separator = document.createElement('hr');
+                        separator.className = 'booking-separator'; // Optional class for styling
+                        upcomingBookingsContainer.appendChild(separator);
+                    }
                 });
             } else {
                 upcomingBookingsContainer.innerHTML = '<p>No upcoming bookings found matching your criteria.</p>';
@@ -430,9 +435,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetchPastBookings, (val) => pastCurrentPage = val, (val) => pastItemsPerPage = val);
             pastBookingsContainer.innerHTML = '';
             if (data.bookings && data.bookings.length > 0) {
-                data.bookings.forEach(booking => {
+                data.bookings.forEach((booking, index) => {
                     const bookingCard = createBookingCardElement(booking, data.check_in_out_enabled, allowCheckInWithoutPinPast);
                     pastBookingsContainer.appendChild(bookingCard);
+                    if (index < data.bookings.length - 1) {
+                        const separator = document.createElement('hr');
+                        separator.className = 'booking-separator'; // Optional class for styling
+                        pastBookingsContainer.appendChild(separator);
+                    }
                 });
             } else {
                 pastBookingsContainer.innerHTML = '<p>No past bookings found matching your criteria.</p>';
