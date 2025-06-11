@@ -52,7 +52,7 @@
         </div> -->
     </div>
 
-    <div id="my-bookings-list">
+    <div id="my-bookings-list" data-global-offset="{{ global_time_offset_hours | default(0) }}">
         <div id="upcoming-bookings-section">
             <h2>{{ _('Upcoming Bookings') }}</h2>
 			<div class="form-check form-switch mb-2">

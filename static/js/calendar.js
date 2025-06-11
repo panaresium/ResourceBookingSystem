@@ -3,6 +3,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const calendarEl = document.getElementById('calendar');
     const calendarStatusFilterSelect = document.getElementById('calendar-status-filter'); // Changed ID
 
+    const calendarElementForOffset = document.getElementById('calendar');
+    const offsetHours = calendarElementForOffset ? parseInt(calendarElementForOffset.dataset.globalOffset) || 0 : 0;
+
     let unavailableDates = []; // Store fetched unavailable dates
 
     // Modal elements
@@ -73,9 +76,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Define the predefined slots
             const predefinedSlots = [
-                { text: "08:00 - 12:00 UTC", value: "08:00,12:00" },
-                { text: "13:00 - 17:00 UTC", value: "13:00,17:00" },
-                { text: "08:00 - 17:00 UTC", value: "08:00,17:00" }
+                { text: "08:00 - 12:00", value: "08:00,12:00" }, // Removed UTC
+                { text: "13:00 - 17:00", value: "13:00,17:00" }, // Removed UTC
+                { text: "08:00 - 17:00", value: "08:00,17:00" }  // Removed UTC
             ];
 
             slotsSelect.innerHTML = '<option value="">-- Select a time slot --</option>'; // Reset
@@ -291,14 +294,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 const cebmBookingDateInput = document.getElementById('cebm-booking-date');
 
                 if (info.event.start) {
-                    const startDate = new Date(info.event.start); // Local representation of event's start
-                    const year = startDate.getFullYear();
-                    const month = (startDate.getMonth() + 1).toString().padStart(2, '0');
-                    const day = startDate.getDate().toString().padStart(2, '0');
+                    const originalEventStartForModal = new Date(info.event.start); // This is a UTC Date object
+
+                    // For date input, use original UTC date parts
+                    const year = originalEventStartForModal.getUTCFullYear();
+                    const month = (originalEventStartForModal.getUTCMonth() + 1).toString().padStart(2, '0');
+                    const day = originalEventStartForModal.getUTCDate().toString().padStart(2, '0');
                     cebmBookingDateInput.value = `${year}-${month}-${day}`;
 
-                    const startHours = info.event.start.getUTCHours().toString().padStart(2, '0');
-                    const startMinutes = info.event.start.getUTCMinutes().toString().padStart(2, '0');
+                    // For selectedStartTimeHHMM, use offset-adjusted time
+                    const displayEventStartForModal = new Date(originalEventStartForModal.getTime() + offsetHours * 60 * 60 * 1000);
+                    const startHours = displayEventStartForModal.getUTCHours().toString().padStart(2, '0');
+                    const startMinutes = displayEventStartForModal.getUTCMinutes().toString().padStart(2, '0');
                     const selectedStartTimeHHMM = `${startHours}:${startMinutes}`;
 
                     fetchAndDisplayAvailableSlots(info.event.extendedProps.resource_id, cebmBookingDateInput.value, selectedStartTimeHHMM);
@@ -469,25 +476,30 @@ document.addEventListener('DOMContentLoaded', () => {
                     let eventHtml = `<b>${displayTitle}</b>`;
 
                     if (arg.event.start) {
-                        const startHours = arg.event.start.getUTCHours().toString().padStart(2, '0');
-                        const startMinutes = arg.event.start.getUTCMinutes().toString().padStart(2, '0');
-                        const startTimeUTC = `${startHours}:${startMinutes}`;
+                        const originalEventStart = arg.event.start; // UTC Date object
+                        const displayEventStart = new Date(originalEventStart.getTime() + offsetHours * 60 * 60 * 1000);
 
-                        let endTimeUTC = '';
+                        const startHours = displayEventStart.getUTCHours().toString().padStart(2, '0');
+                        const startMinutes = displayEventStart.getUTCMinutes().toString().padStart(2, '0');
+                        const startTimeDisplay = `${startHours}:${startMinutes}`;
+
+                        let endTimeDisplay = '';
                         if (arg.event.end) {
-                            const endHours = arg.event.end.getUTCHours().toString().padStart(2, '0');
-                            const endMinutes = arg.event.end.getUTCMinutes().toString().padStart(2, '0');
-                            endTimeUTC = `${endHours}:${endMinutes}`;
+                            const originalEventEnd = arg.event.end; // UTC Date object
+                            const displayEventEnd = new Date(originalEventEnd.getTime() + offsetHours * 60 * 60 * 1000);
+                            const endHours = displayEventEnd.getUTCHours().toString().padStart(2, '0');
+                            const endMinutes = displayEventEnd.getUTCMinutes().toString().padStart(2, '0');
+                            endTimeDisplay = `${endHours}:${endMinutes}`;
                         }
 
                         let fullTimeString = '';
                         // Construct the time string only if it's not an all-day event or if time is not midnight
-                        if (!arg.event.allDay || (startTimeUTC !== '00:00' || (endTimeUTC && endTimeUTC !== '00:00'))) {
-                            fullTimeString = startTimeUTC;
-                            if (endTimeUTC && endTimeUTC !== startTimeUTC) {
-                                fullTimeString += ` - ${endTimeUTC}`;
+                        if (!arg.event.allDay || (startTimeDisplay !== '00:00' || (endTimeDisplay && endTimeDisplay !== '00:00'))) {
+                            fullTimeString = startTimeDisplay;
+                            if (endTimeDisplay && endTimeDisplay !== startTimeDisplay) {
+                                fullTimeString += ` - ${endTimeDisplay}`;
                             }
-                            // fullTimeString += ' UTC'; // Removed ' UTC'
+
                         }
 
                         if (fullTimeString) {
