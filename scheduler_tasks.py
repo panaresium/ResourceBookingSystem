@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from flask import current_app, render_template
-from .extensions import db
-from .models import Booking, User, Resource, FloorMap, BookingSettings # Added BookingSettings
-from .utils import add_audit_log, send_email
+from extensions import db # Changed to absolute import
+from models import Booking, User, Resource, FloorMap, BookingSettings # Changed to absolute import
+from utils import add_audit_log, send_email # Changed to absolute import
 
 def auto_checkout_overdue_bookings():
     """
