@@ -294,19 +294,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 const cebmBookingDateInput = document.getElementById('cebm-booking-date');
 
                 if (info.event.start) {
-                    const originalEventStartForModal = new Date(info.event.start); // This is a UTC Date object
+                    const originalEventStartForDate = new Date(info.event.start); // UTC Date object from FullCalendar
 
                     // For date input, use original UTC date parts
-                    const year = originalEventStartForModal.getUTCFullYear();
-                    const month = (originalEventStartForModal.getUTCMonth() + 1).toString().padStart(2, '0');
-                    const day = originalEventStartForModal.getUTCDate().toString().padStart(2, '0');
+                    const year = originalEventStartForDate.getUTCFullYear();
+                    const month = (originalEventStartForDate.getUTCMonth() + 1).toString().padStart(2, '0');
+                    const day = originalEventStartForDate.getUTCDate().toString().padStart(2, '0');
                     cebmBookingDateInput.value = `${year}-${month}-${day}`;
 
-                    // For selectedStartTimeHHMM, use offset-adjusted time
-                    const displayEventStartForModal = new Date(originalEventStartForModal.getTime() + offsetHours * 60 * 60 * 1000);
-                    const startHours = displayEventStartForModal.getUTCHours().toString().padStart(2, '0');
-                    const startMinutes = displayEventStartForModal.getUTCMinutes().toString().padStart(2, '0');
-                    const selectedStartTimeHHMM = `${startHours}:${startMinutes}`;
+                    let selectedStartTimeHHMM;
+                    if (info.event.extendedProps.booking_display_start_time) {
+                        selectedStartTimeHHMM = info.event.extendedProps.booking_display_start_time; // "HH:MM"
+                    } else {
+                        // Fallback for older events: use UTC time parts from original event start
+                        const fallbackStart = new Date(info.event.start); // Already a Date object
+                        const optionsTimeUTC = { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' };
+                        selectedStartTimeHHMM = fallbackStart.toLocaleTimeString(undefined, optionsTimeUTC);
+                        // No " UTC" suffix here as it's for internal logic, not direct display in this variable.
+                    }
 
                     fetchAndDisplayAvailableSlots(info.event.extendedProps.resource_id, cebmBookingDateInput.value, selectedStartTimeHHMM);
                 } else {
@@ -476,30 +481,29 @@ document.addEventListener('DOMContentLoaded', () => {
                     let eventHtml = `<b>${displayTitle}</b>`;
 
                     if (arg.event.start) {
-                        const originalEventStart = arg.event.start; // UTC Date object
-                        const displayEventStart = new Date(originalEventStart.getTime() + offsetHours * 60 * 60 * 1000);
+                        let startTimeDisplay, endTimeDisplay;
 
-                        const startHours = displayEventStart.getUTCHours().toString().padStart(2, '0');
-                        const startMinutes = displayEventStart.getUTCMinutes().toString().padStart(2, '0');
-                        const startTimeDisplay = `${startHours}:${startMinutes}`;
-
-                        let endTimeDisplay = '';
-                        if (arg.event.end) {
-                            const originalEventEnd = arg.event.end; // UTC Date object
-                            const displayEventEnd = new Date(originalEventEnd.getTime() + offsetHours * 60 * 60 * 1000);
-                            const endHours = displayEventEnd.getUTCHours().toString().padStart(2, '0');
-                            const endMinutes = displayEventEnd.getUTCMinutes().toString().padStart(2, '0');
-                            endTimeDisplay = `${endHours}:${endMinutes}`;
+                        if (arg.event.extendedProps.booking_display_start_time && arg.event.extendedProps.booking_display_end_time) {
+                            startTimeDisplay = arg.event.extendedProps.booking_display_start_time; // "HH:MM"
+                            endTimeDisplay = arg.event.extendedProps.booking_display_end_time;   // "HH:MM"
+                        } else {
+                            // Fallback for older bookings: display UTC time parts from the main UTC datetimes
+                            const fallbackStart = new Date(arg.event.start); // arg.event.start is already a Date object
+                            const fallbackEnd = arg.event.end ? new Date(arg.event.end) : null;
+                            const optionsTimeUTC = { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' };
+                            startTimeDisplay = fallbackStart.toLocaleTimeString(undefined, optionsTimeUTC) + " UTC";
+                            endTimeDisplay = fallbackEnd ? fallbackEnd.toLocaleTimeString(undefined, optionsTimeUTC) + " UTC" : "";
                         }
 
                         let fullTimeString = '';
-                        // Construct the time string only if it's not an all-day event or if time is not midnight
-                        if (!arg.event.allDay || (startTimeDisplay !== '00:00' || (endTimeDisplay && endTimeDisplay !== '00:00'))) {
+                        // Construct the time string only if it's not an all-day event or if time is not midnight (for non-fallback)
+                        // For fallback, it will always include " UTC" if times are not "00:00 UTC"
+                        if (!arg.event.allDay || (startTimeDisplay && (startTimeDisplay !== '00:00' && !startTimeDisplay.endsWith("00:00 UTC")))) {
                             fullTimeString = startTimeDisplay;
-                            if (endTimeDisplay && endTimeDisplay !== startTimeDisplay) {
+                            // Ensure endTimeDisplay is meaningful and different before appending
+                            if (endTimeDisplay && endTimeDisplay !== startTimeDisplay && endTimeDisplay.replace(" UTC", "") !== "") {
                                 fullTimeString += ` - ${endTimeDisplay}`;
                             }
-
                         }
 
                         if (fullTimeString) {
@@ -509,10 +513,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                             eventHtml += `<br>${displayTime}`;
                         }
-                    }
-                    // Add resource name
-                    if (arg.event.extendedProps && arg.event.extendedProps.resource_name) {
-                        eventHtml += `<br><b>${arg.event.extendedProps.resource_name}</b>`;
                     }
                     return { html: eventHtml };
                 }

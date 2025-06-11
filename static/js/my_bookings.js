@@ -57,8 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     function createBookingCardElement(booking, checkInOutEnabled, allow_check_in_without_pin) {
-        const bookingsListElement = document.getElementById('my-bookings-list');
-        const offsetHours = parseInt(bookingsListElement.dataset.globalOffset) || 0;
+        // offsetHours retrieval is removed as we now use pre-formatted display times from API
 
         if (!bookingItemTemplate) {
             console.error("Booking item template not found!");
@@ -84,22 +83,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const resourceSpan = bookingCardDiv.querySelector('.resource-name-value');
         if (resourceSpan) resourceSpan.textContent = booking.resource_name || 'N/A';
 
-        const startDate = new Date(booking.start_time); // booking.start_time is ISO UTC
-        const endDate = new Date(booking.end_time);   // booking.end_time is ISO UTC
-
-        // Apply offset for time display
-        const displayStartDate = new Date(startDate.getTime() + offsetHours * 60 * 60 * 1000);
-        const displayEndDate = new Date(endDate.getTime() + offsetHours * 60 * 60 * 1000);
-
-        // Date part should be based on original UTC date to correctly represent the slot's calendar day
+        const startDateForDate = new Date(booking.start_time); // For the date part, from absolute UTC time
         const optionsDate = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' };
-        const formattedDate = startDate.toLocaleDateString(undefined, optionsDate);
+        const formattedDate = startDateForDate.toLocaleDateString(undefined, optionsDate);
 
-        // Time part uses the displayStartDate/EndDate, but still formatted *as if* it's UTC
-        // because the offset has already been baked into its millisecond value.
-        const optionsTime = { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' };
-        const formattedStartTime = displayStartDate.toLocaleTimeString(undefined, optionsTime);
-        const formattedEndTime = displayEndDate.toLocaleTimeString(undefined, optionsTime);
+        let formattedStartTime, formattedEndTime;
+
+        if (booking.booking_display_start_time && booking.booking_display_end_time) {
+            formattedStartTime = booking.booking_display_start_time; // Already "HH:MM"
+            formattedEndTime = booking.booking_display_end_time;   // Already "HH:MM"
+        } else {
+            // Fallback for older bookings: display UTC time parts from the main UTC datetime fields
+            const fallbackStartDate = new Date(booking.start_time);
+            const fallbackEndDate = new Date(booking.end_time);
+            const optionsTimeUTC = { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' };
+            formattedStartTime = fallbackStartDate.toLocaleTimeString(undefined, optionsTimeUTC) + " UTC"; // Add UTC label for clarity
+            formattedEndTime = fallbackEndDate.toLocaleTimeString(undefined, optionsTimeUTC) + " UTC";   // Add UTC label for clarity
+        }
 
         const dateSpan = bookingCardDiv.querySelector('.booking-date-value');
         if (dateSpan) dateSpan.textContent = formattedDate;
