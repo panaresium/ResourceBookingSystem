@@ -139,28 +139,29 @@ def run_scheduled_booking_csv_backup(app=None):
             # It will internally determine the range based on its schedule settings.
             # For a scheduled task, socketio_instance and task_id are typically None.
             success = backup_bookings_csv(
-                app=app, # Use the passed app directly
+                app=app,
                 socketio_instance=None,
                 task_id=None,
-                start_date_dt=None, # Explicitly None, backup_bookings_csv will use its schedule settings
-                end_date_dt=None,   # Explicitly None
-                range_label="scheduled_auto" # Label to indicate it's from the scheduler
+                start_date_dt=None,
+                end_date_dt=None,
+                range_label="scheduled_auto"
             )
             if success:
-                logger.info("Scheduler: run_scheduled_booking_csv_backup completed successfully.")
-        else:
-            logger.warning("Scheduler: run_scheduled_booking_csv_backup encountered issues (see previous logs from backup_bookings_csv).")
-    except Exception as e:
-        logger.error(f"Scheduler: Error in run_scheduled_booking_csv_backup: {e}", exc_info=True)
-    logger.info("Scheduler: run_scheduled_booking_csv_backup task finished.")
+                logger.info("Scheduler: run_scheduled_booking_csv_backup (backup_bookings_csv call) reported success.")
+            else:
+                logger.warning("Scheduler: run_scheduled_booking_csv_backup (backup_bookings_csv call) reported issues (returned False). See azure_backup logs for details.")
+        except Exception as e:
+            logger.error(f"Scheduler: Exception during run_scheduled_booking_csv_backup execution: {e}", exc_info=True)
 
-def cancel_unchecked_bookings(app=None):
+        logger.info("Scheduler: run_scheduled_booking_csv_backup task finished.")
+
+def cancel_unchecked_bookings(app):
     """
     Placeholder for the scheduled task to cancel bookings that were not checked in
     within the allowed window.
     """
     with app.app_context():
-        logger = app.logger
+        logger = app.logger # Corrected: use app.logger after context
         logger.info("Scheduler: Task 'cancel_unchecked_bookings' called.")
         logger.warning("Scheduler: The logic for 'cancel_unchecked_bookings' is not yet fully implemented. This is a placeholder.")
         # TODO: Implement logic to query 'approved' bookings where:
@@ -178,7 +179,7 @@ def apply_scheduled_resource_status_changes(app=None):
     Scheduled task to apply pending scheduled status changes to resources.
     """
     with app.app_context():
-        logger = app.logger
+        logger = app.logger # Corrected: use app.logger after context
         logger.info("Scheduler: Starting apply_scheduled_resource_status_changes task...")
         now_utc = datetime.now(timezone.utc)
 
@@ -229,7 +230,7 @@ def run_scheduled_backup_job(app=None):
     Scheduled task entry point to run a full system backup.
     """
     with app.app_context():
-        logger = app.logger
+        logger = app.logger # Corrected: use app.logger after context
         logger.info("Scheduler: Starting run_scheduled_backup_job (full system backup)...")
 
         try:
