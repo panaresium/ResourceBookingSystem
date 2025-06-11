@@ -445,22 +445,55 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
 
 def send_email(to_address: str, subject: str, body: str = None, html_body: str = None, attachment_path: str = None):
     logger = current_app.logger if current_app else logging.getLogger(__name__)
+    logger.info(f"send_email function called. To: {to_address}, Subject: '{subject}'. Attachment present: {bool(attachment_path)}")
 
     if not body and not html_body:
         logger.error(f"Email to {to_address} has no body or html_body. Not sending.")
         if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
             try:
                 os.remove(attachment_path)
-            except Exception: pass
+                logger.info(f"Cleaned up temporary attachment due to no body/html_body: {attachment_path}")
+            except Exception as e_clean_no_body:
+                logger.error(f"Error cleaning up temporary attachment {attachment_path} (no body/html_body): {e_clean_no_body}", exc_info=True)
         return
 
-    if current_app.config.get('MAIL_SUPPRESS_SEND'):
-        logger.info(f"Email sending is suppressed (MAIL_SUPPRESS_SEND). Intent: To='{to_address}', Subject='{subject}'.")
+    logger.info(f"Checking email configurations for sending to {to_address}:")
+    mail_suppress_send = current_app.config.get('MAIL_SUPPRESS_SEND', False) # Default to False if not set
+    logger.info(f"  MAIL_SUPPRESS_SEND: {mail_suppress_send}")
+
+    gmail_sender_address = current_app.config.get('GMAIL_SENDER_ADDRESS')
+    logger.info(f"  GMAIL_SENDER_ADDRESS: {'Present' if gmail_sender_address else 'MISSING!'}")
+
+    google_client_id = current_app.config.get('GOOGLE_CLIENT_ID')
+    logger.info(f"  GOOGLE_CLIENT_ID: {'Present' if google_client_id and google_client_id != 'YOUR_GOOGLE_CLIENT_ID_PLACEHOLDER_config.py' else 'MISSING or Placeholder!'}")
+
+    google_client_secret = current_app.config.get('GOOGLE_CLIENT_SECRET')
+    logger.info(f"  GOOGLE_CLIENT_SECRET: {'Present' if google_client_secret and google_client_secret != 'YOUR_GOOGLE_CLIENT_SECRET_PLACEHOLDER_config.py' else 'MISSING or Placeholder!'}")
+
+    gmail_refresh_token = current_app.config.get('GMAIL_REFRESH_TOKEN')
+    logger.info(f"  GMAIL_REFRESH_TOKEN: {'Present' if gmail_refresh_token else 'MISSING!'}")
+
+    if mail_suppress_send:
+        logger.warning(f"Email sending is SUPPRESSED (MAIL_SUPPRESS_SEND is True). Email to {to_address} with subject '{subject}' will not be sent.")
         if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
             try:
                 os.remove(attachment_path)
-            except Exception: pass
+                logger.info(f"Cleaned up temporary attachment due to MAIL_SUPPRESS_SEND: {attachment_path}")
+            except Exception as e_clean_suppress:
+                logger.error(f"Error cleaning up temporary attachment {attachment_path} (suppressed): {e_clean_suppress}", exc_info=True)
         return
+
+    if not all([gmail_sender_address, google_client_id, google_client_secret, gmail_refresh_token]) or \
+       google_client_id == 'YOUR_GOOGLE_CLIENT_ID_PLACEHOLDER_config.py' or \
+       google_client_secret == 'YOUR_GOOGLE_CLIENT_SECRET_PLACEHOLDER_config.py':
+        logger.error(f"CRITICAL: Email configuration is INCOMPLETE. Cannot send email to {to_address} with subject '{subject}'. Please check GMAIL_SENDER_ADDRESS, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GMAIL_REFRESH_TOKEN.")
+        if attachment_path and tempfile.gettempdir() in os.path.normpath(os.path.abspath(attachment_path)):
+            try:
+                os.remove(attachment_path)
+                logger.info(f"Cleaned up temporary attachment due to missing configuration: {attachment_path}")
+            except Exception as e_clean_cfg:
+                logger.error(f"Error cleaning up temporary attachment {attachment_path} (config issue): {e_clean_cfg}", exc_info=True)
+        return # Exit the function if critical configs are missing
 
     email_log_entry = {
         'to': to_address, 'subject': subject, 'body_present': bool(body),
