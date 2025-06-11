@@ -1431,11 +1431,18 @@ def check_in_booking(booking_id):
         current_app.logger.info(f"User '{current_user.username}' successfully checked into booking ID: {booking_id} at {now_utc.isoformat()}{' using PIN' if provided_pin else ''}.")
 
         # Send Email Notification for Check-in
-        try:
-            user = User.query.filter_by(username=booking.user_name).first()
-            resource_details = Resource.query.get(booking.resource_id) # Renamed to avoid conflict
+        user = User.query.filter_by(username=booking.user_name).first()
+        resource_details = Resource.query.get(booking.resource_id) # Renamed to avoid conflict
 
-            if user and user.email and resource_details:
+        current_app.logger.info(f"Preparing to send check-in email for booking ID {booking.id} to user {booking.user_name}.")
+        if not user: # Added check for user object itself
+            current_app.logger.warning(f"User object not found for username {booking.user_name}. Skipping check-in email for booking {booking.id}.")
+        elif not user.email:
+            current_app.logger.warning(f"User {user.username} (ID: {user.id}) does not have an email address. Skipping check-in email for booking {booking.id}.")
+        elif not resource_details: # Added check for resource_details
+            current_app.logger.warning(f"Resource {booking.resource_id} not found. Skipping check-in email for booking {booking.id}.")
+        else:
+            try:
                 floor_map_location = "N/A"
                 floor_map_floor = "N/A"
                 if resource_details.floor_map_id:
@@ -1460,6 +1467,9 @@ def check_in_booking(booking_id):
                     'floor': floor_map_floor,
                 }
 
+                subject = f"Check-in Confirmed: {email_data['resource_name']} - {email_data['booking_title']}"
+                current_app.logger.info(f"Attempting to send check-in email to {user.email} for booking {booking.id}. Subject: {subject}")
+
                 html_body = render_template('email/check_in_confirmation.html', **email_data)
                 # Basic plain text version
                 body = (
@@ -1475,7 +1485,6 @@ def check_in_booking(booking_id):
                     f"- Floor: {email_data['floor']}\n\n"
                     f"Thank you for using our booking system!"
                 )
-                subject = f"Check-in Confirmed: {email_data['resource_name']} - {email_data['booking_title']}"
 
                 send_email(
                     to_address=user.email,
@@ -1483,16 +1492,11 @@ def check_in_booking(booking_id):
                     html_body=html_body,
                     body=body
                 )
-                current_app.logger.info(f"Check-in confirmation email sent to {user.email} for booking {booking.id}.")
-            elif not user:
-                current_app.logger.warning(f"User {booking.user_name} not found. Skipping check-in email for booking {booking.id}.")
-            elif not user.email:
-                current_app.logger.warning(f"User {booking.user_name} has no email. Skipping check-in email for booking {booking.id}.")
-            elif not resource_details:
-                 current_app.logger.warning(f"Resource {booking.resource_id} not found. Skipping check-in email for booking {booking.id}.")
-
-        except Exception as e_email:
-            current_app.logger.error(f"Error sending check-in confirmation email for booking {booking.id}: {e_email}", exc_info=True)
+                current_app.logger.info(f"Check-in email for booking {booking.id} to {user.email} initiated successfully.")
+            except Exception as e_email:
+                # Ensure user.email is available for logging, might need to fetch user again if not available in this scope for some reason
+                user_email_for_log = user.email if user and hasattr(user, 'email') else "unknown_email"
+                current_app.logger.error(f"Error sending check-in email for booking {booking.id} to {user_email_for_log}: {e_email}", exc_info=True)
         # End of Email Notification Logic
 
         if current_user.email: # Existing Teams notification
@@ -1552,11 +1556,18 @@ def check_out_booking(booking_id):
         current_app.logger.info(f"User '{current_user.username}' successfully checked out of booking ID: {booking_id} at {now.isoformat()}. Status set to completed.")
 
         # Send Email Notification for Check-out
-        try:
-            user = User.query.filter_by(username=booking.user_name).first()
-            resource_details = Resource.query.get(booking.resource_id) # Renamed
+        user = User.query.filter_by(username=booking.user_name).first()
+        resource_details = Resource.query.get(booking.resource_id) # Renamed
 
-            if user and user.email and resource_details:
+        current_app.logger.info(f"Preparing to send check-out email for booking ID {booking.id} to user {booking.user_name}.")
+        if not user: # Added check for user object itself
+            current_app.logger.warning(f"User object not found for username {booking.user_name}. Skipping check-out email for booking {booking.id}.")
+        elif not user.email:
+            current_app.logger.warning(f"User {user.username} (ID: {user.id}) does not have an email address. Skipping check-out email for booking {booking.id}.")
+        elif not resource_details: # Added check for resource_details
+            current_app.logger.warning(f"Resource {booking.resource_id} not found. Skipping check-out email for booking {booking.id}.")
+        else:
+            try:
                 floor_map_location = "N/A"
                 floor_map_floor = "N/A"
                 if resource_details.floor_map_id:
@@ -1581,6 +1592,9 @@ def check_out_booking(booking_id):
                     'floor': floor_map_floor,
                 }
 
+                subject = f"Check-out Confirmed: {email_data['resource_name']} - {email_data['booking_title']}"
+                current_app.logger.info(f"Attempting to send check-out email to {user.email} for booking {booking.id}. Subject: {subject}")
+
                 html_body = render_template('email/check_out_confirmation.html', **email_data)
                 # Basic plain text version
                 body = (
@@ -1596,7 +1610,6 @@ def check_out_booking(booking_id):
                     f"- Floor: {email_data['floor']}\n\n"
                     f"Thank you for using our booking system!"
                 )
-                subject = f"Check-out Confirmed: {email_data['resource_name']} - {email_data['booking_title']}"
 
                 send_email(
                     to_address=user.email,
@@ -1604,16 +1617,10 @@ def check_out_booking(booking_id):
                     html_body=html_body,
                     body=body
                 )
-                current_app.logger.info(f"Check-out confirmation email sent to {user.email} for booking {booking.id}.")
-            elif not user:
-                current_app.logger.warning(f"User {booking.user_name} not found. Skipping check-out email for booking {booking.id}.")
-            elif not user.email:
-                current_app.logger.warning(f"User {booking.user_name} has no email. Skipping check-out email for booking {booking.id}.")
-            elif not resource_details:
-                current_app.logger.warning(f"Resource {booking.resource_id} not found. Skipping check-out email for booking {booking.id}.")
-
-        except Exception as e_email:
-            current_app.logger.error(f"Error sending check-out confirmation email for booking {booking.id}: {e_email}", exc_info=True)
+                current_app.logger.info(f"Check-out email for booking {booking.id} to {user.email} initiated successfully.")
+            except Exception as e_email:
+                user_email_for_log = user.email if user and hasattr(user, 'email') else "unknown_email"
+                current_app.logger.error(f"Error sending check-out email for booking {booking.id} to {user_email_for_log}: {e_email}", exc_info=True)
         # End of Email Notification Logic
 
         if current_user.email: # Existing Teams notification
