@@ -39,7 +39,7 @@ function setupDOM() {
         <div id="my-bookings-status"></div>
         <template id="booking-item-template"></template>
         <!-- Add other elements your script might interact with -->
-        <select id="status-filter-my-bookings"><option value="">All</option></select>
+        <select id="my-bookings-status-filter"><option value="">All</option></select>
         <input type="text" id="resource-name-filter">
     `;
 }
@@ -105,22 +105,21 @@ describe('My Bookings Date Filter', () => {
 
 
     describe('Initialization', () => {
-        test('should NOT initialize flatpickr if date filter type is "any" on load', () => {
+        test('should NOT initialize flatpickr and hide container if date filter type is "any" on load', () => {
             loadScript(); // Simulate script loading
             const datePickerContainer = document.getElementById('my-bookings-datepicker-container');
+            expect(datePickerContainer.classList.contains('d-none')).toBe(true);
             expect(datePickerContainer.style.display).toBe('none');
             expect(mockFlatpickr).not.toHaveBeenCalled();
         });
 
-        test('should initialize flatpickr if date filter type is "specific" on load (e.g., value pre-set)', () => {
+        test('should initialize flatpickr and show container if date filter type is "specific" on load', () => {
             document.getElementById('my-bookings-date-filter-type').value = 'specific';
-            // Important: The my_bookings.js script needs to run *after* this value is set
-            // and check it on initialization.
             loadScript();
 
             const datePickerContainer = document.getElementById('my-bookings-datepicker-container');
-            // The script's initial setup should make it visible
-            expect(datePickerContainer.style.display).toBe('block'); // or 'flex' or whatever it uses
+            expect(datePickerContainer.classList.contains('d-none')).toBe(false);
+            expect(datePickerContainer.style.display).toBe('flex');
             expect(mockFlatpickr).toHaveBeenCalledWith(
                 document.getElementById('my-bookings-specific-date-filter'),
                 expect.objectContaining({ dateFormat: "Y-m-d" })
@@ -138,14 +137,16 @@ describe('My Bookings Date Filter', () => {
             const datePickerContainer = document.getElementById('my-bookings-datepicker-container');
             const datePickerInput = document.getElementById('my-bookings-specific-date-filter');
 
-            // Initial state check
+            // Initial state check (assuming it starts as 'any' based on DOM setup)
+            expect(datePickerContainer.classList.contains('d-none')).toBe(true);
             expect(datePickerContainer.style.display).toBe('none');
 
             // Change to "specific"
             dateFilterTypeSelect.value = 'specific';
             dateFilterTypeSelect.dispatchEvent(new Event('change'));
 
-            expect(datePickerContainer.style.display).toBe('block'); // Or 'flex', etc.
+            expect(datePickerContainer.classList.contains('d-none')).toBe(false);
+            expect(datePickerContainer.style.display).toBe('flex');
             expect(mockFlatpickr).toHaveBeenCalledWith(datePickerInput, expect.any(Object));
         });
 
@@ -156,12 +157,14 @@ describe('My Bookings Date Filter', () => {
             // First, change to "specific" to initialize flatpickr and show container
             dateFilterTypeSelect.value = 'specific';
             dateFilterTypeSelect.dispatchEvent(new Event('change'));
-            expect(datePickerContainer.style.display).toBe('block');
+            expect(datePickerContainer.classList.contains('d-none')).toBe(false);
+            expect(datePickerContainer.style.display).toBe('flex');
 
             // Change back to "any"
             dateFilterTypeSelect.value = 'any';
             dateFilterTypeSelect.dispatchEvent(new Event('change'));
 
+            expect(datePickerContainer.classList.contains('d-none')).toBe(true);
             expect(datePickerContainer.style.display).toBe('none');
         });
 
@@ -265,8 +268,43 @@ describe('My Bookings Date Filter', () => {
             clearFiltersBtn.click();
 
             expect(dateFilterTypeSelect.value).toBe('any');
+            expect(datePickerContainer.classList.contains('d-none')).toBe(true);
             expect(datePickerContainer.style.display).toBe('none');
             expect(mockFlatpickrInstance.clear).toHaveBeenCalled();
+        });
+    });
+
+    describe('Status Filter Auto-Refresh', () => {
+        beforeEach(() => {
+            loadScript(); // Ensure event listeners are active
+            mockApiCall.mockClear(); // Clear previous calls before this test
+        });
+
+        test('should call handleFilterOrToggleChange (and thus fetch bookings) when status filter changes', async () => {
+            const statusFilter = document.getElementById('my-bookings-status-filter');
+            if (!statusFilter) throw new Error("Status filter select not found in DOM for test");
+
+            statusFilter.value = 'approved'; // Change value
+            statusFilter.dispatchEvent(new Event('change')); // Dispatch event
+
+            // handleFilterOrToggleChange calls fetchUpcomingBookings and fetchPastBookings
+            // Each of those makes one apiCall if the respective section is visible.
+            // Assuming both upcoming and past are visible by default in tests (checkboxes checked).
+
+            // Check if apiCall was made for upcoming bookings
+            expect(mockApiCall).toHaveBeenCalledWith(
+                expect.stringContaining('/api/bookings/upcoming'),
+                expect.anything(),
+                expect.anything()
+            );
+            // Check if apiCall was made for past bookings
+            expect(mockApiCall).toHaveBeenCalledWith(
+                expect.stringContaining('/api/bookings/past'),
+                expect.anything(),
+                expect.anything()
+            );
+            // Ensure it was called at least for these two. Could be more if other fetches are triggered.
+            expect(mockApiCall.mock.calls.length).toBeGreaterThanOrEqual(2);
         });
     });
 });

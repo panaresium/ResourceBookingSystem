@@ -5,7 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusDiv = document.getElementById('my-bookings-status');
 
     // Filter Elements
-    const statusFilterSelect = document.getElementById('my-bookings-status-filter');
+    const statusFilterSelect = document.getElementById('my-bookings-status-filter'); // Corrected ID as per subtask
     const resourceNameFilterInput = document.getElementById('resource-name-filter'); // New filter
     const dateFilterTypeSelect = document.getElementById('my-bookings-date-filter-type');
     const datePickerContainer = document.getElementById('my-bookings-datepicker-container');
@@ -225,6 +225,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const currentDateFilterType = dateFilterTypeSelect ? dateFilterTypeSelect.value : 'any';
         const currentDateFilterValue = (flatpickrInstance && flatpickrInstance.selectedDates.length > 0) ? flatpickrInstance.selectedDates[0] : null;
 
+        // Hide pagination if no items AND no filters are active (including date filter)
         if (totalItems === 0 && !currentStatusFilter && !currentResourceFilter && (currentDateFilterType === 'any' || !currentDateFilterValue)) {
              paginationContainer.style.display = 'none';
              return;
@@ -352,7 +353,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (dateFilterTypeSelect && dateFilterTypeSelect.value === 'specific' && flatpickrInstance && flatpickrInstance.selectedDates.length > 0) {
             const selectedDate = flatpickrInstance.selectedDates[0];
-            // Format date as YYYY-MM-DD
             const year = selectedDate.getFullYear();
             const month = ('0' + (selectedDate.getMonth() + 1)).slice(-2);
             const day = ('0' + selectedDate.getDate()).slice(-2);
@@ -406,7 +406,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (dateFilterTypeSelect && dateFilterTypeSelect.value === 'specific' && flatpickrInstance && flatpickrInstance.selectedDates.length > 0) {
             const selectedDate = flatpickrInstance.selectedDates[0];
-            // Format date as YYYY-MM-DD
             const year = selectedDate.getFullYear();
             const month = ('0' + (selectedDate.getMonth() + 1)).slice(-2);
             const day = ('0' + selectedDate.getDate()).slice(-2);
@@ -537,50 +536,58 @@ document.addEventListener('DOMContentLoaded', () => {
     if (applyFiltersBtn) {
         applyFiltersBtn.addEventListener('click', handleFilterOrToggleChange);
     }
+    if (statusFilterSelect) { // Auto-refresh on status change
+        statusFilterSelect.addEventListener('change', handleFilterOrToggleChange);
+    }
     if (clearFiltersBtn) {
         clearFiltersBtn.addEventListener('click', () => {
             if(statusFilterSelect) statusFilterSelect.value = '';
             if(resourceNameFilterInput) resourceNameFilterInput.value = '';
-            if(dateFilterTypeSelect) dateFilterTypeSelect.value = 'any';
-            if(datePickerContainer) datePickerContainer.style.display = 'none';
+            if(dateFilterTypeSelect) {
+                dateFilterTypeSelect.value = 'any';
+                // Manually trigger the state update for date picker visibility
+                setupInitialDateFilterState.call(dateFilterTypeSelect);
+            }
             if(flatpickrInstance) flatpickrInstance.clear();
             handleFilterOrToggleChange();
         });
     }
 
-    if (dateFilterTypeSelect && datePickerContainer && datePickerInput) {
-        dateFilterTypeSelect.addEventListener('change', () => {
-            if (dateFilterTypeSelect.value === 'specific') {
-                datePickerContainer.style.display = 'block';
-                if (!flatpickrInstance) {
-                    flatpickrInstance = flatpickr(datePickerInput, {
-                        dateFormat: "Y-m-d",
-                        altInput: true,
-                        altFormat: "F j, Y",
-                    });
-                }
-            } else {
-                datePickerContainer.style.display = 'none';
-                // Optionally clear date when switching to "any"
-                // if (flatpickrInstance) {
-                //     flatpickrInstance.clear();
-                // }
-            }
-            // No automatic filter application on date type change, user clicks "Apply Filters"
-        });
-        // Initial state based on select value (e.g. if "specific" is pre-selected)
-        if (dateFilterTypeSelect.value === 'specific') {
-            datePickerContainer.style.display = 'block';
+    // Function to manage date picker visibility and initialization
+    function setupInitialDateFilterState() {
+        // Ensure elements exist. `this` is expected to be dateFilterTypeSelect.
+        if (!this || !datePickerContainer || !datePickerInput) {
+            console.warn('Date filter elements not ready for setupInitialDateFilterState');
+            return;
+        }
+
+        const selectedValue = this.value;
+        // console.log('Date filter type changed/evaluated:', selectedValue); // Removed
+
+        if (selectedValue === 'specific') {
+            // console.log('Showing date picker container'); // Removed
+            datePickerContainer.classList.remove('d-none');
+            datePickerContainer.style.display = 'flex'; // Use flex or block as appropriate for layout
             if (!flatpickrInstance) {
-                 flatpickrInstance = flatpickr(datePickerInput, {
+                // console.log('Initializing Flatpickr on:', datePickerInput); // Removed
+                flatpickrInstance = flatpickr(datePickerInput, {
                     dateFormat: "Y-m-d",
                     altInput: true,
                     altFormat: "F j, Y",
                 });
             }
-        } else {
-            datePickerContainer.style.display = 'none';
+        } else { // 'any' or other
+            // console.log('Hiding date picker container'); // Removed
+            datePickerContainer.classList.add('d-none');
+            datePickerContainer.style.display = 'none'; // Fallback
         }
+    }
+
+    if (dateFilterTypeSelect) { // Check if the main select exists
+        dateFilterTypeSelect.addEventListener('change', function() {
+            setupInitialDateFilterState.call(this);
+            // Note: Filters are applied by clicking "Apply Filters", not directly on change here.
+        });
     }
 
     if (toggleUpcomingCheckbox) {
@@ -593,5 +600,9 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeMyBookingsPerPageSelect('upcoming_bk_pg_', upcomingPerPageSelect, (val) => upcomingItemsPerPage = val, (val) => upcomingCurrentPage = val, fetchUpcomingBookings, upcomingItemsPerPage);
     initializeMyBookingsPerPageSelect('past_bk_pg_', pastPerPageSelect, (val) => pastItemsPerPage = val, (val) => pastCurrentPage = val, fetchPastBookings, pastItemsPerPage);
     
-    handleFilterOrToggleChange();
+    // Initial setup calls at the end of DOMContentLoaded
+    if (dateFilterTypeSelect) { // Ensure element exists
+        setupInitialDateFilterState.call(dateFilterTypeSelect); // Set initial state of date picker
+    }
+    handleFilterOrToggleChange(); // Initial fetch of bookings based on all filters
 });
