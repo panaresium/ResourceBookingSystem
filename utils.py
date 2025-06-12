@@ -1658,7 +1658,7 @@ def check_resources_availability_for_user(resources_list: list[Resource], target
                 Booking.resource_id == resource.id,
                 Booking.start_time < slot_end_dt,
                 Booking.end_time > slot_start_dt,
-                Booking.status.notin_(['cancelled', 'rejected'])
+                Booking.status.notin_(['cancelled', 'rejected', 'system_cancelled_no_checkin', 'cancelled_by_system'])
             ).all()
 
             is_generally_booked = bool(general_bookings_overlap)
