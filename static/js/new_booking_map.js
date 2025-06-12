@@ -897,6 +897,49 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (currentMapId && currentSelectedDateStr) { // Use global date string
                         loadMapDetails(currentMapId, currentSelectedDateStr);
                         updateLocationFloorButtons(); // Update map selection buttons
+
+                        // <<< START NEW CODE >>>
+                        if (userId && calendarContainer) { // Ensure userId and calendarContainer are available
+                            try {
+                                console.log('[Booking Success] Attempting to refresh Flatpickr unavailable dates...');
+                                // Ensure userId is defined and available in this scope.
+                                // It's typically defined globally in the script like:
+                                // const userId = calendarContainer ? calendarContainer.dataset.userId : null;
+                                // Ensure calendarContainer is also defined and available.
+
+                                const newUnavailableDates = await apiCall(`/api/resources/unavailable_dates?user_id=${userId}`);
+                                const fpInstance = calendarContainer._flatpickr;
+
+                                if (fpInstance && newUnavailableDates) {
+                                    console.log('[Booking Success] Fetched new unavailable dates:', newUnavailableDates);
+
+                                    fpInstance.set('disable', [
+                                        function(date) {
+                                            const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                                            // Check against the newly fetched unavailable dates
+                                            if (newUnavailableDates.includes(dateStr)) {
+                                                return true;
+                                            }
+                                            // Original logic for disabling past 5 PM for today's date
+                                            const todayStr = getTodayDateString(); // Ensure getTodayDateString is accessible
+                                            const isPastFivePMToday = dateStr === todayStr && isPastFivePM(); // Ensure isPastFivePM is accessible
+                                            return isPastFivePMToday;
+                                        }
+                                    ]);
+                                    fpInstance.redraw(); // Trigger a redraw to apply changes
+                                    console.log('[Booking Success] Flatpickr unavailable dates refreshed.');
+                                } else {
+                                    if (!fpInstance) console.warn('[Booking Success] Flatpickr instance not found for refresh.');
+                                    if (!newUnavailableDates) console.warn('[Booking Success] New unavailable dates not fetched (or empty) for refresh.');
+                                }
+                            } catch (error) {
+                                console.error('[Booking Success] Error refreshing Flatpickr unavailable dates:', error);
+                            }
+                        } else {
+                            if (!userId) console.warn('[Booking Success] userId not available for Flatpickr refresh.');
+                            if (!calendarContainer) console.warn('[Booking Success] calendarContainer not available for Flatpickr refresh.');
+                        }
+                        // <<< END NEW CODE >>>
                     }
                 } else {
                     if (!modalStatusMessageP.classList.contains('error') && !modalStatusMessageP.classList.contains('success')) {
