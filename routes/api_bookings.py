@@ -1051,6 +1051,15 @@ def update_booking_by_user(booking_id):
             # old_start_time and old_end_time from DB are naive venue local (after migration)
             # parsed_new_start_time and parsed_new_end_time are now also naive venue local
 
+            current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] ---- Time Change Check Debug ----")
+            current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] Original DB old_start_time (naive venue local): {old_start_time.isoformat() if old_start_time else 'None'}")
+            current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] Original DB old_end_time (naive venue local): {old_end_time.isoformat() if old_end_time else 'None'}")
+            current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] Incoming new_start_iso from request: {new_start_iso}")
+            current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] Incoming new_end_iso from request: {new_end_iso}")
+            current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] current_offset_hours: {current_offset_hours}")
+            current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] Parsed new_start_time (naive venue local): {parsed_new_start_time.isoformat() if parsed_new_start_time else 'None'}")
+            current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] Parsed new_end_time (naive venue local): {parsed_new_end_time.isoformat() if parsed_new_end_time else 'None'}")
+            current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] ---- End Time Change Check Debug ----")
             time_changed = parsed_new_start_time != old_start_time or parsed_new_end_time != old_end_time
 
             if time_changed and resource.is_under_maintenance:
