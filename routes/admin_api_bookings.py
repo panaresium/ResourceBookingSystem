@@ -1,11 +1,11 @@
 from flask import Blueprint, jsonify, request, current_app
 from flask_login import login_required, current_user
-from datetime import timezone # Added timezone
+from datetime import timezone, timedelta # Added timezone and timedelta
 
 # Assuming extensions.py contains db, socketio, mail
 from extensions import db, socketio # Removed mail
 # Assuming models.py contains these model definitions
-from models import Booking, User, Resource # Added Resource
+from models import Booking, User, Resource, BookingSettings # Added Resource and BookingSettings
 # Assuming utils.py contains these helper functions
 from utils import add_audit_log, send_email, send_slack_notification # Added other utils as needed
 # Assuming auth.py contains permission_required decorator
@@ -18,6 +18,14 @@ admin_api_bookings_bp = Blueprint('admin_api_bookings', __name__, url_prefix='/a
 @permission_required('manage_bookings')
 def list_pending_bookings():
     # The @permission_required decorator handles auth and permission.
+
+    booking_settings = BookingSettings.query.first()
+    current_offset_hours = 0
+    if booking_settings and hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None:
+        current_offset_hours = booking_settings.global_time_offset_hours
+    else:
+        current_app.logger.warning("BookingSettings not found or global_time_offset_hours not set for list_pending_bookings, using 0 offset for UTC conversion.")
+
     pending = Booking.query.filter_by(status='pending').all()
     result = []
     for b in pending:
@@ -26,8 +34,8 @@ def list_pending_bookings():
             'resource_id': b.resource_id,
             'resource_name': b.resource_booked.name if b.resource_booked else None,
             'user_name': b.user_name,
-            'start_time': b.start_time.replace(tzinfo=timezone.utc).isoformat(),
-            'end_time': b.end_time.replace(tzinfo=timezone.utc).isoformat(),
+            'start_time': (b.start_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat(),
+            'end_time': (b.end_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat(),
             'title': b.title,
         })
     return jsonify(result), 200
