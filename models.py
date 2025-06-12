@@ -104,9 +104,10 @@ class BookingSettings(db.Model):
     # Positive values make "now" seem earlier (allowing bookings further in the past if past bookings are enabled, or requiring future bookings to be even further out).
     # Negative values make "now" seem later (restricting past bookings more, or allowing future bookings sooner).
     global_time_offset_hours = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    auto_release_if_not_checked_in_minutes = db.Column(db.Integer, nullable=True, default=None)
 
     def __repr__(self):
-        return f"<BookingSettings {self.id}>"
+        return f"<BookingSettings {self.id} auto_release_minutes={self.auto_release_if_not_checked_in_minutes}>"
 
 # Association table for Resource and Role (Many-to-Many for resource-specific role permissions)
 resource_roles_table = db.Table('resource_roles',

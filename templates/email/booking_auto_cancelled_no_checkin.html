@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Booking Automatically Cancelled</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+        .container {
+            width: 80%;
+            max-width: 600px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .header {
+            font-size: 24px;
+            font-weight: bold;
+            color: #d9534f; /* Bootstrap danger color for cancellation */
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        .content p {
+            margin-bottom: 10px;
+        }
+        .content strong {
+            color: #555;
+        }
+        .booking-details {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border: 1px solid #eee;
+            border-radius: 4px;
+        }
+        .booking-details h3 {
+            margin-top: 0;
+            font-size: 18px;
+            color: #333;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .booking-details p {
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        .booking-details p strong {
+            display: inline-block;
+            width: 150px; /* Adjust as needed for alignment */
+            color: #555;
+        }
+        .footer {
+            margin-top: 20px;
+            font-size: 0.9em;
+            color: #777;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            Booking Automatically Cancelled
+        </div>
+        <div class="content">
+            <p>Dear {{ user_name }},</p>
+            <p>This email is to inform you that your booking for <strong>{{ resource_name }}</strong> from <strong>{{ start_time }}</strong> to <strong>{{ end_time }}</strong> has been automatically cancelled.</p>
+            <p><strong>Reason:</strong> This is because the booking was not checked in within the allowed time period of {{ release_minutes }} minutes after the scheduled start time.</p>
+        </div>
+
+        <div class="booking-details">
+            <h3>Booking Details:</h3>
+            <p><strong>Resource:</strong> {{ resource_name }}</p>
+            <p><strong>Booking Title:</strong> {{ booking_title | default('N/A') }}</p>
+            <p><strong>Scheduled Start:</strong> {{ start_time }}</p>
+            <p><strong>Scheduled End:</strong> {{ end_time }}</p>
+            <p><strong>Cancelled At (Deadline):</strong> {{ cancelled_at_time }}</p>
+            <p><strong>Location:</strong> {{ location | default('N/A') }}</p>
+            <p><strong>Floor:</strong> {{ floor | default('N/A') }}</p>
+        </div>
+
+        <div class="footer">
+            <p>If you believe this was in error, please contact an administrator.</p>
+            <p>&copy; Smart Resource Booking System</p>
+        </div>
+    </div>
+</body>
+</html>

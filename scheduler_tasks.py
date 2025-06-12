@@ -296,3 +296,149 @@ def run_scheduled_backup_job(app=None):
             logger.error(f"Scheduler: Critical error in run_scheduled_backup_job: {e}", exc_info=True)
 
         logger.info("Scheduler: Task 'run_scheduled_backup_job' finished.")
+
+def auto_release_unclaimed_bookings(app):
+    """
+    Automatically cancels bookings that are 'approved' but not checked in
+    within a configured number of minutes after their start time.
+    """
+    with app.app_context():
+        logger = app.logger
+        logger.info("Scheduler: Starting auto_release_unclaimed_bookings task...")
+
+        booking_settings = BookingSettings.query.first()
+        if not booking_settings:
+            logger.warning("Scheduler: BookingSettings not found. Auto-release task will not run.")
+            return
+
+        enable_check_in_out = booking_settings.enable_check_in_out
+        release_minutes = booking_settings.auto_release_if_not_checked_in_minutes
+        current_offset_hours = booking_settings.global_time_offset_hours if hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
+
+        logger.info(f"Scheduler: Auto-release settings: Check-in/out enabled: {enable_check_in_out}, Release minutes: {release_minutes}, Offset: {current_offset_hours} hours.")
+
+        if not enable_check_in_out:
+            logger.info("Scheduler: Check-in/out feature is disabled in settings. Auto-release task will not run.")
+            return
+
+        if not release_minutes or release_minutes <= 0:
+            logger.info("Scheduler: Auto-release minutes not configured or is zero/negative. Auto-release task will not run.")
+            return
+
+        effective_now_aware = get_current_effective_time()  # Aware, in venue's effective timezone
+        effective_now_local_naive = effective_now_aware.replace(tzinfo=None)  # Naive representation of venue's current time
+
+        try:
+            # Query for bookings that are 'approved' and have not been checked in
+            unclaimed_bookings = Booking.query.filter(
+                Booking.status == 'approved',
+                Booking.checked_in_at.is_(None)
+            ).all()
+        except Exception as e_query:
+            logger.error(f"Scheduler: Error querying for unclaimed bookings: {e_query}", exc_info=True)
+            logger.info("Scheduler: auto_release_unclaimed_bookings task finished due to query error.")
+            return
+
+        logger.info(f"Scheduler: Found {len(unclaimed_bookings)} unclaimed 'approved' bookings to evaluate for auto-release.")
+
+        for booking in unclaimed_bookings:
+            resource_name_for_log = booking.resource_booked.name if booking.resource_booked else f"Unknown Resource (ID: {booking.resource_id})"
+            user_name_for_log = booking.user_name if booking.user_name else "Unknown User"
+
+            try:
+                # booking.start_time is naive local
+                start_time_local_naive = booking.start_time
+                deadline_local_naive = start_time_local_naive + timedelta(minutes=release_minutes)
+
+                if effective_now_local_naive > deadline_local_naive:
+                    logger.info(f"Scheduler: Booking ID {booking.id} for '{resource_name_for_log}' by '{user_name_for_log}' is past its check-in deadline ({deadline_local_naive}). Attempting to auto-release.")
+
+                    original_status = booking.status
+                    booking.status = 'system_cancelled_no_checkin'
+                    # Optionally, set a specific field for release reason or time if model has one
+                    # booking.cancellation_reason = "Auto-released due to no check-in"
+                    # booking.cancelled_at = effective_now_local_naive # Or use UTC time
+
+                    db.session.add(booking)
+                    db.session.commit()
+
+                    # Convert deadline to UTC for consistent logging if desired
+                    deadline_utc_aware = (deadline_local_naive - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc)
+
+                    audit_log_details = (
+                        f"Booking ID {booking.id} for resource '{resource_name_for_log}' by user '{user_name_for_log}' "
+                        f"(original status: {original_status}) auto-released. "
+                        f"Check-in deadline (local): {deadline_local_naive.strftime('%Y-%m-%d %H:%M:%S')}, "
+                        f"Deadline (UTC): {deadline_utc_aware.strftime('%Y-%m-%d %H:%M:%S UTC')}."
+                    )
+                    add_audit_log(action="AUTO_RELEASE_NO_CHECKIN", details=audit_log_details)
+                    logger.info(f"Scheduler: Booking ID {booking.id} status changed to '{booking.status}'. {audit_log_details}")
+
+                    # Send Email Notification (similar to auto_checkout_overdue_bookings)
+                    user = User.query.filter_by(username=booking.user_name).first()
+                    if user and user.email:
+                        resource = Resource.query.get(booking.resource_id)
+                        floor_map_location = "N/A"
+                        floor_map_floor = "N/A"
+                        resource_name_for_email = "Unknown Resource"
+
+                        if resource:
+                            resource_name_for_email = resource.name
+                            if resource.floor_map_id:
+                                floor_map = FloorMap.query.get(resource.floor_map_id)
+                                if floor_map:
+                                    floor_map_location = floor_map.location or "N/A"
+                                    floor_map_floor = floor_map.floor or "N/A"
+
+                        explanation = (
+                            f"This booking was automatically cancelled because it was not checked-in "
+                            f"within {release_minutes} minutes of its scheduled start time."
+                        )
+
+                        # Times for email: start_time and end_time are naive local.
+                        # deadline_local_naive is also naive local.
+                        # Display them as such, or convert to a specific display timezone if needed.
+                        # For consistency, let's display deadline in local time.
+                        email_data = {
+                            'user_name': user.username,
+                            'booking_title': booking.title or "N/A",
+                            'resource_name': resource_name_for_email,
+                            'start_time_local': booking.start_time.strftime('%Y-%m-%d %H:%M'), # Naive local
+                            'end_time_local': booking.end_time.strftime('%Y-%m-%d %H:%M'),     # Naive local
+                            'check_in_deadline_local': deadline_local_naive.strftime('%Y-%m-%d %H:%M:%S'),
+                            'location': floor_map_location,
+                            'floor': floor_map_floor,
+                            'explanation': explanation
+                        }
+
+                        subject = f"Booking Automatically Cancelled (No Check-in): {email_data.get('resource_name', 'N/A')} - {email_data.get('booking_title', 'N/A')}"
+
+                        try:
+                            # Ensure email templates exist for this scenario
+                            html_body = render_template('email/booking_auto_cancelled_no_checkin.html', **email_data)
+                            text_body = render_template('email/booking_auto_cancelled_no_checkin_text.html', **email_data)
+                            send_email(to_address=user.email, subject=subject, body=text_body, html_body=html_body)
+                            logger.info(f"Scheduler: Auto-release (no check-in) email initiated for booking ID {booking.id} to {user.email}.")
+                        except Exception as e_email:
+                            # Check if it's a Jinja template not found error
+                            if "TemplateNotFound" in str(type(e_email)):
+                                logger.warning(f"Scheduler: Email template for auto-release not found. Skipping email for booking {booking.id}. Error: {e_email}")
+                            else:
+                                logger.error(f"Scheduler: Error sending auto-release email for booking {booking.id} to {user.email}: {e_email}", exc_info=True)
+                    elif booking.user_name: # User exists but no email, or user object not found
+                        logger.warning(f"Scheduler: User {booking.user_name} not found or has no email. Skipping auto-release email for booking {booking.id}.")
+                    else: # booking.user_name is None or empty
+                         logger.warning(f"Scheduler: Booking ID {booking.id} has no associated user_name. Skipping auto-release email.")
+
+                else:
+                    logger.debug(f"Scheduler: Booking ID {booking.id} for '{resource_name_for_log}' by '{user_name_for_log}' is not yet past its check-in deadline ({deadline_local_naive}). Effective local time: {effective_now_local_naive}")
+
+            except Exception as e_booking_process:
+                db.session.rollback()
+                logger.error(f"Scheduler: Error processing auto-release for booking ID {booking.id}: {e_booking_process}", exc_info=True)
+                add_audit_log(
+                    action="AUTO_RELEASE_NO_CHECKIN_FAILED",
+                    details=f"Scheduler: Failed to auto-release booking ID {booking.id} for '{resource_name_for_log}'. Error: {str(e_booking_process)}"
+                )
+
+        logger.info("Scheduler: auto_release_unclaimed_bookings task finished.")
