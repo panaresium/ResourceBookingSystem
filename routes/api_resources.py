@@ -206,15 +206,30 @@ def get_unavailable_dates():
             current_processing_date = current_iter_date
 
             # a. Past Date Check
-            date_is_past = current_processing_date < now.date()
-            if date_is_past:
-                if not booking_settings.allow_past_bookings:
-                    unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
-                    logger.debug(f"Date {current_processing_date} is past and allow_past_bookings is false. Added to unavailable.")
-                    current_iter_date += timedelta(days=1)
-                    continue
-                else: # This means date_is_past is true AND booking_settings.allow_past_bookings is true.
-                    logger.debug(f"Date {current_processing_date} is past and allow_past_bookings is true. Proceeding to check slot availability for this date.")
+            date_is_past = current_processing_date < now.date() # 'now' is datetime.now(timezone.utc)
+
+            # Ensure booking_settings is fetched and has a default for past_booking_time_adjustment_hours
+            if not booking_settings:
+                logger.warning("get_unavailable_dates: BookingSettings not found when expected in loop. Using default adjustment hours.")
+                past_adjustment_hours = 0
+            else:
+                past_adjustment_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings.past_booking_time_adjustment_hours is not None else 0
+
+            effective_cutoff_datetime_utc = now - timedelta(hours=past_adjustment_hours)
+            # Log the effective cutoff for debugging purposes, can be removed later
+            logger.debug(f"For date {current_processing_date}: now_utc={now}, past_adjustment_hours={past_adjustment_hours}, effective_cutoff_datetime_utc={effective_cutoff_datetime_utc}")
+
+            # New Rule for allow_past_bookings == FALSE and strictly past dates
+            if booking_settings and not booking_settings.allow_past_bookings and date_is_past:
+                unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
+                logger.debug(f"Date {current_processing_date} is strictly past and allow_past_bookings is false. Added to unavailable. Skipping slot checks.")
+                current_iter_date += timedelta(days=1)
+                continue
+
+            # If allow_past_bookings is true, the original logic for checking slots on past dates will still run.
+            # If date_is_past is true AND allow_past_bookings is true, we log and proceed.
+            if date_is_past and booking_settings and booking_settings.allow_past_bookings:
+                 logger.debug(f"Date {current_processing_date} is past and allow_past_bookings is true. Proceeding to check slot availability for this date.")
 
             # b. User's Existing Bookings for the Day (for conflict checking against other resources)
             user_bookings_on_this_date = Booking.query.filter(
@@ -244,22 +259,28 @@ def get_unavailable_dates():
             for resource_to_check in active_resources_for_date:
                 for slot_def in STANDARD_SLOTS:
                     # Ensure time objects are combined with current_processing_date and made timezone-aware for comparison
-                    slot_start_dt = datetime.combine(current_processing_date, slot_def['start'])
-                    slot_end_dt = datetime.combine(current_processing_date, slot_def['end'])
-                    if slot_start_dt.tzinfo is None: slot_start_dt = slot_start_dt.replace(tzinfo=timezone.utc)
-                    if slot_end_dt.tzinfo is None: slot_end_dt = slot_end_dt.replace(tzinfo=timezone.utc)
+                    slot_start_datetime_utc = datetime.combine(current_processing_date, slot_def['start'])
+                    slot_end_datetime_utc = datetime.combine(current_processing_date, slot_def['end'])
+                    if slot_start_datetime_utc.tzinfo is None: slot_start_datetime_utc = slot_start_datetime_utc.replace(tzinfo=timezone.utc)
+                    if slot_end_datetime_utc.tzinfo is None: slot_end_datetime_utc = slot_end_datetime_utc.replace(tzinfo=timezone.utc)
 
+                    # New Time Viability Check:
+                    # effective_cutoff_datetime_utc is available from logic earlier in the parent loop.
+                    if slot_start_datetime_utc < effective_cutoff_datetime_utc:
+                        logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on {current_processing_date.strftime('%Y-%m-%d')} for resource {resource_to_check.name} is considered 'passed' based on effective_cutoff_datetime_utc ({effective_cutoff_datetime_utc.isoformat()}). Skipping.")
+                        continue # Skip to the next slot_def
 
                     # Conflict Check 1: Resource Slot Generally Booked?
                     is_generally_booked = Booking.query.filter(
                         Booking.resource_id == resource_to_check.id,
-                        Booking.start_time < slot_end_dt,
-                        Booking.end_time > slot_start_dt,
+                        Booking.start_time < slot_end_datetime_utc, # Use slot_end_datetime_utc
+                        Booking.end_time > slot_start_datetime_utc,   # Use slot_start_datetime_utc
                         Booking.status.in_(['approved', 'pending', 'checked_in', 'confirmed'])
                     ).first() is not None
 
                     if is_generally_booked:
-                        logger.debug(f"Slot {slot_def['start']}-{slot_def['end']} on {resource_to_check.name} for {current_processing_date} is generally booked.")
+                        logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on {resource_to_check.name} for {current_processing_date.strftime('%Y-%m-%d')} is generally booked.")
+                        logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on {resource_to_check.name} for {current_processing_date.strftime('%Y-%m-%d')} is generally booked.")
                         continue # Next slot
 
                     # Conflict Check 2: User's Own Schedule Conflicts with this Potential Slot?
@@ -273,12 +294,13 @@ def get_unavailable_dates():
                                 user_booking_start_dt = user_booking.start_time.replace(tzinfo=timezone.utc) if user_booking.start_time.tzinfo is None else user_booking.start_time
                                 user_booking_end_dt = user_booking.end_time.replace(tzinfo=timezone.utc) if user_booking.end_time.tzinfo is None else user_booking.end_time
 
-                                if user_booking_start_dt < slot_end_dt and user_booking_end_dt > slot_start_dt:
+                                if user_booking_start_dt < slot_end_datetime_utc and user_booking_end_dt > slot_start_datetime_utc: # Use renamed slot datetimes
                                     user_schedule_conflicts = True
                                     logger.debug(
                                         f"User {target_user.username} has a conflicting booking (ID: {user_booking.id} "
-                                        f"on resource {user_booking.resource_id}) with slot {slot_def['start']}-{slot_def['end']} "
-                                        f"on {current_processing_date} for resource {resource_to_check.name}. "
+                                        f"on resource {user_booking.resource_id}) with slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} "
+                                        f"on {current_processing_date.strftime('%Y-%m-%d')} for resource {resource_to_check.name}. "
+                                        f"on {current_processing_date.strftime('%Y-%m-%d')} for resource {resource_to_check.name}. "
                                         "Multiple bookings at the same time are disallowed by settings."
                                     )
                                     break # Found a conflict
@@ -287,13 +309,13 @@ def get_unavailable_dates():
                         # This condition is now only met if allow_multiple_resources_same_time is False AND a conflict exists.
                         logger.debug(
                             f"User schedule conflict (allow_multiple_resources_same_time is False) "
-                            f"for slot {slot_def['start']}-{slot_def['end']} on {resource_to_check.name} "
-                            f"for {current_processing_date}. Skipping this slot."
+                            f"for slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on {resource_to_check.name} "
+                            f"for {current_processing_date.strftime('%Y-%m-%d')}. Skipping this slot."
                         )
                         continue # Next slot
 
                     any_slot_bookable_for_user_this_date = True
-                    logger.debug(f"Found bookable slot for user {target_user.username} on {current_processing_date}: Resource {resource_to_check.name}, Slot {slot_def['start']}-{slot_def['end']}.")
+                    logger.debug(f"Found bookable slot for user {target_user.username} on {current_processing_date.strftime('%Y-%m-%d')}: Resource {resource_to_check.name}, Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')}.")
                     break
 
                 if any_slot_bookable_for_user_this_date:
@@ -306,20 +328,7 @@ def get_unavailable_dates():
 
             current_iter_date += timedelta(days=1)
 
-        # New logic: Add current server date if server time is past 5 PM UTC
-        # 'now' is already defined as datetime.now(timezone.utc)
-        server_today_date_obj = now.date()
-        server_cutoff_time_utc = time(17, 0, 0, tzinfo=timezone.utc) # 5 PM UTC
-
-        # Combine server's today date with the cutoff time to create a datetime object for comparison
-        server_today_at_cutoff_utc = datetime.combine(server_today_date_obj, server_cutoff_time_utc)
-        # server_today_at_cutoff_utc = server_today_at_cutoff_utc.replace(tzinfo=timezone.utc) # Ensure tzinfo if combine doesn't preserve from time
-
-        if now >= server_today_at_cutoff_utc:
-            server_today_date_str = server_today_date_obj.strftime('%Y-%m-%d')
-            if server_today_date_str not in unavailable_dates_set:
-                unavailable_dates_set.add(server_today_date_str)
-                logger.info(f"Server time is past 5 PM UTC. Adding server's current date {server_today_date_str} to unavailable dates for user {user_id}.")
+        # The old 5 PM server logic block is now removed.
 
         logger.info(f"Returning {len(unavailable_dates_set)} unavailable dates for user {user_id}.")
         return jsonify(sorted(list(unavailable_dates_set)))
