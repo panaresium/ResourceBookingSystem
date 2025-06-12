@@ -32,14 +32,14 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
     """
     try:
         booking_settings = BookingSettings.query.first()
-        booking_settings = BookingSettings.query.first()
         enable_check_in_out = booking_settings.enable_check_in_out if booking_settings else False
         allow_check_in_without_pin_setting = booking_settings.allow_check_in_without_pin if booking_settings and hasattr(booking_settings, 'allow_check_in_without_pin') else True # Default True
         check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings and booking_settings.check_in_minutes_before is not None else 15
         check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings and booking_settings.check_in_minutes_after is not None else 15
         past_booking_adjustment_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings and booking_settings.past_booking_time_adjustment_hours is not None else 0
-        if not booking_settings:
-            logger.warning("BookingSettings not found, using default check-in window, adjustment, and allow_check_in_without_pin for _fetch_user_bookings_data.")
+        current_offset_hours = booking_settings.global_time_offset_hours if booking_settings and hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
+        if not booking_settings: # This check might be redundant if individual attributes are checked with hasattr, but kept for general warning.
+            logger.warning("BookingSettings not found or some settings are missing, using default values for _fetch_user_bookings_data.")
 
         base_query = Booking.query.filter_by(user_name=user_name)
 
@@ -54,30 +54,34 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
         if date_filter_str:
             try:
                 selected_date = datetime.strptime(date_filter_str, '%Y-%m-%d').date()
-                # Filter bookings where the date of start_time (in UTC) matches selected_date
-                # Assuming Booking.start_time is stored as naive UTC DateTime
+                # Booking.start_time is naive venue local. To filter by a specific date,
+                # it's generally fine to use sqlfunc.date() directly if the DB handles it well.
+                # Or, convert selected_date to a range in venue local time if more precision is needed.
+                # For now, assume sqlfunc.date(Booking.start_time) works as intended for local times.
                 base_query = base_query.filter(sqlfunc.date(Booking.start_time) == selected_date)
             except ValueError:
                 logger.warning(f"Invalid date_filter format: '{date_filter_str}'. Ignoring date filter.")
-                # Optionally, you could return an error or an empty list if date format is crucial
-                pass # Or handle error appropriately
+                pass
 
         all_user_bookings_from_db = base_query.all()
 
         relevant_bookings_dicts = []
-        effective_now = get_current_effective_time()
+        effective_now_aware = get_current_effective_time() # This is aware (UTC or with offset)
+        effective_now_local_naive = effective_now_aware.replace(tzinfo=None) # For comparison with naive local DB times
 
         for booking in all_user_bookings_from_db:
             resource = Resource.query.get(booking.resource_id)
             resource_name = resource.name if resource else "Unknown Resource"
 
-            actual_start_time_utc = booking.start_time.replace(tzinfo=timezone.utc) if booking.start_time.tzinfo is None else booking.start_time
-            effective_check_in_base_time = actual_start_time_utc + timedelta(hours=past_booking_adjustment_hours)
+            # Booking.start_time is naive venue local
+            booking_start_local_naive = booking.start_time
 
-            check_in_window_start = effective_check_in_base_time - timedelta(minutes=check_in_minutes_before)
-            check_in_window_end = effective_check_in_base_time + timedelta(minutes=check_in_minutes_after)
+            # Check-in window calculation in local naive time
+            effective_check_in_base_time_local_naive = booking_start_local_naive + timedelta(hours=past_booking_adjustment_hours)
+            check_in_window_start_local_naive = effective_check_in_base_time_local_naive - timedelta(minutes=check_in_minutes_before)
+            check_in_window_end_local_naive = effective_check_in_base_time_local_naive + timedelta(minutes=check_in_minutes_after)
 
-            is_upcoming = actual_start_time_utc >= effective_now # Based on actual start time
+            is_upcoming = booking_start_local_naive >= effective_now_local_naive
 
             if (booking_type == 'upcoming' and not is_upcoming) or \
                (booking_type == 'past' and is_upcoming):
@@ -87,20 +91,23 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
                 enable_check_in_out and
                 booking.checked_in_at is None and
                 booking.status == 'approved' and
-                (check_in_window_start <= effective_now <= check_in_window_end)
+                (check_in_window_start_local_naive <= effective_now_local_naive <= check_in_window_end_local_naive)
             )
 
             display_check_in_token = None
             if booking.check_in_token and booking.checked_in_at is None and booking.status == 'approved':
-                token_expires_at_aware = booking.check_in_token_expires_at
-                if token_expires_at_aware and token_expires_at_aware.tzinfo is None:
-                    token_expires_at_aware = token_expires_at_aware.replace(tzinfo=timezone.utc)
+                # booking.check_in_token_expires_at is naive UTC
+                # booking.end_time is naive venue local
+                # effective_now_aware is aware (system effective time)
 
-                booking_end_time_aware = booking.end_time
-                if booking_end_time_aware.tzinfo is None:
-                    booking_end_time_aware = booking_end_time_aware.replace(tzinfo=timezone.utc)
+                aware_utc_token_expiry = None
+                if booking.check_in_token_expires_at:
+                    aware_utc_token_expiry = booking.check_in_token_expires_at.replace(tzinfo=timezone.utc)
 
-                if token_expires_at_aware and token_expires_at_aware > effective_now and booking_end_time_aware > effective_now:
+                # Convert booking.end_time (naive venue local) to aware UTC for comparison
+                aware_utc_booking_end = (booking.end_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc)
+
+                if aware_utc_token_expiry and aware_utc_token_expiry > effective_now_aware and aware_utc_booking_end > effective_now_aware:
                     display_check_in_token = booking.check_in_token
 
             resource_has_active_pin = False
@@ -116,14 +123,14 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
                 'resource_id': booking.resource_id,
                 'resource_name': resource_name,
                 'user_name': booking.user_name,
-                'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
-                'end_time': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
+                'start_time': (booking.start_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat(),
+                'end_time': (booking.end_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat(),
                 'title': booking.title,
                 'status': booking.status,
                 'recurrence_rule': booking.recurrence_rule,
                 'admin_deleted_message': booking.admin_deleted_message,
-                'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else None,
-                'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else None,
+                'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else None, # Assuming checked_in_at is stored as naive UTC
+                'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else None, # Assuming checked_out_at is stored as naive UTC
                 'can_check_in': can_check_in,
                 'check_in_token': display_check_in_token,
                 'resource_has_active_pin': resource_has_active_pin,
@@ -309,7 +316,7 @@ def create_booking():
 
     effective_now = get_current_effective_time()
     # For comparisons with naive new_booking_start_time, and for date() operations like in max_booking_days_in_future
-    now_for_logic = effective_now.replace(tzinfo=None)
+    now_for_logic = effective_now.replace(tzinfo=None) # This is naive local "now"
 
     if allow_past_bookings_effective:
         # Past bookings are allowed.
@@ -341,9 +348,19 @@ def create_booking():
             current_app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} too far in future ({new_booking_start_time.date()}), limit is {max_booking_days_in_future_effective} days.")
             return jsonify({'error': f'Bookings cannot be made more than {max_booking_days_in_future_effective} days in advance.'}), 400
 
-    if resource.is_under_maintenance and (resource.maintenance_until is None or new_booking_start_time < resource.maintenance_until):
-        until_str = resource.maintenance_until.isoformat() if resource.maintenance_until else 'until further notice'
-        return jsonify({'error': f'Resource under maintenance until {until_str}.'}), 403
+    if resource.is_under_maintenance:
+        maintenance_until_local_naive = None
+        if resource.maintenance_until:
+            # Assuming resource.maintenance_until is naive UTC
+            maint_utc = resource.maintenance_until.replace(tzinfo=timezone.utc)
+            maint_local_aware = maint_utc + timedelta(hours=current_offset_hours)
+            maintenance_until_local_naive = maint_local_aware.replace(tzinfo=None)
+
+        if maintenance_until_local_naive is None or new_booking_start_time < maintenance_until_local_naive:
+            until_str = maintenance_until_local_naive.isoformat() if maintenance_until_local_naive else 'until further notice'
+            # It might be better to format until_str more nicely, e.g., .strftime('%Y-%m-%d %H:%M')
+            current_app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} during maintenance period (until {until_str} local).")
+            return jsonify({'error': f'Resource is under maintenance until {until_str} (venue local time). Booking not allowed.'}), 403
 
     freq, count = parse_simple_rrule(recurrence_rule_str)
     if recurrence_rule_str and freq is None:
@@ -420,19 +437,18 @@ def create_booking():
     try:
         created_bookings = []
         for occ_start_local, occ_end_local in occurrences: # occ_start_local, occ_end_local are from user's perspective (effective local time)
-            # Convert to UTC for storage
-            occ_start_utc = occ_start_local - timedelta(hours=current_offset_hours)
-            occ_end_utc = occ_end_local - timedelta(hours=current_offset_hours)
+            # occ_start_local and occ_end_local are already naive datetime objects representing venue time
+            # No conversion to UTC needed here as we want to store them directly.
 
             new_booking = Booking(
                 resource_id=resource_id,
-                start_time=occ_start_utc, # This is the absolute UTC time
-                end_time=occ_end_utc,     # This is the absolute UTC time
+                start_time=occ_start_local, # Store venue local time directly
+                end_time=occ_end_local,   # Store venue local time directly
                 title=title,
                 user_name=user_name_for_record,
                 recurrence_rule=recurrence_rule_str,
-                booking_display_start_time=occ_start_local.time(), # Store HH:MM of the local slot
-                booking_display_end_time=occ_end_local.time()      # Store HH:MM of the local slot
+                booking_display_start_time=occ_start_local.time(),
+                booking_display_end_time=occ_end_local.time()
             )
             db.session.add(new_booking)
             created_bookings.append(new_booking)
@@ -611,12 +627,13 @@ def get_my_bookings():
 
         booking_settings = BookingSettings.query.first()
         enable_check_in_out = booking_settings.enable_check_in_out if booking_settings else False
-        allow_check_in_without_pin_setting = booking_settings.allow_check_in_without_pin if booking_settings else True # Default True
+        allow_check_in_without_pin_setting = booking_settings.allow_check_in_without_pin if booking_settings and hasattr(booking_settings, 'allow_check_in_without_pin') else True
         check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings and booking_settings.check_in_minutes_before is not None else 15
         check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings and booking_settings.check_in_minutes_after is not None else 15
         past_booking_adjustment_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings and booking_settings.past_booking_time_adjustment_hours is not None else 0
-        if not booking_settings:
-             logger.warning("BookingSettings not found, using default check-in window, adjustment, and allow_check_in_without_pin for get_my_bookings.")
+        current_offset_hours = booking_settings.global_time_offset_hours if booking_settings and hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
+        if not booking_settings: # General warning if settings are missing
+             logger.warning("BookingSettings not found or some settings are missing, using default values for get_my_bookings.")
 
         user_bookings_query = Booking.query.filter_by(user_name=current_user.username)
 
@@ -643,36 +660,37 @@ def get_my_bookings():
 
         all_upcoming_bookings_dicts = []
         all_past_bookings_dicts = []
-        effective_now = get_current_effective_time()
+        effective_now_aware = get_current_effective_time() # Aware (UTC or with offset)
+        effective_now_local_naive = effective_now_aware.replace(tzinfo=None) # Naive local for DB comparisons
 
         for booking in all_user_bookings_from_db:
             resource = Resource.query.get(booking.resource_id)
             resource_name = resource.name if resource else "Unknown Resource"
 
-            actual_start_time_utc = booking.start_time.replace(tzinfo=timezone.utc) if booking.start_time.tzinfo is None else booking.start_time
-            effective_check_in_base_time = actual_start_time_utc + timedelta(hours=past_booking_adjustment_hours)
+            booking_start_local_naive = booking.start_time # Naive venue local
 
-            check_in_window_start = effective_check_in_base_time - timedelta(minutes=check_in_minutes_before)
-            check_in_window_end = effective_check_in_base_time + timedelta(minutes=check_in_minutes_after)
+            # Check-in window calculation in local naive time
+            effective_check_in_base_time_local_naive = booking_start_local_naive + timedelta(hours=past_booking_adjustment_hours)
+            check_in_window_start_local_naive = effective_check_in_base_time_local_naive - timedelta(minutes=check_in_minutes_before)
+            check_in_window_end_local_naive = effective_check_in_base_time_local_naive + timedelta(minutes=check_in_minutes_after)
 
             can_check_in = (
-                enable_check_in_out and # Only if feature is enabled
+                enable_check_in_out and
                 booking.checked_in_at is None and
-                booking.status == 'approved' and # Only for approved bookings
-                (check_in_window_start <= effective_now <= check_in_window_end)
+                booking.status == 'approved' and
+                (check_in_window_start_local_naive <= effective_now_local_naive <= check_in_window_end_local_naive)
             )
 
             display_check_in_token = None
             if booking.check_in_token and booking.checked_in_at is None and booking.status == 'approved':
-                token_expires_at_aware = booking.check_in_token_expires_at
-                if token_expires_at_aware and token_expires_at_aware.tzinfo is None:
-                    token_expires_at_aware = token_expires_at_aware.replace(tzinfo=timezone.utc)
+                aware_utc_token_expiry = None
+                if booking.check_in_token_expires_at: # naive UTC
+                    aware_utc_token_expiry = booking.check_in_token_expires_at.replace(tzinfo=timezone.utc)
 
-                booking_end_time_aware = booking.end_time
-                if booking_end_time_aware.tzinfo is None:
-                    booking_end_time_aware = booking_end_time_aware.replace(tzinfo=timezone.utc)
+                # Convert booking.end_time (naive venue local) to aware UTC for comparison
+                aware_utc_booking_end = (booking.end_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc)
 
-                if token_expires_at_aware and token_expires_at_aware > effective_now and booking_end_time_aware > effective_now:
+                if aware_utc_token_expiry and aware_utc_token_expiry > effective_now_aware and aware_utc_booking_end > effective_now_aware:
                     display_check_in_token = booking.check_in_token
 
             booking_dict = {
@@ -680,19 +698,19 @@ def get_my_bookings():
                 'resource_id': booking.resource_id,
                 'resource_name': resource_name,
                 'user_name': booking.user_name,
-                'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(), # Ensure ISO format with Z
-                'end_time': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),   # Ensure ISO format with Z
+                'start_time': (booking.start_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat(),
+                'end_time': (booking.end_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat(),
                 'title': booking.title,
                 'status': booking.status,
                 'recurrence_rule': booking.recurrence_rule,
-                'admin_deleted_message': booking.admin_deleted_message, # Keep for potential internal use, JS should hide it
-                'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else None,
-                'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else None,
+                'admin_deleted_message': booking.admin_deleted_message,
+                'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else None, # Assuming checked_in_at is naive UTC
+                'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else None, # Assuming checked_out_at is naive UTC
                 'can_check_in': can_check_in,
                 'check_in_token': display_check_in_token
             }
 
-            if actual_start_time_utc >= effective_now: # Compare with actual_start_time_utc
+            if booking_start_local_naive >= effective_now_local_naive:
                 all_upcoming_bookings_dicts.append(booking_dict)
             else:
                 all_past_bookings_dicts.append(booking_dict)
@@ -781,7 +799,7 @@ def get_my_bookings_for_date():
                 Booking.end_time
             ).join(Resource, Booking.resource_id == Resource.id)\
             .filter(Booking.user_name == current_user.username)\
-            .filter(func.date(Booking.start_time) == target_date_obj)\
+            .filter(func.date(Booking.start_time) == target_date_obj) # target_date_obj is date, Booking.start_time is naive local datetime. func.date should handle this.
             .filter(sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_booking_statuses_for_user_schedule))\
             .order_by(Booking.start_time.asc())\
             .all()
@@ -829,6 +847,15 @@ def bookings_calendar():
 
         user_bookings = query.all()
 
+        # Fetch current_offset_hours for converting to UTC for JSON response
+        booking_settings_calendar = BookingSettings.query.first() # Renamed to avoid conflict if outer scope has it
+        current_offset_hours_calendar = 0
+        if booking_settings_calendar and hasattr(booking_settings_calendar, 'global_time_offset_hours') and booking_settings_calendar.global_time_offset_hours is not None:
+            current_offset_hours_calendar = booking_settings_calendar.global_time_offset_hours
+        else:
+            current_app.logger.warning("BookingSettings not found or global_time_offset_hours not set for bookings_calendar, using 0 offset for UTC conversion.")
+
+
         events = []
         for booking in user_bookings:
             resource = Resource.query.get(booking.resource_id)
@@ -837,8 +864,8 @@ def bookings_calendar():
             events.append({
                 'id': booking.id,
                 'title': title,
-                'start': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
-                'end': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
+                'start': (booking.start_time - timedelta(hours=current_offset_hours_calendar)).replace(tzinfo=timezone.utc).isoformat(),
+                'end': (booking.end_time - timedelta(hours=current_offset_hours_calendar)).replace(tzinfo=timezone.utc).isoformat(),
                 'recurrence_rule': booking.recurrence_rule,
                 'resource_id': booking.resource_id,
                 'resource_name': resource_name, # Include resource name
@@ -905,6 +932,9 @@ def update_booking_by_user(booking_id):
     """
     Allows an authenticated user to update the title, start_time, or end_time of their own booking.
     Expects start_time and end_time as ISO 8601 formatted datetime strings.
+    Input times can be offset-aware or naive. If naive, they are assumed to be in venue local time.
+    If offset-aware, they are converted to venue local time.
+    Booking times are stored as naive venue local times.
     """
     current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] Request received. User: {current_user.username if current_user.is_authenticated else 'Anonymous'}")
     data = request.get_json()
@@ -915,6 +945,14 @@ def update_booking_by_user(booking_id):
         return jsonify({'error': 'Invalid input. JSON data expected.'}), 400
 
     try:
+        # Fetch Booking Settings for global_time_offset_hours
+        booking_settings = BookingSettings.query.first()
+        current_offset_hours = 0
+        if booking_settings and booking_settings.global_time_offset_hours is not None:
+            current_offset_hours = booking_settings.global_time_offset_hours
+        else:
+            current_app.logger.warning(f"[API PUT /api/bookings/{booking_id}] BookingSettings not found or global_time_offset_hours not set, using 0 offset.")
+
         booking = Booking.query.get(booking_id)
 
         if not booking:
@@ -954,17 +992,21 @@ def update_booking_by_user(booking_id):
                 current_app.logger.warning(f"User '{current_user.username}' provided incomplete time for booking {booking_id}. Start: {new_start_iso}, End: {new_end_iso}")
                 return jsonify({'error': 'Both start_time and end_time are required if one is provided.'}), 400
             try:
-                # Ensure timezone-aware datetime objects if input strings include timezone info
-                # Otherwise, assume naive and they will be treated as UTC by default by fromisoformat
-                # If they need to be localized to server's local time first, that's a different logic.
                 parsed_new_start_time = datetime.fromisoformat(new_start_iso)
                 parsed_new_end_time = datetime.fromisoformat(new_end_iso)
 
-                # If parsed times are naive, assume UTC (or make them UTC)
-                if parsed_new_start_time.tzinfo is None:
-                    parsed_new_start_time = parsed_new_start_time.replace(tzinfo=timezone.utc)
-                if parsed_new_end_time.tzinfo is None:
-                    parsed_new_end_time = parsed_new_end_time.replace(tzinfo=timezone.utc)
+                # Convert to Naive Venue Local Time
+                if parsed_new_start_time.tzinfo is not None:
+                    utc_dt_start = parsed_new_start_time.astimezone(timezone.utc)
+                    venue_local_dt_start = utc_dt_start + timedelta(hours=current_offset_hours)
+                    parsed_new_start_time = venue_local_dt_start.replace(tzinfo=None)
+                # Else: naive, assume it's already venue local time
+
+                if parsed_new_end_time.tzinfo is not None:
+                    utc_dt_end = parsed_new_end_time.astimezone(timezone.utc)
+                    venue_local_dt_end = utc_dt_end + timedelta(hours=current_offset_hours)
+                    parsed_new_end_time = venue_local_dt_end.replace(tzinfo=None)
+                # Else: naive, assume it's already venue local time
 
             except ValueError:
                 current_app.logger.warning(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' provided invalid ISO format. Start: {new_start_iso}, End: {new_end_iso}")
@@ -977,43 +1019,49 @@ def update_booking_by_user(booking_id):
             resource = Resource.query.get(booking.resource_id)
             if not resource:
                 current_app.logger.error(f"[API PUT /api/bookings/{booking_id}] Resource ID {booking.resource_id} for booking {booking_id} not found during update.")
-                return jsonify({'error': 'Associated resource not found.'}), 500 # Should be 500, as it's a server-side data integrity issue
+                return jsonify({'error': 'Associated resource not found.'}), 500
 
-            # Convert old DB times to aware UTC if they are naive, for correct comparison
-            old_start_time_aware = old_start_time.replace(tzinfo=timezone.utc) if old_start_time.tzinfo is None else old_start_time
-            old_end_time_aware = old_end_time.replace(tzinfo=timezone.utc) if old_end_time.tzinfo is None else old_end_time
+            # old_start_time and old_end_time from DB are naive venue local (after migration)
+            # parsed_new_start_time and parsed_new_end_time are now also naive venue local
 
-            time_changed = parsed_new_start_time != old_start_time_aware or parsed_new_end_time != old_end_time_aware
+            time_changed = parsed_new_start_time != old_start_time or parsed_new_end_time != old_end_time
 
             if time_changed and resource.is_under_maintenance:
                 maintenance_active = False
-                # Ensure maintenance_until is UTC aware if it exists
-                maintenance_until_aware = resource.maintenance_until.replace(tzinfo=timezone.utc) if resource.maintenance_until and resource.maintenance_until.tzinfo is None else resource.maintenance_until
+                maintenance_until_venue_local_naive = None
+                if resource.maintenance_until:
+                    # Assuming resource.maintenance_until is stored as naive UTC or is UTC if aware
+                    maintenance_until_utc = resource.maintenance_until
+                    if maintenance_until_utc.tzinfo is None:
+                        maintenance_until_utc = maintenance_until_utc.replace(tzinfo=timezone.utc)
+                    else:
+                        maintenance_until_utc = maintenance_until_utc.astimezone(timezone.utc)
 
-                if maintenance_until_aware is None: # Maintenance is indefinite
+                    maintenance_until_venue_local = maintenance_until_utc + timedelta(hours=current_offset_hours)
+                    maintenance_until_venue_local_naive = maintenance_until_venue_local.replace(tzinfo=None)
+
+                if maintenance_until_venue_local_naive is None and resource.is_under_maintenance: # Indefinite maintenance
                     maintenance_active = True
-                # Check if new booking period overlaps with maintenance period
-                # This logic assumes maintenance_until means "maintained up to but not including this time"
-                # or "maintained until the end of this time if it's a date".
-                # For datetimes, direct comparison is fine.
-                elif parsed_new_start_time < maintenance_until_aware or parsed_new_end_time <= maintenance_until_aware: # Simplified, might need adjustment
+                elif maintenance_until_venue_local_naive and \
+                     (parsed_new_start_time < maintenance_until_venue_local_naive or \
+                      parsed_new_end_time <= maintenance_until_venue_local_naive): # Check against venue local maintenance time
                      maintenance_active = True
 
                 if maintenance_active:
-                    maint_until_str = maintenance_until_aware.isoformat() if maintenance_until_aware else "indefinitely"
-                    current_app.logger.warning(f"[API PUT /api/bookings/{booking_id}] Booking update conflicts with resource maintenance (until {maint_until_str}).")
-                    return jsonify({'error': f'Resource is under maintenance until {maint_until_str} and the new time slot falls within this period.'}), 403
+                    maint_until_str = maintenance_until_venue_local_naive.isoformat() if maintenance_until_venue_local_naive else "indefinitely"
+                    current_app.logger.warning(f"[API PUT /api/bookings/{booking_id}] Booking update conflicts with resource maintenance (until {maint_until_str} venue local).")
+                    return jsonify({'error': f'Resource is under maintenance until {maint_until_str} (venue local) and the new time slot falls within this period.'}), 403
 
             if time_changed:
-                # Convert new times to naive UTC for storage, matching original app's likely behavior
-                booking.start_time = parsed_new_start_time.replace(tzinfo=None)
-                booking.end_time = parsed_new_end_time.replace(tzinfo=None)
+                # Assign processed naive venue local times
+                booking.start_time = parsed_new_start_time
+                booking.end_time = parsed_new_end_time
 
                 conflicting_booking = Booking.query.filter(
                     Booking.resource_id == booking.resource_id,
                     Booking.id != booking_id,
-                    Booking.start_time < booking.end_time, # Use the new end_time for comparison
-                    Booking.end_time > booking.start_time  # Use the new start_time for comparison
+                    Booking.start_time < booking.end_time, # Compares new venue local end time
+                    Booking.end_time > booking.start_time  # Compares new venue local start time
                 ).first()
 
                 if conflicting_booking:
@@ -1025,16 +1073,13 @@ def update_booking_by_user(booking_id):
                     return jsonify({'error': 'The updated time slot conflicts with an existing booking on this resource.'}), 409
 
                 # NEW CHECK: User's other bookings conflict on DIFFERENT resources
-                # Ensure new times are naive UTC for DB comparison, if not already
-                new_start_naive_utc = parsed_new_start_time.replace(tzinfo=None) if parsed_new_start_time.tzinfo else parsed_new_start_time
-                new_end_naive_utc = parsed_new_end_time.replace(tzinfo=None) if parsed_new_end_time.tzinfo else parsed_new_end_time
-
+                # parsed_new_start_time and parsed_new_end_time are already naive venue local
                 user_own_conflict = Booking.query.filter(
                     Booking.user_name == current_user.username,
                     Booking.resource_id != booking.resource_id,  # Critical: Different resource
                     Booking.id != booking_id,                   # Critical: Not the current booking
-                    Booking.start_time < new_end_naive_utc,
-                    Booking.end_time > new_start_naive_utc
+                    Booking.start_time < parsed_new_end_time,   # Compare against naive venue local
+                    Booking.end_time > parsed_new_start_time    # Compare against naive venue local
                 ).first()
 
                 if user_own_conflict:
@@ -1172,8 +1217,13 @@ def update_booking_by_user(booking_id):
             'resource_id': booking.resource_id,
             'resource_name': resource_name,
             'user_name': booking.user_name,
-            'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
-            'end_time': booking.end_time.replace(tzinfo=timezone.utc).isoformat(),
+            # start_time and end_time are now naive venue local; for ISO format, client might expect UTC or offset.
+            # For now, sending as is, assuming client will handle or it's for internal state.
+            # To send as UTC ISO: booking.start_time.replace(tzinfo=timezone.utc).isoformat()
+            # To send as venue local with offset: (booking.start_time.replace(tzinfo=pytz.timezone(venue_timezone_str)).isoformat())
+            # This part depends on API contract, for now, keep it simple, adjust if client needs specific format.
+            'start_time': (booking.start_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat(), # Convert back to UTC for client
+            'end_time': (booking.end_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat(),     # Convert back to UTC for client
             'title': booking.title,
             'booking_display_start_time': booking.booking_display_start_time.strftime('%H:%M') if booking.booking_display_start_time else None,
             'booking_display_end_time': booking.booking_display_end_time.strftime('%H:%M') if booking.booking_display_end_time else None
@@ -1394,38 +1444,42 @@ def check_in_booking(booking_id):
             current_app.logger.warning(f"User {current_user.username} unauthorized check-in attempt for booking {booking_id} owned by {booking.user_name}.")
             return jsonify({'error': 'You are not authorized to check into this booking.'}), 403
 
-        if booking.checked_in_at:
-            current_app.logger.info(f"User {current_user.username} attempt to check-in to already checked-in booking {booking_id} at {booking.checked_in_at.isoformat()}")
-            return jsonify({'message': 'Already checked in.', 'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat()}), 200 # Or 409 Conflict
+        if booking.checked_in_at: # checked_in_at is naive UTC
+            current_app.logger.info(f"User {current_user.username} attempt to check-in to already checked-in booking {booking_id} at {booking.checked_in_at.isoformat()} UTC")
+            return jsonify({'message': 'Already checked in.', 'checked_in_at': booking.checked_in_at.replace(tzinfo=timezone.utc).isoformat()}), 200
 
         booking_settings = BookingSettings.query.first()
         check_in_minutes_before = 15
         check_in_minutes_after = 15
         past_booking_adjustment_hours = 0
-        allow_check_in_without_pin_setting = True # Default to true if no settings row
+        allow_check_in_without_pin_setting = True
+        # current_offset_hours is not strictly needed here if checked_in_at stores naive local "now",
+        # but fetching for consistency or if other conversions were added later.
+        # current_offset_hours = booking_settings.global_time_offset_hours if booking_settings and hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
+
 
         if booking_settings:
             check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings.check_in_minutes_before is not None else 15
             check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings.check_in_minutes_after is not None else 15
             past_booking_adjustment_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings.past_booking_time_adjustment_hours is not None else 0
-            if hasattr(booking_settings, 'allow_check_in_without_pin'): # Check if attribute exists for older DBs
+            if hasattr(booking_settings, 'allow_check_in_without_pin'):
                 allow_check_in_without_pin_setting = booking_settings.allow_check_in_without_pin
         else:
             current_app.logger.warning(f"BookingSettings not found for check_in_booking {booking_id}, using defaults.")
 
-        effective_now = get_current_effective_time()
+        effective_now_aware = get_current_effective_time()
+        effective_now_local_naive = effective_now_aware.replace(tzinfo=None)
 
-        actual_start_time_utc = booking.start_time.replace(tzinfo=timezone.utc) if booking.start_time.tzinfo is None else booking.start_time
-        effective_check_in_base_time = actual_start_time_utc + timedelta(hours=past_booking_adjustment_hours)
+        booking_start_local_naive = booking.start_time # Naive venue local
+        effective_check_in_base_time_local_naive = booking_start_local_naive + timedelta(hours=past_booking_adjustment_hours)
+        check_in_window_start_local_naive = effective_check_in_base_time_local_naive - timedelta(minutes=check_in_minutes_before)
+        check_in_window_end_local_naive = effective_check_in_base_time_local_naive + timedelta(minutes=check_in_minutes_after)
 
-        check_in_window_start = effective_check_in_base_time - timedelta(minutes=check_in_minutes_before)
-        check_in_window_end = effective_check_in_base_time + timedelta(minutes=check_in_minutes_after)
-
-        if not (check_in_window_start <= effective_now <= check_in_window_end):
-            current_app.logger.warning(f"User {current_user.username} check-in attempt for booking {booking_id} outside of allowed window. Actual start: {actual_start_time_utc.isoformat()}, Effective base: {effective_check_in_base_time.isoformat()}, Window: {check_in_window_start.isoformat()} to {check_in_window_end.isoformat()}, Current time: {effective_now.isoformat()}")
+        if not (check_in_window_start_local_naive <= effective_now_local_naive <= check_in_window_end_local_naive):
+            current_app.logger.warning(f"User {current_user.username} check-in attempt for booking {booking_id} outside of allowed window. Booking start (local): {booking_start_local_naive.isoformat()}, Effective base (local): {effective_check_in_base_time_local_naive.isoformat()}, Window (local): {check_in_window_start_local_naive.isoformat()} to {check_in_window_end_local_naive.isoformat()}, Current time (local naive): {effective_now_local_naive.isoformat()}")
             return jsonify({'error': f'Check-in is only allowed from {check_in_minutes_before} minutes before to {check_in_minutes_after} minutes after the effective booking start time (considering adjustments).'}), 403
 
-        resource = booking.resource_booked # Assuming backref is 'resource_booked'
+        resource = booking.resource_booked
         if not resource:
             current_app.logger.error(f"Resource not found for booking {booking_id} during check-in attempt by {current_user.username}.")
             return jsonify({'error': 'Associated resource not found for this booking.'}), 500
@@ -1454,7 +1508,7 @@ def check_in_booking(booking_id):
 
         # If allow_check_in_without_pin_setting is True, we bypass all the above PIN checks.
 
-        booking.checked_in_at = effective_now.replace(tzinfo=None) # Store as naive UTC
+        booking.checked_in_at = effective_now_local_naive # Store naive local "now"
         db.session.commit()
 
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
@@ -1463,8 +1517,8 @@ def check_in_booking(booking_id):
             audit_details += f" Using PIN."
         add_audit_log(action="CHECK_IN_SUCCESS", details=audit_details)
 
-        socketio.emit('booking_updated', {'action': 'checked_in', 'booking_id': booking.id, 'checked_in_at': effective_now.isoformat(), 'resource_id': booking.resource_id})
-        current_app.logger.info(f"User '{current_user.username}' successfully checked into booking ID: {booking_id} at {effective_now.isoformat()}{' using PIN' if provided_pin else ''}.")
+        socketio.emit('booking_updated', {'action': 'checked_in', 'booking_id': booking.id, 'checked_in_at': effective_now_aware.isoformat(), 'resource_id': booking.resource_id})
+        current_app.logger.info(f"User '{current_user.username}' successfully checked into booking ID: {booking_id} at {effective_now_aware.isoformat()}{' using PIN' if provided_pin else ''}.")
 
         # Send Email Notification for Check-in
         user = User.query.filter_by(username=booking.user_name).first()
@@ -1489,16 +1543,22 @@ def check_in_booking(booking_id):
                     else:
                         current_app.logger.warning(f"FloorMap {resource_details.floor_map_id} not found for resource {resource_details.id} during check-in email prep for booking {booking.id}.")
 
-                # Ensure checked_in_at is timezone-aware for display (it's stored naive UTC)
-                checked_in_at_aware = booking.checked_in_at.replace(tzinfo=timezone.utc)
+                # booking.checked_in_at is naive local. For display in UTC as per existing format:
+                # Convert naive local checked_in_at to aware UTC for email.
+                # However, emails should ideally show local time. For now, let's keep UTC as per existing format.
+                # If current_offset_hours was fetched:
+                # checked_in_at_utc_for_email = (booking.checked_in_at - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc)
+                # For now, if booking.checked_in_at is effective_now_local_naive, then to get UTC:
+                checked_in_at_utc_for_email = (effective_now_local_naive - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc) if hasattr(booking_settings, 'global_time_offset_hours') else booking.checked_in_at.replace(tzinfo=timezone.utc)
+
 
                 email_data = {
                     'user_name': user.username,
                     'booking_title': booking.title,
                     'resource_name': resource_details.name,
-                    'start_time': booking.start_time.strftime('%Y-%m-%d %H:%M'),
-                    'end_time': booking.end_time.strftime('%Y-%m-%d %H:%M'),
-                    'checked_in_at_time': checked_in_at_aware.strftime('%Y-%m-%d %H:%M:%S UTC'),
+                    'start_time': booking.start_time.strftime('%Y-%m-%d %H:%M'), # Naive local, correct for email
+                    'end_time': booking.end_time.strftime('%Y-%m-%d %H:%M'),     # Naive local, correct for email
+                    'checked_in_at_time': checked_in_at_utc_for_email.strftime('%Y-%m-%d %H:%M:%S UTC'),
                     'location': floor_map_location,
                     'floor': floor_map_floor,
                 }
@@ -1539,12 +1599,12 @@ def check_in_booking(booking_id):
             send_teams_notification(
                 current_user.email,
                 "Booking Checked In",
-                f"You have successfully checked into your booking for {resource_name} at {effective_now.strftime('%Y-%m-%d %H:%M')}."
+                f"You have successfully checked into your booking for {resource_name} at {effective_now_aware.strftime('%Y-%m-%d %H:%M')}." # Use aware time for notification
             )
 
         return jsonify({
             'message': 'Check-in successful.',
-            'checked_in_at': effective_now.isoformat(), # Send aware UTC time
+            'checked_in_at': effective_now_aware.isoformat(), # Send aware UTC time
             'booking_id': booking.id
         }), 200
 
@@ -1575,21 +1635,27 @@ def check_out_booking(booking_id):
             current_app.logger.warning(f"User {current_user.username} attempt to check-out of booking {booking_id} that was never checked into.")
             return jsonify({'error': 'Cannot check out of a booking that was not checked into.'}), 403 # Or 409 Conflict
 
-        if booking.checked_out_at:
-            current_app.logger.info(f"User {current_user.username} attempt to check-out of already checked-out booking {booking_id} at {booking.checked_out_at.isoformat()}")
-            return jsonify({'message': 'Already checked out.', 'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat()}), 200 # Or 409 Conflict
+        if booking.checked_out_at: # checked_out_at is naive UTC
+            current_app.logger.info(f"User {current_user.username} attempt to check-out of already checked-out booking {booking_id} at {booking.checked_out_at.isoformat()} UTC")
+            return jsonify({'message': 'Already checked out.', 'checked_out_at': booking.checked_out_at.replace(tzinfo=timezone.utc).isoformat()}), 200
 
-        effective_now = get_current_effective_time()
-        booking.checked_out_at = effective_now.replace(tzinfo=None) # Store as naive UTC
-        booking.status = 'completed' # Set status to completed
-        # Optional: Adjust booking end_time if an early check-out should free up the resource.
-        # booking.end_time = effective_now.replace(tzinfo=None)
+        effective_now_aware = get_current_effective_time()
+        effective_now_local_naive = effective_now_aware.replace(tzinfo=None) # Naive local "now"
+
+        booking_settings = BookingSettings.query.first() # For offset, if needed for email formatting
+        current_offset_hours = booking_settings.global_time_offset_hours if booking_settings and hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
+
+
+        booking.checked_out_at = effective_now_local_naive # Store naive local "now"
+        booking.status = 'completed'
+        # Optional: Adjust booking end_time to effective_now_local_naive if an early check-out should free up the resource.
+        # booking.end_time = effective_now_local_naive
         db.session.commit()
 
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
         add_audit_log(action="CHECK_OUT_SUCCESS", details=f"User '{current_user.username}' checked out of booking ID {booking.id} for resource '{resource_name}'. Status set to completed.")
-        socketio.emit('booking_updated', {'action': 'checked_out', 'booking_id': booking.id, 'checked_out_at': effective_now.isoformat(), 'resource_id': booking.resource_id, 'status': 'completed'})
-        current_app.logger.info(f"User '{current_user.username}' successfully checked out of booking ID: {booking_id} at {effective_now.isoformat()}. Status set to completed.")
+        socketio.emit('booking_updated', {'action': 'checked_out', 'booking_id': booking.id, 'checked_out_at': effective_now_aware.isoformat(), 'resource_id': booking.resource_id, 'status': 'completed'})
+        current_app.logger.info(f"User '{current_user.username}' successfully checked out of booking ID: {booking_id} at {effective_now_aware.isoformat()}. Status set to completed.")
 
         # Send Email Notification for Check-out
         user = User.query.filter_by(username=booking.user_name).first()
@@ -1614,16 +1680,17 @@ def check_out_booking(booking_id):
                     else:
                         current_app.logger.warning(f"FloorMap {resource_details.floor_map_id} not found for resource {resource_details.id} during check-out email prep for booking {booking.id}.")
 
-                # Ensure checked_out_at is timezone-aware for display (it's stored naive UTC but 'now' is aware)
-                checked_out_at_aware = booking.checked_out_at # This is 'now' which is already UTC aware
+                # booking.checked_out_at is naive local. For display in UTC as per existing format:
+                # Convert naive local checked_out_at to aware UTC for email.
+                checked_out_at_utc_for_email = (booking.checked_out_at - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc) if hasattr(booking_settings, 'global_time_offset_hours') else booking.checked_out_at.replace(tzinfo=timezone.utc)
 
                 email_data = {
                     'user_name': user.username,
                     'booking_title': booking.title,
                     'resource_name': resource_details.name,
-                    'start_time': booking.start_time.strftime('%Y-%m-%d %H:%M'),
-                    'end_time': booking.end_time.strftime('%Y-%m-%d %H:%M'),
-                    'checked_out_at_time': checked_out_at_aware.strftime('%Y-%m-%d %H:%M:%S UTC'),
+                    'start_time': booking.start_time.strftime('%Y-%m-%d %H:%M'), # Naive local, correct for email
+                    'end_time': booking.end_time.strftime('%Y-%m-%d %H:%M'),     # Naive local, correct for email
+                    'checked_out_at_time': checked_out_at_utc_for_email.strftime('%Y-%m-%d %H:%M:%S UTC'),
                     'location': floor_map_location,
                     'floor': floor_map_floor,
                 }
@@ -1663,12 +1730,12 @@ def check_out_booking(booking_id):
              send_teams_notification(
                 current_user.email,
                 "Booking Checked Out",
-                f"You have successfully checked out of your booking for {resource_name} at {effective_now.strftime('%Y-%m-%d %H:%M')}."
+                f"You have successfully checked out of your booking for {resource_name} at {effective_now_aware.strftime('%Y-%m-%d %H:%M')}." # Use aware time
             )
 
         return jsonify({
             'message': 'Check-out successful.',
-            'checked_out_at': effective_now.isoformat(), # Send aware UTC time
+            'checked_out_at': effective_now_aware.isoformat(), # Send aware UTC time
             'booking_id': booking.id
         }), 200
 
@@ -1690,17 +1757,17 @@ def qr_check_in(token):
         current_app.logger.warning(f"QR Check-in attempt with invalid token: {token}")
         return jsonify({'error': 'Invalid or expired check-in token.'}), 404
 
-    effective_now = get_current_effective_time()
+    effective_now_aware = get_current_effective_time() # Aware
+    effective_now_local_naive = effective_now_aware.replace(tzinfo=None) # Naive local
 
-    # Ensure booking.check_in_token_expires_at is treated as UTC if naive
-    token_expires_at_utc = booking.check_in_token_expires_at
-    if token_expires_at_utc and token_expires_at_utc.tzinfo is None: # Check if not None before accessing tzinfo
-        token_expires_at_utc = token_expires_at_utc.replace(tzinfo=timezone.utc)
+    # booking.check_in_token_expires_at is naive UTC
+    aware_utc_token_expiry = None
+    if booking.check_in_token_expires_at:
+        aware_utc_token_expiry = booking.check_in_token_expires_at.replace(tzinfo=timezone.utc)
 
-    if booking.check_in_token_expires_at is None or token_expires_at_utc < effective_now:
-        current_app.logger.warning(f"QR Check-in attempt with expired token ID {token} for booking {booking.id}. Token expiry: {booking.check_in_token_expires_at}, Now: {effective_now.isoformat()}")
-        # Invalidate the token to prevent reuse if it's just expired
-        booking.check_in_token = None
+    if aware_utc_token_expiry is None or aware_utc_token_expiry < effective_now_aware:
+        current_app.logger.warning(f"QR Check-in attempt with expired token ID {token} for booking {booking.id}. Token expiry (UTC): {aware_utc_token_expiry.isoformat() if aware_utc_token_expiry else 'None'}, Now (aware): {effective_now_aware.isoformat()}")
+        booking.check_in_token = None # Invalidate token
         booking.check_in_token_expires_at = None
         db.session.commit()
         return jsonify({'error': 'Invalid or expired check-in token.'}), 400 # 400 for expired, 404 for invalid
@@ -1721,27 +1788,28 @@ def qr_check_in(token):
     check_in_minutes_before = 15
     check_in_minutes_after = 15
     past_booking_adjustment_hours = 0
+    current_offset_hours = 0 # For converting booking start_time to UTC for JSON response
     if booking_settings:
         check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings.check_in_minutes_before is not None else 15
         check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings.check_in_minutes_after is not None else 15
         past_booking_adjustment_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings.past_booking_time_adjustment_hours is not None else 0
+        current_offset_hours = booking_settings.global_time_offset_hours if hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
     else:
-        current_app.logger.warning(f"BookingSettings not found for qr_check_in booking {booking.id}, using default window (15/15 mins) and 0 adjustment hours.")
+        current_app.logger.warning(f"BookingSettings not found for qr_check_in booking {booking.id}, using defaults.")
 
-    actual_start_time_utc = booking.start_time.replace(tzinfo=timezone.utc) if booking.start_time.tzinfo is None else booking.start_time
-    effective_check_in_base_time = actual_start_time_utc + timedelta(hours=past_booking_adjustment_hours)
+    booking_start_local_naive = booking.start_time # Naive venue local
+    effective_check_in_base_time_local_naive = booking_start_local_naive + timedelta(hours=past_booking_adjustment_hours)
+    check_in_window_start_local_naive = effective_check_in_base_time_local_naive - timedelta(minutes=check_in_minutes_before)
+    check_in_window_end_local_naive = effective_check_in_base_time_local_naive + timedelta(minutes=check_in_minutes_after)
 
-    check_in_window_start = effective_check_in_base_time - timedelta(minutes=check_in_minutes_before)
-    check_in_window_end = effective_check_in_base_time + timedelta(minutes=check_in_minutes_after)
-
-    if not (check_in_window_start <= effective_now <= check_in_window_end): # Corrected indentation
-        current_app.logger.warning(f"QR Check-in for booking {booking.id} (token {token}) outside allowed window. Actual Start: {actual_start_time_utc.isoformat()}, Effective Base: {effective_check_in_base_time.isoformat()}, Window: {check_in_window_start.isoformat()} to {check_in_window_end.isoformat()}, Now: {effective_now.isoformat()}")
-        return jsonify({'error': f'Check-in is only allowed from {check_in_minutes_before} minutes before to {check_in_minutes_after} minutes after the effective booking start time (considering adjustments). (Current time: {effective_now.strftime("%H:%M:%S %Z")}, Effective start: {effective_check_in_base_time.strftime("%H:%M:%S %Z")})'}), 403
+    if not (check_in_window_start_local_naive <= effective_now_local_naive <= check_in_window_end_local_naive):
+        current_app.logger.warning(f"QR Check-in for booking {booking.id} (token {token}) outside allowed window. Booking Start (local): {booking_start_local_naive.isoformat()}, Effective Base (local): {effective_check_in_base_time_local_naive.isoformat()}, Window (local): {check_in_window_start_local_naive.isoformat()} to {check_in_window_end_local_naive.isoformat()}, Now (local naive): {effective_now_local_naive.isoformat()}")
+        return jsonify({'error': f'Check-in is only allowed from {check_in_minutes_before} minutes before to {check_in_minutes_after} minutes after the effective booking start time (considering adjustments). (Current time: {effective_now_aware.strftime("%H:%M:%S %Z")}, Effective start (local): {effective_check_in_base_time_local_naive.strftime("%H:%M:%S")})'}), 403
 
     try:
-        booking.checked_in_at = effective_now.replace(tzinfo=None) # Store as naive UTC
-        booking.check_in_token = None # Invalidate token after use
-        booking.check_in_token_expires_at = None # Clear expiry too
+        booking.checked_in_at = effective_now_local_naive # Store naive local "now"
+        booking.check_in_token = None
+        booking.check_in_token_expires_at = None
         db.session.commit()
 
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
@@ -1760,7 +1828,7 @@ def qr_check_in(token):
             socketio.emit('booking_updated', {
                 'action': 'checked_in',
                 'booking_id': booking.id,
-                'checked_in_at': effective_now.isoformat(), # Send aware UTC time
+                'checked_in_at': effective_now_aware.isoformat(),
                 'resource_id': booking.resource_id
             })
         current_app.logger.info(f"Booking {booking.id} successfully checked in via QR token {token} by user {booking.user_name}")
@@ -1769,9 +1837,9 @@ def qr_check_in(token):
             'message': 'Check-in successful!',
             'resource_name': resource_name,
             'booking_title': booking.title,
-            'user_name': booking.user_name, # Include the original user_name for context
-            'start_time': booking.start_time.replace(tzinfo=timezone.utc).isoformat(),
-            'checked_in_at': effective_now.isoformat() # Send aware UTC time
+            'user_name': booking.user_name,
+            'start_time': (booking.start_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat(), # Convert to UTC ISO
+            'checked_in_at': effective_now_aware.isoformat()
         }), 200
 
     except Exception as e:
@@ -1816,10 +1884,13 @@ def resource_pin_check_in(resource_id):
     # Fetch BookingSettings
     booking_settings = BookingSettings.query.first()
     requires_login = True # Default
-    check_in_minutes_before = 15 # Default
-    check_in_minutes_after = 15 # Default
-    past_booking_adjustment_hours = 0 # Default
-    allow_check_in_without_pin_setting = True # Default True
+    check_in_minutes_before = 15
+    check_in_minutes_after = 15
+    past_booking_adjustment_hours = 0
+    allow_check_in_without_pin_setting = True
+    # current_offset_hours is not directly used here unless for converting something to UTC for display/logic not present
+    # current_offset_hours = booking_settings.global_time_offset_hours if booking_settings and hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
+
 
     if not booking_settings:
         logger.error("BookingSettings not found in DB! Using default values for PIN check-in.")
@@ -1845,7 +1916,8 @@ def resource_pin_check_in(resource_id):
 
     # Find the booking to check in
     target_booking = None
-    effective_now = get_current_effective_time() # Use a single 'now' for all comparisons in this block
+    effective_now_aware = get_current_effective_time()
+    effective_now_local_naive = effective_now_aware.replace(tzinfo=None)
 
     potential_bookings_query = Booking.query.filter(
         Booking.resource_id == resource_id,
@@ -1861,37 +1933,43 @@ def resource_pin_check_in(resource_id):
     potential_bookings = potential_bookings_query.order_by(Booking.start_time.asc()).all()
 
     for b in potential_bookings:
-        actual_start_time_utc = b.start_time.replace(tzinfo=timezone.utc) if b.start_time.tzinfo is None else b.start_time
-        effective_check_in_base_time = actual_start_time_utc + timedelta(hours=past_booking_adjustment_hours)
+        booking_start_local_naive = b.start_time # Naive venue local
+        effective_check_in_base_time_local_naive = booking_start_local_naive + timedelta(hours=past_booking_adjustment_hours)
+        check_in_window_start_local_naive = effective_check_in_base_time_local_naive - timedelta(minutes=check_in_minutes_before)
+        check_in_window_end_local_naive = effective_check_in_base_time_local_naive + timedelta(minutes=check_in_minutes_after)
 
-        check_in_window_start = effective_check_in_base_time - timedelta(minutes=check_in_minutes_before)
-        check_in_window_end = effective_check_in_base_time + timedelta(minutes=check_in_minutes_after)
-
-        if check_in_window_start <= effective_now <= check_in_window_end:
+        if check_in_window_start_local_naive <= effective_now_local_naive <= check_in_window_end_local_naive:
             target_booking = b
             break
 
     if not target_booking:
         user_identifier_for_log = current_user.username if current_user.is_authenticated else "anonymous/public"
-        logger.warning(f"PIN check-in for resource {resource_id} (PIN: {pin_value}): No active booking found within adjusted check-in window for user '{user_identifier_for_log}'. Window based on effective start after adjustment. Current effective time: {effective_now.isoformat()}")
+        logger.warning(f"PIN check-in for resource {resource_id} (PIN: {pin_value}): No active booking found within adjusted check-in window for user '{user_identifier_for_log}'. Window based on effective start after adjustment. Current effective time (local naive): {effective_now_local_naive.isoformat()}")
         return render_template('check_in_status_public.html', message=_('No active booking found for this resource within the check-in window for your session.'), status='error'), 404
 
-    if target_booking.checked_in_at:
+    if target_booking.checked_in_at: # This is naive UTC, convert to local for display if needed, or display as UTC.
         logger.info(f"PIN check-in attempt for already checked-in booking {target_booking.id} (Resource {resource_id}, PIN {pin_value}).")
+        # checked_in_at is stored as naive local "now", so strftime will format it as local.
+        # If it were naive UTC, it would be target_booking.checked_in_at.replace(tzinfo=timezone.utc).strftime(...)
+        # or converted to local then strftime.
+        # Since it's now stored as naive local, direct strftime is fine for local display.
+        # For consistency with UTC display in emails, convert:
+        checked_in_at_utc_display = (target_booking.checked_in_at - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC') if hasattr(booking_settings, 'global_time_offset_hours') else target_booking.checked_in_at.strftime('%Y-%m-%d %H:%M:%S Local')
+
         booking_details = {
             'title': target_booking.title,
             'resource_name': resource.name,
             'user_name': target_booking.user_name,
-            'checked_in_at_formatted': target_booking.checked_in_at.strftime('%Y-%m-%d %H:%M:%S UTC')
+            'checked_in_at_formatted': checked_in_at_utc_display
         }
         return render_template('check_in_status_public.html',
                                message=_('This booking has already been checked in.'),
-                               status='success', # Or 'info'
-                               booking_details=booking_details), 200 # 200 as it's a valid state
+                               status='success',
+                               booking_details=booking_details), 200
 
     # Perform Check-in
     try:
-        target_booking.checked_in_at = effective_now.replace(tzinfo=None) # Stored as naive UTC
+        target_booking.checked_in_at = effective_now_local_naive # Store naive local "now"
         # Optional: Deactivate PIN if single-use
         # verified_pin.is_active = False
         db.session.commit()
@@ -1901,13 +1979,17 @@ def resource_pin_check_in(resource_id):
                       details=f"User '{user_identifier_for_audit}' checked into booking ID {target_booking.id} for resource '{resource.name}' using PIN {verified_pin.pin_value}.",
                       user_id=current_user.id if current_user.is_authenticated else None)
 
-        logger.info(f"Successfully checked in booking ID {target_booking.id} for resource {resource.id} using PIN {pin_value}.")
+        logger.info(f"Successfully checked in booking ID {target_booking.id} for resource {resource.id} using PIN {pin_value}. Checked in at {effective_now_local_naive.isoformat()} local.")
+
+        # For display, format the naive local checked_in_at time.
+        # Or convert to UTC for display if that's the standard.
+        checked_in_at_utc_display_success = (target_booking.checked_in_at - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC') if hasattr(booking_settings, 'global_time_offset_hours') else target_booking.checked_in_at.strftime('%Y-%m-%d %H:%M:%S Local')
 
         booking_details_success = {
             'title': target_booking.title,
             'resource_name': resource.name,
             'user_name': target_booking.user_name,
-            'checked_in_at_formatted': target_booking.checked_in_at.strftime('%Y-%m-%d %H:%M:%S UTC')
+            'checked_in_at_formatted': checked_in_at_utc_display_success
         }
         return render_template('check_in_status_public.html',
                                message=_('Check-in successful!'),

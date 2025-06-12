@@ -1089,18 +1089,31 @@ def export_bookings_to_csv_string(app, start_date=None, end_date=None) -> str:
     Returns:
         A string containing the CSV data.
     """
+    logger = app.logger
     header = [
         'id', 'resource_id', 'user_name', 'start_time', 'end_time',
         'title', 'checked_in_at', 'checked_out_at', 'status', 'recurrence_rule'
     ]
 
     bookings_to_export = []
+    current_offset_hours = 0
     with app.app_context():
+        try:
+            booking_settings = BookingSettings.query.first()
+            if booking_settings and hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None:
+                current_offset_hours = booking_settings.global_time_offset_hours
+            else:
+                logger.warning("BookingSettings not found or global_time_offset_hours not set for CSV export, using 0 offset. Times in CSV will be treated as naive local if they were stored as such.")
+        except Exception as e_settings:
+            logger.error(f"Error fetching BookingSettings for CSV export: {e_settings}. Using 0 offset.")
+            # current_offset_hours remains 0
+
         query = Booking.query
         if start_date:
+            # Assuming start_date is naive local, convert to UTC if DB times are UTC for query
+            # However, Booking.start_time is now naive local, so direct comparison is fine
             query = query.filter(Booking.start_time >= start_date)
         if end_date:
-            # Ensure end_date is exclusive for start_time
             query = query.filter(Booking.start_time < end_date)
         bookings_to_export = query.order_by(Booking.start_time).all()
 
@@ -1119,11 +1132,11 @@ def export_bookings_to_csv_string(app, start_date=None, end_date=None) -> str:
             booking.id,
             booking.resource_id,
             booking.user_name,
-            booking.start_time.isoformat() if booking.start_time else '',
-            booking.end_time.isoformat() if booking.end_time else '',
+            (booking.start_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat() if booking.start_time else '',
+            (booking.end_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat() if booking.end_time else '',
             booking.title,
-            booking.checked_in_at.isoformat() if booking.checked_in_at else '',
-            booking.checked_out_at.isoformat() if booking.checked_out_at else '',
+            (booking.checked_in_at - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else '', # Assuming checked_in_at is naive local
+            (booking.checked_out_at - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else '', # Assuming checked_out_at is naive local
             booking.status,
             booking.recurrence_rule if booking.recurrence_rule is not None else ''
         ]
@@ -1199,13 +1212,23 @@ def import_bookings_from_csv_file(csv_file_path, app, clear_existing: bool = Fal
     bookings_skipped_fk_violation = 0
     bookings_skipped_other_errors = 0
     errors = []
+    current_offset_hours = 0 # Initialize
 
     try:
         with app.app_context():
+            try:
+                booking_settings = BookingSettings.query.first()
+                if booking_settings and hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None:
+                    current_offset_hours = booking_settings.global_time_offset_hours
+                else:
+                    logger.warning(f"{import_context_message_prefix}BookingSettings not found or global_time_offset_hours not set for CSV import, using 0 offset. Imported times will be treated as UTC if they have offset, or as naive local if they don't.")
+            except Exception as e_settings:
+                logger.error(f"{import_context_message_prefix}Error fetching BookingSettings for CSV import: {e_settings}. Using 0 offset for time conversions.")
+
+
             if clear_existing:
                 try:
                     num_deleted = db.session.query(Booking).delete()
-                    # db.session.commit() # Commit separately or as part of main transaction
                     logger.info(f"{import_context_message_prefix}Cleared {num_deleted} existing bookings before import.")
                     _emit_import_progress(socketio_instance, task_id, f"Cleared {num_deleted} existing bookings.", level='INFO', context_prefix=import_context_message_prefix)
                 except Exception as e_clear:
@@ -1261,17 +1284,27 @@ def import_bookings_from_csv_file(csv_file_path, app, clear_existing: bool = Fal
                             bookings_skipped_other_errors += 1
                             continue
 
-                        start_time = _parse_iso_datetime(row.get('start_time'))
-                        end_time = _parse_iso_datetime(row.get('end_time'))
+                        # _parse_iso_datetime returns an aware datetime object (typically UTC)
+                        start_time_aware = _parse_iso_datetime(row.get('start_time'))
+                        end_time_aware = _parse_iso_datetime(row.get('end_time'))
+                        checked_in_at_aware = _parse_iso_datetime(row.get('checked_in_at'))
+                        checked_out_at_aware = _parse_iso_datetime(row.get('checked_out_at'))
 
-                        if not start_time or not end_time:
+                        if not start_time_aware or not end_time_aware:
                             errors.append(f"Row {line_num}: Invalid or missing start_time or end_time format.")
                             bookings_skipped_other_errors += 1
                             continue
-                        if start_time >= end_time:
+                        if start_time_aware >= end_time_aware:
                             errors.append(f"Row {line_num}: Start time must be before end time.")
                             bookings_skipped_other_errors += 1
                             continue
+
+                        # Convert aware times (assumed UTC from _parse_iso_datetime) to naive venue local
+                        start_time_local_naive = (start_time_aware.astimezone(timezone.utc) + timedelta(hours=current_offset_hours)).replace(tzinfo=None) if start_time_aware else None
+                        end_time_local_naive = (end_time_aware.astimezone(timezone.utc) + timedelta(hours=current_offset_hours)).replace(tzinfo=None) if end_time_aware else None
+                        checked_in_at_local_naive = (checked_in_at_aware.astimezone(timezone.utc) + timedelta(hours=current_offset_hours)).replace(tzinfo=None) if checked_in_at_aware else None
+                        checked_out_at_local_naive = (checked_out_at_aware.astimezone(timezone.utc) + timedelta(hours=current_offset_hours)).replace(tzinfo=None) if checked_out_at_aware else None
+
 
                         # FK Checks
                         resource = db.session.get(Resource, resource_id)
@@ -1308,22 +1341,22 @@ def import_bookings_from_csv_file(csv_file_path, app, clear_existing: bool = Fal
                         # this logic needs adjustment and a check for existing booking by ID.
                         # The current duplicate check is semantic (user, resource, time).
 
-                        # If not clearing existing, check for duplicates
+                        # If not clearing existing, check for duplicates using naive local times
                         if not clear_existing:
                             existing_booking = Booking.query.filter_by(
                                 resource_id=resource_id, user_name=user_name,
-                                start_time=start_time, end_time=end_time
+                                start_time=start_time_local_naive, end_time=end_time_local_naive
                             ).first()
                             if existing_booking:
                                 bookings_skipped_duplicate += 1
-                                logger.info(f"Row {line_num}: Skipping duplicate booking for resource {resource_id}, user '{user_name}' at {start_time}.")
+                                logger.info(f"Row {line_num}: Skipping duplicate booking for resource {resource_id}, user '{user_name}' at {start_time_local_naive}.")
                                 continue
 
                         new_booking = Booking(
                             resource_id=resource_id, user_name=user_name,
-                            start_time=start_time, end_time=end_time, title=title,
+                            start_time=start_time_local_naive, end_time=end_time_local_naive, title=title,
                             status=status, recurrence_rule=recurrence_rule,
-                            checked_in_at=checked_in_at, checked_out_at=checked_out_at
+                            checked_in_at=checked_in_at_local_naive, checked_out_at=checked_out_at_local_naive
                         )
                         # If clear_existing was true, and CSV contains 'id', and we want to preserve it:
                         # if clear_existing and 'id' in row and row['id']:
@@ -1570,12 +1603,19 @@ def check_resources_availability_for_user(resources_list: list[Resource], target
     if not resources_list:
         return False
 
+    current_offset_hours = 0
+    try:
+        settings = BookingSettings.query.first()
+        if settings and hasattr(settings, 'global_time_offset_hours') and settings.global_time_offset_hours is not None:
+            current_offset_hours = settings.global_time_offset_hours
+    except Exception as e_settings:
+        logger_instance.error(f"Error fetching BookingSettings for availability check: {e_settings}. Using 0 offset.")
+
     # Get current user's other bookings for the target_date once for efficiency
     try:
         user_other_bookings = Booking.query.filter(
             Booking.user_name == user.username,
-            func.date(Booking.start_time) == target_date
-            # We will filter out bookings for the *current* resource inside the loop
+            func.date(Booking.start_time) == target_date # Booking.start_time is naive local
         ).all()
     except Exception as e:
         logger_instance.error(f"Error fetching user's other bookings for {user.username} on {target_date}: {e}", exc_info=True)
@@ -1585,11 +1625,16 @@ def check_resources_availability_for_user(resources_list: list[Resource], target
         if resource.status != 'published':
             continue
 
-        # Simplified initial maintenance check for the whole day for this resource.
-        # A more granular slot-specific check is also done later.
-        if resource.is_under_maintenance and resource.maintenance_until and resource.maintenance_until.date() >= target_date:
-            if resource.maintenance_until.date() > target_date or resource.maintenance_until.time() == time.max: # Covers full day or past end of day
-                logger_instance.debug(f"Resource {resource.id} under maintenance for the whole of {target_date}.")
+        # Maintenance check: Convert maintenance_until (naive UTC) to naive local for comparison
+        maintenance_until_local_naive = None
+        if resource.maintenance_until:
+            maint_utc = resource.maintenance_until.replace(tzinfo=timezone.utc)
+            maint_local_aware = maint_utc + timedelta(hours=current_offset_hours)
+            maintenance_until_local_naive = maint_local_aware.replace(tzinfo=None)
+
+        if resource.is_under_maintenance and maintenance_until_local_naive and maintenance_until_local_naive.date() >= target_date:
+            if maintenance_until_local_naive.date() > target_date or maintenance_until_local_naive.time() == time.max:
+                logger_instance.debug(f"Resource {resource.id} under maintenance for the whole of {target_date} (local).")
                 continue
 
         user_other_bookings_for_this_resource_check = [
@@ -1625,15 +1670,12 @@ def check_resources_availability_for_user(resources_list: list[Resource], target
                 logger_instance.debug(f"User {user.username} has already booked resource {resource.id} in slot {slot_start_dt}-{slot_end_dt}. Considering available for user.")
                 return True # User already has this specific slot booked
 
-            # b. Check slot-specific maintenance
+            # b. Check slot-specific maintenance (using converted local naive maintenance time)
             slot_is_under_maintenance = False
-            if resource.is_under_maintenance and resource.maintenance_until:
-                # A slot is considered under maintenance if the slot_start_dt is before resource.maintenance_until.
-                # This implies that if maintenance_until is, e.g., 10:00, a slot starting at 09:30 is affected,
-                # but a slot starting at 10:00 is not.
-                if slot_start_dt < resource.maintenance_until:
+            if resource.is_under_maintenance and maintenance_until_local_naive:
+                if slot_start_dt < maintenance_until_local_naive:
                     slot_is_under_maintenance = True
-                    logger_instance.debug(f"Resource {resource.id} slot {slot_start_dt}-{slot_end_dt} is under maintenance (maintenance active until {resource.maintenance_until}).")
+                    logger_instance.debug(f"Resource {resource.id} slot {slot_start_dt}-{slot_end_dt} (local) is under maintenance (maintenance active until {maintenance_until_local_naive} local).")
 
             # c. Check for conflicts with user's other bookings (on *other* resources)
             is_conflicting_with_user_other_bookings = False
@@ -1677,22 +1719,23 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
     if not resources_list:
         return {'total_primary_slots': 0, 'available_primary_slots_for_user': 0}
 
+    current_offset_hours = 0
+    try:
+        settings = BookingSettings.query.first()
+        if settings and hasattr(settings, 'global_time_offset_hours') and settings.global_time_offset_hours is not None:
+            current_offset_hours = settings.global_time_offset_hours
+    except Exception as e_settings:
+        logger_instance.error(f"Error fetching BookingSettings for detailed availability: {e_settings}. Using 0 offset.")
+
     # Fetch all bookings for the user on the target_date across all resources
-    # This is to check for conflicts with bookings on *other* resources.
     try:
         user_all_bookings_on_date = Booking.query.filter(
-            Booking.user_name == user.username, # Changed from user_id to user_name
-            # Using func.date might be slightly cleaner if Booking.start_time is datetime
-            # from sqlalchemy import func
-            # func.date(Booking.start_time) == target_date
-            # For now, let's assume direct comparison works or adjust if needed
-            Booking.start_time >= datetime.combine(target_date, time.min),
-            Booking.start_time <= datetime.combine(target_date, time.max),
+            Booking.user_name == user.username,
+            func.date(Booking.start_time) == target_date, # Booking.start_time is naive local
             sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_booking_statuses_for_conflict)
         ).all()
     except Exception as e:
         logger_instance.error(f"Error fetching user's bookings for {user.username} on {target_date}: {e}", exc_info=True)
-        # Depending on policy, might return 0 available or raise error
         return {'total_primary_slots': 0, 'available_primary_slots_for_user': 0}
 
 
@@ -1703,18 +1746,18 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
 
         total_primary_slots += len(primary_slots)
 
-        # Initial maintenance check for the resource for the whole target_date.
-        # If maintained for the whole day, these slots are not possible.
-        if resource.is_under_maintenance and resource.maintenance_until:
-            maintenance_end_date = resource.maintenance_until.date()
-            maintenance_end_time = resource.maintenance_until.time()
-            if maintenance_end_date > target_date or \
-               (maintenance_end_date == target_date and maintenance_end_time == time.max):
-                logger_instance.debug(f"Resource {resource.id} ('{resource.name}') is under maintenance for the whole of {target_date}. Skipping its primary slots.")
-                continue # Skip this resource, its slots are not available
+        maintenance_until_local_naive = None
+        if resource.maintenance_until: # naive UTC
+            maint_utc = resource.maintenance_until.replace(tzinfo=timezone.utc)
+            maint_local_aware = maint_utc + timedelta(hours=current_offset_hours)
+            maintenance_until_local_naive = maint_local_aware.replace(tzinfo=None)
 
-        # Filter user's bookings that are NOT on the current resource being checked.
-        # These are the "other" bookings that could cause a conflict.
+        if resource.is_under_maintenance and maintenance_until_local_naive:
+            if maintenance_until_local_naive.date() > target_date or \
+               (maintenance_until_local_naive.date() == target_date and maintenance_until_local_naive.time() == time.max):
+                logger_instance.debug(f"Resource {resource.id} ('{resource.name}') is under maintenance for the whole of {target_date} (local). Skipping its primary slots.")
+                continue
+
         user_other_bookings_for_this_resource_check = [
             b for b in user_all_bookings_on_date if b.resource_id != resource.id
         ]
@@ -1746,13 +1789,10 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
 
             # iii. Check for slot-specific maintenance for *this* resource and *slot*
             slot_is_under_maintenance = False
-            if resource.is_under_maintenance and resource.maintenance_until:
-                # A slot is considered under maintenance if the slot overlaps with the maintenance period.
-                # Maintenance period is from "now" until resource.maintenance_until.
-                # We are interested if our specific slot_start_dt is before maintenance_until.
-                if slot_start_dt < resource.maintenance_until: # Naive comparison assumes same timezone (e.g. UTC)
+            if resource.is_under_maintenance and maintenance_until_local_naive:
+                if slot_start_dt < maintenance_until_local_naive: # Compare naive local with naive local
                     slot_is_under_maintenance = True
-                    logger_instance.debug(f"Resource {resource.id} slot {slot_start_dt}-{slot_end_dt} is effectively under maintenance (maintenance active until {resource.maintenance_until}).")
+                    logger_instance.debug(f"Resource {resource.id} slot {slot_start_dt}-{slot_end_dt} (local) is effectively under maintenance (maintenance active until {maintenance_until_local_naive} local).")
 
             # iv. Check if *this* slot on *this* resource conflicts with user_other_bookings_for_this_resource_check
             slot_conflicts_with_user_other_bookings = False

@@ -17,7 +17,7 @@ def auto_checkout_overdue_bookings(app): # app is now a required argument
     and whose end_time is past a configured delay.
     """
     with app.app_context():
-        logger = app.logger # Logger obtained from the passed app, inside context
+        logger = app.logger
         logger.info("Scheduler: Starting auto_checkout_overdue_bookings task...")
 
         booking_settings = BookingSettings.query.first()
@@ -27,23 +27,25 @@ def auto_checkout_overdue_bookings(app): # app is now a required argument
 
         enable_auto_checkout = booking_settings.enable_auto_checkout
         auto_checkout_delay_hours = booking_settings.auto_checkout_delay_hours
+        current_offset_hours = booking_settings.global_time_offset_hours if hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
 
-        logger.info(f"Scheduler: Auto-checkout enabled: {enable_auto_checkout}, Delay: {auto_checkout_delay_hours} hours.")
+        logger.info(f"Scheduler: Auto-checkout enabled: {enable_auto_checkout}, Delay: {auto_checkout_delay_hours} hours, Offset: {current_offset_hours} hours.")
 
         if not enable_auto_checkout:
             logger.info("Scheduler: Auto-checkout feature is disabled in settings. Task will not run.")
             return
 
-        effective_now = get_current_effective_time()
-        # Convert effective_now to naive UTC for comparison with Booking.end_time (naive UTC)
-        effective_now_naive_utc = effective_now.replace(tzinfo=None)
-        cutoff_time = effective_now_naive_utc - timedelta(hours=auto_checkout_delay_hours)
+        effective_now_aware = get_current_effective_time() # Aware, in venue's effective timezone
+        effective_now_local_naive = effective_now_aware.replace(tzinfo=None) # Naive representation of venue's current time
+
+        # Cutoff time in naive venue local time
+        cutoff_time_local_naive = effective_now_local_naive - timedelta(hours=auto_checkout_delay_hours)
 
         try:
             overdue_bookings = Booking.query.filter(
                 Booking.status == 'checked_in',
-                Booking.checked_out_at.is_(None),
-                Booking.end_time < cutoff_time # Booking.end_time is naive UTC
+                Booking.checked_out_at.is_(None), # This is naive local
+                Booking.end_time < cutoff_time_local_naive # Booking.end_time is naive local
             ).all()
         except Exception as e_query:
             logger.error(f"Scheduler: Error querying for overdue bookings: {e_query}", exc_info=True)
@@ -58,24 +60,26 @@ def auto_checkout_overdue_bookings(app): # app is now a required argument
             user_name_for_log = booking.user_name if booking.user_name else "Unknown User"
 
             try:
-                # Set actual checkout time based on configured delay
-                actual_checkout_time = booking.end_time + timedelta(hours=auto_checkout_delay_hours)
+                # Set actual checkout time based on configured delay; this will be naive local
+                actual_checkout_time_local_naive = booking.end_time + timedelta(hours=auto_checkout_delay_hours)
 
-                booking.checked_out_at = actual_checkout_time
+                booking.checked_out_at = actual_checkout_time_local_naive # Store naive local
                 booking.status = 'completed'
 
-                db.session.add(booking) # Add booking to session before commit
-                db.session.commit() # Commit per booking to isolate failures
+                db.session.add(booking)
+                db.session.commit()
 
+                # For logging/display, convert to UTC
+                actual_checkout_time_utc = (actual_checkout_time_local_naive - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc)
                 add_audit_log(
                     action="AUTO_CHECKOUT_SUCCESS",
                     details=(
                         f"Booking ID {booking.id} for resource '{resource_name_for_log}' by user "
                         f"'{user_name_for_log}' automatically checked out at "
-                        f"{actual_checkout_time.strftime('%Y-%m-%d %H:%M:%S UTC')}."
+                        f"{actual_checkout_time_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}."
                     )
                 )
-                logger.info(f"Scheduler: Booking ID {booking.id} successfully auto checked-out in DB.")
+                logger.info(f"Scheduler: Booking ID {booking.id} successfully auto checked-out in DB (local time: {actual_checkout_time_local_naive}).")
 
                 # Send Email Notification
                 user = User.query.filter_by(username=booking.user_name).first()
@@ -95,16 +99,21 @@ def auto_checkout_overdue_bookings(app): # app is now a required argument
 
                     explanation = f"This booking was automatically checked out because it was still active more than {auto_checkout_delay_hours} hour(s) past its scheduled end time."
 
+                    # Times for email: start_time and end_time are naive local. actual_checkout_time_local_naive is also naive local.
+                    # Display them as such, or convert to a specific display timezone if needed.
+                    # For consistency with previous UTC display in emails for checkout times:
+                    auto_checkout_at_utc_display = (actual_checkout_time_local_naive - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc)
+
                     email_data = {
                         'user_name': user.username,
                         'booking_title': booking.title or "N/A",
                         'resource_name': resource_name_for_email,
-                        'start_time': booking.start_time.strftime('%Y-%m-%d %H:%M'),
-                        'end_time': booking.end_time.strftime('%Y-%m-%d %H:%M'),
-                        'auto_checked_out_at_time': actual_checkout_time.strftime('%Y-%m-%d %H:%M:%S UTC'),
+                        'start_time': booking.start_time.strftime('%Y-%m-%d %H:%M'), # Naive local
+                        'end_time': booking.end_time.strftime('%Y-%m-%d %H:%M'),     # Naive local
+                        'auto_checked_out_at_time': auto_checkout_at_utc_display.strftime('%Y-%m-%d %H:%M:%S UTC'),
                         'location': floor_map_location,
                         'floor': floor_map_floor,
-                        'explanation': explanation # Added explanation
+                        'explanation': explanation
                     }
 
                     subject = f"Booking Automatically Checked Out: {email_data.get('resource_name', 'N/A')} - {email_data.get('booking_title', 'N/A')}"
@@ -182,18 +191,33 @@ def apply_scheduled_resource_status_changes(app=None):
     Scheduled task to apply pending scheduled status changes to resources.
     """
     with app.app_context():
-        logger = app.logger # Corrected: use app.logger after context
+        logger = app.logger
         logger.info("Scheduler: Starting apply_scheduled_resource_status_changes task...")
-        effective_now = get_current_effective_time()
-        # Convert effective_now to naive UTC for comparison with Resource.scheduled_status_at (naive UTC)
-        now_for_comparison = effective_now.replace(tzinfo=None)
+
+        booking_settings_for_offset = BookingSettings.query.first()
+        current_offset_hours = 0
+        if booking_settings_for_offset and hasattr(booking_settings_for_offset, 'global_time_offset_hours') and booking_settings_for_offset.global_time_offset_hours is not None:
+            current_offset_hours = booking_settings_for_offset.global_time_offset_hours
+
+        effective_now_aware = get_current_effective_time() # Aware, in venue's effective timezone
+        effective_now_local_naive = effective_now_aware.replace(tzinfo=None) # Naive representation of venue's current time
 
         try:
-            resources_to_update = Resource.query.filter(
+            resources_to_update = []
+            all_sched_resources = Resource.query.filter(
                 Resource.scheduled_status.isnot(None),
-                Resource.scheduled_status_at.isnot(None),
-                Resource.scheduled_status_at <= now_for_comparison # Resource.scheduled_status_at is naive UTC
+                Resource.scheduled_status_at.isnot(None)
             ).all()
+
+            for res in all_sched_resources:
+                if res.scheduled_status_at: # Should always be true due to query filter
+                    # Convert naive UTC scheduled_status_at to naive local for comparison
+                    scheduled_at_utc_aware = res.scheduled_status_at.replace(tzinfo=timezone.utc)
+                    scheduled_at_local_aware = scheduled_at_utc_aware + timedelta(hours=current_offset_hours)
+                    scheduled_at_local_naive = scheduled_at_local_aware.replace(tzinfo=None)
+
+                    if scheduled_at_local_naive <= effective_now_local_naive:
+                        resources_to_update.append(res)
 
             if not resources_to_update:
                 logger.info("Scheduler: No resource status changes to apply at this time.")
