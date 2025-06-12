@@ -33,6 +33,10 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
     try:
         booking_settings = BookingSettings.query.first()
         enable_check_in_out = booking_settings.enable_check_in_out if booking_settings else False
+        if booking_settings:
+            logger.info(f"BookingSettings found. enable_check_in_out determined as: {enable_check_in_out}")
+        else:
+            logger.info(f"BookingSettings NOT found. enable_check_in_out determined as: {enable_check_in_out}")
         allow_check_in_without_pin_setting = booking_settings.allow_check_in_without_pin if booking_settings and hasattr(booking_settings, 'allow_check_in_without_pin') else True # Default True
         check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings and booking_settings.check_in_minutes_before is not None else 15
         check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings and booking_settings.check_in_minutes_after is not None else 15
