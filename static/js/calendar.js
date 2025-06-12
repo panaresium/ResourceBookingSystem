@@ -490,10 +490,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const floor = arg.event.extendedProps.floor || "N/A";
                     const resourceName = arg.event.extendedProps.resource_name || "N/A";
 
-                    let eventHtml = `<b>Title: ${displayTitle}</b>`;
-                    eventHtml += `<br>Location: ${location} - ${floor}`;
-                    eventHtml += `<br>Resource: ${resourceName}`;
-
+                    // Construct HTML without labels, each on a new line
+                    let eventHtml = `<b>${displayTitle}</b>`; // Title is bold
+                    eventHtml += `<br>${location} - ${floor}`;
+                    eventHtml += `<br>${resourceName}`;
 
                     if (arg.event.start) {
                         let startTimeDisplay, endTimeDisplay;
@@ -510,7 +510,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
 
                         let fullTimeString = '';
-                        if (!arg.event.allDay || (startTimeDisplay && (startTimeDisplay !== '00:00' && !startTimeDisplay.endsWith("00:00 UTC")))) { // Condition to display time
+                        if (!arg.event.allDay || (startTimeDisplay && (startTimeDisplay !== '00:00' && !startTimeDisplay.endsWith("00:00 UTC")))) {
                             fullTimeString = startTimeDisplay;
                             if (endTimeDisplay && endTimeDisplay !== startTimeDisplay && endTimeDisplay.replace(" UTC", "") !== "") {
                                 fullTimeString += ` - ${endTimeDisplay}`;
@@ -522,7 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (fullTimeString.length > MAX_TIME_LENGTH) {
                                 displayTime = fullTimeString.substring(0, MAX_TIME_LENGTH - 3) + "...";
                             }
-                            eventHtml += `<br>Time: ${displayTime}`;
+                            eventHtml += `<br>${displayTime}`; // Time string on a new line
                         }
                     }
                     return { html: eventHtml };
