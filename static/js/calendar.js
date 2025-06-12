@@ -175,11 +175,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const [slotStartTime, slotEndTime] = selectedSlotValue.split(',');
 
-        // Construct full ISO datetime strings for start and end
-        const localStartDate = new Date(`${bookingDateStr}T${slotStartTime}:00Z`); // Parsed as UTC
-        const localEndDate = new Date(`${bookingDateStr}T${slotEndTime}:00Z`);   // Parsed as UTC
+        // Construct naive local ISO strings directly
+        const naiveLocalISOStart = `${bookingDateStr}T${slotStartTime}:00`;
+        const naiveLocalISOEnd = `${bookingDateStr}T${slotEndTime}:00`;
 
-        if (localEndDate <= localStartDate) { // Validation for new slot times
+        // Basic validation for new slot times (can be done with string comparison here)
+        if (naiveLocalISOEnd <= naiveLocalISOStart) {
             cebmStatusMessage.textContent = 'End time must be after start time.';
             cebmStatusMessage.className = 'status-message error-message';
             return;
@@ -187,8 +188,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const eventPayload = {
             title: title,
-            start_time: localStartDate.toISOString(),
-            end_time: localEndDate.toISOString(),
+            start_time: naiveLocalISOStart,
+            end_time: naiveLocalISOEnd,
         };
 
         try {

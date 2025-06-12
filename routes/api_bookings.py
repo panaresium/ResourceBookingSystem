@@ -1019,25 +1019,17 @@ def update_booking_by_user(booking_id):
                 current_app.logger.warning(f"User '{current_user.username}' provided incomplete time for booking {booking_id}. Start: {new_start_iso}, End: {new_end_iso}")
                 return jsonify({'error': 'Both start_time and end_time are required if one is provided.'}), 400
             try:
+                # new_start_iso and new_end_iso are expected to be naive local ISO strings
+                # e.g., "2025-06-13T08:00:00"
                 parsed_new_start_time = datetime.fromisoformat(new_start_iso)
                 parsed_new_end_time = datetime.fromisoformat(new_end_iso)
-
-                # Convert to Naive Venue Local Time
-                if parsed_new_start_time.tzinfo is not None:
-                    utc_dt_start = parsed_new_start_time.astimezone(timezone.utc)
-                    venue_local_dt_start = utc_dt_start + timedelta(hours=current_offset_hours)
-                    parsed_new_start_time = venue_local_dt_start.replace(tzinfo=None)
-                # Else: naive, assume it's already venue local time
-
-                if parsed_new_end_time.tzinfo is not None:
-                    utc_dt_end = parsed_new_end_time.astimezone(timezone.utc)
-                    venue_local_dt_end = utc_dt_end + timedelta(hours=current_offset_hours)
-                    parsed_new_end_time = venue_local_dt_end.replace(tzinfo=None)
-                # Else: naive, assume it's already venue local time
+                # parsed_new_start_time and parsed_new_end_time are now naive datetime objects
+                # representing the venue's local time as provided by the client.
+                # No further offset adjustments are needed for these slot times.
 
             except ValueError:
-                current_app.logger.warning(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' provided invalid ISO format. Start: {new_start_iso}, End: {new_end_iso}")
-                return jsonify({'error': 'Invalid datetime format. Use ISO 8601 (YYYY-MM-DDTHH:MM:SS[Z] or YYYY-MM-DDTHH:MM:SS+/-HH:MM).'}), 400
+                current_app.logger.warning(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' provided invalid naive ISO format. Start: {new_start_iso}, End: {new_end_iso}")
+                return jsonify({'error': 'Invalid datetime format. Expected YYYY-MM-DDTHH:MM:SS.'}), 400
 
             if parsed_new_start_time >= parsed_new_end_time:
                 current_app.logger.warning(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' provided start_time not before end_time.")
