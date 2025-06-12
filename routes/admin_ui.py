@@ -167,20 +167,20 @@ def serve_admin_bookings_page():
         # For consistency, let's define a more comprehensive list or fetch from a central place if available.
         # For now, using a more extended list similar to what was used in admin_api_bookings.py
         comprehensive_statuses = [
-            'pending', 'approved', 'rejected', 'cancelled', 'checked_in', 'completed',
-            'cancelled_by_user', 'cancelled_by_admin', 'cancelled_admin_acknowledged',
-            'no_show', 'awaiting_payment', 'payment_failed', 'confirmed_pending_payment',
-            'rescheduled', 'awaiting_confirmation', 'under_review', 'on_hold', 'archived',
-            'expired', 'draft', 'system_cancelled', 'error', 'pending_approval',
-            'pending_resource_confirmation', 'active', 'inactive', 'user_confirmed',
-            'admin_confirmed', 'auto_approved', 'auto_cancelled', 'payment_pending',
-            'payment_received', 'fulfillment_pending', 'fulfillment_complete', 'action_required',
-            'dispute_raised', 'dispute_resolved', 'refund_pending', 'refund_completed',
-            'partially_refunded', 'voided', 'pending_cancellation', 'cancellation_requested',
-            'attended', 'absent', 'tentative', 'waitlisted', 'blocked', 'requires_modification',
-            'pending_reschedule', 'reschedule_confirmed', 'reschedule_declined',
-            'pending_payment_confirmation', 'payment_disputed', 'subscription_active',
-            'subscription_cancelled', 'subscription_ended', 'subscription_pending', 'trial', 'past_due'
+            'pending',
+            'approved',
+            'rejected',
+            'cancelled',
+            'checked_in',
+            'completed',
+            'cancelled_by_user',
+            'cancelled_by_admin',
+            'cancelled_admin_acknowledged',
+            'system_cancelled_no_checkin',
+            'confirmed',
+            'no_show',
+            'on_hold',
+            'under_review'
         ]
         # Filter out any None or empty strings from comprehensive_statuses if they exist
         comprehensive_statuses = sorted(list(set(s for s in comprehensive_statuses if s and s.strip())))
@@ -199,9 +199,20 @@ def serve_admin_bookings_page():
         logger.error(f"Error fetching and sorting bookings for admin page: {e}", exc_info=True)
         # Define comprehensive_statuses here as well for the error case
         comprehensive_statuses = [
-            'pending', 'approved', 'rejected', 'cancelled', 'checked_in', 'completed',
-            'cancelled_by_user', 'cancelled_by_admin', 'cancelled_admin_acknowledged', 'no_show'
-            # A smaller, but still reasonable default list for error cases
+            'pending',
+            'approved',
+            'rejected',
+            'cancelled',
+            'checked_in',
+            'completed',
+            'cancelled_by_user',
+            'cancelled_by_admin',
+            'cancelled_admin_acknowledged',
+            'system_cancelled_no_checkin',
+            'confirmed',
+            'no_show',
+            'on_hold',
+            'under_review'
         ]
         comprehensive_statuses = sorted(list(set(s for s in comprehensive_statuses if s and s.strip())))
 
