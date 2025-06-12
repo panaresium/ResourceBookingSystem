@@ -383,7 +383,6 @@ main { /* The <main> tag inside #main-content */
 footer {
     height: var(--footer-height);
     background-color: var(--background-color-dark);
-    box-sizing: border-box;
     color: var(--text-color-light);
     padding: 0 1em;
     display: flex;
@@ -1010,7 +1009,7 @@ body.high-contrast footer {
         min-height: var(--footer-height);
         padding-top: 5px;
         padding-bottom: 5px;
-        width: 100%;
+        width: 100vw;
     }
     .footer-accessibility-controls {
         display: flex;
@@ -1145,7 +1144,7 @@ body.high-contrast footer {
         padding-top: 10px;
         padding-bottom: 10px;
         /* height: auto; Removed for fixed footer consistency */
-        width: 100%;
+        width: 100vw;
     }
     footer > * {
         margin-bottom: 5px;
