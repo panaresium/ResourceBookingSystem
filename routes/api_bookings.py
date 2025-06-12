@@ -85,7 +85,7 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
             check_in_window_start_local_naive = effective_check_in_base_time_local_naive - timedelta(minutes=check_in_minutes_before)
             check_in_window_end_local_naive = effective_check_in_base_time_local_naive + timedelta(minutes=check_in_minutes_after)
 
-            is_upcoming = booking_start_local_naive >= effective_now_local_naive
+            is_upcoming = booking.end_time > effective_now_local_naive
 
             if (booking_type == 'upcoming' and not is_upcoming) or \
                (booking_type == 'past' and is_upcoming):
