@@ -1221,12 +1221,44 @@ def update_booking_by_user(booking_id):
                 if any("time from" in change for change in change_details_list):
                     update_summary_for_email += f"The new time is {booking.start_time.strftime('%Y-%m-%d %H:%M')} to {booking.end_time.strftime('%Y-%m-%d %H:%M')}. "
 
+                current_app.logger.info(f"[Email Prep Debug] Booking ID: {booking.id}")
+                current_app.logger.info(f"[Email Prep Debug] booking.start_time RAW: {booking.start_time}")
+                current_app.logger.info(f"[Email Prep Debug] type(booking.start_time): {type(booking.start_time)}")
+                current_app.logger.info(f"[Email Prep Debug] booking.start_time.tzinfo: {booking.start_time.tzinfo if hasattr(booking.start_time, 'tzinfo') else 'N/A'}")
+                current_app.logger.info(f"[Email Prep Debug] booking.end_time RAW: {booking.end_time}")
+                current_app.logger.info(f"[Email Prep Debug] type(booking.end_time): {type(booking.end_time)}")
+                current_app.logger.info(f"[Email Prep Debug] booking.end_time.tzinfo: {booking.end_time.tzinfo if hasattr(booking.end_time, 'tzinfo') else 'N/A'}")
+
+                # Prepare naive local times for email display
+                # booking.start_time from DB should be naive local. If it has become aware UTC, convert it.
+                # current_offset_hours is already defined in this function.
+
+                actual_start_for_email = booking.start_time
+                if hasattr(booking.start_time, 'tzinfo') and booking.start_time.tzinfo is not None:
+                    # It's an aware datetime object. Assume it's UTC. Convert to naive local.
+                    current_app.logger.info(f"[Email Prep Corrective] booking.start_time was aware: {booking.start_time}. Converting to naive local using offset: {current_offset_hours}.")
+                    utc_start_time = booking.start_time.astimezone(timezone.utc)
+                    actual_start_for_email = (utc_start_time + timedelta(hours=current_offset_hours)).replace(tzinfo=None)
+                else:
+                    # It's naive. Assume it's already the correct venue local time.
+                    current_app.logger.info(f"[Email Prep Corrective] booking.start_time was naive: {booking.start_time}. Using as is for email.")
+
+                actual_end_for_email = booking.end_time
+                if hasattr(booking.end_time, 'tzinfo') and booking.end_time.tzinfo is not None:
+                    # It's an aware datetime object. Assume it's UTC. Convert to naive local.
+                    current_app.logger.info(f"[Email Prep Corrective] booking.end_time was aware: {booking.end_time}. Converting to naive local using offset: {current_offset_hours}.")
+                    utc_end_time = booking.end_time.astimezone(timezone.utc)
+                    actual_end_for_email = (utc_end_time + timedelta(hours=current_offset_hours)).replace(tzinfo=None)
+                else:
+                    # It's naive. Assume it's already the correct venue local time.
+                    current_app.logger.info(f"[Email Prep Corrective] booking.end_time was naive: {booking.end_time}. Using as is for email.")
+
                 email_data = {
                     'user_name': current_user.username,
                     'booking_title': booking.title,
                     'resource_name': resource_name,
-                    'start_time': booking.start_time.strftime('%Y-%m-%d %H:%M'),
-                    'end_time': booking.end_time.strftime('%Y-%m-%d %H:%M'),
+                    'start_time': actual_start_for_email.strftime('%Y-%m-%d %H:%M'),
+                    'end_time': actual_end_for_email.strftime('%Y-%m-%d %H:%M'),
                     'location': floor_map_location,
                     'floor': floor_map_floor,
                     'floor_map_name': floor_map_name, # Added
