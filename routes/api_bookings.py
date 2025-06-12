@@ -91,12 +91,28 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
                (booking_type == 'past' and is_upcoming):
                 continue # Skip if not matching the requested type
 
+            # Log variables for can_check_in calculation
+            logger.info(f"[Booking ID: {booking.id}] Check-in Calc: booking.status = {booking.status}")
+            logger.info(f"[Booking ID: {booking.id}] Check-in Calc: booking.checked_in_at = {booking.checked_in_at}")
+            logger.info(f"[Booking ID: {booking.id}] Check-in Calc: booking_start_local_naive = {booking_start_local_naive}")
+            logger.info(f"[Booking ID: {booking.id}] Check-in Calc: past_booking_adjustment_hours = {past_booking_adjustment_hours}")
+            logger.info(f"[Booking ID: {booking.id}] Check-in Calc: effective_check_in_base_time_local_naive = {effective_check_in_base_time_local_naive}")
+            logger.info(f"[Booking ID: {booking.id}] Check-in Calc: check_in_minutes_before = {check_in_minutes_before}")
+            logger.info(f"[Booking ID: {booking.id}] Check-in Calc: check_in_minutes_after = {check_in_minutes_after}")
+            logger.info(f"[Booking ID: {booking.id}] Check-in Calc: check_in_window_start_local_naive = {check_in_window_start_local_naive}")
+            logger.info(f"[Booking ID: {booking.id}] Check-in Calc: check_in_window_end_local_naive = {check_in_window_end_local_naive}")
+            logger.info(f"[Booking ID: {booking.id}] Check-in Calc: effective_now_local_naive = {effective_now_local_naive}")
+
+            window_comparison_result = (check_in_window_start_local_naive <= effective_now_local_naive <= check_in_window_end_local_naive)
+            logger.info(f"[Booking ID: {booking.id}] Check-in Calc: window_comparison_result = {window_comparison_result}")
+
             can_check_in = (
                 enable_check_in_out and
                 booking.checked_in_at is None and
                 booking.status == 'approved' and
-                (check_in_window_start_local_naive <= effective_now_local_naive <= check_in_window_end_local_naive)
+                window_comparison_result
             )
+            logger.info(f"[Booking ID: {booking.id}] Check-in Calc: FINAL can_check_in = {can_check_in}")
 
             display_check_in_token = None
             if booking.check_in_token and booking.checked_in_at is None and booking.status == 'approved':
