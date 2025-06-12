@@ -260,8 +260,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Logic to initialize and render the calendar ---
     const initializeCalendar = () => {
+        let determinedInitialView = 'dayGridMonth'; // Default to month view
+        if (window.innerWidth < 768) {
+            determinedInitialView = 'timeGridWeek'; // Change to week view for mobile
+        }
         calendarInstance = new FullCalendar.Calendar(calendarEl, {
-            initialView: 'dayGridMonth',
+            initialView: determinedInitialView,
             timeZone: 'local', // Keep timezone as UTC for consistency with server
             selectAllow: function(selectInfo) {
                 // Convert startStr to 'YYYY-MM-DD' format
