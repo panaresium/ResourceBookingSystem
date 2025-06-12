@@ -618,5 +618,140 @@ class TestPastBookingLogic(AppTests):
         self.assertEqual(response.status_code, 201, response.get_json())
         self.logout()
 
+
+class TestUpdateBookingConflicts(AppTests):
+    def _create_initial_booking(self, user_name, resource_id, start_offset_hours, duration_hours=1, title="Initial Booking", status="approved"):
+        # Using datetime_original and timedelta_original from AppTests context for consistency
+        # Ensure bookings are far enough in the future to avoid other validation issues
+        start_time = datetime_original.utcnow() + timedelta_original(hours=start_offset_hours)
+        end_time = start_time + timedelta_original(hours=duration_hours)
+        booking = Booking(
+            user_name=user_name,
+            resource_id=resource_id,
+            start_time=start_time, # Stored as naive UTC by convention in tests
+            end_time=end_time,     # Stored as naive UTC by convention in tests
+            title=title,
+            status=status
+        )
+        # Add BookingSettings to ensure global_time_offset_hours is available for the API
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings(global_time_offset_hours=0, allow_multiple_resources_same_time=False)
+            db.session.add(settings)
+        else:
+            settings.global_time_offset_hours = 0 # Ensure it's 0 for test predictability
+            settings.allow_multiple_resources_same_time = False # Ensure default for these tests
+        db.session.add(booking)
+        db.session.commit()
+        return booking
+
+    def _update_booking_payload(self, new_start_time_dt, new_end_time_dt, title="Updated Title"):
+        # Convert naive datetimes (assumed UTC for test logic) to ISO format strings.
+        return {
+            "start_time": new_start_time_dt.isoformat(),
+            "end_time": new_end_time_dt.isoformat(),
+            "title": title
+        }
+
+    def test_update_conflict_own_booking_different_resource(self):
+        self.login('testuser', 'password')
+        # Booking to keep: e.g., 102:00 - 103:00 on resource1
+        booking_to_keep = self._create_initial_booking('testuser', self.resource1.id, start_offset_hours=102, duration_hours=1, title="Kept Booking R1")
+        # Booking to update: e.g., 104:00 - 105:00 on resource2
+        booking_to_update = self._create_initial_booking('testuser', self.resource2.id, start_offset_hours=104, duration_hours=1, title="Updated Booking R2")
+
+        # Try to move booking_to_update to overlap with booking_to_keep: e.g., 102:30 - 103:30
+        new_start_dt = booking_to_keep.start_time + timedelta_original(minutes=30)
+        new_end_dt = new_start_dt + timedelta_original(hours=1)
+        payload = self._update_booking_payload(new_start_dt, new_end_dt)
+
+        response = self.client.put(f'/api/bookings/{booking_to_update.id}', data=json.dumps(payload), content_type='application/json')
+
+        self.assertEqual(response.status_code, 409, response.get_json())
+        error_data = response.get_json()
+        self.assertIn("conflicts with another of your existing bookings", error_data.get('error', ''))
+        # Check that the conflicting resource mentioned is booking_to_keep's resource
+        self.assertIn(self.resource1.name, error_data.get('error', ''))
+        self.logout()
+
+    def test_update_conflict_own_booking_same_resource(self):
+        self.login('testuser', 'password')
+        # Booking to keep: e.g., 102:00 - 103:00 on resource1
+        booking_to_keep = self._create_initial_booking('testuser', self.resource1.id, start_offset_hours=102, duration_hours=1)
+        # Booking to update: e.g., 104:00 - 105:00 on resource1
+        booking_to_update = self._create_initial_booking('testuser', self.resource1.id, start_offset_hours=104, duration_hours=1)
+
+        # Try to move booking_to_update to overlap with booking_to_keep: e.g., 102:30 - 103:30
+        new_start_dt = booking_to_keep.start_time + timedelta_original(minutes=30)
+        new_end_dt = new_start_dt + timedelta_original(hours=1)
+        payload = self._update_booking_payload(new_start_dt, new_end_dt)
+
+        response = self.client.put(f'/api/bookings/{booking_to_update.id}', data=json.dumps(payload), content_type='application/json')
+
+        self.assertEqual(response.status_code, 409, response.get_json())
+        error_data = response.get_json()
+        # This is the original check's message for same resource conflict
+        self.assertIn("conflicts with an existing booking on this resource", error_data.get('error', ''))
+        self.logout()
+
+    def test_update_conflict_other_user_same_resource(self):
+        user2 = User.query.filter_by(username='user2').first()
+        if not user2:
+            user2 = User(username='user2', email='user2@example.com')
+            user2.set_password('password')
+            db.session.add(user2)
+            db.session.commit()
+
+        # Booking by other user: e.g., 102:00 - 103:00 on resource1
+        booking_other_user = self._create_initial_booking('user2', self.resource1.id, start_offset_hours=102, duration_hours=1)
+
+        self.login('testuser', 'password')
+        # Booking to update by testuser: e.g., 104:00 - 105:00 on resource1
+        booking_to_update = self._create_initial_booking('testuser', self.resource1.id, start_offset_hours=104, duration_hours=1)
+
+        # Try to move booking_to_update to overlap with booking_other_user: e.g., 102:30 - 103:30
+        new_start_dt = booking_other_user.start_time + timedelta_original(minutes=30)
+        new_end_dt = new_start_dt + timedelta_original(hours=1)
+        payload = self._update_booking_payload(new_start_dt, new_end_dt)
+
+        response = self.client.put(f'/api/bookings/{booking_to_update.id}', data=json.dumps(payload), content_type='application/json')
+
+        self.assertEqual(response.status_code, 409, response.get_json())
+        error_data = response.get_json()
+        # This is the original check's message for same resource conflict (another user)
+        self.assertIn("conflicts with an existing booking on this resource", error_data.get('error', ''))
+        self.logout()
+
+    def test_update_no_conflict_successful(self):
+        self.login('testuser', 'password')
+        # Booking to update: e.g., 102:00 - 103:00 on resource1
+        booking_to_update = self._create_initial_booking('testuser', self.resource1.id, start_offset_hours=102, duration_hours=1)
+
+        # New time, far in the future, no conflict: e.g., 107:00 - 108:00
+        new_start_dt = booking_to_update.start_time + timedelta_original(hours=5)
+        new_end_dt = new_start_dt + timedelta_original(hours=1)
+        updated_title = "Successfully Updated Booking"
+        payload = self._update_booking_payload(new_start_dt, new_end_dt, title=updated_title)
+
+        response = self.client.put(f'/api/bookings/{booking_to_update.id}', data=json.dumps(payload), content_type='application/json')
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        data = response.get_json()
+        self.assertEqual(data['title'], updated_title)
+
+        # API returns start_time as UTC ISO string.
+        # new_start_dt is naive, assumed UTC in test. Add tzinfo for comparison.
+        expected_start_iso = new_start_dt.replace(tzinfo=timezone_original.utc).isoformat()
+        self.assertEqual(data['start_time'], expected_start_iso)
+
+        # Check database
+        updated_booking_db = db.session.get(Booking, booking_to_update.id)
+        self.assertEqual(updated_booking_db.title, updated_title)
+        # In DB, time is stored as naive (effectively UTC in test context with offset 0)
+        self.assertEqual(updated_booking_db.start_time, new_start_dt)
+        self.assertEqual(updated_booking_db.end_time, new_end_dt)
+        self.logout()
+
+
 if __name__ == '__main__':
     unittest.main()
