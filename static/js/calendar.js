@@ -179,10 +179,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const naiveLocalISOStart = `${bookingDateStr}T${slotStartTime}:00`;
         const naiveLocalISOEnd = `${bookingDateStr}T${slotEndTime}:00`;
 
-        // Basic validation for new slot times (can be done with string comparison here)
+        // Corrected validation:
         if (naiveLocalISOEnd <= naiveLocalISOStart) {
             cebmStatusMessage.textContent = 'End time must be after start time.';
             cebmStatusMessage.className = 'status-message error-message';
+            // Ensure button state is correctly managed if validation fails
+            if (buttonElement) { // Check if buttonElement is passed and valid
+                 buttonElement.disabled = false;
+                 buttonElement.textContent = 'Save Changes';
+            }
             return;
         }
 
