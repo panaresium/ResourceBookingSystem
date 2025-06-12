@@ -800,6 +800,459 @@ class TestUpdateBookingConflicts(AppTests):
         self.assertEqual(updated_booking_db.end_time, booking.end_time)     # Should be unchanged
         self.logout()
 
+# Model Tests
+class TestBookingSettingsModel(AppTests):
+    def test_booking_settings_model_defaults(self):
+        settings = BookingSettings()
+        db.session.add(settings)
+        db.session.commit()
+
+        fetched_settings = BookingSettings.query.first()
+        self.assertIsNotNone(fetched_settings)
+        self.assertIsNone(fetched_settings.auto_release_if_not_checked_in_minutes)
+        self.assertEqual(fetched_settings.auto_checkout_delay_minutes, 60)
+        # Check a few other defaults to ensure the object is behaving as expected
+        self.assertEqual(fetched_settings.enable_check_in_out, False)
+        self.assertEqual(fetched_settings.check_in_minutes_before, 15)
+
+
+# Admin Route Tests
+class TestAdminBookingSettingsRoutes(AppTests):
+    def _create_admin_user_for_settings(self):
+        admin_user = User.query.filter_by(username='admin_settings_user').first()
+        if not admin_user:
+            admin_user = User(username='admin_settings_user', email='admin_settings@example.com', is_admin=True)
+            admin_user.set_password("securepassword")
+            db.session.add(admin_user)
+            db.session.commit()
+        return admin_user
+
+    def _get_full_booking_settings_form_data(self, current_settings=None):
+        """ Helper to get a full set of form data, using current or default values. """
+        if current_settings is None:
+            current_settings = BookingSettings.query.first()
+            if not current_settings: # If no settings in DB, create a default one for form population
+                current_settings = BookingSettings()
+                # Note: This temporary settings object won't have an ID and might not reflect committed state
+                # but it's good enough for populating form field values with model defaults.
+
+        # Helper to convert boolean to 'on' or None (for checkboxes not present in POST if off)
+        def cb_value(val):
+            return 'on' if val else None
+
+        data = {
+            'allow_past_bookings': cb_value(current_settings.allow_past_bookings),
+            'max_booking_days_in_future': str(current_settings.max_booking_days_in_future or ''),
+            'allow_multiple_resources_same_time': cb_value(current_settings.allow_multiple_resources_same_time),
+            'max_bookings_per_user': str(current_settings.max_bookings_per_user or ''),
+            'enable_check_in_out': cb_value(current_settings.enable_check_in_out),
+            'check_in_minutes_before': str(current_settings.check_in_minutes_before),
+            'check_in_minutes_after': str(current_settings.check_in_minutes_after),
+            'past_booking_time_adjustment_hours': str(current_settings.past_booking_time_adjustment_hours),
+            'pin_auto_generation_enabled': cb_value(current_settings.pin_auto_generation_enabled),
+            'pin_length': str(current_settings.pin_length),
+            'pin_allow_manual_override': cb_value(current_settings.pin_allow_manual_override),
+            'resource_checkin_url_requires_login': cb_value(current_settings.resource_checkin_url_requires_login),
+            'allow_check_in_without_pin': cb_value(current_settings.allow_check_in_without_pin),
+            'enable_auto_checkout': cb_value(current_settings.enable_auto_checkout),
+            'auto_checkout_delay_minutes': str(current_settings.auto_checkout_delay_minutes),
+            'auto_release_if_not_checked_in_minutes': str(current_settings.auto_release_if_not_checked_in_minutes or ''),
+        }
+        # Remove None values so they are not submitted (like unchecked checkboxes)
+        return {k: v for k, v in data.items() if v is not None}
+
+
+    def test_get_booking_settings_page(self):
+        admin = self._create_admin_user_for_settings()
+        self.login(admin.username, "securepassword")
+
+        # Ensure there's a settings object, or create one with defaults
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings()
+            db.session.add(settings)
+            db.session.commit()
+
+        response = self.client.get(url_for('admin_ui.serve_booking_settings_page'))
+        self.assertEqual(response.status_code, 200)
+        response_data = response.data.decode('utf-8')
+        self.assertIn("Auto Check-out Delay (Minutes)", response_data)
+        self.assertIn("Auto-release booking if not checked-in after X minutes", response_data)
+        # Check if the values are rendered (using current or default)
+        self.assertIn(f'name="auto_checkout_delay_minutes" value="{settings.auto_checkout_delay_minutes}"', response_data)
+        self.assertIn(f'name="auto_release_if_not_checked_in_minutes" value="{settings.auto_release_if_not_checked_in_minutes or ""}"', response_data)
+        self.logout()
+
+    def test_update_booking_settings_success(self):
+        admin = self._create_admin_user_for_settings()
+        self.login(admin.username, "securepassword")
+
+        # Get initial settings or create if none
+        initial_settings = BookingSettings.query.first()
+        if not initial_settings:
+            initial_settings = BookingSettings()
+            db.session.add(initial_settings)
+            db.session.commit()
+            initial_settings = BookingSettings.query.first() # Re-fetch to get committed state
+
+        form_data = self._get_full_booking_settings_form_data(initial_settings)
+
+        # Apply specific changes for this test
+        form_data['auto_checkout_delay_minutes'] = '30'
+        form_data['auto_release_if_not_checked_in_minutes'] = '15'
+        form_data['enable_check_in_out'] = 'on' # Make sure this is on for release_minutes to be relevant
+
+        response = self.client.post(url_for('admin_ui.update_booking_settings'), data=form_data, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Booking settings updated successfully.", response.data)
+
+        updated_settings = BookingSettings.query.first()
+        self.assertEqual(updated_settings.auto_checkout_delay_minutes, 30)
+        self.assertEqual(updated_settings.auto_release_if_not_checked_in_minutes, 15)
+        self.assertTrue(updated_settings.enable_check_in_out)
+        self.logout()
+
+    def test_update_booking_settings_validation_errors(self):
+        admin = self._create_admin_user_for_settings()
+        self.login(admin.username, "securepassword")
+
+        initial_settings = BookingSettings.query.first()
+        if not initial_settings:
+            initial_settings = BookingSettings() # Default values: auto_checkout_delay_minutes=60, auto_release_if_not_checked_in_minutes=None
+            db.session.add(initial_settings)
+            db.session.commit()
+            initial_settings = BookingSettings.query.first() # Re-fetch
+
+        form_data = self._get_full_booking_settings_form_data(initial_settings)
+
+        # Introduce errors
+        form_data['auto_checkout_delay_minutes'] = '-5' # Invalid
+        form_data['auto_release_if_not_checked_in_minutes'] = 'abc' # Invalid
+
+        response = self.client.post(url_for('admin_ui.update_booking_settings'), data=form_data, follow_redirects=True)
+        self.assertEqual(response.status_code, 200) # Should reload the page
+
+        response_data = response.data.decode('utf-8')
+        self.assertIn("Auto Check-out Delay must be at least 1 minute.", response_data)
+        self.assertIn("Invalid input for Auto-release minutes.", response_data)
+
+        # Verify settings were not changed from initial values
+        settings_after_error = BookingSettings.query.first()
+        self.assertEqual(settings_after_error.auto_checkout_delay_minutes, initial_settings.auto_checkout_delay_minutes)
+        self.assertEqual(settings_after_error.auto_release_if_not_checked_in_minutes, initial_settings.auto_release_if_not_checked_in_minutes)
+        self.logout()
+
+# Scheduler Task Unit Tests
+# Importing the tasks and other necessary components
+from scheduler_tasks import auto_release_unclaimed_bookings, auto_checkout_overdue_bookings
+from utils import get_current_effective_time # To mock this
+
+class TestAutoReleaseTask(AppTests):
+    def setUp(self):
+        super().setUp()
+        # Create a default BookingSettings if none exists, as the task expects one.
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings()
+            db.session.add(settings)
+            db.session.commit()
+        self.settings = settings
+
+        self.test_user = User.query.filter_by(username='testuser').first()
+        self.test_resource = self.resource1 # Use one of the resources created in AppTests.setUp
+
+    @patch('scheduler_tasks.send_email')
+    @patch('scheduler_tasks.add_audit_log')
+    @patch('scheduler_tasks.db.session.commit')
+    @patch('scheduler_tasks.BookingSettings.query')
+    def test_auto_release_disabled_by_main_flag(self, mock_settings_query, mock_commit, mock_audit, mock_send_email):
+        mock_settings = MagicMock(spec=BookingSettings)
+        mock_settings.enable_check_in_out = False
+        mock_settings.auto_release_if_not_checked_in_minutes = 30 # This shouldn't matter
+        mock_settings.global_time_offset_hours = 0
+        mock_settings_query.first.return_value = mock_settings
+
+        # Create a booking that would otherwise be released
+        booking_start_time = datetime.utcnow() - timedelta(minutes=60)
+        booking = self._create_booking(self.test_user.username, self.test_resource.id, start_offset_hours=-1) # approx 1hr ago
+        booking.status = 'approved'
+        booking.checked_in_at = None
+        db.session.commit()
+
+        auto_release_unclaimed_bookings(app) # Pass the global app fixture
+
+        db.session.refresh(booking)
+        self.assertEqual(booking.status, 'approved') # Status should not change
+        mock_commit.assert_not_called()
+        mock_audit.assert_not_called()
+        mock_send_email.assert_not_called()
+
+    @patch('scheduler_tasks.send_email')
+    @patch('scheduler_tasks.add_audit_log')
+    @patch('scheduler_tasks.db.session.commit')
+    @patch('scheduler_tasks.BookingSettings.query')
+    def test_auto_release_disabled_by_minutes_none(self, mock_settings_query, mock_commit, mock_audit, mock_send_email):
+        mock_settings = MagicMock(spec=BookingSettings)
+        mock_settings.enable_check_in_out = True
+        mock_settings.auto_release_if_not_checked_in_minutes = None # Disabled
+        mock_settings.global_time_offset_hours = 0
+        mock_settings_query.first.return_value = mock_settings
+
+        booking_start_time = datetime.utcnow() - timedelta(minutes=60)
+        booking = self._create_booking(self.test_user.username, self.test_resource.id, start_offset_hours=-1)
+        booking.status = 'approved'; booking.checked_in_at = None; db.session.commit()
+
+        auto_release_unclaimed_bookings(app)
+
+        db.session.refresh(booking)
+        self.assertEqual(booking.status, 'approved')
+        mock_commit.assert_not_called()
+
+    @patch('scheduler_tasks.get_current_effective_time')
+    @patch('scheduler_tasks.send_email')
+    @patch('scheduler_tasks.add_audit_log')
+    @patch('scheduler_tasks.db.session.commit')
+    @patch('scheduler_tasks.BookingSettings.query')
+    def test_booking_released_successfully(self, mock_settings_query, mock_commit, mock_audit, mock_send_email, mock_effective_time):
+        mock_settings = MagicMock(spec=BookingSettings)
+        mock_settings.enable_check_in_out = True
+        mock_settings.auto_release_if_not_checked_in_minutes = 30
+        mock_settings.global_time_offset_hours = 0
+        mock_settings_query.first.return_value = mock_settings
+
+        # Mock current time to be, for example, 2024-01-01 12:00:00 (effective local)
+        # Effective time is what the venue operates on.
+        # `get_current_effective_time` returns an *aware* datetime object.
+        mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc) # Assuming offset 0 for simplicity
+        mock_effective_time.return_value = mocked_now_aware
+
+        # Booking started 60 minutes ago (local naive time), check-in deadline was 30 mins ago
+        # Booking start_time should be naive local for the task's logic
+        booking_start_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=60)
+
+        booking = Booking(
+            user_name=self.test_user.username, resource_id=self.test_resource.id,
+            start_time=booking_start_local_naive, end_time=booking_start_local_naive + timedelta(hours=1),
+            status='approved', checked_in_at=None, title='Test Release'
+        )
+        db.session.add(booking); db.session.commit()
+
+        auto_release_unclaimed_bookings(app)
+
+        db.session.refresh(booking)
+        self.assertEqual(booking.status, 'system_cancelled_no_checkin')
+        mock_commit.assert_called_once()
+        mock_audit.assert_called_once_with(action="AUTO_RELEASE_NO_CHECKIN", details=ANY)
+        mock_send_email.assert_called_once() # Assuming user has email
+
+    @patch('scheduler_tasks.get_current_effective_time')
+    @patch('scheduler_tasks.db.session.commit')
+    @patch('scheduler_tasks.BookingSettings.query')
+    def test_booking_not_yet_due_for_release(self, mock_settings_query, mock_commit, mock_effective_time):
+        mock_settings = MagicMock(spec=BookingSettings)
+        mock_settings.enable_check_in_out = True
+        mock_settings.auto_release_if_not_checked_in_minutes = 30
+        mock_settings.global_time_offset_hours = 0
+        mock_settings_query.first.return_value = mock_settings
+
+        mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc)
+        mock_effective_time.return_value = mocked_now_aware
+
+        # Booking started 15 minutes ago (local naive), deadline is in 15 mins
+        booking_start_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=15)
+        booking = Booking(
+            user_name=self.test_user.username, resource_id=self.test_resource.id,
+            start_time=booking_start_local_naive, end_time=booking_start_local_naive + timedelta(hours=1),
+            status='approved', checked_in_at=None
+        )
+        db.session.add(booking); db.session.commit()
+
+        auto_release_unclaimed_bookings(app)
+        db.session.refresh(booking)
+        self.assertEqual(booking.status, 'approved')
+        mock_commit.assert_not_called()
+
+    @patch('scheduler_tasks.get_current_effective_time')
+    @patch('scheduler_tasks.db.session.commit')
+    @patch('scheduler_tasks.BookingSettings.query')
+    def test_booking_already_checked_in_not_released(self, mock_settings_query, mock_commit, mock_effective_time):
+        mock_settings = MagicMock(spec=BookingSettings)
+        mock_settings.enable_check_in_out = True
+        mock_settings.auto_release_if_not_checked_in_minutes = 30
+        mock_settings.global_time_offset_hours = 0
+        mock_settings_query.first.return_value = mock_settings
+
+        mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc)
+        mock_effective_time.return_value = mocked_now_aware
+
+        # Booking started 60 mins ago, but was checked in 50 mins ago
+        booking_start_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=60)
+        checked_in_time_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=50)
+        booking = Booking(
+            user_name=self.test_user.username, resource_id=self.test_resource.id,
+            start_time=booking_start_local_naive, end_time=booking_start_local_naive + timedelta(hours=1),
+            status='approved', # Status might change to 'checked_in' by another mechanism
+            checked_in_at=checked_in_time_local_naive
+        )
+        db.session.add(booking); db.session.commit()
+
+        auto_release_unclaimed_bookings(app)
+        db.session.refresh(booking)
+        self.assertEqual(booking.status, 'approved') # Or 'checked_in', depends on other logic not tested here
+        mock_commit.assert_not_called()
+
+
+class TestAutoCheckoutTaskUpdated(AppTests):
+    def setUp(self):
+        super().setUp()
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings() # Defaults include auto_checkout_delay_minutes = 60
+            db.session.add(settings)
+            db.session.commit()
+        self.settings = settings
+        self.test_user = User.query.filter_by(username='testuser').first()
+        self.test_resource = self.resource1
+
+    @patch('scheduler_tasks.get_current_effective_time')
+    @patch('scheduler_tasks.send_email')
+    @patch('scheduler_tasks.add_audit_log')
+    @patch('scheduler_tasks.db.session.commit')
+    @patch('scheduler_tasks.BookingSettings.query')
+    def test_booking_checked_out_successfully_minutes(self, mock_settings_query, mock_commit, mock_audit, mock_send_email, mock_effective_time):
+        mock_settings = MagicMock(spec=BookingSettings)
+        mock_settings.enable_auto_checkout = True
+        mock_settings.auto_checkout_delay_minutes = 60 # Test with 60 minutes
+        mock_settings.global_time_offset_hours = 0
+        mock_settings_query.first.return_value = mock_settings
+
+        mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc)
+        mock_effective_time.return_value = mocked_now_aware
+
+        # Booking ended 90 minutes ago (local naive). Delay is 60 minutes. So, it's overdue.
+        booking_end_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=90)
+        booking_start_local_naive = booking_end_local_naive - timedelta(hours=1)
+        checked_in_local_naive = booking_start_local_naive + timedelta(minutes=5)
+
+        booking = Booking(
+            user_name=self.test_user.username, resource_id=self.test_resource.id,
+            start_time=booking_start_local_naive, end_time=booking_end_local_naive,
+            checked_in_at=checked_in_local_naive, status='checked_in', title='Test Auto Checkout Minutes'
+        )
+        db.session.add(booking); db.session.commit()
+
+        auto_checkout_overdue_bookings(app)
+
+        db.session.refresh(booking)
+        self.assertEqual(booking.status, 'completed')
+        self.assertIsNotNone(booking.checked_out_at)
+        expected_checkout_time_local_naive = booking_end_local_naive + timedelta(minutes=60)
+        self.assertEqual(booking.checked_out_at, expected_checkout_time_local_naive)
+        mock_commit.assert_called_once()
+        mock_audit.assert_called_once()
+        mock_send_email.assert_called_once()
+
+    @patch('scheduler_tasks.get_current_effective_time')
+    @patch('scheduler_tasks.db.session.commit')
+    @patch('scheduler_tasks.BookingSettings.query')
+    def test_booking_not_yet_due_for_checkout_minutes(self, mock_settings_query, mock_commit, mock_effective_time):
+        mock_settings = MagicMock(spec=BookingSettings)
+        mock_settings.enable_auto_checkout = True
+        mock_settings.auto_checkout_delay_minutes = 60
+        mock_settings.global_time_offset_hours = 0
+        mock_settings_query.first.return_value = mock_settings
+
+        mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc)
+        mock_effective_time.return_value = mocked_now_aware
+
+        # Booking ended 30 minutes ago (local naive). Delay is 60 minutes. Not overdue.
+        booking_end_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=30)
+        booking_start_local_naive = booking_end_local_naive - timedelta(hours=1)
+        booking = Booking(
+            user_name=self.test_user.username, resource_id=self.test_resource.id,
+            start_time=booking_start_local_naive, end_time=booking_end_local_naive,
+            checked_in_at=booking_start_local_naive + timedelta(minutes=5), status='checked_in'
+        )
+        db.session.add(booking); db.session.commit()
+
+        auto_checkout_overdue_bookings(app)
+        db.session.refresh(booking)
+        self.assertEqual(booking.status, 'checked_in')
+        self.assertIsNone(booking.checked_out_at)
+        mock_commit.assert_not_called()
+
+# Email Template Rendering Tests
+from flask import render_template
+
+class TestEmailTemplates(AppTests):
+    def test_render_auto_release_email(self):
+        # Test data consistent with what the auto_release_unclaimed_bookings task would provide
+        # after updating it to match the template variables.
+        email_data = {
+            'user_name': 'Test User',
+            'resource_name': 'Test Room 101',
+            'start_time': '2024-01-01 10:00', # Assuming these are strings as prepared by the task
+            'end_time': '2024-01-01 11:00',
+            'release_minutes': 30,
+            'cancelled_at_time': '2024-01-01 10:30', # Placeholder for when it was processed
+            'booking_title': 'Project Meeting',
+            'location': 'Main Building',
+            'floor': '1st Floor',
+            # The 'explanation' is constructed within the template for this one, based on release_minutes
+        }
+        # The actual 'explanation' for auto_release is built into the template text itself
+        # using release_minutes. The Python task provides 'release_minutes'.
+        # For auto_checkout, the 'explanation' is passed in, so we'll test that separately.
+
+
+        with app.app_context(): # render_template needs app context
+            # Test HTML template
+            html_output = render_template('email/booking_auto_cancelled_no_checkin.html', **email_data)
+            self.assertIn("Dear Test User,", html_output)
+            self.assertIn("your booking for <strong>Test Room 101</strong>", html_output)
+            self.assertIn("from <strong>2024-01-01 10:00</strong> to <strong>2024-01-01 11:00</strong>", html_output)
+            self.assertIn("within the allowed time period of 30 minutes", html_output)
+            self.assertIn("<strong>Resource:</strong> Test Room 101", html_output)
+            self.assertIn("<strong>Booking Title:</strong> Project Meeting", html_output)
+            self.assertIn("<strong>Cancelled At (Deadline):</strong> 2024-01-01 10:30", html_output)
+            self.assertIn("<strong>Location:</strong> Main Building", html_output)
+            self.assertIn("<strong>Floor:</strong> 1st Floor", html_output)
+
+            # Test Text template
+            text_output = render_template('email/booking_auto_cancelled_no_checkin_text.html', **email_data)
+            self.assertIn("Dear Test User,", text_output)
+            self.assertIn("your booking for Test Room 101", text_output)
+            self.assertIn("from 2024-01-01 10:00 to 2024-01-01 11:00", text_output)
+            self.assertIn("within the allowed time period of 30 minutes", text_output)
+            self.assertIn("- Resource: Test Room 101", text_output)
+            self.assertIn("- Booking Title: Project Meeting", text_output)
+            self.assertIn("- Cancelled At (Deadline): 2024-01-01 10:30", text_output)
+            self.assertIn("- Location: Main Building", text_output)
+            self.assertIn("- Floor: 1st Floor", text_output)
+
+    def test_render_auto_checkout_email_minutes_wording(self):
+        # Test data consistent with auto_checkout_overdue_bookings task
+        email_data = {
+            'user_name': 'Checkout User',
+            'resource_name': 'Meeting Pod A',
+            'start_time': '2024-01-02 14:00',
+            'end_time': '2024-01-02 15:00',
+            'auto_checked_out_at_time': '2024-01-02 16:00 UTC', # Example
+            'location': 'Annex',
+            'floor': '2',
+            'booking_title': 'Quick Sync',
+            # This explanation is generated in the scheduler task
+            'explanation': "This booking was automatically checked out because it was still active more than 60 minute(s) past its scheduled end time."
+        }
+        with app.app_context():
+            # Test HTML template for the specific wording
+            html_output = render_template('email/booking_auto_checkout.html', **email_data)
+            self.assertIn("more than 60 minute(s) past its scheduled end time.", html_output)
+
+            # Test Text template for the specific wording
+            text_output = render_template('email/booking_auto_checkout_text.html', **email_data)
+            self.assertIn("more than 60 minute(s) past its scheduled end time.", text_output)
+
 
 if __name__ == '__main__':
     unittest.main()
