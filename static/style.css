@@ -1770,4 +1770,9 @@ ul.pagination.align-items-baseline > li.page-item {
 
 /* === End of Styles for Admin Bookings Table Enhancements === */
 
-[end of static/style.css]
+.resource-area-permission-denied {
+    background-color: rgba(173, 216, 230, 0.7) !important; /* Light Blue with opacity */
+    border-color: #99b8c3 !important; /* A slightly darker, desaturated blue for the border */
+    color: #333 !important; /* Darker text for readability */
+    cursor: not-allowed; /* Indicate non-interactive */
+}

@@ -434,89 +434,102 @@ document.addEventListener('DOMContentLoaded', function () {
 
                         let finalClass = '';
                         let finalTitle = resource.name;
-                        const numPrimarySlots = primarySlots.length;
-                        const numBookableByCurrentUser = primarySlots.filter(s => s.isBookableByCurrentUser).length;
-                        const numBookedByCurrentUser = primarySlots.filter(s => s.isBookedByCurrentUser).length;
-                        const numGenerallyBooked = primarySlots.filter(s => s.isGenerallyBooked).length;
+                        let isMapAreaClickable = false; // Default to not clickable
 
-                        // REMOVED: console.log("DEBUG MAP: Counts for " + resource.name + ": BookedByCU=" + numBookedByCurrentUser + ", GenerallyBooked=" + numGenerallyBooked + ", BookableByCU=" + numBookableByCurrentUser + ", NumPrimarySlots=" + numPrimarySlots);
-
-                        if (numBookedByCurrentUser === numPrimarySlots) {
-                            // REMOVED: console.log("DEBUG MAP: Condition for " + resource.name + ": User booked all slots. Assigning map-area-red.");
-                            finalClass = 'map-area-red';
-                            finalTitle += ' (Booked by You - Full Day)';
-                        } else if (numBookedByCurrentUser > 0) {
-                            // REMOVED: console.log("DEBUG MAP: Condition for " + resource.name + ": User booked some slots.");
-                            if (numBookableByCurrentUser > 0) {
-                                // REMOVED: console.log("DEBUG MAP: Path B1 for " + resource.name + ". Assigning map-area-yellow.");
-                                finalClass = 'map-area-yellow';
-                                finalTitle += ' (Partially Booked by You - More Available Here)';
-                            } else {
-                                // REMOVED: console.log("DEBUG MAP: Path B2 for " + resource.name + ". Assigning map-area-dark-orange.");
-                                finalClass = 'map-area-dark-orange';
-                                finalTitle += ' (Partially Booked by You - Fully Utilized by You)';
-                            }
+                        if (resource.current_user_can_book === false) {
+                            finalClass = 'resource-area-permission-denied';
+                            finalTitle = resource.name + ' (Permission Denied)';
+                            isMapAreaClickable = false; // Ensure not clickable
+                            // The areaDiv.textContent is already set above
                         } else {
-                            // REMOVED: console.log("DEBUG MAP: Path C for " + resource.name + " (User has no bookings on this resource)");
-                            if (resource.is_under_maintenance && numGenerallyBooked === 0) {
-                                // REMOVED: console.log("DEBUG MAP: Path C1 for " + resource.name + ". Assigning map-area-light-blue (Maintenance).");
-                                finalClass = 'map-area-light-blue';
-                                finalTitle += ' (Under Maintenance)';
-                            } else if (numGenerallyBooked === numPrimarySlots) {
-                                // REMOVED: console.log("DEBUG MAP: Path C2 for " + resource.name + ". Assigning map-area-light-blue (Fully Booked by Others).");
-                                finalClass = 'map-area-light-blue';
-                                finalTitle += ' (Fully Booked by Others)';
-                            } else if (numGenerallyBooked === 0) { // Generally FULLY available (no bookings by anyone on this resource)
-                                if (numBookableByCurrentUser === numPrimarySlots) { // And current user can book all of it (no conflicts from their *other* bookings)
-                                    // console.log("DEBUG MAP: Condition for " + resource.name + ": Generally fully available, all slots available to current user. Assigning map-area-green.");
-                                    finalClass = 'map-area-green';
-                                    finalTitle += ' (Available)';
-                                } else if (numBookableByCurrentUser > 0) { // Generally fully available, but user's other conflicts block SOME (but not all) slots
-                                    // console.log("DEBUG MAP: Condition for " + resource.name + ": Generally fully available, but user conflicts block SOME slots. User can still book " + numBookableByCurrentUser + " slots. Assigning map-area-yellow.");
-                                    finalClass = 'map-area-yellow';
-                                    finalTitle += ' (Partially Available to You - Schedule Conflicts)';
-                                } else { // Generally fully available, but user's other schedule conflicts block ALL slots (numBookableByCurrentUser === 0)
-                                    // console.log("DEBUG MAP: Condition for " + resource.name + ": Generally fully available, but user conflicts block ALL slots. Assigning map-area-light-blue.");
-                                    finalClass = 'map-area-light-blue';
-                                    finalTitle += ' (Unavailable - Your Schedule Conflicts)';
-                                }
-                            } else { // numGenerallyBooked > 0 && numGenerallyBooked < numPrimarySlots
-                                // REMOVED: console.log("DEBUG MAP: Path C4 for " + resource.name + " (Generally partially available by others)");
+                            // User has permission, proceed with existing availability logic
+                            const numPrimarySlots = primarySlots.length;
+                            const numBookableByCurrentUser = primarySlots.filter(s => s.isBookableByCurrentUser).length;
+                            const numBookedByCurrentUser = primarySlots.filter(s => s.isBookedByCurrentUser).length;
+                            const numGenerallyBooked = primarySlots.filter(s => s.isGenerallyBooked).length;
+
+                            // REMOVED: console.log("DEBUG MAP: Counts for " + resource.name + ": BookedByCU=" + numBookedByCurrentUser + ", GenerallyBooked=" + numGenerallyBooked + ", BookableByCU=" + numBookableByCurrentUser + ", NumPrimarySlots=" + numPrimarySlots);
+
+                            if (numBookedByCurrentUser === numPrimarySlots) {
+                                // REMOVED: console.log("DEBUG MAP: Condition for " + resource.name + ": User booked all slots. Assigning map-area-red.");
+                                finalClass = 'map-area-red';
+                                finalTitle += ' (Booked by You - Full Day)';
+                            } else if (numBookedByCurrentUser > 0) {
+                                // REMOVED: console.log("DEBUG MAP: Condition for " + resource.name + ": User booked some slots.");
                                 if (numBookableByCurrentUser > 0) {
-                                    // REMOVED: console.log("DEBUG MAP: Path C4a for " + resource.name + ". Assigning map-area-yellow.");
+                                    // REMOVED: console.log("DEBUG MAP: Path B1 for " + resource.name + ". Assigning map-area-yellow.");
                                     finalClass = 'map-area-yellow';
-                                    finalTitle += ' (Partially Available)';
+                                    finalTitle += ' (Partially Booked by You - More Available Here)';
                                 } else {
-                                    // REMOVED: console.log("DEBUG MAP: Path C4b for " + resource.name + ". Assigning map-area-light-blue (User schedule conflicts for remaining).");
-                                    finalClass = 'map-area-light-blue';
-                                    finalTitle += ' (Unavailable - Your Schedule Conflicts)';
+                                    // REMOVED: console.log("DEBUG MAP: Path B2 for " + resource.name + ". Assigning map-area-dark-orange.");
+                                    finalClass = 'map-area-dark-orange';
+                                    finalTitle += ' (Partially Booked by You - Fully Utilized by You)';
                                 }
+                            } else {
+                                // REMOVED: console.log("DEBUG MAP: Path C for " + resource.name + " (User has no bookings on this resource)");
+                                if (resource.is_under_maintenance && numGenerallyBooked === 0) {
+                                    // REMOVED: console.log("DEBUG MAP: Path C1 for " + resource.name + ". Assigning map-area-light-blue (Maintenance).");
+                                    finalClass = 'map-area-light-blue';
+                                    finalTitle += ' (Under Maintenance)';
+                                } else if (numGenerallyBooked === numPrimarySlots) {
+                                    // REMOVED: console.log("DEBUG MAP: Path C2 for " + resource.name + ". Assigning map-area-light-blue (Fully Booked by Others).");
+                                    finalClass = 'map-area-light-blue';
+                                    finalTitle += ' (Fully Booked by Others)';
+                                } else if (numGenerallyBooked === 0) { // Generally FULLY available (no bookings by anyone on this resource)
+                                    if (numBookableByCurrentUser === numPrimarySlots) { // And current user can book all of it (no conflicts from their *other* bookings)
+                                        // console.log("DEBUG MAP: Condition for " + resource.name + ": Generally fully available, all slots available to current user. Assigning map-area-green.");
+                                        finalClass = 'map-area-green';
+                                        finalTitle += ' (Available)';
+                                    } else if (numBookableByCurrentUser > 0) { // Generally fully available, but user's other conflicts block SOME (but not all) slots
+                                        // console.log("DEBUG MAP: Condition for " + resource.name + ": Generally fully available, but user conflicts block SOME slots. User can still book " + numBookableByCurrentUser + " slots. Assigning map-area-yellow.");
+                                        finalClass = 'map-area-yellow';
+                                        finalTitle += ' (Partially Available to You - Schedule Conflicts)';
+                                    } else { // Generally fully available, but user's other schedule conflicts block ALL slots (numBookableByCurrentUser === 0)
+                                        // console.log("DEBUG MAP: Condition for " + resource.name + ": Generally fully available, but user conflicts block ALL slots. Assigning map-area-light-blue.");
+                                        finalClass = 'map-area-light-blue';
+                                        finalTitle += ' (Unavailable - Your Schedule Conflicts)';
+                                    }
+                                } else { // numGenerallyBooked > 0 && numGenerallyBooked < numPrimarySlots
+                                    // REMOVED: console.log("DEBUG MAP: Path C4 for " + resource.name + " (Generally partially available by others)");
+                                    if (numBookableByCurrentUser > 0) {
+                                        // REMOVED: console.log("DEBUG MAP: Path C4a for " + resource.name + ". Assigning map-area-yellow.");
+                                        finalClass = 'map-area-yellow';
+                                        finalTitle += ' (Partially Available)';
+                                    } else {
+                                        // REMOVED: console.log("DEBUG MAP: Path C4b for " + resource.name + ". Assigning map-area-light-blue (User schedule conflicts for remaining).");
+                                        finalClass = 'map-area-light-blue';
+                                        finalTitle += ' (Unavailable - Your Schedule Conflicts)';
+                                    }
+                                }
+                            }
+
+                            if (finalClass === 'map-area-unknown' || finalClass === '') { // Ensure a class if logic missed one
+                                 // REMOVED: console.warn("DEBUG MAP: Condition for " + resource.name + ": Fallback, unknown state. Assigning map-area-unknown.");
+                                 finalClass = 'map-area-light-blue'; // Default to a non-clickable, neutral color
+                                 finalTitle += ' (Status Unknown)';
+                            }
+                             // Determine clickability based on finalClass for permitted resources
+                            if (finalClass === 'map-area-green' || finalClass === 'map-area-yellow') {
+                                isMapAreaClickable = true;
                             }
                         }
 
-                        if (finalClass === 'map-area-unknown') {
-                             // REMOVED: console.warn("DEBUG MAP: Condition for " + resource.name + ": Fallback, unknown state. Assigning map-area-unknown.");
-                             finalTitle += ' (Status Unknown)';
-                        }
 
                         // REMOVED: console.log("DEBUG MAP: Final Class for " + resource.name + ":", finalClass, ". Final Title:", finalTitle);
 
-                        areaDiv.className = 'resource-area';
+                        areaDiv.className = 'resource-area'; // Reset class
                         areaDiv.classList.add(finalClass);
 
                         // Apply translucent background color
-                        const rgbString = colorMap[finalClass];
+                        // Ensure 'resource-area-permission-denied' is in colorMap or handled
+                        const rgbString = colorMap[finalClass] || colorMap['map-area-light-blue']; // Fallback color
                         if (rgbString) {
                             areaDiv.style.setProperty('background-color', `rgba(${rgbString}, ${mapResourceOpacity})`, 'important');
                         }
 
                         areaDiv.title = finalTitle;
 
-                        let isMapAreaClickable = false;
-                        if (finalClass === 'map-area-green' || finalClass === 'map-area-yellow') {
-                            isMapAreaClickable = true;
-                        }
-
+                        // Clickability is now determined before this block
                         if (isMapAreaClickable) {
                             areaDiv.classList.add('map-area-clickable');
                             areaDiv.addEventListener('click', function() {
