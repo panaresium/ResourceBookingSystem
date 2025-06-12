@@ -44,6 +44,7 @@
 
 html {
     height: 100%;
+    overflow-y: hidden; /* Add this line */
 }
 
 /* Dark theme color variables */
@@ -85,6 +86,11 @@ body {
     align-items: center;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     flex-shrink: 0;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1030;
 }
 
 /* Reset list-like styles for all elements within the header */
@@ -343,7 +349,7 @@ body {
 /* Main Content Styling */
 #main-content {
     margin-left: var(--sidebar-width);
-    padding: 30px 20px;
+    padding: calc(30px + var(--header-height)) 20px 30px 20px;
     overflow-y: auto;
     background-color: var(--background-color-light);
     box-sizing: border-box; /* Added this line */
@@ -1004,6 +1010,7 @@ body.high-contrast footer {
         min-height: var(--footer-height);
         padding-top: 5px;
         padding-bottom: 5px;
+        width: 100%;
     }
     .footer-accessibility-controls {
         display: flex;
@@ -1138,6 +1145,7 @@ body.high-contrast footer {
         padding-top: 10px;
         padding-bottom: 10px;
         /* height: auto; Removed for fixed footer consistency */
+        width: 100%;
     }
     footer > * {
         margin-bottom: 5px;
