@@ -911,12 +911,12 @@ def update_booking_settings():
 
         # Auto Check-out Settings
         settings.enable_auto_checkout = request.form.get('enable_auto_checkout') == 'on'
-        auto_checkout_delay_hours_str = request.form.get('auto_checkout_delay_hours', '1')
+        auto_checkout_delay_minutes_str = request.form.get('auto_checkout_delay_minutes', '60')
         try:
-            auto_checkout_delay_hours_val = int(auto_checkout_delay_hours_str) if auto_checkout_delay_hours_str.strip() else 1
-            if auto_checkout_delay_hours_val < 1:
-                raise ValueError("Auto Check-out Delay must be at least 1 hour.")
-            settings.auto_checkout_delay_hours = auto_checkout_delay_hours_val
+            auto_checkout_delay_minutes_val = int(auto_checkout_delay_minutes_str) if auto_checkout_delay_minutes_str.strip() else 60
+            if auto_checkout_delay_minutes_val < 1:
+                raise ValueError("Auto Check-out Delay must be at least 1 minute.")
+            settings.auto_checkout_delay_minutes = auto_checkout_delay_minutes_val
         except ValueError as ve_auto_checkout:
             db.session.rollback()
             flash(f'{_("Invalid Auto Check-out Delay")}: {str(ve_auto_checkout)}', 'danger')
@@ -956,7 +956,7 @@ def update_booking_settings():
             f"resource_checkin_url_requires_login={settings.resource_checkin_url_requires_login}, "
             f"allow_check_in_without_pin={settings.allow_check_in_without_pin}, "
             f"enable_auto_checkout={settings.enable_auto_checkout}, "
-            f"auto_checkout_delay_hours={settings.auto_checkout_delay_hours}, "
+            f"auto_checkout_delay_minutes={settings.auto_checkout_delay_minutes}, "
             f"auto_release_if_not_checked_in_minutes={settings.auto_release_if_not_checked_in_minutes}"
         )
         # Assuming add_audit_log is available and imported

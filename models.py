@@ -98,7 +98,7 @@ class BookingSettings(db.Model):
     resource_checkin_url_requires_login = db.Column(db.Boolean, default=True, nullable=False)
     map_resource_opacity = db.Column(db.Float, nullable=False, default=0.7)
     enable_auto_checkout = db.Column(db.Boolean, default=False, nullable=False)
-    auto_checkout_delay_hours = db.Column(db.Integer, default=1, nullable=False)
+    auto_checkout_delay_minutes = db.Column(db.Integer, default=60, nullable=False)
 
     # Global offset in hours to adjust "current time" perception for booking logic.
     # Positive values make "now" seem earlier (allowing bookings further in the past if past bookings are enabled, or requiring future bookings to be even further out).

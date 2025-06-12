@@ -26,10 +26,10 @@ def auto_checkout_overdue_bookings(app): # app is now a required argument
             return
 
         enable_auto_checkout = booking_settings.enable_auto_checkout
-        auto_checkout_delay_hours = booking_settings.auto_checkout_delay_hours
+        auto_checkout_delay_minutes = booking_settings.auto_checkout_delay_minutes # Changed
         current_offset_hours = booking_settings.global_time_offset_hours if hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
 
-        logger.info(f"Scheduler: Auto-checkout enabled: {enable_auto_checkout}, Delay: {auto_checkout_delay_hours} hours, Offset: {current_offset_hours} hours.")
+        logger.info(f"Scheduler: Auto-checkout enabled: {enable_auto_checkout}, Delay: {auto_checkout_delay_minutes} minutes, Offset: {current_offset_hours} hours.") # Changed
 
         if not enable_auto_checkout:
             logger.info("Scheduler: Auto-checkout feature is disabled in settings. Task will not run.")
@@ -39,7 +39,7 @@ def auto_checkout_overdue_bookings(app): # app is now a required argument
         effective_now_local_naive = effective_now_aware.replace(tzinfo=None) # Naive representation of venue's current time
 
         # Cutoff time in naive venue local time
-        cutoff_time_local_naive = effective_now_local_naive - timedelta(hours=auto_checkout_delay_hours)
+        cutoff_time_local_naive = effective_now_local_naive - timedelta(minutes=auto_checkout_delay_minutes) # Changed
 
         try:
             overdue_bookings = Booking.query.filter(
@@ -61,7 +61,7 @@ def auto_checkout_overdue_bookings(app): # app is now a required argument
 
             try:
                 # Set actual checkout time based on configured delay; this will be naive local
-                actual_checkout_time_local_naive = booking.end_time + timedelta(hours=auto_checkout_delay_hours)
+                actual_checkout_time_local_naive = booking.end_time + timedelta(minutes=auto_checkout_delay_minutes) # Changed
 
                 booking.checked_out_at = actual_checkout_time_local_naive # Store naive local
                 booking.status = 'completed'
@@ -97,7 +97,7 @@ def auto_checkout_overdue_bookings(app): # app is now a required argument
                                 floor_map_location = floor_map.location or "N/A"
                                 floor_map_floor = floor_map.floor or "N/A"
 
-                    explanation = f"This booking was automatically checked out because it was still active more than {auto_checkout_delay_hours} hour(s) past its scheduled end time."
+                    explanation = f"This booking was automatically checked out because it was still active more than {auto_checkout_delay_minutes} minute(s) past its scheduled end time." # Changed
 
                     # Times for email: start_time and end_time are naive local. actual_checkout_time_local_naive is also naive local.
                     # Display them as such, or convert to a specific display timezone if needed.
