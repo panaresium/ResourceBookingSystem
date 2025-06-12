@@ -1176,9 +1176,9 @@ def update_booking_by_user(booking_id):
                              f"on {user_self_conflict_check.start_time.strftime('%Y-%m-%d')}."
                 }), 409
 
-                # If all checks pass, booking.start_time and booking.end_time are already set to new values
-                changes_made = True
-                change_details_list.append(f"time from {old_start_time.isoformat()} to {booking.start_time.isoformat()}-{booking.end_time.isoformat()}")
+            current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] All conflict checks passed or were not applicable. Setting changes_made=True for time change.")
+            changes_made = True
+            change_details_list.append(f"time from {old_start_time.isoformat()} to {booking.start_time.isoformat()}-{booking.end_time.isoformat()}")
 
         if not changes_made:
             current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' submitted update with no actual changes.")
