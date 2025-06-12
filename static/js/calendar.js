@@ -287,13 +287,68 @@ document.addEventListener('DOMContentLoaded', () => {
             editable: false, // Disable drag-and-drop and resize
             eventClick: function(info) {
                 // Populate modal with event details
+
+                // Get references to new read-only display elements
+                const roResourceName = document.getElementById('cebm-ro-resource-name');
+                const roLocationFloor = document.getElementById('cebm-ro-location-floor');
+                const roBookingTitle = document.getElementById('cebm-ro-booking-title');
+                const roDatetimeRange = document.getElementById('cebm-ro-datetime-range');
+
+                // Hide the old general resource name display
+                const oldResourceNameP = document.getElementById('cebm-resource-name');
+                if (oldResourceNameP && oldResourceNameP.parentNode) {
+                    oldResourceNameP.parentNode.style.display = 'none';
+                }
+
+                // Populate new read-only fields
+                if (roResourceName) {
+                    roResourceName.textContent = info.event.extendedProps.resource_name || 'N/A';
+                }
+                if (roLocationFloor) {
+                    const location = info.event.extendedProps.location || "N/A";
+                    const floor = info.event.extendedProps.floor || "N/A";
+                    roLocationFloor.textContent = `${location} - ${floor}`;
+                }
+                if (roBookingTitle) {
+                    roBookingTitle.textContent = info.event.title || 'N/A';
+                }
+                if (roDatetimeRange && info.event.start) {
+                    const startDate = new Date(info.event.start);
+                    const year = startDate.getFullYear();
+                    const month = (startDate.getMonth() + 1).toString().padStart(2, '0');
+                    const day = startDate.getDate().toString().padStart(2, '0');
+                    const datePart = `${year}-${month}-${day}`;
+
+                    let startTimeStr, endTimeStr;
+                    if (info.event.extendedProps.booking_display_start_time && info.event.extendedProps.booking_display_end_time) {
+                        startTimeStr = info.event.extendedProps.booking_display_start_time; // HH:MM
+                        endTimeStr = info.event.extendedProps.booking_display_end_time;   // HH:MM
+                    } else {
+                        const optionsTime = { hour: '2-digit', minute: '2-digit', hour12: false };
+                        startTimeStr = startDate.toLocaleTimeString([], optionsTime);
+                        if (info.event.end) {
+                            const endDate = new Date(info.event.end);
+                            endTimeStr = endDate.toLocaleTimeString([], optionsTime);
+                        } else {
+                            endTimeStr = "N/A";
+                        }
+                    }
+                    roDatetimeRange.textContent = `${datePart} ${startTimeStr} - ${endTimeStr}`;
+                } else if (roDatetimeRange) {
+                    roDatetimeRange.textContent = 'N/A';
+                }
+
+                // Populate existing editable fields (ensure this logic is preserved)
                 cebmBookingId.value = info.event.id;
-                cebmBookingTitle.value = info.event.title;
+                cebmBookingTitle.value = info.event.title; // This is the input field for editing
 
-                // Ensure resource_name is correctly sourced. Assuming it's in extendedProps.
-                cebmResourceName.textContent = info.event.extendedProps.resource_name || info.event.title || 'N/A';
+                // This was the old way of setting the general resource name, ensure it's not needed or adapt
+                // cebmResourceName.textContent = info.event.extendedProps.resource_name || info.event.title || 'N/A';
+                // Since we hid the parent paragraph of 'cebm-resource-name', this line is not strictly necessary for display,
+                // but if other JS logic relies on its textContent, it should be reviewed.
+                // For now, the new 'cebm-ro-resource-name' handles the display.
 
-                // Store resource_id in hidden input
+                // Store resource_id in hidden input (preserve this)
                 const cebmResourceIdInput = document.getElementById('cebm-resource-id');
                 cebmResourceIdInput.value = info.event.extendedProps.resource_id;
 
