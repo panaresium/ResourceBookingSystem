@@ -124,6 +124,29 @@ def get_audit_logs():
 def ping():
     return jsonify(message='pong', timestamp=datetime.now(timezone.utc).isoformat()), 200
 
+@api_system_bp.route('/api/system/today', methods=['GET'])
+def get_server_today_date():
+    '''
+    Returns the server's current date in YYYY-MM-DD format.
+    This is used by the frontend calendar to have an authoritative 'today'.
+    '''
+    try:
+        today_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        # Using current_app.logger for consistency if available, otherwise print
+        logger = getattr(current_app, 'logger', None)
+        if logger:
+            logger.debug(f"API call to /api/system/today, returning date: {today_date}")
+        else:
+            print(f"API call to /api/system/today, returning date: {today_date}")
+        return jsonify({'current_date': today_date}), 200
+    except Exception as e:
+        logger = getattr(current_app, 'logger', None)
+        if logger:
+            logger.error(f"Error in /api/system/today endpoint: {e}", exc_info=True)
+        else:
+            print(f"Error in /api/system/today endpoint: {e}")
+        return jsonify({'error': 'Failed to retrieve server date due to an internal error.'}), 500
+
 @api_system_bp.route('/debug/list_routes', methods=['GET'])
 @login_required
 # @permission_required('manage_system') # Or some debug permission
