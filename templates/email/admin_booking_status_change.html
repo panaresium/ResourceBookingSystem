@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Booking Status Updated</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { width: 90%; max-width: 600px; margin: 20px auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+        .header { font-size: 1.5em; color: #007bff; margin-bottom: 15px; }
+        .content p { margin-bottom: 10px; }
+        .content strong { color: #555; }
+        .status-change { margin-top: 15px; padding: 10px; border: 1px solid #eee; background-color: #f9f9f9; }
+        .status-old { color: #dc3545; }
+        .status-new { color: #28a745; font-weight: bold; }
+        .footer { margin-top: 20px; font-size: 0.9em; color: #777; text-align: center; }
+        .button { display: inline-block; padding: 10px 15px; background-color: #007bff; color: #ffffff; text-decoration: none; border-radius: 3px; margin-top:15px}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">Booking Status Updated</div>
+        <div class="content">
+            <p>Hello {{ user_name }},</p>
+            <p>An administrator has updated the status of one of your bookings.</p>
+
+            <p><strong>Booking Details:</strong></p>
+            <ul>
+                <li><strong>Resource:</strong> {{ resource_name }}</li>
+                {% if booking_title %}
+                <li><strong>Title:</strong> {{ booking_title }}</li>
+                {% endif %}
+                <li><strong>Time:</strong> {{ start_time }} - {{ end_time }}</li>
+            </ul>
+
+            <div class="status-change">
+                <p>The status of this booking has changed:</p>
+                <p>From: <strong class="status-old">{{ old_status }}</strong></p>
+                <p>To: <strong class="status-new">{{ new_status }}</strong></p>
+            </div>
+
+            {% if admin_reason %}
+            <p><strong>Administrator's Reason:</strong></p>
+            <p>{{ admin_reason }}</p>
+            {% endif %}
+
+            <p>You can view your bookings or make new ones by visiting the platform:</p>
+            <a href="{{ my_bookings_url }}" class="button">View My Bookings</a>
+        </div>
+        <div class="footer">
+            Thank you for using our booking system.
+        </div>
+    </div>
+</body>
+</html>

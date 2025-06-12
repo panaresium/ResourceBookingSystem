@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request, current_app
+from flask import Blueprint, jsonify, request, current_app, render_template, url_for
 from flask_login import login_required, current_user
 from datetime import timezone, timedelta # Added timezone and timedelta
 
@@ -371,6 +371,54 @@ def update_booking_status(booking_id):
     booking.status = new_status
     try:
         db.session.commit()
+
+        # Send email notification about status change
+        try:
+            user = User.query.filter_by(username=booking.user_name).first()
+            resource = Resource.query.get(booking.resource_id)
+
+            if user and user.email and resource:
+                # booking_settings = BookingSettings.query.first() # Not strictly needed if displaying stored time directly
+                # offset_hours = booking_settings.global_time_offset_hours if booking_settings and booking_settings.global_time_offset_hours is not None else 0
+
+                # Display times as stored (venue local time)
+                start_time_display = booking.start_time.strftime('%Y-%m-%d %H:%M')
+                end_time_display = booking.end_time.strftime('%Y-%m-%d %H:%M')
+
+                email_context = {
+                    'user_name': user.username,
+                    'resource_name': resource.name,
+                    'booking_title': booking.title or 'N/A', # Handle if title is None
+                    'start_time': start_time_display,
+                    'end_time': end_time_display,
+                    'old_status': current_status,
+                    'new_status': booking.status, # This is new_status
+                    'admin_reason': None, # No specific reason field in this function currently
+                    'my_bookings_url': url_for('ui.my_bookings_page', _external=True)
+                }
+
+                html_body = render_template('email/admin_booking_status_change.html', **email_context)
+                text_body = render_template('email/admin_booking_status_change_text.html', **email_context)
+
+                email_subject = f"Booking Status Updated: {resource.name} - {booking.title or 'Booking'}"
+
+                send_email(
+                    to_address=user.email,
+                    subject=email_subject,
+                    body=text_body,
+                    html_body=html_body
+                )
+                current_app.logger.info(f"Admin status change notification email sent to {user.email} for booking ID {booking.id}.")
+            elif not user:
+                current_app.logger.warning(f"User {booking.user_name} not found. Cannot send status change email for booking ID {booking.id}.")
+            elif not user.email:
+                current_app.logger.warning(f"User {booking.user_name} (ID: {user.id if user else 'N/A'}) has no email. Cannot send status change email for booking ID {booking.id}.")
+            elif not resource:
+                current_app.logger.warning(f"Resource ID {booking.resource_id} not found for booking ID {booking.id}. Cannot send status change email.")
+
+        except Exception as e_email:
+            current_app.logger.error(f"Failed to send admin status change email for booking ID {booking.id}: {str(e_email)}", exc_info=True)
+
         add_audit_log(
             action="UPDATE_BOOKING_STATUS",
             details=f"Admin {current_user.username} updated booking ID {booking.id} status from '{current_status}' to '{new_status}'."

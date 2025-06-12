@@ -1,0 +1,23 @@
+Hello {{ user_name }},
+
+An administrator has updated the status of one of your bookings.
+
+Booking Details:
+- Resource: {{ resource_name }}
+{% if booking_title %}
+- Title: {{ booking_title }}
+{% endif %}
+- Time: {{ start_time }} - {{ end_time }}
+
+Status Change:
+- Old Status: {{ old_status }}
+- New Status: {{ new_status }}
+
+{% if admin_reason %}
+Administrator's Reason:
+{{ admin_reason }}
+{% endif %}
+
+You can view your bookings here: {{ my_bookings_url }}
+
+Thank you for using our booking system.
