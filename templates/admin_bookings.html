@@ -53,81 +53,206 @@
         {# <button type="submit" class="button" style="padding: 5px 10px;">{{ _('Apply Filters') }}</button> #}
     </form>
 
-    {% if bookings %}
-    <div class="table-responsive">
-        <table id="admin-bookings-table" class="table bookings-table"> {# Added id #}
-            <thead>
-                <tr>
-                    <th>{{ _('ID') }}</th>
-                    <th>{{ _('User') }}</th>
-                    <th>{{ _('Resource') }}</th>
-                    <th>{{ _('Title') }}</th>
-                    <th>{{ _('Start Time') }}</th>
-                    <th>{{ _('End Time') }}</th>
-                    <th>{{ _('Status') }}</th>
-                    <th>{{ _('Actions') }}</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for booking in bookings %}
-                {# Added dynamic class for row styling based on status, and improved condition for table-warning #}
-                <tr class="booking-row-{{ booking.status | lower | replace('_', '-') }} {{ 'table-warning' if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message else '' }}">
-                    <td>{{ booking.id }}</td>
-                    <td>{{ booking.user_username }}</td>
-                    <td>{{ booking.resource_name }}</td>
-                    <td>
-                        {{ booking.title if booking.title else '-' }}
-                        {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
-                          <div class="alert alert-warning p-1 my-1">
-                            <small><strong>{{ _('Admin Cancellation:') }}</strong> {{ booking.admin_deleted_message }}</small>
-                          </div>
-                        {% endif %}
-                    </td>
-                    <td>{{ booking.start_time.strftime('%Y-%m-%d %H:%M') if booking.start_time else '-' }}</td>
-                    <td>{{ booking.end_time.strftime('%Y-%m-%d %H:%M') if booking.end_time else '-' }}</td>
-                    {# Updated status display to be more readable and use new CSS class convention #}
-                    <td><span class="status-badge status-{{ booking.status | lower | replace('_', '-') }}" id="status-badge-{{ booking.id }}">{{ booking.status.replace('_', ' ').capitalize() }}</span></td>
-                    <td class="actions-cell" data-booking-id="{{ booking.id }}">
-                        <div class="btn-group-vertical btn-group-sm d-inline-flex" role="group" aria-label="Booking Actions">
-                            {# Cancel button - shown for statuses that are active and can be cancelled by admin #}
-                            {% if booking.status and booking.status.lower() not in ['completed', 'checked_out', 'cancelled', 'cancelled_by_user', 'cancelled_by_admin', 'cancelled_admin_acknowledged', 'rejected', 'system_cancelled', 'no_show', 'expired'] %}
-                                <button class="btn btn-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel Booking') }}</button>
-                            {% endif %}
+    {% if new_sorting_active %}
+        {# New structure with Upcoming/Current and Past bookings sections #}
 
-                            {# Send Confirmation Email button - generally always available #}
-                            <button class="btn btn-info send-confirmation-email-btn mt-1" data-booking-id="{{ booking.id }}">{{ _('Send Email') }}</button>
+        {# Upcoming/Current Bookings Section #}
+        <div class="bookings-section mt-4">
+            <h2 class="mb-3">{{ _('Upcoming/Current Bookings') }}</h2>
+            {% if upcoming_bookings %}
+            <div class="table-responsive">
+                <table id="admin-upcoming-bookings-table" class="table bookings-table sortable-table">
+                    <thead>
+                        <tr>
+                            <th class="sortable-header" data-sort-column="id" data-sort-direction="asc">{{ _('ID') }} <span class="sort-indicator"></span></th>
+                            <th class="sortable-header" data-sort-column="user_username" data-sort-direction="asc">{{ _('User') }} <span class="sort-indicator"></span></th>
+                            <th class="sortable-header" data-sort-column="resource_name" data-sort-direction="asc">{{ _('Resource') }} <span class="sort-indicator"></span></th>
+                            <th class="sortable-header" data-sort-column="title" data-sort-direction="asc">{{ _('Title') }} <span class="sort-indicator"></span></th>
+                            <th class="sortable-header" data-sort-column="start_time" data-sort-direction="asc">{{ _('Start Time') }} <span class="sort-indicator"></span></th>
+                            <th class="sortable-header" data-sort-column="end_time" data-sort-direction="asc">{{ _('End Time') }} <span class="sort-indicator"></span></th>
+                            <th class="sortable-header" data-sort-column="status" data-sort-direction="asc">{{ _('Status') }} <span class="sort-indicator"></span></th>
+                            <th>{{ _('Actions') }}</th> {# Actions column is typically not sorted #}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for booking in upcoming_bookings %}
+                        <tr class="booking-row-separator booking-row-{{ booking.status | lower | replace('_', '-') }} {{ 'table-warning' if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message else '' }}">
+                            <td>{{ booking.id }}</td>
+                            <td>{{ booking.user_username }}</td>
+                            <td>{{ booking.resource_name }}</td>
+                            <td>
+                                {{ booking.title if booking.title else '-' }}
+                                {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
+                                  <div class="alert alert-warning p-1 my-1">
+                                    <small><strong>{{ _('Admin Cancellation:') }}</strong> {{ booking.admin_deleted_message }}</small>
+                                  </div>
+                                {% endif %}
+                            </td>
+                            <td>{{ booking.start_time.strftime('%Y-%m-%d %H:%M') if booking.start_time else '-' }}</td>
+                            <td>{{ booking.end_time.strftime('%Y-%m-%d %H:%M') if booking.end_time else '-' }}</td>
+                            <td><span class="status-badge status-{{ booking.status | lower | replace('_', '-') }}" id="status-badge-{{ booking.id }}">{{ booking.status.replace('_', ' ').capitalize() }}</span></td>
+                            <td class="actions-cell" data-booking-id="{{ booking.id }}">
+                                <div class="btn-group-vertical btn-group-sm d-inline-flex" role="group" aria-label="Booking Actions">
+                                    {% if booking.status and booking.status.lower() not in ['completed', 'checked_out', 'cancelled', 'cancelled_by_user', 'cancelled_by_admin', 'cancelled_admin_acknowledged', 'rejected', 'system_cancelled', 'no_show', 'expired'] %}
+                                        <button class="btn btn-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel Booking') }}</button>
+                                    {% endif %}
+                                    <button class="btn btn-info send-confirmation-email-btn mt-1" data-booking-id="{{ booking.id }}">{{ _('Send Email') }}</button>
+                                    <select class="form-select form-select-sm change-status-dropdown mt-1" data-booking-id="{{ booking.id }}" data-current-status="{{ booking.status }}">
+                                        <option value="" disabled>{{ _('Change status...') }}</option>
+                                        {% for stat in all_statuses %} {# Use all_statuses passed from backend #}
+                                            <option value="{{ stat }}" {% if stat == booking.status %}selected{% endif %}>
+                                                {{ stat.replace('_', ' ').capitalize() }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                    {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
+                                      <button class="btn btn-outline-secondary dismiss-admin-message-btn mt-1" data-booking-id="{{ booking.id }}">
+                                        {{ _('Dismiss Message') }}
+                                      </button>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p>{{ _('No upcoming or current bookings found.') }}</p>
+            {% endif %}
+        </div>
 
-                            {# Status Update Dropdown - generally always available #}
-                            <select class="form-select form-select-sm change-status-dropdown mt-1" data-booking-id="{{ booking.id }}" data-current-status="{{ booking.status }}">
-                                <option value="" disabled>{{ _('Change status...') }}</option> {# Placeholder #}
-                                {% for stat in all_statuses %}
-                                    <option value="{{ stat }}" {% if stat == booking.status %}selected{% endif %}>
-                                        {{ stat.replace('_', ' ').capitalize() }}
-                                    </option>
-                                {% endfor %}
-                            </select>
+        {# Past Bookings Section #}
+        <div class="bookings-section mt-5">
+            <h2 class="mb-3">{{ _('Past Bookings') }}</h2>
+            {% if past_bookings %}
+            <div class="table-responsive">
+                <table id="admin-past-bookings-table" class="table bookings-table sortable-table">
+                    <thead>
+                        <tr>
+                            <th class="sortable-header" data-sort-column="id" data-sort-direction="asc">{{ _('ID') }} <span class="sort-indicator"></span></th>
+                            <th class="sortable-header" data-sort-column="user_username" data-sort-direction="asc">{{ _('User') }} <span class="sort-indicator"></span></th>
+                            <th class="sortable-header" data-sort-column="resource_name" data-sort-direction="asc">{{ _('Resource') }} <span class="sort-indicator"></span></th>
+                            <th class="sortable-header" data-sort-column="title" data-sort-direction="asc">{{ _('Title') }} <span class="sort-indicator"></span></th>
+                            <th class="sortable-header" data-sort-column="start_time" data-sort-direction="asc">{{ _('Start Time') }} <span class="sort-indicator"></span></th>
+                            <th class="sortable-header" data-sort-column="end_time" data-sort-direction="asc">{{ _('End Time') }} <span class="sort-indicator"></span></th>
+                            <th class="sortable-header" data-sort-column="status" data-sort-direction="asc">{{ _('Status') }} <span class="sort-indicator"></span></th>
+                            <th>{{ _('Actions') }}</th> {# Actions column is typically not sorted #}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for booking in past_bookings %}
+                        <tr class="booking-row-separator booking-row-{{ booking.status | lower | replace('_', '-') }} {{ 'table-warning' if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message else '' }}">
+                            <td>{{ booking.id }}</td>
+                            <td>{{ booking.user_username }}</td>
+                            <td>{{ booking.resource_name }}</td>
+                            <td>
+                                {{ booking.title if booking.title else '-' }}
+                                {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
+                                  <div class="alert alert-warning p-1 my-1">
+                                    <small><strong>{{ _('Admin Cancellation:') }}</strong> {{ booking.admin_deleted_message }}</small>
+                                  </div>
+                                {% endif %}
+                            </td>
+                            <td>{{ booking.start_time.strftime('%Y-%m-%d %H:%M') if booking.start_time else '-' }}</td>
+                            <td>{{ booking.end_time.strftime('%Y-%m-%d %H:%M') if booking.end_time else '-' }}</td>
+                            <td><span class="status-badge status-{{ booking.status | lower | replace('_', '-') }}" id="status-badge-{{ booking.id }}">{{ booking.status.replace('_', ' ').capitalize() }}</span></td>
+                            <td class="actions-cell" data-booking-id="{{ booking.id }}">
+                                 <div class="btn-group-vertical btn-group-sm d-inline-flex" role="group" aria-label="Booking Actions">
+                                    {% if booking.status and booking.status.lower() not in ['completed', 'checked_out', 'cancelled', 'cancelled_by_user', 'cancelled_by_admin', 'cancelled_admin_acknowledged', 'rejected', 'system_cancelled', 'no_show', 'expired'] %}
+                                        {# Fewer actions typically available for past bookings, but kept for consistency if backend allows #}
+                                        <button class="btn btn-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel Booking') }}</button>
+                                    {% endif %}
+                                    <button class="btn btn-info send-confirmation-email-btn mt-1" data-booking-id="{{ booking.id }}">{{ _('Send Email') }}</button>
+                                    <select class="form-select form-select-sm change-status-dropdown mt-1" data-booking-id="{{ booking.id }}" data-current-status="{{ booking.status }}">
+                                        <option value="" disabled>{{ _('Change status...') }}</option>
+                                        {% for stat in all_statuses %} {# Use all_statuses passed from backend #}
+                                            <option value="{{ stat }}" {% if stat == booking.status %}selected{% endif %}>
+                                                {{ stat.replace('_', ' ').capitalize() }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                    {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
+                                      <button class="btn btn-outline-secondary dismiss-admin-message-btn mt-1" data-booking-id="{{ booking.id }}">
+                                        {{ _('Dismiss Message') }}
+                                      </button>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p>{{ _('No past bookings found.') }}</p>
+            {% endif %}
+        </div>
 
-                            {# Dismiss Admin Message button - specific to 'cancelled_by_admin' with a message #}
-                            {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
-                              <button class="btn btn-outline-secondary dismiss-admin-message-btn mt-1" data-booking-id="{{ booking.id }}">
-                                {{ _('Dismiss Message') }}
-                              </button>
-                            {% endif %}
-                        </div>
-                        {# Fallback for states where no actions are available in the group above #}
-                        {# This logic is tricky. If the div above is empty, this will show. #}
-                        {% if not (booking.status and booking.status.lower() not in ['completed', 'checked_out', 'cancelled', 'cancelled_by_user', 'cancelled_by_admin', 'cancelled_admin_acknowledged', 'rejected', 'system_cancelled', 'no_show', 'expired']) and not (booking.status == 'cancelled_by_admin' and booking.admin_deleted_message) %}
-                            {# This means no "Cancel" button and no "Dismiss" button. Email and Dropdown are always there. So this might not be needed. #}
-                            {# Let's remove this else part for now as the dropdown and email button are always shown. #}
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
     {% else %}
-    <p>{{ _('No bookings found.') }}</p>
+        {# Fallback to old structure if new_sorting_active is not true (or bookings var is present) #}
+        {# This part assumes 'bookings' variable might be passed in old format if new_sorting_active is false #}
+        {% if bookings %}
+            <div class="table-responsive">
+                <table id="admin-bookings-table" class="table bookings-table">
+                    <thead>
+                        <tr>
+                            <th>{{ _('ID') }}</th>
+                            <th>{{ _('User') }}</th>
+                            <th>{{ _('Resource') }}</th>
+                            <th>{{ _('Title') }}</th>
+                            <th>{{ _('Start Time') }}</th>
+                            <th>{{ _('End Time') }}</th>
+                            <th>{{ _('Status') }}</th>
+                            <th>{{ _('Actions') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for booking in bookings %}
+                        <tr class="booking-row-separator booking-row-{{ booking.status | lower | replace('_', '-') }} {{ 'table-warning' if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message else '' }}">
+                            <td>{{ booking.id }}</td>
+                            <td>{{ booking.user_username }}</td>
+                            <td>{{ booking.resource_name }}</td>
+                            <td>
+                                {{ booking.title if booking.title else '-' }}
+                                {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
+                                <div class="alert alert-warning p-1 my-1">
+                                    <small><strong>{{ _('Admin Cancellation:') }}</strong> {{ booking.admin_deleted_message }}</small>
+                                </div>
+                                {% endif %}
+                            </td>
+                            <td>{{ booking.start_time.strftime('%Y-%m-%d %H:%M') if booking.start_time else '-' }}</td>
+                            <td>{{ booking.end_time.strftime('%Y-%m-%d %H:%M') if booking.end_time else '-' }}</td>
+                            <td><span class="status-badge status-{{ booking.status | lower | replace('_', '-') }}" id="status-badge-{{ booking.id }}">{{ booking.status.replace('_', ' ').capitalize() }}</span></td>
+                            <td class="actions-cell" data-booking-id="{{ booking.id }}">
+                                <div class="btn-group-vertical btn-group-sm d-inline-flex" role="group" aria-label="Booking Actions">
+                                    {% if booking.status and booking.status.lower() not in ['completed', 'checked_out', 'cancelled', 'cancelled_by_user', 'cancelled_by_admin', 'cancelled_admin_acknowledged', 'rejected', 'system_cancelled', 'no_show', 'expired'] %}
+                                        <button class="btn btn-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel Booking') }}</button>
+                                    {% endif %}
+                                    <button class="btn btn-info send-confirmation-email-btn mt-1" data-booking-id="{{ booking.id }}">{{ _('Send Email') }}</button>
+                                    <select class="form-select form-select-sm change-status-dropdown mt-1" data-booking-id="{{ booking.id }}" data-current-status="{{ booking.status }}">
+                                        <option value="" disabled>{{ _('Change status...') }}</option>
+                                        {% for stat in all_statuses %}
+                                            <option value="{{ stat }}" {% if stat == booking.status %}selected{% endif %}>
+                                                {{ stat.replace('_', ' ').capitalize() }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                    {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
+                                    <button class="btn btn-outline-secondary dismiss-admin-message-btn mt-1" data-booking-id="{{ booking.id }}">
+                                        {{ _('Dismiss Message') }}
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p>{{ _('No bookings found.') }}</p>
+        {% endif %}
     {% endif %}
 </div>
 
@@ -441,6 +566,70 @@ document.addEventListener('DOMContentLoaded', function() {
             .finally(() => {
                 this.disabled = false;
             });
+        });
+    });
+
+    // --- Client-side Table Sorting ---
+    document.querySelectorAll('.sortable-header').forEach(header => {
+        header.addEventListener('click', function() {
+            const table = this.closest('table.sortable-table');
+            if (!table) return;
+
+            const tbody = table.querySelector('tbody');
+            const columnKey = this.dataset.sortColumn;
+            let sortDirection = this.dataset.sortDirection || 'asc';
+
+            // Toggle direction
+            sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            this.dataset.sortDirection = sortDirection;
+
+            // Update indicators (simple text for now, can be icons)
+            table.querySelectorAll('.sort-indicator').forEach(ind => ind.textContent = '');
+            this.querySelector('.sort-indicator').textContent = sortDirection === 'asc' ? ' ▲' : ' ▼';
+
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+
+            rows.sort((rowA, rowB) => {
+                let valA, valB;
+
+                // Attempt to find the cell by its index based on header's index
+                const headerIndex = Array.from(this.parentNode.children).indexOf(this);
+                const cellA = rowA.cells[headerIndex];
+                const cellB = rowB.cells[headerIndex];
+
+                if (!cellA || !cellB) return 0;
+
+                valA = cellA.textContent.trim().toLowerCase();
+                valB = cellB.textContent.trim().toLowerCase();
+
+                // Special handling for dates/times if the columnKey suggests it
+                if (columnKey === 'start_time' || columnKey === 'end_time') {
+                    // Assuming dates are in 'YYYY-MM-DD HH:MM' format in textContent
+                    // This might need adjustment if strftime format changes or if direct data attributes are available
+                    // For robustness, it's better to sort based on actual datetime objects if possible,
+                    // or store sortable values in data attributes on the cells/rows.
+                    // For now, string comparison of formatted dates.
+                    // This will work for ISO-like formats (YYYY-MM-DD HH:MM)
+                } else if (columnKey === 'id') {
+                    valA = parseInt(valA, 10);
+                    valB = parseInt(valB, 10);
+                }
+                // Add more type handling as needed (numbers, etc.)
+
+                if (valA < valB) {
+                    return sortDirection === 'asc' ? -1 : 1;
+                }
+                if (valA > valB) {
+                    return sortDirection === 'asc' ? 1 : -1;
+                }
+                return 0;
+            });
+
+            // Re-append sorted rows
+            rows.forEach(row => tbody.appendChild(row));
+
+            console.log(`Sorting table by column: ${columnKey}, direction: ${sortDirection}`);
+            // Actual sorting logic will be more involved.
         });
     });
 });

@@ -90,7 +90,7 @@ def serve_admin_bookings_page():
             Booking.start_time,
             Booking.end_time,
             Booking.status,
-            Booking.admin_deleted_message, # Added admin_deleted_message to query
+            Booking.admin_deleted_message,
             User.username.label('user_username'),
             Resource.name.label('resource_name')
         ).join(Resource, Booking.resource_id == Resource.id)\
@@ -104,46 +104,108 @@ def serve_admin_bookings_page():
 
         if date_filter_str:
             try:
-                # Convert string to date object for comparison
                 date_filter_obj = datetime.strptime(date_filter_str, '%Y-%m-%d').date()
                 bookings_query = bookings_query.filter(func.date(Booking.start_time) == date_filter_obj)
             except ValueError:
                 logger.warning(f"Invalid date format for date_filter: '{date_filter_str}'. Ignoring filter.")
-                # Optionally, flash a message to the user
                 # flash('Invalid date format. Please use YYYY-MM-DD.', 'warning')
 
+        # Fetch all rows matching filters, without initial overall sorting if Python sort is preferred later.
+        # However, database level sorting for large datasets is usually more efficient.
+        # For this refactor, we'll fetch then sort in Python as per the plan.
+        all_booking_rows = bookings_query.all()
 
-        all_bookings = bookings_query.order_by(Booking.start_time.desc()).all()
+        upcoming_bookings_processed = []
+        past_bookings_processed = []
+        now_utc = datetime.now(timezone.utc)
 
-        bookings_list = []
-        for booking_row in all_bookings:
-            bookings_list.append({
-                'id': booking_row.id,
-                'title': booking_row.title,
-                'start_time': booking_row.start_time,
-                'end_time': booking_row.end_time,
-                'status': booking_row.status,
-                'user_username': booking_row.user_username,
-                'resource_name': booking_row.resource_name,
-                'admin_deleted_message': booking_row.admin_deleted_message
-            })
+        # Optional: Consider global_time_offset_hours from BookingSettings for 'effective_now'
+        # booking_settings = BookingSettings.query.first()
+        # current_offset_hours = booking_settings.global_time_offset_hours if booking_settings and booking_settings.global_time_offset_hours is not None else 0
+        # effective_now_for_comparison = now_utc - timedelta(hours=current_offset_hours)
+        # For this implementation, we use now_utc directly as per instruction, assuming start_time is UTC.
+
+        for row in all_booking_rows:
+            booking_data = {
+                'id': row.id,
+                'title': row.title,
+                'start_time': row.start_time, # This is a datetime object
+                'end_time': row.end_time,     # This is a datetime object
+                'status': row.status,
+                'user_username': row.user_username,
+                'resource_name': row.resource_name,
+                'admin_deleted_message': row.admin_deleted_message
+            }
+
+            # Partitioning based on start_time relative to now_utc
+            # Bookings starting now or in the future (or very recently, e.g. within an hour for "current")
+            # For simplicity, using >= now_utc for upcoming/current.
+            # A small buffer could be added: e.g., row.start_time >= (now_utc - timedelta(hours=1))
+            if row.start_time >= now_utc:
+                upcoming_bookings_processed.append(booking_data)
+            else:
+                past_bookings_processed.append(booking_data)
+
+        # Sort upcoming_or_current_bookings by start_time ascending (soonest first)
+        upcoming_bookings_processed.sort(key=lambda b: b['start_time'])
+        # Sort past_bookings by start_time descending (most recent past first)
+        past_bookings_processed.sort(key=lambda b: b['start_time'], reverse=True)
+
+        # The 'possible_statuses' list in the original code for the filter dropdown was:
+        # ['approved', 'checked_in', 'completed', 'cancelled', 'rejected', 'cancelled_by_admin']
+        # The admin_bookings.html template also uses `all_statuses` for the status change dropdown.
+        # This should be a comprehensive list of all valid statuses the system uses.
+        # For consistency, let's define a more comprehensive list or fetch from a central place if available.
+        # For now, using a more extended list similar to what was used in admin_api_bookings.py
+        comprehensive_statuses = [
+            'pending', 'approved', 'rejected', 'cancelled', 'checked_in', 'completed',
+            'cancelled_by_user', 'cancelled_by_admin', 'cancelled_admin_acknowledged',
+            'no_show', 'awaiting_payment', 'payment_failed', 'confirmed_pending_payment',
+            'rescheduled', 'awaiting_confirmation', 'under_review', 'on_hold', 'archived',
+            'expired', 'draft', 'system_cancelled', 'error', 'pending_approval',
+            'pending_resource_confirmation', 'active', 'inactive', 'user_confirmed',
+            'admin_confirmed', 'auto_approved', 'auto_cancelled', 'payment_pending',
+            'payment_received', 'fulfillment_pending', 'fulfillment_complete', 'action_required',
+            'dispute_raised', 'dispute_resolved', 'refund_pending', 'refund_completed',
+            'partially_refunded', 'voided', 'pending_cancellation', 'cancellation_requested',
+            'attended', 'absent', 'tentative', 'waitlisted', 'blocked', 'requires_modification',
+            'pending_reschedule', 'reschedule_confirmed', 'reschedule_declined',
+            'pending_payment_confirmation', 'payment_disputed', 'subscription_active',
+            'subscription_cancelled', 'subscription_ended', 'subscription_pending', 'trial', 'past_due'
+        ]
+        # Filter out any None or empty strings from comprehensive_statuses if they exist
+        comprehensive_statuses = sorted(list(set(s for s in comprehensive_statuses if s and s.strip())))
+
+
         return render_template("admin_bookings.html",
-                               bookings=bookings_list,
-                               all_statuses=possible_statuses,
+                               upcoming_bookings=upcoming_bookings_processed,
+                               past_bookings=past_bookings_processed,
+                               all_statuses=comprehensive_statuses, # Use the more comprehensive list
                                current_status_filter=status_filter,
                                all_users=all_users,
                                current_user_filter=user_filter,
-                               current_date_filter=date_filter_str)
+                               current_date_filter=date_filter_str,
+                               new_sorting_active=True)
     except Exception as e:
-        logger.error(f"Error fetching bookings for admin page: {e}", exc_info=True)
+        logger.error(f"Error fetching and sorting bookings for admin page: {e}", exc_info=True)
+        # Define comprehensive_statuses here as well for the error case
+        comprehensive_statuses = [
+            'pending', 'approved', 'rejected', 'cancelled', 'checked_in', 'completed',
+            'cancelled_by_user', 'cancelled_by_admin', 'cancelled_admin_acknowledged', 'no_show'
+            # A smaller, but still reasonable default list for error cases
+        ]
+        comprehensive_statuses = sorted(list(set(s for s in comprehensive_statuses if s and s.strip())))
+
         return render_template("admin_bookings.html",
-                               bookings=[],
-                               error="Could not load bookings.",
-                               all_statuses=possible_statuses,
+                               upcoming_bookings=[],
+                               past_bookings=[],
+                               error="Could not load and sort bookings.",
+                               all_statuses=comprehensive_statuses,
                                current_status_filter=status_filter,
-                               all_users=all_users, # Pass even in case of error for consistency
+                               all_users=all_users,
                                current_user_filter=user_filter,
-                               current_date_filter=date_filter_str)
+                               current_date_filter=date_filter_str,
+                               new_sorting_active=True)
 
 @admin_ui_bp.route('/backup_restore')
 @login_required

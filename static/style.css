@@ -1744,4 +1744,30 @@ ul.pagination.align-items-baseline > li.page-item {
     border-top: 1px solid rgba(0, 0, 0, 0.1); /* Default Bootstrap hr color/style */
 }
 
+/* === Styles for Admin Bookings Table Enhancements === */
+
+/* Row Separators for booking tables */
+.booking-row-separator td {
+    border-bottom: 1px solid #dee2e6; /* Light grey, common Bootstrap table border color */
+}
+
+/* Sortable Header Cursor */
+.sortable-header {
+    cursor: pointer;
+}
+
+/* Sort Indicators */
+.sortable-header .sort-indicator {
+    margin-left: 5px;
+    color: #6c757d; /* Muted grey */
+    font-weight: bold; /* Make arrows a bit more prominent */
+}
+
+/* Optional: Style for the table sections if needed for spacing */
+.bookings-section {
+    margin-bottom: 2rem; /* Add some space between Upcoming and Past sections */
+}
+
+/* === End of Styles for Admin Bookings Table Enhancements === */
+
 [end of static/style.css]
