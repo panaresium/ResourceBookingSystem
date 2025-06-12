@@ -1001,7 +1001,9 @@ def api_admin_get_table_data(table_name: str):
             record_dict_raw = row._asdict()
             record_dict_final = {}
             for col_name, val in record_dict_raw.items():
-                if isinstance(val, datetime):
+                if isinstance(val, datetime): # This handles datetime.datetime
+                    record_dict_final[col_name] = val.isoformat()
+                elif isinstance(val, time): # Add this condition for datetime.time
                     record_dict_final[col_name] = val.isoformat()
                 elif isinstance(val, uuid.UUID):
                     record_dict_final[col_name] = str(val)
