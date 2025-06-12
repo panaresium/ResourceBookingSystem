@@ -752,6 +752,54 @@ class TestUpdateBookingConflicts(AppTests):
         self.assertEqual(updated_booking_db.end_time, new_end_dt)
         self.logout()
 
+    def test_update_no_actual_change(self):
+        self.login('testuser', 'password')
+        booking = self._create_initial_booking('testuser', self.resource1.id, start_offset_hours=100, duration_hours=1, title="Original Title")
+
+        # Prepare payload with existing data
+        payload = {
+            "start_time": booking.start_time.isoformat(),
+            "end_time": booking.end_time.isoformat(),
+            "title": booking.title
+        }
+
+        response = self.client.put(f'/api/bookings/{booking.id}', data=json.dumps(payload), content_type='application/json')
+
+        self.assertEqual(response.status_code, 400, response.get_json())
+        self.assertEqual(response.get_json().get('error'), 'No changes supplied.')
+        self.logout()
+
+    def test_update_only_title_changed(self):
+        self.login('testuser', 'password')
+        booking = self._create_initial_booking('testuser', self.resource1.id, start_offset_hours=102, duration_hours=1, title="Original Title Only")
+        new_title = "Updated Title Only"
+
+        # Prepare payload, changing only the title
+        payload = {
+            "start_time": booking.start_time.isoformat(),
+            "end_time": booking.end_time.isoformat(),
+            "title": new_title
+        }
+
+        response = self.client.put(f'/api/bookings/{booking.id}', data=json.dumps(payload), content_type='application/json')
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        data = response.get_json()
+        self.assertEqual(data['title'], new_title)
+
+        # Verify times in response are unchanged (booking.start_time is naive UTC in test context)
+        expected_start_iso = booking.start_time.replace(tzinfo=timezone_original.utc).isoformat()
+        expected_end_iso = booking.end_time.replace(tzinfo=timezone_original.utc).isoformat()
+        self.assertEqual(data['start_time'], expected_start_iso)
+        self.assertEqual(data['end_time'], expected_end_iso)
+
+        # Verify in DB
+        updated_booking_db = db.session.get(Booking, booking.id)
+        self.assertEqual(updated_booking_db.title, new_title)
+        self.assertEqual(updated_booking_db.start_time, booking.start_time) # Should be unchanged
+        self.assertEqual(updated_booking_db.end_time, booking.end_time)     # Should be unchanged
+        self.logout()
+
 
 if __name__ == '__main__':
     unittest.main()
