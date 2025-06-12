@@ -346,8 +346,22 @@ def update_booking_status(booking_id):
     new_status = data['new_status']
     current_status = booking.status
 
-    ALLOWED_STATUSES = ['pending', 'approved', 'rejected', 'cancelled', 'checked_in', 'completed', 'cancelled_by_user', 'cancelled_by_admin', 'no_show', 'awaiting_payment', 'payment_failed', 'confirmed_pending_payment', 'rescheduled', 'awaiting_confirmation', 'under_review', 'on_hold', 'archived', 'expired', 'draft', 'system_cancelled', 'error', 'pending_approval', 'pending_resource_confirmation', 'active', 'inactive', 'user_confirmed', 'admin_confirmed', 'auto_approved', 'auto_cancelled', 'payment_pending', 'payment_received', 'fulfillment_pending', 'fulfillment_complete', 'action_required', 'dispute_raised', 'dispute_resolved', 'refund_pending', 'refund_completed', 'partially_refunded', 'voided', 'pending_cancellation', 'cancellation_requested', 'attended', 'absent', 'tentative', 'waitlisted', 'blocked', 'requires_modification', 'pending_reschedule', 'reschedule_confirmed', 'reschedule_declined', 'pending_payment_confirmation', 'payment_disputed', 'subscription_active', 'subscription_cancelled', 'subscription_ended', 'subscription_pending', 'trial', 'past_due']
-    # Extended from original example: 'approved', 'pending', 'checked_in', 'completed', 'cancelled'
+    ALLOWED_STATUSES = [
+        'pending',
+        'approved',
+        'rejected',
+        'cancelled',
+        'checked_in',
+        'completed',
+        'cancelled_by_user', # Retaining this as it's a common scenario, even if not explicitly set elsewhere in *these* files
+        'cancelled_by_admin',
+        'cancelled_admin_acknowledged', # Follow-up to cancelled_by_admin
+        'system_cancelled_no_checkin', # Set by scheduler, admin might need to view/filter
+        'confirmed', # Used in conflict/quota logic
+        'no_show', # Common manual admin status
+        'on_hold', # Useful manual admin status
+        'under_review' # Useful manual admin status
+    ]
 
     if new_status not in ALLOWED_STATUSES:
         return jsonify({'error': 'Invalid new_status provided.'}), 400
