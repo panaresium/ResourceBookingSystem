@@ -273,6 +273,122 @@ def admin_clear_booking_message(booking_id):
         )
         return jsonify({'error': 'Failed to clear admin message due to a server error.'}), 500
 
+
+@admin_api_bookings_bp.route('/bookings/<int:booking_id>/send_confirmation_email', methods=['POST'])
+@login_required
+@permission_required('manage_bookings')
+def send_booking_confirmation_email(booking_id):
+    booking = Booking.query.get_or_404(booking_id)
+    user = User.query.filter_by(username=booking.user_name).first()
+
+    if not user:
+        current_app.logger.error(f"User {booking.user_name} not found for booking {booking.id} when trying to send confirmation email.")
+        return jsonify({'error': 'User not found for this booking.'}), 404
+
+    if not user.email:
+        current_app.logger.error(f"User {user.username} (ID: {user.id}) has no email address for booking {booking.id}.")
+        return jsonify({'error': 'User email not found.'}), 400
+
+    resource_name = booking.resource_booked.name if booking.resource_booked else "N/A"
+
+    # Format start and end times
+    # Assuming start_time and end_time are stored in UTC and need to be displayed in a user-friendly format.
+    # For simplicity, using ISO format. Adjust formatting as needed.
+    # Also, consider applying the global time offset if applicable, similar to list_pending_bookings
+    booking_settings = BookingSettings.query.first()
+    current_offset_hours = 0
+    if booking_settings and hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None:
+        current_offset_hours = booking_settings.global_time_offset_hours
+
+    start_time_str = (booking.start_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).strftime('%Y-%m-%d %H:%M %Z')
+    end_time_str = (booking.end_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).strftime('%Y-%m-%d %H:%M %Z')
+
+    email_context = {
+        'user_name': user.username,
+        'resource_name': resource_name,
+        'start_time': start_time_str,
+        'end_time': end_time_str,
+        'booking_title': booking.title or "No Title",
+        'booking_id': booking.id
+    }
+
+    email_subject = "Booking Confirmation"
+    email_template = "email/booking_confirmation.html" # Path relative to templates directory
+
+    try:
+        send_email(
+            recipient_email=user.email,
+            subject=email_subject,
+            html_template=email_template,
+            context=email_context
+        )
+        add_audit_log(
+            action="SEND_BOOKING_CONFIRMATION_EMAIL",
+            details=f"Admin {current_user.username} sent confirmation email for booking ID {booking.id} to {user.email}."
+        )
+        current_app.logger.info(f"Booking confirmation email sent for booking {booking.id} to {user.email} by admin {current_user.username}.")
+        return jsonify({'success': True, 'message': 'Confirmation email sent.'}), 200
+    except Exception as e:
+        current_app.logger.error(f"Failed to send confirmation email for booking {booking.id} to {user.email}: {str(e)}")
+        return jsonify({'error': 'Failed to send email', 'details': str(e)}), 500
+
+
+@admin_api_bookings_bp.route('/bookings/<int:booking_id>/update_status', methods=['POST'])
+@login_required
+@permission_required('manage_bookings')
+def update_booking_status(booking_id):
+    booking = Booking.query.get_or_404(booking_id)
+    data = request.get_json()
+
+    if not data or 'new_status' not in data:
+        return jsonify({'error': 'Missing new_status in request body.'}), 400
+
+    new_status = data['new_status']
+    current_status = booking.status
+
+    ALLOWED_STATUSES = ['pending', 'approved', 'rejected', 'cancelled', 'checked_in', 'completed', 'cancelled_by_user', 'cancelled_by_admin', 'no_show', 'awaiting_payment', 'payment_failed', 'confirmed_pending_payment', 'rescheduled', 'awaiting_confirmation', 'under_review', 'on_hold', 'archived', 'expired', 'draft', 'system_cancelled', 'error', 'pending_approval', 'pending_resource_confirmation', 'active', 'inactive', 'user_confirmed', 'admin_confirmed', 'auto_approved', 'auto_cancelled', 'payment_pending', 'payment_received', 'fulfillment_pending', 'fulfillment_complete', 'action_required', 'dispute_raised', 'dispute_resolved', 'refund_pending', 'refund_completed', 'partially_refunded', 'voided', 'pending_cancellation', 'cancellation_requested', 'attended', 'absent', 'tentative', 'waitlisted', 'blocked', 'requires_modification', 'pending_reschedule', 'reschedule_confirmed', 'reschedule_declined', 'pending_payment_confirmation', 'payment_disputed', 'subscription_active', 'subscription_cancelled', 'subscription_ended', 'subscription_pending', 'trial', 'past_due']
+    # Extended from original example: 'approved', 'pending', 'checked_in', 'completed', 'cancelled'
+
+    if new_status not in ALLOWED_STATUSES:
+        return jsonify({'error': 'Invalid new_status provided.'}), 400
+
+    # Define invalid transitions (current_status -> new_status)
+    # This is a basic example; more complex logic might be needed.
+    invalid_transitions = {
+        'completed': ['pending', 'approved', 'checked_in', 'rejected', 'cancelled_by_user', 'cancelled_by_admin'],
+        'cancelled': ['pending', 'approved', 'checked_in', 'completed', 'rejected'], # Or make it completely unchangeable
+        'cancelled_by_user': ['pending', 'approved', 'checked_in', 'completed', 'rejected'],
+        'cancelled_by_admin': ['pending', 'approved', 'checked_in', 'completed', 'rejected'],
+        'rejected': ['approved', 'checked_in', 'completed']
+        # Add more as needed, e.g. 'checked_in' cannot go to 'pending'
+    }
+
+    if current_status in invalid_transitions and new_status in invalid_transitions[current_status]:
+        message = f"Cannot change status from '{current_status}' to '{new_status}'."
+        current_app.logger.warning(f"Invalid status transition attempt for booking {booking_id}: {message}")
+        return jsonify({'error': 'Invalid status transition', 'message': message}), 409 # 409 Conflict is suitable
+
+    booking.status = new_status
+    try:
+        db.session.commit()
+        add_audit_log(
+            action="UPDATE_BOOKING_STATUS",
+            details=f"Admin {current_user.username} updated booking ID {booking.id} status from '{current_status}' to '{new_status}'."
+        )
+        socketio.emit('booking_updated', {
+            'action': 'status_updated',
+            'booking_id': booking.id,
+            'new_status': new_status,
+            'resource_id': booking.resource_id,
+            'user_name': booking.user_name # Good to include for client-side updates
+        })
+        current_app.logger.info(f"Booking {booking.id} status updated from '{current_status}' to '{new_status}' by admin {current_user.username}.")
+        return jsonify({'success': True, 'message': 'Booking status updated.', 'new_status': booking.status}), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Failed to update status for booking {booking.id}: {str(e)}")
+        return jsonify({'error': 'Failed to update booking status', 'details': str(e)}), 500
+
 # Initialization function for this blueprint
 def init_admin_api_bookings_routes(app):
     app.register_blueprint(admin_api_bookings_bp)

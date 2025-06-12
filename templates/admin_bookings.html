@@ -86,18 +86,39 @@
                     <td>{{ booking.start_time.strftime('%Y-%m-%d %H:%M') if booking.start_time else '-' }}</td>
                     <td>{{ booking.end_time.strftime('%Y-%m-%d %H:%M') if booking.end_time else '-' }}</td>
                     {# Updated status display to be more readable and use new CSS class convention #}
-                    <td><span class="status-badge status-{{ booking.status | lower | replace('_', '-') }}">{{ booking.status.replace('_', ' ').capitalize() }}</span></td>
-                    <td>
-                        {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
-                          <button class="btn btn-sm btn-outline-secondary dismiss-admin-message-btn" data-booking-id="{{ booking.id }}">
-                            {{ _('Dismiss Message') }}
-                          </button>
-                        {% elif booking.status and booking.status.lower() not in ['cancelled', 'rejected', 'completed', 'checked_out', 'cancelled_by_admin'] %}
-                        {# Delete button for active bookings might still be relevant for hard deletion #}
-                        <button class="button button-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel') }}</button>
-                        {% else %}
-                        {# For completed, cancelled, rejected bookings, show a dash or specific info #}
-                        <span class="text-muted">-</span>
+                    <td><span class="status-badge status-{{ booking.status | lower | replace('_', '-') }}" id="status-badge-{{ booking.id }}">{{ booking.status.replace('_', ' ').capitalize() }}</span></td>
+                    <td class="actions-cell" data-booking-id="{{ booking.id }}">
+                        <div class="btn-group-vertical btn-group-sm d-inline-flex" role="group" aria-label="Booking Actions">
+                            {# Cancel button - shown for statuses that are active and can be cancelled by admin #}
+                            {% if booking.status and booking.status.lower() not in ['completed', 'checked_out', 'cancelled', 'cancelled_by_user', 'cancelled_by_admin', 'cancelled_admin_acknowledged', 'rejected', 'system_cancelled', 'no_show', 'expired'] %}
+                                <button class="btn btn-danger delete-booking-btn" data-booking-id="{{ booking.id }}">{{ _('Cancel Booking') }}</button>
+                            {% endif %}
+
+                            {# Send Confirmation Email button - generally always available #}
+                            <button class="btn btn-info send-confirmation-email-btn mt-1" data-booking-id="{{ booking.id }}">{{ _('Send Email') }}</button>
+
+                            {# Status Update Dropdown - generally always available #}
+                            <select class="form-select form-select-sm change-status-dropdown mt-1" data-booking-id="{{ booking.id }}" data-current-status="{{ booking.status }}">
+                                <option value="" disabled>{{ _('Change status...') }}</option> {# Placeholder #}
+                                {% for stat in all_statuses %}
+                                    <option value="{{ stat }}" {% if stat == booking.status %}selected{% endif %}>
+                                        {{ stat.replace('_', ' ').capitalize() }}
+                                    </option>
+                                {% endfor %}
+                            </select>
+
+                            {# Dismiss Admin Message button - specific to 'cancelled_by_admin' with a message #}
+                            {% if booking.status == 'cancelled_by_admin' and booking.admin_deleted_message %}
+                              <button class="btn btn-outline-secondary dismiss-admin-message-btn mt-1" data-booking-id="{{ booking.id }}">
+                                {{ _('Dismiss Message') }}
+                              </button>
+                            {% endif %}
+                        </div>
+                        {# Fallback for states where no actions are available in the group above #}
+                        {# This logic is tricky. If the div above is empty, this will show. #}
+                        {% if not (booking.status and booking.status.lower() not in ['completed', 'checked_out', 'cancelled', 'cancelled_by_user', 'cancelled_by_admin', 'cancelled_admin_acknowledged', 'rejected', 'system_cancelled', 'no_show', 'expired']) and not (booking.status == 'cancelled_by_admin' and booking.admin_deleted_message) %}
+                            {# This means no "Cancel" button and no "Dismiss" button. Email and Dropdown are always there. So this might not be needed. #}
+                            {# Let's remove this else part for now as the dropdown and email button are always shown. #}
                         {% endif %}
                     </td>
                 </tr>
@@ -315,6 +336,113 @@ document.addEventListener('DOMContentLoaded', function() {
     //        dateFilterInput._flatpickr.clear();
     //    }
     // }
+
+    // --- Send Confirmation Email ---
+    document.querySelectorAll('.send-confirmation-email-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const bookingId = this.dataset.bookingId;
+            this.disabled = true;
+            const originalButtonText = this.textContent;
+            this.textContent = "{{ _('Sending...') }}";
+            statusDiv.textContent = '';
+            statusDiv.className = 'status-message';
+
+
+            fetch(`/api/admin/bookings/${bookingId}/send_confirmation_email`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken,
+                    'Content-Type': 'application/json' // Though not strictly needed for this POST, good practice
+                }
+            })
+            .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, data })))
+            .then(({ ok, status, data }) => {
+                if (ok && data.success) {
+                    statusDiv.textContent = data.message || "{{ _('Confirmation email sent successfully.') }}";
+                    statusDiv.className = 'alert alert-success';
+                } else {
+                    statusDiv.textContent = `{{ _('Error') }}: ${data.message || data.error || _('Failed to send email.')} (Status: ${status})`;
+                    statusDiv.className = 'alert alert-danger';
+                }
+            })
+            .catch(error => {
+                statusDiv.textContent = `{{ _('Error') }}: ${error.message}`;
+                statusDiv.className = 'alert alert-danger';
+            })
+            .finally(() => {
+                this.disabled = false;
+                this.textContent = originalButtonText;
+            });
+        });
+    });
+
+    // --- Change Booking Status ---
+    document.querySelectorAll('.change-status-dropdown').forEach(dropdown => {
+        dropdown.addEventListener('change', function() {
+            const bookingId = this.dataset.bookingId;
+            const newStatus = this.value;
+            const currentStatus = this.dataset.currentStatus;
+            const statusBadge = document.getElementById(`status-badge-${bookingId}`);
+
+            if (!newStatus || newStatus === currentStatus) {
+                // If placeholder selected or status not actually changed, do nothing or revert to currentStatus
+                this.value = currentStatus;
+                return;
+            }
+
+            this.disabled = true;
+            statusDiv.textContent = '';
+            statusDiv.className = 'status-message';
+
+            fetch(`/api/admin/bookings/${bookingId}/update_status`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({ new_status: newStatus })
+            })
+            .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, data })))
+            .then(({ ok, status, data }) => {
+                if (ok && data.success) {
+                    statusDiv.textContent = data.message || "{{ _('Booking status updated successfully.') }}";
+                    statusDiv.className = 'alert alert-success';
+
+                    // Update current status attribute on the dropdown
+                    this.dataset.currentStatus = data.new_status;
+                    this.value = data.new_status; // Ensure dropdown shows the new status
+
+                    // Update status badge in the table
+                    if (statusBadge) {
+                        statusBadge.textContent = data.new_status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                        statusBadge.className = `status-badge status-${data.new_status.toLowerCase().replace(/_/g, '-')}`;
+                    }
+                     // Potentially refresh or update other action buttons based on the new status
+                    // This might require a more complex refresh of the action cell, or specific logic
+                    // For example, the "Cancel" button might need to be hidden or shown.
+                    // For now, we rely on the next full page load or a manual refresh for that,
+                    // or the existing cancel/dismiss logic if it's triggered.
+                    // A simple way to update the action cell might be to re-evaluate the conditions for buttons
+                    // or even to re-fetch the row's action cell HTML, but that is more involved.
+
+                } else {
+                    statusDiv.textContent = `{{ _('Error') }}: ${data.message || data.error || _('Failed to update status.')} (Status: ${status})`;
+                    statusDiv.className = 'alert alert-danger';
+                    // Revert dropdown to original status
+                    this.value = currentStatus;
+                }
+            })
+            .catch(error => {
+                statusDiv.textContent = `{{ _('Error') }}: ${error.message}`;
+                statusDiv.className = 'alert alert-danger';
+                // Revert dropdown to original status
+                this.value = currentStatus;
+            })
+            .finally(() => {
+                this.disabled = false;
+            });
+        });
+    });
 });
 </script>
 
