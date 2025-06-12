@@ -85,26 +85,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
             predefinedSlots.forEach(pSlot => {
                 const [pSlotStartStr, pSlotEndStr] = pSlot.value.split(',');
-                // Construct Date objects for the predefined slot in UTC
-                const predefinedSlotStartUTC = new Date(dateStr + 'T' + pSlotStartStr + ':00Z');
-                const predefinedSlotEndUTC = new Date(dateStr + 'T' + pSlotEndStr + ':00Z');
+                // Construct Date objects for the predefined slot in Local Time
+                const predefinedSlotStartLocal = new Date(dateStr + 'T' + pSlotStartStr + ':00'); // No 'Z', parsed as local
+                const predefinedSlotEndLocal = new Date(dateStr + 'T' + pSlotEndStr + ':00');     // No 'Z', parsed as local
 
                 let isConflicting = false;
                 for (const existingEvent of otherUserBookingsOnDate) {
-                    // FullCalendar events store start/end as Date objects.
-                    // These are already likely in UTC or will be correctly compared if Date objects are consistently used.
+                    // FullCalendar events store start/end as Date objects (now local due to timeZone: 'local')
                     const existingBookingStart = existingEvent.start;
                     const existingBookingEnd = existingEvent.end;
 
                     if (existingBookingStart && existingBookingEnd) { // Standard check for events with duration
-                        if ((predefinedSlotStartUTC < existingBookingEnd) && (predefinedSlotEndUTC > existingBookingStart)) {
+                        if ((predefinedSlotStartLocal < existingBookingEnd) && (predefinedSlotEndLocal > existingBookingStart)) {
                             isConflicting = true;
                             break;
                         }
                     } else if (existingBookingStart) {
                         // Handle events that might be point-in-time or have missing end dates
                         // This logic assumes such events conflict if they are within the predefined slot
-                        if (predefinedSlotStartUTC <= existingBookingStart && predefinedSlotEndUTC > existingBookingStart) {
+                        if (predefinedSlotStartLocal <= existingBookingStart && predefinedSlotEndLocal > existingBookingStart) {
                            // isConflicting = true; // Uncomment and refine if point-in-time events need specific handling
                            // break;
                         }
@@ -256,7 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const initializeCalendar = () => {
         calendarInstance = new FullCalendar.Calendar(calendarEl, {
             initialView: 'dayGridMonth',
-            timeZone: 'UTC', // Keep timezone as UTC for consistency with server
+            timeZone: 'local', // Keep timezone as UTC for consistency with server
             selectAllow: function(selectInfo) {
                 // Convert startStr to 'YYYY-MM-DD' format
                 const startDateStr = selectInfo.startStr.split('T')[0];
@@ -487,12 +486,12 @@ document.addEventListener('DOMContentLoaded', () => {
                             startTimeDisplay = arg.event.extendedProps.booking_display_start_time; // "HH:MM"
                             endTimeDisplay = arg.event.extendedProps.booking_display_end_time;   // "HH:MM"
                         } else {
-                            // Fallback for older bookings: display UTC time parts from the main UTC datetimes
-                            const fallbackStart = new Date(arg.event.start); // arg.event.start is already a Date object
-                            const fallbackEnd = arg.event.end ? new Date(arg.event.end) : null;
-                            const optionsTimeUTC = { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' };
-                            startTimeDisplay = fallbackStart.toLocaleTimeString(undefined, optionsTimeUTC) + " UTC";
-                            endTimeDisplay = fallbackEnd ? fallbackEnd.toLocaleTimeString(undefined, optionsTimeUTC) + " UTC" : "";
+                            // Fallback for older bookings: display local time parts
+                            const fallbackStart = new Date(arg.event.start); // Parsed as local based on naive ISO string
+                            const fallbackEnd = arg.event.end ? new Date(arg.event.end) : null; // Parsed as local
+                            const optionsTimeLocal = { hour: '2-digit', minute: '2-digit', hour12: false }; // Use browser's local time
+                            startTimeDisplay = fallbackStart.toLocaleTimeString(undefined, optionsTimeLocal);
+                            endTimeDisplay = fallbackEnd ? fallbackEnd.toLocaleTimeString(undefined, optionsTimeLocal) : "";
                         }
 
                         let fullTimeString = '';

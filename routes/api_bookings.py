@@ -143,8 +143,8 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
                 'resource_id': booking.resource_id,
                 'resource_name': resource_name,
                 'user_name': booking.user_name,
-                'start_time': (booking.start_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat(),
-                'end_time': (booking.end_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat(),
+                'start_time': booking.start_time.isoformat(),
+                'end_time': booking.end_time.isoformat(),
                 'title': booking.title,
                 'status': booking.status,
                 'recurrence_rule': booking.recurrence_rule,
@@ -593,8 +593,8 @@ def create_booking():
             'resource_id': b.resource_id,
             'title': b.title,
             'user_name': b.user_name,
-                'start_time': b.start_time.replace(tzinfo=timezone.utc).isoformat(),
-                'end_time': b.end_time.replace(tzinfo=timezone.utc).isoformat(),
+                'start_time': b.start_time.isoformat(),
+                'end_time': b.end_time.isoformat(),
                 'status': b.status,
                 'recurrence_rule': b.recurrence_rule,
                 'booking_display_start_time': b.booking_display_start_time.strftime('%H:%M') if b.booking_display_start_time else None,
@@ -891,8 +891,8 @@ def bookings_calendar():
             events.append({
                 'id': booking.id,
                 'title': title,
-                'start': (booking.start_time - timedelta(hours=current_offset_hours_calendar)).replace(tzinfo=timezone.utc).isoformat(),
-                'end': (booking.end_time - timedelta(hours=current_offset_hours_calendar)).replace(tzinfo=timezone.utc).isoformat(),
+                'start': booking.start_time.isoformat(),
+                'end': booking.end_time.isoformat(),
                 'recurrence_rule': booking.recurrence_rule,
                 'resource_id': booking.resource_id,
                 'resource_name': resource_name, # Include resource name
@@ -1299,8 +1299,8 @@ def update_booking_by_user(booking_id):
             # To send as UTC ISO: booking.start_time.replace(tzinfo=timezone.utc).isoformat()
             # To send as venue local with offset: (booking.start_time.replace(tzinfo=pytz.timezone(venue_timezone_str)).isoformat())
             # This part depends on API contract, for now, keep it simple, adjust if client needs specific format.
-            'start_time': (booking.start_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat(), # Convert back to UTC for client
-            'end_time': (booking.end_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat(),     # Convert back to UTC for client
+            'start_time': booking.start_time.isoformat(), # Convert back to UTC for client
+            'end_time': booking.end_time.isoformat(),     # Convert back to UTC for client
             'title': booking.title,
             'booking_display_start_time': booking.booking_display_start_time.strftime('%H:%M') if booking.booking_display_start_time else None,
             'booking_display_end_time': booking.booking_display_end_time.strftime('%H:%M') if booking.booking_display_end_time else None
@@ -1915,7 +1915,7 @@ def qr_check_in(token):
             'resource_name': resource_name,
             'booking_title': booking.title,
             'user_name': booking.user_name,
-            'start_time': (booking.start_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat(), # Convert to UTC ISO
+            'start_time': booking.start_time.isoformat(), # Convert to UTC ISO
             'checked_in_at': effective_now_aware.isoformat()
         }), 200
 
