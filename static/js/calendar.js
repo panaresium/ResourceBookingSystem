@@ -475,38 +475,43 @@ document.addEventListener('DOMContentLoaded', () => {
                 return 0;
             },
             eventContent: function(arg) {
+                // Preserve existing logic for title and time display for dayGridMonth view
                 if (arg.view.type === 'dayGridMonth') {
-                    const MAX_TITLE_LENGTH = 20;
-                    const MAX_TIME_LENGTH = 18; // Max length for "HH:MM - HH:MM UTC"
+                    const MAX_TITLE_LENGTH = 20; // Adjusted for potentially longer content
+                    const MAX_TIME_LENGTH = 18;
 
                     let displayTitle = arg.event.title;
                     if (arg.event.title.length > MAX_TITLE_LENGTH) {
                         displayTitle = arg.event.title.substring(0, MAX_TITLE_LENGTH - 3) + "...";
                     }
 
-                    let eventHtml = `<b>${displayTitle}</b>`;
+                    // Access new properties
+                    const location = arg.event.extendedProps.location || "N/A";
+                    const floor = arg.event.extendedProps.floor || "N/A";
+                    const resourceName = arg.event.extendedProps.resource_name || "N/A";
+
+                    let eventHtml = `<b>Title: ${displayTitle}</b>`;
+                    eventHtml += `<br>Location: ${location} - ${floor}`;
+                    eventHtml += `<br>Resource: ${resourceName}`;
+
 
                     if (arg.event.start) {
                         let startTimeDisplay, endTimeDisplay;
 
                         if (arg.event.extendedProps.booking_display_start_time && arg.event.extendedProps.booking_display_end_time) {
-                            startTimeDisplay = arg.event.extendedProps.booking_display_start_time; // "HH:MM"
-                            endTimeDisplay = arg.event.extendedProps.booking_display_end_time;   // "HH:MM"
+                            startTimeDisplay = arg.event.extendedProps.booking_display_start_time;
+                            endTimeDisplay = arg.event.extendedProps.booking_display_end_time;
                         } else {
-                            // Fallback for older bookings: display local time parts
-                            const fallbackStart = new Date(arg.event.start); // Parsed as local based on naive ISO string
-                            const fallbackEnd = arg.event.end ? new Date(arg.event.end) : null; // Parsed as local
-                            const optionsTimeLocal = { hour: '2-digit', minute: '2-digit', hour12: false }; // Use browser's local time
+                            const fallbackStart = new Date(arg.event.start);
+                            const fallbackEnd = arg.event.end ? new Date(arg.event.end) : null;
+                            const optionsTimeLocal = { hour: '2-digit', minute: '2-digit', hour12: false };
                             startTimeDisplay = fallbackStart.toLocaleTimeString(undefined, optionsTimeLocal);
                             endTimeDisplay = fallbackEnd ? fallbackEnd.toLocaleTimeString(undefined, optionsTimeLocal) : "";
                         }
 
                         let fullTimeString = '';
-                        // Construct the time string only if it's not an all-day event or if time is not midnight (for non-fallback)
-                        // For fallback, it will always include " UTC" if times are not "00:00 UTC"
-                        if (!arg.event.allDay || (startTimeDisplay && (startTimeDisplay !== '00:00' && !startTimeDisplay.endsWith("00:00 UTC")))) {
+                        if (!arg.event.allDay || (startTimeDisplay && (startTimeDisplay !== '00:00' && !startTimeDisplay.endsWith("00:00 UTC")))) { // Condition to display time
                             fullTimeString = startTimeDisplay;
-                            // Ensure endTimeDisplay is meaningful and different before appending
                             if (endTimeDisplay && endTimeDisplay !== startTimeDisplay && endTimeDisplay.replace(" UTC", "") !== "") {
                                 fullTimeString += ` - ${endTimeDisplay}`;
                             }
@@ -517,21 +522,22 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (fullTimeString.length > MAX_TIME_LENGTH) {
                                 displayTime = fullTimeString.substring(0, MAX_TIME_LENGTH - 3) + "...";
                             }
-                            eventHtml += `<br>${displayTime}`;
+                            eventHtml += `<br>Time: ${displayTime}`;
                         }
                     }
                     return { html: eventHtml };
                 }
                 // For other views, retain original behavior (bold title, FC handles time)
-                // Consider applying similar truncation for title here if needed for consistency
+                // Or apply a similar detailed view if desired for other views as well.
+                // For now, only modifying month view as per typical calendar detail levels.
                 let displayTitleOtherView = arg.event.title;
-                // const MAX_TITLE_LENGTH_OTHER_VIEW = 30; // Example for other views
-                // if (arg.event.title.length > MAX_TITLE_LENGTH_OTHER_VIEW) {
-                //     displayTitleOtherView = arg.event.title.substring(0, MAX_TITLE_LENGTH_OTHER_VIEW - 3) + "...";
-                // }
-                // return { html: `<b>${displayTitleOtherView}</b>` };
-                // For now, keeping it as it was for other views, only month view is in scope
-                return { html: `<b>${arg.event.title}</b>` };
+                // Potentially add location/floor/resource here as well if desired for week/day views
+                // const locationOther = arg.event.extendedProps.location || "N/A";
+                // const floorOther = arg.event.extendedProps.floor || "N/A";
+                // const resourceNameOther = arg.event.extendedProps.resource_name || "N/A";
+                // let otherViewHtml = `<b>${displayTitleOtherView}</b><br>L: ${locationOther}-${floorOther}<br>R: ${resourceNameOther}`;
+                // return { html: otherViewHtml };
+                return { html: `<b>${arg.event.title}</b>` }; // Original behavior for other views
             }
         });
         calendarInstance.render();
