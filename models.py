@@ -179,6 +179,10 @@ class Booking(db.Model):
     booking_display_start_time = db.Column(db.Time, nullable=True)
     booking_display_end_time = db.Column(db.Time, nullable=True)
 
+    __table_args__ = (
+        db.UniqueConstraint('resource_id', 'start_time', 'end_time', name='uq_booking_resource_time'),
+    )
+
     def __repr__(self):
         return f"<Booking {self.title or self.id} for Resource {self.resource_id} from {self.start_time.strftime('%Y-%m-%d %H:%M')} to {self.end_time.strftime('%Y-%m-%d %H:%M')}>"
 
