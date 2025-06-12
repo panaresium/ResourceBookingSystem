@@ -209,9 +209,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // Update the event on the calendar
             if (calendarEventToUpdate) {
                 calendarEventToUpdate.setProp('title', title);
-                // Use the localStartDate and localEndDate, FullCalendar will handle timezone conversion
-                calendarEventToUpdate.setStart(localStartDate.toISOString());
-                calendarEventToUpdate.setEnd(localEndDate.toISOString());
+                // Use the naiveLocalISOStart and naiveLocalISOEnd, FullCalendar (with timeZone: 'local')
+                // will interpret these as local time.
+                calendarEventToUpdate.setStart(naiveLocalISOStart);
+                calendarEventToUpdate.setEnd(naiveLocalISOEnd);
             }
             // calendarInstance.refetchEvents(); // Corrected, but the original instruction implies this was a standalone line to change
 
