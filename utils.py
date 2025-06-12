@@ -1744,6 +1744,40 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
             logger_instance.debug(f"Resource {resource.id} ('{resource.name}') is not published. Skipping.")
             continue
 
+        # --- Permission Check START ---
+        user_has_permission = False
+        if user.is_admin:
+            user_has_permission = True
+            logger_instance.debug(f"User {user.id} ('{user.username}') has permission for resource {resource.id} ('{resource.name}') because user is admin.")
+        elif not resource.map_allowed_role_ids: # Assuming map_allowed_role_ids is a string field from the model
+            user_has_permission = True
+            logger_instance.debug(f"User {user.id} ('{user.username}') has permission for resource {resource.id} ('{resource.name}') because resource.map_allowed_role_ids is empty (public).")
+        else:
+            try:
+                allowed_role_ids = json.loads(resource.map_allowed_role_ids)
+                if not isinstance(allowed_role_ids, list): # Ensure it's a list
+                    logger_instance.warning(f"Resource {resource.id} map_allowed_role_ids was not a list after JSON parsing: {allowed_role_ids}. Denying access for safety.")
+                    user_has_permission = False # Or handle as error / grant if empty list means public
+                else:
+                    user_role_ids = {role.id for role in user.roles}
+                    # Check for intersection
+                    if any(role_id in user_role_ids for role_id in allowed_role_ids):
+                        user_has_permission = True
+                        logger_instance.debug(f"User {user.id} ('{user.username}') has permission for resource {resource.id} ('{resource.name}') due to matching role ID. User roles: {user_role_ids}, Resource allowed roles: {allowed_role_ids}.")
+                    else:
+                        logger_instance.debug(f"User {user.id} ('{user.username}') DENIED permission for resource {resource.id} ('{resource.name}'). No matching role ID. User roles: {user_role_ids}, Resource allowed roles: {allowed_role_ids}.")
+            except json.JSONDecodeError:
+                logger_instance.error(f"Failed to parse map_allowed_role_ids JSON for resource {resource.id}: '{resource.map_allowed_role_ids}'. Denying access.")
+                user_has_permission = False # Deny access if JSON is invalid
+
+        if not user_has_permission:
+            logger_instance.info(f"User {user.id} ('{user.username}') does not have permission to access resource {resource.id} ('{resource.name}'). Skipping this resource for availability calculation.")
+            # Do not add its len(primary_slots) to total_primary_slots
+            # It contributes 0 to available_primary_slots_for_user
+            continue # Skip to the next resource
+        # --- Permission Check END ---
+
+        # If permission granted, proceed with existing logic
         total_primary_slots += len(primary_slots)
 
         maintenance_until_local_naive = None
