@@ -9,11 +9,6 @@ document.addEventListener('DOMContentLoaded', function () {
         return `${yyyy}-${mm}-${dd}`;
     }
 
-    function isPastFivePM() {
-        const now = new Date();
-        return now.getHours() >= 17; // 17 is 5 PM in 24-hour format
-    }
-
     // const mapAvailabilityDateInput = document.getElementById('new-booking-map-availability-date'); // Old input field, now removed from HTML
     const calendarContainer = document.getElementById('inline-calendar-container'); // New container for inline flatpickr
     const userId = calendarContainer ? calendarContainer.dataset.userId : null;
@@ -82,35 +77,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // const today = getTodayDateString(); // currentSelectedDateStr is initialized with this
 
-    let serverTodayDateStr = null;
+    // serverTodayDateStr removed
 
-    async function fetchServerDateAndInitializeFlatpickr() {
-        // 1. Fetch server date (with fallback)
-        try {
-            // IMPORTANT: Use a placeholder URL for now, as the API endpoint might not exist yet.
-            // This will be updated later if the actual backend implementation uses a different URL or needs specific headers.
-            const response = await fetch('/api/system/today');
-            if (!response.ok) {
-                throw new Error(`API request to /api/system/today failed with status ${response.status}`);
-            }
-            const data = await response.json();
-            // Validate the received date format strictly
-            if (data && data.current_date && /^\d{4}-\d{2}-\d{2}$/.test(data.current_date)) {
-                serverTodayDateStr = data.current_date;
-                console.log('[Info] Successfully fetched server date:', serverTodayDateStr);
-            } else {
-                console.warn('[Warning] Invalid date format or missing current_date in response from /api/system/today. Falling back to client system date.');
-                serverTodayDateStr = getTodayDateString(); // Fallback defined in the script
-            }
-        } catch (error) {
-            console.warn('[Warning] Could not fetch server date from /api/system/today:', error.message, 'Falling back to client system date.');
-            serverTodayDateStr = getTodayDateString(); // Fallback
-        }
-
-        // 2. Proceed with existing Flatpickr initialization logic
-        // (The following is the existing logic, now nested)
-        const calendarContainer = document.getElementById('inline-calendar-container'); // Ensure this is accessible
-        const userId = calendarContainer ? calendarContainer.dataset.userId : null; // Ensure this is accessible
+    function fetchDataAndInitializeFlatpickr() { // Renamed and async removed
+        // Directly proceed with existing Flatpickr initialization logic that depends on unavailableDatesList
+        const calendarContainer = document.getElementById('inline-calendar-container');
+        const userId = calendarContainer ? calendarContainer.dataset.userId : null;
 
         if (userId && calendarContainer) {
             apiCall(`/api/resources/unavailable_dates?user_id=${userId}`)
@@ -126,65 +98,43 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!calendarContainer) {
                  console.info('Calendar container not found, Flatpickr setup skipped.');
             } else if (!userId) {
-                // This console message might be slightly confusing now that serverTodayDateStr is global,
-                // but initializeFlatpickr([]) will still use it.
                 console.info('User ID not found. Initializing Flatpickr without user-specific unavailable dates.');
             }
-            // Initialize Flatpickr even if no user or unavailable dates, so the calendar shows.
-            // It will use the serverTodayDateStr (or its fallback) for 'today' logic.
-            if (calendarContainer) { // Only initialize if container exists
-                initializeFlatpickr([]);
+            if (calendarContainer) {
+                initializeFlatpickr([]); // Initialize with empty list if no user, calendar still needs to show
             }
         }
     }
 
     function initializeFlatpickr(unavailableDatesList = []) {
         if (calendarContainer) {
-            let effectiveToday = serverTodayDateStr || getTodayDateString(); // Use server date or client fallback
-            let initialDate = effectiveToday; // Default to the authoritative 'today'
-
-            // If current client time is past 5 PM, default calendar to tomorrow (relative to authoritative 'today')
-            if (isPastFivePM()) { // isPastFivePM() uses the client's current time
-                // Create a Date object from effectiveToday. Ensure time is neutral (e.g., T00:00:00) to avoid timezone shifts when using setDate.
-                const dateObj = new Date(effectiveToday + 'T00:00:00');
-                dateObj.setDate(dateObj.getDate() + 1); // Advance to the next day
-
-                const yyyy = dateObj.getFullYear();
-                const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-                const dd = String(dateObj.getDate()).padStart(2, '0');
-                initialDate = `${yyyy}-${mm}-${dd}`;
-            }
-            currentSelectedDateStr = initialDate; // currentSelectedDateStr is used by Flatpickr and other functions
+            // currentSelectedDateStr is an outer scope variable.
+            // Initialize/update it here before Flatpickr uses it for defaultDate.
+            currentSelectedDateStr = getTodayDateString();
 
             flatpickr(calendarContainer, {
                 inline: true,
-                static: true,
+                static: true, // Keep existing options
                 dateFormat: "Y-m-d",
                 disable: [
                     function(date) {
                         const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
-                        // --- Add this logging ---
-                        const isDisabledByList = unavailableDatesList.includes(dateStr);
-                        if (unavailableDatesList.length > 0) { // Log only if the list has been populated
-                            console.log(`[Debug] Flatpickr disable check for ${dateStr}: inList = ${isDisabledByList}`);
-                        }
-                        // --- End of added logging ---
+                        // unavailableDatesList is passed to initializeFlatpickr
+                        const isDisabled = unavailableDatesList.includes(dateStr);
 
-                        if (isDisabledByList) {
-                            return true;
+                        // Optional: keep a simple log for debugging
+                        // Added a condition to ensure some logging for relevant test dates if list is empty
+                        if (unavailableDatesList.length > 0 || dateStr.startsWith("2025-06")) {
+                            console.log(`[Debug] Flatpickr disable check for ${dateStr}: inList = ${isDisabled} (list length: ${unavailableDatesList.length})`);
                         }
-                        const effectiveTodayStr = serverTodayDateStr || getTodayDateString(); // Use server date or client fallback
-                        const isEffectivelyPastFivePMToday = dateStr === effectiveTodayStr && isPastFivePM();
-                        if (isEffectivelyPastFivePMToday) {
-                            console.log(`[Debug] Flatpickr disabling date ${dateStr} because it matches effective 'today' (effectiveTodayStr: ${effectiveTodayStr}) and current client time is past 5 PM.`);
-                        }
-                        return isEffectivelyPastFivePMToday;
+
+                        return isDisabled;
                     }
                 ],
-                defaultDate: currentSelectedDateStr,
+                defaultDate: currentSelectedDateStr, // Set defaultDate to client's current date
                 onChange: function(selectedDates, dateStr, instance) {
-                    currentSelectedDateStr = dateStr;
+                    currentSelectedDateStr = dateStr; // Update on change
 
                     if (dateSelectionInstructionDiv) dateSelectionInstructionDiv.style.display = 'none';
                     if (locationFloorWrapperDiv) locationFloorWrapperDiv.style.display = 'flex'; // Assuming flex display
@@ -205,7 +155,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     });
                 }
             });
-            if (mainBookingFormDateInput) {
+            // Also update the main booking form's date input if it exists, to reflect this initial date
+            if (mainBookingFormDateInput && mainBookingFormDateInput.value !== currentSelectedDateStr) {
                 mainBookingFormDateInput.value = currentSelectedDateStr;
             }
         } else {
@@ -213,7 +164,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    fetchServerDateAndInitializeFlatpickr();
+    fetchDataAndInitializeFlatpickr(); // Call the refactored function
 
     // function updateFloorSelectOptions() { // Removed }
 

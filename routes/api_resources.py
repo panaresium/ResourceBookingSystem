@@ -306,6 +306,21 @@ def get_unavailable_dates():
 
             current_iter_date += timedelta(days=1)
 
+        # New logic: Add current server date if server time is past 5 PM UTC
+        # 'now' is already defined as datetime.now(timezone.utc)
+        server_today_date_obj = now.date()
+        server_cutoff_time_utc = time(17, 0, 0, tzinfo=timezone.utc) # 5 PM UTC
+
+        # Combine server's today date with the cutoff time to create a datetime object for comparison
+        server_today_at_cutoff_utc = datetime.combine(server_today_date_obj, server_cutoff_time_utc)
+        # server_today_at_cutoff_utc = server_today_at_cutoff_utc.replace(tzinfo=timezone.utc) # Ensure tzinfo if combine doesn't preserve from time
+
+        if now >= server_today_at_cutoff_utc:
+            server_today_date_str = server_today_date_obj.strftime('%Y-%m-%d')
+            if server_today_date_str not in unavailable_dates_set:
+                unavailable_dates_set.add(server_today_date_str)
+                logger.info(f"Server time is past 5 PM UTC. Adding server's current date {server_today_date_str} to unavailable dates for user {user_id}.")
+
         logger.info(f"Returning {len(unavailable_dates_set)} unavailable dates for user {user_id}.")
         return jsonify(sorted(list(unavailable_dates_set)))
 
