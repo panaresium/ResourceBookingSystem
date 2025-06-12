@@ -28,7 +28,7 @@ from routes.gmail_auth import init_gmail_auth_routes # Added for Gmail OAuth flo
 
 # For scheduler
 from apscheduler.schedulers.background import BackgroundScheduler
-from scheduler_tasks import cancel_unchecked_bookings, apply_scheduled_resource_status_changes, run_scheduled_backup_job, run_scheduled_booking_csv_backup, auto_checkout_overdue_bookings # Added new task
+from scheduler_tasks import cancel_unchecked_bookings, apply_scheduled_resource_status_changes, run_scheduled_backup_job, run_scheduled_booking_csv_backup, auto_checkout_overdue_bookings, auto_release_unclaimed_bookings
 # Conditional import for azure_backup
 try:
     from azure_backup import restore_latest_backup_set_on_startup, backup_if_changed as azure_backup_if_changed, restore_incremental_bookings
@@ -470,6 +470,21 @@ def create_app(config_object=config, testing=False): # Added testing parameter
                 app.logger.info(f"Scheduled auto_checkout_overdue_bookings job: Interval {checkout_interval} minutes.")
             else:
                 app.logger.warning("auto_checkout_overdue_bookings function not found in scheduler_tasks. Job not added.")
+
+            # Add the new auto_release_unclaimed_bookings job
+            if auto_release_unclaimed_bookings:
+                release_interval = app.config.get('AUTO_RELEASE_UNCLAIMED_INTERVAL_MINUTES', 10)
+                scheduler.add_job(
+                    id='auto_release_unclaimed_bookings_job',
+                    func=auto_release_unclaimed_bookings,
+                    trigger='interval',
+                    minutes=release_interval,
+                    replace_existing=True,
+                    args=[app]
+                )
+                app.logger.info(f"Scheduled auto_release_unclaimed_bookings job: Interval {release_interval} minutes.")
+            else:
+                app.logger.warning("auto_release_unclaimed_bookings function not found in scheduler_tasks. Job not added.")
 
             if azure_backup_if_changed: # Legacy Azure backup, check if function exists
                  scheduler.add_job(azure_backup_if_changed, 'interval', minutes=app.config.get('AZURE_BACKUP_INTERVAL_MINUTES', 60))

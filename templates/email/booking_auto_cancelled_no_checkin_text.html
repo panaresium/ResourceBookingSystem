@@ -1,0 +1,21 @@
+Dear {{ user_name }},
+
+This email is to inform you that your booking for {{ resource_name }} from {{ start_time }} to {{ end_time }} has been automatically cancelled.
+
+Reason: This is because the booking was not checked in within the allowed time period of {{ release_minutes }} minutes after the scheduled start time.
+
+Booking Details:
+- Resource: {{ resource_name }}
+- Booking Title: {{ booking_title | default('N/A') }}
+- Scheduled Start: {{ start_time }}
+- Scheduled End: {{ end_time }}
+- Cancelled At (Deadline): {{ cancelled_at_time }}
+- Location: {{ location | default('N/A') }}
+- Floor: {{ floor | default('N/A') }}
+
+If you believe this was in error, please contact an administrator.
+
+Thank you,
+Smart Resource Booking System
+---
+This is an automated message. Please do not reply directly to this email.

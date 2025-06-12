@@ -922,6 +922,23 @@ def update_booking_settings():
             flash(f'{_("Invalid Auto Check-out Delay")}: {str(ve_auto_checkout)}', 'danger')
             return redirect(url_for('admin_ui.serve_booking_settings_page'))
 
+        # Auto-release if not checked in minutes
+        auto_release_str = request.form.get('auto_release_if_not_checked_in_minutes')
+        if not auto_release_str or auto_release_str.strip() == "" or auto_release_str.strip() == "0":
+            settings.auto_release_if_not_checked_in_minutes = None
+        else:
+            try:
+                auto_release_val = int(auto_release_str)
+                if auto_release_val < 0:
+                    db.session.rollback()
+                    flash(_('Auto-release minutes must be a non-negative integer.'), 'danger')
+                    return redirect(url_for('admin_ui.serve_booking_settings_page'))
+                settings.auto_release_if_not_checked_in_minutes = auto_release_val
+            except ValueError:
+                db.session.rollback()
+                flash(_('Invalid input for Auto-release minutes. Please enter a whole number.'), 'danger')
+                return redirect(url_for('admin_ui.serve_booking_settings_page'))
+
         db.session.commit()
         # Log changed settings
         changed_settings_log = (
@@ -939,7 +956,8 @@ def update_booking_settings():
             f"resource_checkin_url_requires_login={settings.resource_checkin_url_requires_login}, "
             f"allow_check_in_without_pin={settings.allow_check_in_without_pin}, "
             f"enable_auto_checkout={settings.enable_auto_checkout}, "
-            f"auto_checkout_delay_hours={settings.auto_checkout_delay_hours}"
+            f"auto_checkout_delay_hours={settings.auto_checkout_delay_hours}, "
+            f"auto_release_if_not_checked_in_minutes={settings.auto_release_if_not_checked_in_minutes}"
         )
         # Assuming add_audit_log is available and imported
         # from utils import add_audit_log # Ensure this import is at the top of the file
