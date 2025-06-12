@@ -115,10 +115,9 @@ document.addEventListener('DOMContentLoaded', function () {
                         }
                         const todayStr = getTodayDateString();
                         const isPastFivePMToday = dateStr === todayStr && isPastFivePM();
-                        // Log if it's being disabled by the 5 PM rule
-                        // if (isPastFivePMToday) {
-                        //     console.log(`[Debug] Flatpickr disabling ${dateStr} due to 5 PM rule.`);
-                        // }
+                        if (isPastFivePMToday) {
+                            console.log(`[Debug] Flatpickr disabling date ${dateStr} because it is considered 'today' (todayStr: ${todayStr}) and current time is past 5 PM.`);
+                        }
                         return isPastFivePMToday;
                     }
                 ],
