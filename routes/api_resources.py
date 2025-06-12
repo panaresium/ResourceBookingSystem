@@ -264,11 +264,19 @@ def get_unavailable_dates():
                     if slot_start_datetime_utc.tzinfo is None: slot_start_datetime_utc = slot_start_datetime_utc.replace(tzinfo=timezone.utc)
                     if slot_end_datetime_utc.tzinfo is None: slot_end_datetime_utc = slot_end_datetime_utc.replace(tzinfo=timezone.utc)
 
-                    # New Time Viability Check:
-                    # effective_cutoff_datetime_utc is available from logic earlier in the parent loop.
-                    if slot_start_datetime_utc < effective_cutoff_datetime_utc:
-                        logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on {current_processing_date.strftime('%Y-%m-%d')} for resource {resource_to_check.name} is considered 'passed' based on effective_cutoff_datetime_utc ({effective_cutoff_datetime_utc.isoformat()}). Skipping.")
-                        continue # Skip to the next slot_def
+                    # Conditionally apply the time viability check
+                    is_server_today = (current_processing_date == now.date()) # now is defined in outer scope as now = datetime.now(timezone.utc)
+
+                    if is_server_today:
+                        # This is the current server date, apply the effective_cutoff_datetime_utc check
+                        if slot_start_datetime_utc < effective_cutoff_datetime_utc:
+                            logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on SERVER TODAY {current_processing_date.strftime('%Y-%m-%d')} for resource {resource_to_check.name} is 'passed' based on effective_cutoff_datetime_utc ({effective_cutoff_datetime_utc.isoformat()}). Skipping.")
+                            continue
+                    else:
+                        # This is a past date (and allow_past_bookings must be true to have reached this point).
+                        # For past dates with allow_past_bookings=true, we skip the effective_cutoff_datetime_utc check.
+                        # The slot is considered timely by default.
+                        logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on PAST DATE {current_processing_date.strftime('%Y-%m-%d')} (allow_past_bookings=TRUE). Time-viability check skipped. Proceeding to conflict/booking checks.")
 
                     # Conflict Check 1: Resource Slot Generally Booked?
                     is_generally_booked = Booking.query.filter(
