@@ -126,11 +126,21 @@ def serve_admin_bookings_page():
         # For this implementation, we use now_utc directly as per instruction, assuming start_time is UTC.
 
         for row in all_booking_rows:
+            start_time_dt = row.start_time
+            aware_start_time = start_time_dt
+            if start_time_dt is not None and start_time_dt.tzinfo is None:
+                aware_start_time = start_time_dt.replace(tzinfo=timezone.utc)
+
+            end_time_dt = row.end_time
+            aware_end_time = end_time_dt
+            if end_time_dt is not None and end_time_dt.tzinfo is None:
+                aware_end_time = end_time_dt.replace(tzinfo=timezone.utc)
+
             booking_data = {
                 'id': row.id,
                 'title': row.title,
-                'start_time': row.start_time, # This is a datetime object
-                'end_time': row.end_time,     # This is a datetime object
+                'start_time': aware_start_time, # Use the (potentially) tz-aware version
+                'end_time': aware_end_time,     # Use the (potentially) tz-aware version
                 'status': row.status,
                 'user_username': row.user_username,
                 'resource_name': row.resource_name,
@@ -138,13 +148,12 @@ def serve_admin_bookings_page():
             }
 
             # Partitioning based on start_time relative to now_utc
-            # Bookings starting now or in the future (or very recently, e.g. within an hour for "current")
-            # For simplicity, using >= now_utc for upcoming/current.
-            # A small buffer could be added: e.g., row.start_time >= (now_utc - timedelta(hours=1))
-            if row.start_time >= now_utc:
+            if aware_start_time is not None and aware_start_time >= now_utc:
                 upcoming_bookings_processed.append(booking_data)
-            else:
+            elif aware_start_time is not None: # It's in the past
                 past_bookings_processed.append(booking_data)
+            # else: start_time is None. If this is possible, decide how to classify such bookings.
+            # For now, they won't be added to either list if start_time is None.
 
         # Sort upcoming_or_current_bookings by start_time ascending (soonest first)
         upcoming_bookings_processed.sort(key=lambda b: b['start_time'])
