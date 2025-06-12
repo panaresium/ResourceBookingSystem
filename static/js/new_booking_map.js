@@ -292,9 +292,13 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             } else {
                 // console.warn('Failed to fetch UI configured opacity, status:', response.status); // Optional: for debugging
+                // If response is not ok (e.g. 403 for non-admins), this path is taken.
+                // We want to treat this as a non-critical failure and proceed to fallbacks.
+                console.warn(`API call to fetch map opacity failed with status ${response.status}. Using fallback opacity values.`);
             }
         } catch (error) {
-            // console.error('Error fetching UI configured opacity:', error); // Optional: for debugging
+            // console.error('Error fetching UI configured opacity:', error); // Original console.error
+            console.warn(`Error fetching UI configured opacity: ${error.message}. Using fallback opacity values.`);
         }
 
         // Fallback to environment variable if UI opacity is not valid or fetch failed
@@ -529,8 +533,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
                         areaDiv.title = finalTitle;
 
-                        // Clickability is now determined before this block
-                        if (isMapAreaClickable) {
+                        // Clickability logic refined:
+                        // Event listener and clickable class are only added if user can book AND it's deemed clickable by availability.
+                        if (resource.current_user_can_book === true && isMapAreaClickable) {
                             areaDiv.classList.add('map-area-clickable');
                             areaDiv.addEventListener('click', function() {
                                 if (resourceSelectBooking) {
@@ -540,7 +545,9 @@ document.addEventListener('DOMContentLoaded', function () {
                                 openResourceDetailModal(resource, dateString, userBookingsForDate || []);
                             });
                         } else {
+                            // Ensure it's not clickable if permission denied OR if not green/yellow
                             areaDiv.classList.remove('map-area-clickable');
+                            // The cursor style should be handled by CSS (.resource-area-permission-denied or default .resource-area)
                         }
 
                         if (resourceSelectBooking && resourceSelectBooking.value === resource.id.toString()) {
