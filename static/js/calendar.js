@@ -293,12 +293,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const cebmBookingDateInput = document.getElementById('cebm-booking-date');
 
                 if (info.event.start) {
-                    const originalEventStartForDate = new Date(info.event.start); // UTC Date object from FullCalendar
+                    const originalEventStartForDate = new Date(info.event.start); // This is a local Date object
 
-                    // For date input, use original UTC date parts
-                    const year = originalEventStartForDate.getUTCFullYear();
-                    const month = (originalEventStartForDate.getUTCMonth() + 1).toString().padStart(2, '0');
-                    const day = originalEventStartForDate.getUTCDate().toString().padStart(2, '0');
+                    // For date input, use local date parts
+                    const year = originalEventStartForDate.getFullYear();
+                    const month = (originalEventStartForDate.getMonth() + 1).toString().padStart(2, '0'); // getMonth() is 0-indexed
+                    const day = originalEventStartForDate.getDate().toString().padStart(2, '0');
                     cebmBookingDateInput.value = `${year}-${month}-${day}`;
 
                     let selectedStartTimeHHMM;
