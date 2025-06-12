@@ -1053,6 +1053,26 @@ def update_booking_by_user(booking_id):
             current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] Parsed new_end_time (naive venue local): {parsed_new_end_time.isoformat() if parsed_new_end_time else 'None'}")
             current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] ---- End Time Change Check Debug ----")
 
+            # ---> INSERT NEW VALIDATION LOGIC HERE <---
+            if time_update_intended: # Only apply this check if times are actually being changed
+                now_for_logic = get_current_effective_time().replace(tzinfo=None) # Naive local "now"
+
+                # Use allow_past_bookings_effective and effective_past_booking_hours from BookingSettings
+                allow_past_bookings_effective = booking_settings.allow_past_bookings if booking_settings else False
+                effective_past_booking_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings and booking_settings.past_booking_time_adjustment_hours is not None else 0
+
+                if not allow_past_bookings_effective:
+                    # Past bookings are generally disallowed, past_booking_time_adjustment_hours defines the cutoff.
+                    past_booking_cutoff_time = now_for_logic - timedelta(hours=effective_past_booking_hours)
+
+                    if parsed_new_start_time < past_booking_cutoff_time:
+                        current_app.logger.warning(
+                            f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' attempted to update booking to a past time slot. "
+                            f"Proposed start: {parsed_new_start_time}, Cutoff: {past_booking_cutoff_time}"
+                        )
+                        return jsonify({'error': 'Cannot update booking to a time slot that is already in the past.'}), 400
+            # ---> END OF NEW VALIDATION LOGIC <---
+
             current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] --- Detailed Time Comparison ---")
             current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] Comparing old_start_time: {old_start_time.isoformat() if old_start_time else 'None'} (type: {type(old_start_time)}) with parsed_new_start_time: {parsed_new_start_time.isoformat() if parsed_new_start_time else 'None'} (type: {type(parsed_new_start_time)})")
             current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] Result of (parsed_new_start_time != old_start_time): {parsed_new_start_time != old_start_time if parsed_new_start_time and old_start_time else 'Comparison N/A'}")
