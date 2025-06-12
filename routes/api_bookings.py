@@ -3,6 +3,7 @@ from flask_login import login_required, current_user
 import json # Added json import
 from sqlalchemy import func
 from sqlalchemy.sql import func as sqlfunc # Explicit import for sqlalchemy.sql.func
+from sqlalchemy.exc import IntegrityError # Added for unique constraint handling
 from translations import _ # For translations
 import secrets
 from datetime import datetime, timedelta, timezone, time
@@ -565,7 +566,20 @@ def create_booking():
         } for b in created_bookings]
         return jsonify({'bookings': created_data}), 201
 
-    except Exception as e:
+    except IntegrityError as ie: # Catch specific IntegrityError
+        db.session.rollback()
+        current_app.logger.warning(f"IntegrityError during booking creation by {current_user.username} for resource {resource_id}: {ie}")
+        # Construct a user-friendly representation of the first attempted slot for the audit log
+        # Note: occurrences, date_str, start_time_str, end_time_str are from the outer scope of create_booking
+        first_occ_start_local, _ = occurrences[0] if occurrences else (None, None)
+        slot_time_for_log = f"{date_str} {start_time_str}-{end_time_str}" # Original request data
+        if first_occ_start_local: # If occurrences were generated, use the first actual slot time
+             slot_time_for_log = f"{first_occ_start_local.strftime('%Y-%m-%d %H:%M')}-{occurrences[0][1].strftime('%H:%M')}"
+
+        add_audit_log(action="CREATE_BOOKING_FAILED_DUPLICATE", details=f"User '{current_user.username}' attempted to book a duplicate slot for resource ID {resource_id}. Slot: {slot_time_for_log}.")
+        return jsonify({'error': 'This time slot appears to have just been booked or conflicts with an existing booking. Please try a different slot or refresh.'}), 409 # 409 Conflict
+
+    except Exception as e: # Catch other general exceptions
         db.session.rollback()
         current_app.logger.exception(f"Error creating booking series for resource {resource_id} by {current_user.username}: {e}")
         add_audit_log(action="CREATE_BOOKING_FAILED", details=f"Failed to create booking series for resource ID {resource_id} by user '{current_user.username}'. Error: {str(e)}")
