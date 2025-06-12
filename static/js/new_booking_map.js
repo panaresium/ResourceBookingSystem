@@ -393,7 +393,11 @@ document.addEventListener('DOMContentLoaded', function () {
                         areaDiv.textContent = resource.name;
                         areaDiv.dataset.resourceId = resource.id;
 
+                        console.log("[DEBUG MAP] Processing resource:", resource.id, resource.name, "current_user_can_book:", resource.current_user_can_book);
+
+                        console.log("[DEBUG MAP] About to check current_user_can_book for resource:", resource.id);
                         if (resource.current_user_can_book === false) {
+                            console.log("[DEBUG MAP] Entered current_user_can_book === false for resource:", resource.id);
                             areaDiv.className = 'resource-area resource-area-permission-denied';
                             areaDiv.title = resource.name + ' (Permission Denied)';
                             // Ensure 'resource-area-permission-denied' is in colorMap or CSS handles its appearance
@@ -401,6 +405,7 @@ document.addEventListener('DOMContentLoaded', function () {
                             areaDiv.style.setProperty('background-color', `rgba(${permissionDeniedRgbString}, ${mapResourceOpacity})`, 'important');
                             // No event listener, not clickable.
                         } else {
+                            console.log("[DEBUG MAP] Entered ELSE (current_user_can_book is true or undefined) for resource:", resource.id);
                             // User has permission, proceed with detailed availability logic
                             const primarySlots = [
                                 { name: "first_half", start: 8 * 60, end: 12 * 60, isGenerallyBooked: false, isBookedByCurrentUser: false, isConflictingWithUserOtherBookings: false, isBookableByCurrentUser: false },
@@ -509,9 +514,11 @@ document.addEventListener('DOMContentLoaded', function () {
                             }
                             areaDiv.title = finalTitle;
 
+                            console.log("[DEBUG MAP] In ELSE block, for resource:", resource.id, "finalClass:", finalClass, "isMapAreaClickable:", isMapAreaClickable);
                             if (isMapAreaClickable) { // This check is now correctly placed after all logic for permitted users
                                 areaDiv.classList.add('map-area-clickable');
                                 areaDiv.addEventListener('click', function() {
+                                    console.log("[DEBUG MAP] Click listener EXECUTED for resource:", resource.id, "Name:", resource.name);
                                     if (resourceSelectBooking) {
                                         resourceSelectBooking.value = resource.id;
                                         resourceSelectBooking.dispatchEvent(new Event('change'));
