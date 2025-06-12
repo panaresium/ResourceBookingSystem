@@ -790,19 +790,26 @@ def get_my_bookings_for_date():
         return jsonify({'error': 'Invalid date format. Please use YYYY-MM-DD.'}), 400
 
     try:
-        user_bookings_on_date = db.session.query(
-                Booking.id, # Added booking ID
-                Booking.title, # Added booking title
+        user_bookings_on_date = (
+            db.session.query(
+                Booking.id,
+                Booking.title,
                 Booking.resource_id,
                 Resource.name.label('resource_name'),
                 Booking.start_time,
                 Booking.end_time
-            ).join(Resource, Booking.resource_id == Resource.id)\
-            .filter(Booking.user_name == current_user.username)\
-            .filter(func.date(Booking.start_time) == target_date_obj) # target_date_obj is date, Booking.start_time is naive local datetime. func.date should handle this.
-            .filter(sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_booking_statuses_for_user_schedule))\
-            .order_by(Booking.start_time.asc())\
+            )
+            .join(Resource, Booking.resource_id == Resource.id)
+            .filter(Booking.user_name == current_user.username)
+            .filter(func.date(Booking.start_time) == target_date_obj)
+            .filter(
+                sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(
+                    active_booking_statuses_for_user_schedule
+                )
+            )
+            .order_by(Booking.start_time.asc())
             .all()
+        )
 
         bookings_list = []
         for booking_row in user_bookings_on_date:
