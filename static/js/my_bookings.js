@@ -93,12 +93,13 @@ document.addEventListener('DOMContentLoaded', () => {
             formattedStartTime = booking.booking_display_start_time; // Already "HH:MM"
             formattedEndTime = booking.booking_display_end_time;   // Already "HH:MM"
         } else {
-            // Fallback for older bookings: display UTC time parts from the main UTC datetime fields
-            const fallbackStartDate = new Date(booking.start_time);
-            const fallbackEndDate = new Date(booking.end_time);
-            const optionsTimeUTC = { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' };
-            formattedStartTime = fallbackStartDate.toLocaleTimeString(undefined, optionsTimeUTC) + " UTC"; // Add UTC label for clarity
-            formattedEndTime = fallbackEndDate.toLocaleTimeString(undefined, optionsTimeUTC) + " UTC";   // Add UTC label for clarity
+            // Fallback for older bookings: display local time parts from the naive local ISO datetime fields
+            const fallbackStartDate = new Date(booking.start_time); // Parsed as local based on naive ISO string
+            const fallbackEndDate = new Date(booking.end_time);     // Parsed as local
+            // Options to get HH:MM format, using browser's local interpretation of the Date object
+            const optionsTimeLocal = { hour: '2-digit', minute: '2-digit', hour12: false };
+            formattedStartTime = fallbackStartDate.toLocaleTimeString(undefined, optionsTimeLocal);
+            formattedEndTime = fallbackEndDate.toLocaleTimeString(undefined, optionsTimeLocal);
         }
 
         const dateSpan = bookingCardDiv.querySelector('.booking-date-value');
