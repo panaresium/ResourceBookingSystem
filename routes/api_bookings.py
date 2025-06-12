@@ -872,33 +872,74 @@ def bookings_calendar():
             default_active_statuses = ['approved', 'pending', 'checked_in', 'confirmed']
             query = query.filter(Booking.status.in_(default_active_statuses))
 
-        user_bookings = query.all()
+        # Join with Resource and FloorMap
+        query = query.join(Resource, Booking.resource_id == Resource.id)\
+                     .outerjoin(FloorMap, Resource.floor_map_id == FloorMap.id)\
+                     .add_columns(
+                         Booking.id,
+                         Booking.title,
+                         Booking.start_time,
+                         Booking.end_time,
+                         Booking.recurrence_rule,
+                         Booking.resource_id,
+                         Resource.name.label('resource_name'),
+                         Booking.status,
+                         Booking.booking_display_start_time,
+                         Booking.booking_display_end_time,
+                         FloorMap.location,
+                         FloorMap.floor
+                     )
+
+        user_bookings_data = query.all()
 
         # Fetch current_offset_hours for converting to UTC for JSON response
-        booking_settings_calendar = BookingSettings.query.first() # Renamed to avoid conflict if outer scope has it
-        current_offset_hours_calendar = 0
-        if booking_settings_calendar and hasattr(booking_settings_calendar, 'global_time_offset_hours') and booking_settings_calendar.global_time_offset_hours is not None:
-            current_offset_hours_calendar = booking_settings_calendar.global_time_offset_hours
-        else:
-            current_app.logger.warning("BookingSettings not found or global_time_offset_hours not set for bookings_calendar, using 0 offset for UTC conversion.")
-
+        # This part seems okay, but it's not used in the original loop for start/end times.
+        # FullCalendar typically expects ISO8601 strings, which can be UTC or have offsets.
+        # Assuming booking.start_time and booking.end_time are stored as naive venue local times.
+        # For FullCalendar, it's often best to send them as is, or as UTC if your frontend expects that.
+        # The original code sends booking.start_time.isoformat() directly.
+        # If these are naive local, they will be interpreted as local by FullCalendar unless timezone is specified.
+        # If they are naive UTC, they will be interpreted as UTC.
+        # Let's stick to the original behavior for time fields unless conversion is explicitly needed.
 
         events = []
-        for booking in user_bookings:
-            resource = Resource.query.get(booking.resource_id)
-            title = booking.title or (resource.name if resource else 'Booking')
-            resource_name = resource.name if resource else "Unknown Resource" # Get resource name
+        for booking_data in user_bookings_data:
+            # Access data by attribute name or index if it's a tuple from add_columns
+            # If using add_columns, results are tuples. Accessing by attribute name is cleaner if possible.
+            # Let's assume it's a Row object where attributes can be accessed by name.
+            # If not, adjust to booking_data[index] based on add_columns order.
+
+            # For clarity, let's destructure or access by named attributes (assuming query returns objects with these attributes)
+            # If query.all() returns tuples because of add_columns, then access by index:
+            # booking_id = booking_data[0]
+            # booking_title_val = booking_data[1]
+            # ...and so on.
+            # However, if we iterate over Booking objects directly and access joined properties:
+            # This requires the query to return Booking objects primarily, with eager loading or specific column selection.
+            # The current query with add_columns will return RowProxy objects (like named tuples).
+
+            # Let's use the named attributes from the RowProxy
+            booking_id = booking_data.id
+            booking_title_val = booking_data.title
+            resource_name_val = booking_data.resource_name
+            location_val = booking_data.location
+            floor_val = booking_data.floor
+
+            title = booking_title_val or (resource_name_val if resource_name_val else 'Booking')
+
             events.append({
-                'id': booking.id,
+                'id': booking_id,
                 'title': title,
-                'start': booking.start_time.isoformat(),
-                'end': booking.end_time.isoformat(),
-                'recurrence_rule': booking.recurrence_rule,
-                'resource_id': booking.resource_id,
-                'resource_name': resource_name, # Include resource name
-                'status': booking.status, # Include status
-                'booking_display_start_time': booking.booking_display_start_time.strftime('%H:%M') if booking.booking_display_start_time else None,
-                'booking_display_end_time': booking.booking_display_end_time.strftime('%H:%M') if booking.booking_display_end_time else None
+                'start': booking_data.start_time.isoformat(),
+                'end': booking_data.end_time.isoformat(),
+                'recurrence_rule': booking_data.recurrence_rule,
+                'resource_id': booking_data.resource_id,
+                'resource_name': resource_name_val if resource_name_val else "Unknown Resource",
+                'status': booking_data.status,
+                'booking_display_start_time': booking_data.booking_display_start_time.strftime('%H:%M') if booking_data.booking_display_start_time else None,
+                'booking_display_end_time': booking_data.booking_display_end_time.strftime('%H:%M') if booking_data.booking_display_end_time else None,
+                'location': location_val if location_val else "N/A",
+                'floor': floor_val if floor_val else "N/A"
             })
         return jsonify(events), 200
     except Exception as e:
