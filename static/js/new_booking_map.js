@@ -873,12 +873,21 @@ document.addEventListener('DOMContentLoaded', function () {
                                 }
                             }
                         }
-                        if (isUserBusyElsewhere) {
+                        // Determine if the button should be disabled due to user conflict, considering the setting
+                        let disableButtonDueToUserConflict = isUserBusyElsewhere;
+                        if (systemBookingSettings.allowMultipleResourcesSameTime) {
+                            disableButtonDueToUserConflict = false; // If multiple bookings allowed, don't disable/mark as conflict due to user's other bookings
+                            // console.log(`[Debug Modal] Slot ${slot.name} for Resource ${resource.id}: AllowMultiple is TRUE. UserConflictInitially: ${isUserBusyElsewhere}, ConsideredConflictForButton: ${disableButtonDueToUserConflict}`);
+                        } else {
+                            // console.log(`[Debug Modal] Slot ${slot.name} for Resource ${resource.id}: AllowMultiple is FALSE. UserConflictInitially: ${isUserBusyElsewhere}, ConsideredConflictForButton: ${disableButtonDueToUserConflict}`);
+                        }
+
+                        if (disableButtonDueToUserConflict) { // Check the modified flag
                             button.classList.add('time-slot-user-busy');
                             button.disabled = true;
                             button.title = `${slot.name} is unavailable as you have another booking at this time.`;
                             button.textContent = slot.label + " (Your Conflict)";
-                        } else {
+                        } else { // Slot is available from the user's schedule perspective (or conflicts are ignored)
                             button.classList.add('time-slot-available');
                             button.title = `${slot.name} is available.`;
                             button.addEventListener('click', function() {
@@ -911,8 +920,15 @@ document.addEventListener('DOMContentLoaded', function () {
                     // If Full Day hasn't passed, check constituent slots
                     const firstHalfBooked = firstHalfBtn.classList.contains('time-slot-booked');
                     const secondHalfBooked = secondHalfBtn.classList.contains('time-slot-booked');
-                    const firstHalfUserConflict = firstHalfBtn.classList.contains('time-slot-user-busy');
-                    const secondHalfUserConflict = secondHalfBtn.classList.contains('time-slot-user-busy');
+                    const firstHalfBooked = firstHalfBtn.classList.contains('time-slot-booked'); // General booking conflict
+                    const secondHalfBooked = secondHalfBtn.classList.contains('time-slot-booked'); // General booking conflict
+
+                    // User conflict for full day depends on the setting.
+                    // The classes 'time-slot-user-busy' on half-day buttons are now conditional on the setting.
+                    // So, if allowMultipleResourcesSameTime is true, these classes won't be there for user conflicts.
+                    const firstHalfShowsUserConflict = firstHalfBtn.classList.contains('time-slot-user-busy');
+                    const secondHalfShowsUserConflict = secondHalfBtn.classList.contains('time-slot-user-busy');
+
                     const firstHalfPassed = firstHalfBtn.classList.contains('time-slot-passed');
                     const secondHalfPassed = secondHalfBtn.classList.contains('time-slot-passed');
 
@@ -922,7 +938,9 @@ document.addEventListener('DOMContentLoaded', function () {
                         fullDayBtn.classList.add('time-slot-booked');
                         fullDayBtn.title = "Full Day is unavailable because part of the day is booked on this resource.";
                         if (fullDaySlotDetails) fullDayBtn.textContent = fullDaySlotDetails.label + " (Booked)";
-                    } else if (firstHalfUserConflict || secondHalfUserConflict) {
+                    } else if (firstHalfShowsUserConflict || secondHalfShowsUserConflict) {
+                        // This condition is now naturally correct. If allowMultiple is true,
+                        // firstHalfShowsUserConflict/secondHalfShowsUserConflict will be false for user-only conflicts.
                         fullDayBtn.disabled = true;
                         fullDayBtn.classList.remove('time-slot-available', 'time-slot-booked', 'time-slot-passed', 'selected', 'time-slot-selected');
                         fullDayBtn.classList.add('time-slot-user-busy');
