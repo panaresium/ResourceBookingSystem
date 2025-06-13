@@ -546,7 +546,7 @@ def send_checkin_reminders(app):
                             send_email(
                                 to_address=user.email,
                                 subject=email_subject,
-                                text_body=text_body,
+                                body=text_body,
                                 html_body=html_body
                             )
                             booking.checkin_reminder_sent_at = datetime.now(timezone.utc) # Mark as sent with current UTC time
