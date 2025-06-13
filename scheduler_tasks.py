@@ -449,138 +449,195 @@ def send_checkin_reminders(app):
         logger = app.logger
         logger.info("Scheduler: Starting send_checkin_reminders task...")
         try:
-            settings = BookingSettings.query.first()
-            if not settings or settings.checkin_reminder_minutes_before is None or settings.checkin_reminder_minutes_before <= 0:
-                logger.info("Scheduler: Check-in reminders are disabled or reminder time is not set/valid.")
-                logger.info("Scheduler: Task 'send_checkin_reminders' finished early.")
+            booking_settings = BookingSettings.query.first()
+            if not booking_settings:
+                logger.warning("Scheduler: BookingSettings not found. Check-in reminder task will not run.")
                 return
 
-            now_utc = datetime.now(timezone.utc)
-            reminder_minutes = settings.checkin_reminder_minutes_before
-            # Get global_time_offset_hours from settings
-            current_offset_hours = settings.global_time_offset_hours if hasattr(settings, 'global_time_offset_hours') and settings.global_time_offset_hours is not None else 0
+            if not booking_settings.enable_check_in_out:
+                logger.info("Scheduler: Check-in/out feature is disabled. Check-in reminder task will not run.")
+                return
 
-            # Assuming the scheduler runs approximately every 5 minutes.
-            # This interval is used to define a window to catch bookings.
-            scheduler_interval_minutes = 5
+            # Get global_time_offset_hours from settings for local time conversions
+            current_offset_hours = booking_settings.global_time_offset_hours if hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
 
-            # Target window for booking start times in UTC
-            # A booking's start_time (converted to UTC) should fall in this window to get a reminder.
-            target_start_time_window_end_utc = now_utc + timedelta(minutes=reminder_minutes)
-            target_start_time_window_start_utc = target_start_time_window_end_utc - timedelta(minutes=scheduler_interval_minutes)
+            # Effective current time in venue's local timezone (naive)
+            effective_now_aware = get_current_effective_time() # Aware, in venue's effective timezone
+            effective_now_local_naive = effective_now_aware.replace(tzinfo=None) # Naive representation of venue's current time
 
-            logger.debug(f"Scheduler: Precise UTC window for booking start times: ({target_start_time_window_start_utc}, {target_start_time_window_end_utc}]")
-            logger.info(f"Scheduler: Using current_offset_hours: {current_offset_hours} for local time conversions.")
+            logger.info(f"Scheduler: Effective local time for processing: {effective_now_local_naive.strftime('%Y-%m-%d %H:%M:%S')}")
 
-            # Python filtering approach:
-            # 1. Calculate an approximate local time window for the initial query.
-            # Booking.start_time is naive venue local time.
-            now_local_naive_approx = now_utc + timedelta(hours=current_offset_hours)
-            reminder_time_local_naive_approx = now_local_naive_approx + timedelta(minutes=reminder_minutes)
-
-            # Query window in naive local time for fetching candidates.
-            # Query a wider window to be safe, then filter precisely in Python.
-            query_window_start_local = reminder_time_local_naive_approx - timedelta(minutes=scheduler_interval_minutes * 2) # Wider start
-            query_window_end_local = reminder_time_local_naive_approx + timedelta(minutes=scheduler_interval_minutes)     # Wider end
-
-            logger.debug(f"Scheduler: Querying for potential bookings with naive local start_time between {query_window_start_local} and {query_window_end_local}")
-
+            # Fetch all approved bookings where checked_in_at is None
             potential_bookings_local_query = Booking.query.filter(
                 Booking.status == 'approved',
-                Booking.start_time > query_window_start_local, # Booking.start_time is naive local
-                Booking.start_time <= query_window_end_local,  # Booking.start_time is naive local
-                Booking.checkin_reminder_sent_at.is_(None),
                 Booking.checked_in_at.is_(None)
             ).all()
 
-            logger.info(f"Scheduler: Found {len(potential_bookings_local_query)} potential bookings in the local time window for further filtering.")
+            logger.info(f"Scheduler: Found {len(potential_bookings_local_query)} potential bookings (approved, not checked-in) for reminder/cancellation processing.")
 
-            sent_count = 0
-            final_bookings_for_reminder = []
+            sent_reminders_count = 0
+            cancelled_bookings_count = 0
 
             for booking in potential_bookings_local_query:
-                # Convert booking.start_time (naive local) to aware UTC
-                start_time_utc_aware = (booking.start_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc)
-
-                # Now check if this aware UTC time falls into the precise UTC window
-                if target_start_time_window_start_utc < start_time_utc_aware <= target_start_time_window_end_utc:
-                    final_bookings_for_reminder.append(booking)
-                else:
-                    logger.debug(f"Scheduler: Booking ID {booking.id} (Local Start: {booking.start_time}, Calculated UTC: {start_time_utc_aware}) filtered out. Does not match precise UTC window: ({target_start_time_window_start_utc} to {target_start_time_window_end_utc}].")
-
-            if not final_bookings_for_reminder:
-                logger.info("Scheduler: No bookings matched the precise UTC reminder window after Python filtering.")
-                logger.info("Scheduler: Task 'send_checkin_reminders' finished.") # Added finish log here
-                return
-
-            logger.info(f"Scheduler: {len(final_bookings_for_reminder)} bookings matched for sending reminders after time zone adjustments.")
-
-            for booking in final_bookings_for_reminder: # Iterate over the filtered list
                 user = User.query.filter_by(username=booking.user_name).first()
                 resource = db.session.get(Resource, booking.resource_id)
 
                 if not user:
-                    logger.warning(f"Scheduler: Could not find user '{booking.user_name}' for booking ID {booking.id}. Skipping reminder.")
+                    logger.warning(f"Scheduler: Could not find user '{booking.user_name}' for booking ID {booking.id}. Skipping processing for this booking.")
                     continue
                 if not resource:
-                    logger.warning(f"Scheduler: Could not find resource ID {booking.resource_id} for booking ID {booking.id}. Skipping reminder.")
+                    logger.warning(f"Scheduler: Could not find resource ID {booking.resource_id} for booking ID {booking.id}. Skipping processing for this booking.")
                     continue
 
-                if not user.email:
-                    logger.warning(f"Scheduler: User {user.username} has no email address. Skipping reminder for booking ID {booking.id}.")
+                # Booking times are naive local
+                booking_start_local_naive = booking.start_time
+
+                # Get check-in window parameters from BookingSettings
+                # Ensure these settings exist and are valid
+                check_in_minutes_before = booking_settings.check_in_minutes_before
+                check_in_minutes_after = booking_settings.check_in_minutes_after
+                reminder_minutes_before_start = booking_settings.checkin_reminder_minutes_before
+
+                if reminder_minutes_before_start is None or reminder_minutes_before_start <= 0:
+                    logger.info(f"Scheduler: Check-in reminder minutes not configured or invalid for booking ID {booking.id}. Reminder logic will be skipped.")
+                    # Proceed to cancellation logic if applicable
+
+                if check_in_minutes_before is None or check_in_minutes_after is None:
+                    logger.warning(f"Scheduler: Check-in window (before/after minutes) not fully configured in BookingSettings. Skipping reminder/cancellation for booking ID {booking.id}.")
                     continue
 
-                try:
-                    checkin_url = url_for('ui.check_in_at_resource', resource_id=booking.resource_id, _external=True)
+                # Calculate reminder send target and check-in deadline
+                # Reminder target: X minutes before booking start_time
+                reminder_send_target_local_naive = booking_start_local_naive - timedelta(minutes=reminder_minutes_before_start if reminder_minutes_before_start else 0)
+                # Check-in deadline: Y minutes after booking start_time
+                check_in_deadline_local_naive = booking_start_local_naive + timedelta(minutes=check_in_minutes_after)
 
-                    # booking.start_time is naive venue local time. Format it as such for the email.
-                    booking_start_str = booking.start_time.strftime("%Y-%m-%d %H:%M:%S") + " (Venue Local Time)"
+                # Reminder Logic
+                if booking.checkin_reminder_sent_at is None and \
+                   (reminder_minutes_before_start and reminder_minutes_before_start > 0) and \
+                   effective_now_local_naive >= reminder_send_target_local_naive and \
+                   effective_now_local_naive < booking_start_local_naive and \
+                   effective_now_local_naive <= check_in_deadline_local_naive: # Ensure reminder is not sent after deadline
 
-                    email_subject = f"Check-in Reminder: {booking.title or resource.name}"
-                    app_name = current_app.config.get('APP_NAME', 'Smart Resource Booking System')
+                    if not user.email:
+                        logger.warning(f"Scheduler: User {user.username} has no email address. Skipping reminder for booking ID {booking.id}.")
+                    else:
+                        try:
+                            checkin_url = url_for('ui.check_in_at_resource', resource_id=booking.resource_id, _external=True)
+                            booking_start_str = booking_start_local_naive.strftime("%Y-%m-%d %H:%M:%S") + " (Venue Local Time)"
+                            email_subject = f"Check-in Reminder: {booking.title or resource.name}"
+                            app_name = current_app.config.get('APP_NAME', 'Smart Resource Booking System')
 
-                    html_body = render_template('email/checkin_reminder_email.html',
-                                                booking_title=booking.title or "Booking",
-                                                resource_name=resource.name,
-                                                booking_start_time=booking_start_str,
-                                                checkin_url=checkin_url,
-                                                app_name=app_name,
-                                                user_name=user.username) # Pass username for Dear {{user_name}} if template supports
+                            html_body = render_template('email/checkin_reminder_email.html',
+                                                        booking_title=booking.title or "Booking",
+                                                        resource_name=resource.name,
+                                                        booking_start_time=booking_start_str,
+                                                        checkin_url=checkin_url,
+                                                        app_name=app_name,
+                                                        user_name=user.username)
+                            text_body = render_template('email/checkin_reminder_email.txt',
+                                                        booking_title=booking.title or "Booking",
+                                                        resource_name=resource.name,
+                                                        booking_start_time=booking_start_str,
+                                                        checkin_url=checkin_url,
+                                                        app_name=app_name,
+                                                        user_name=user.username)
+                            send_email(
+                                to_address=user.email,
+                                subject=email_subject,
+                                text_body=text_body,
+                                html_body=html_body
+                            )
+                            booking.checkin_reminder_sent_at = datetime.now(timezone.utc) # Mark as sent with current UTC time
+                            db.session.add(booking)
+                            db.session.commit()
+                            sent_reminders_count += 1
+                            logger.info(f"Scheduler: Sent check-in reminder for booking ID {booking.id} to {user.email}.")
+                        except Exception as e_send_reminder:
+                            db.session.rollback()
+                            logger.error(f"Scheduler: Error sending reminder for booking ID {booking.id}: {e_send_reminder}", exc_info=True)
 
-                    text_body = render_template('email/checkin_reminder_email.txt',
-                                                booking_title=booking.title or "Booking",
-                                                resource_name=resource.name,
-                                                booking_start_time=booking_start_str,
-                                                checkin_url=checkin_url,
-                                                app_name=app_name,
-                                                user_name=user.username)
+                # Cancellation Logic
+                # Ensure booking status is still 'approved' before cancelling
+                elif effective_now_local_naive > check_in_deadline_local_naive and booking.status == 'approved':
+                    logger.info(f"Scheduler: Booking ID {booking.id} for resource '{resource.name}' by user '{user.username}' is past its check-in deadline ({check_in_deadline_local_naive}). Attempting to auto-cancel.")
+                    original_status = booking.status
+                    booking.status = 'system_cancelled_no_checkin'
 
-                    send_email(
-                        to_address=user.email, # Changed from recipient to to_address
-                        subject=email_subject,
-                        text_body=text_body, # Assuming send_email expects 'text_body' or 'body'
-                        html_body=html_body
-                    )
+                    try:
+                        db.session.add(booking)
+                        # Audit log before commit, in case commit fails
+                        audit_log_details = (
+                            f"Booking ID {booking.id} for resource '{resource.name}' by user "
+                            f"'{user.username}' (original status: {original_status}) auto-cancelled due to no check-in. "
+                            f"Check-in deadline (local): {check_in_deadline_local_naive.strftime('%Y-%m-%d %H:%M:%S')}."
+                        )
+                        add_audit_log(action="AUTO_CANCEL_NO_CHECKIN", details=audit_log_details)
+                        db.session.commit()
+                        cancelled_bookings_count += 1
+                        logger.info(f"Scheduler: Booking ID {booking.id} status changed to '{booking.status}'. {audit_log_details}")
 
-                    booking.checkin_reminder_sent_at = datetime.now(timezone.utc) # Mark as sent with current UTC time
-                    db.session.add(booking)
-                    db.session.commit()
-                    sent_count += 1
-                    logger.info(f"Scheduler: Sent check-in reminder for booking ID {booking.id} to {user.email}.")
+                        # Send Cancellation Email
+                        if user.email:
+                            floor_map_location = "N/A"
+                            floor_map_floor = "N/A"
+                            if resource.floor_map_id:
+                                floor_map = FloorMap.query.get(resource.floor_map_id)
+                                if floor_map:
+                                    floor_map_location = floor_map.location or "N/A"
+                                    floor_map_floor = floor_map.floor or "N/A"
 
-                except Exception as e_send:
-                    db.session.rollback()
-                    logger.error(f"Scheduler: Error sending reminder for booking ID {booking.id}: {e_send}", exc_info=True)
+                            explanation = (
+                                f"This booking was automatically cancelled because it was not checked-in "
+                                f"within {check_in_minutes_after} minutes of its scheduled start time (by {check_in_deadline_local_naive.strftime('%Y-%m-%d %H:%M:%S')})."
+                            )
+                            email_data = {
+                                'user_name': user.username,
+                                'booking_title': booking.title or "N/A",
+                                'resource_name': resource.name,
+                                'start_time_local': booking_start_local_naive.strftime('%Y-%m-%d %H:%M'),
+                                'end_time_local': booking.end_time.strftime('%Y-%m-%d %H:%M'), # Assuming booking.end_time is naive local
+                                'check_in_deadline_local': check_in_deadline_local_naive.strftime('%Y-%m-%d %H:%M:%S'),
+                                'location': floor_map_location,
+                                'floor': floor_map_floor,
+                                'explanation': explanation
+                            }
+                            subject = f"Booking Automatically Cancelled (No Check-in): {email_data.get('resource_name', 'N/A')} - {email_data.get('booking_title', 'N/A')}"
 
-            if sent_count > 0:
-                logger.info(f"Scheduler: Sent {sent_count} check-in reminders successfully.")
-            elif final_bookings_for_reminder: # Check if there were bookings that were supposed to be sent
-                logger.info("Scheduler: Processed filtered bookings, but no reminders were ultimately sent (e.g., missing user emails, errors during send).")
-            # If no final_bookings_for_reminder and no potential_bookings_local_query, initial log handles it.
-            # If potential_bookings_local_query had items but final_bookings_for_reminder is empty, it's logged before return.
+                            try:
+                                html_body_cancel = render_template('email/booking_auto_cancelled_no_checkin.html', **email_data)
+                                text_body_cancel = render_template('email/booking_auto_cancelled_no_checkin_text.html', **email_data)
+                                send_email(to_address=user.email, subject=subject, body=text_body_cancel, html_body=html_body_cancel)
+                                logger.info(f"Scheduler: Auto-cancellation (no check-in) email initiated for booking ID {booking.id} to {user.email}.")
+                            except Exception as e_send_cancel_email:
+                                if "TemplateNotFound" in str(type(e_send_cancel_email)):
+                                    logger.warning(f"Scheduler: Email template for auto-cancellation not found. Skipping email for booking {booking.id}. Error: {e_send_cancel_email}")
+                                else:
+                                    logger.error(f"Scheduler: Error sending auto-cancellation email for booking {booking.id} to {user.email}: {e_send_cancel_email}", exc_info=True)
+                        else:
+                            logger.warning(f"Scheduler: User {user.username} has no email. Skipping auto-cancellation email for booking ID {booking.id}.")
+                    except Exception as e_cancel_commit:
+                        db.session.rollback()
+                        logger.error(f"Scheduler: Error committing cancellation for booking ID {booking.id}: {e_cancel_commit}", exc_info=True)
+                        add_audit_log(action="AUTO_CANCEL_NO_CHECKIN_FAILED", details=f"Failed to auto-cancel booking ID {booking.id}. Error: {str(e_cancel_commit)}")
+                # else: booking is not yet in reminder window and not past cancellation deadline
+                    # logger.debug(f"Booking ID {booking.id} not yet in reminder window or past cancellation deadline.")
+
+            if sent_reminders_count > 0:
+                logger.info(f"Scheduler: Successfully sent {sent_reminders_count} check-in reminders.")
+            if cancelled_bookings_count > 0:
+                logger.info(f"Scheduler: Successfully auto-cancelled {cancelled_bookings_count} bookings due to no check-in.")
+
+            if sent_reminders_count == 0 and cancelled_bookings_count == 0:
+                logger.info("Scheduler: No reminders sent and no bookings cancelled in this run.")
 
         except Exception as e_task:
-            db.session.rollback()
+            # Attempt to rollback any db changes if an unexpected error occurs at task level
+            try:
+                db.session.rollback()
+                logger.info("Scheduler: Rolled back database session due to error in main task block.")
+            except Exception as e_rollback:
+                logger.error(f"Scheduler: Critical error during task-level rollback: {e_rollback}", exc_info=True)
             logger.error(f"Scheduler: Error in send_checkin_reminders task's main try block: {e_task}", exc_info=True)
         finally:
             logger.info("Scheduler: Task 'send_checkin_reminders' finished.")
