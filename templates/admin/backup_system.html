@@ -241,10 +241,13 @@
                     if (data.task_id !== currentBackupTaskId) return;
                     let messageType = data.level ? data.level.toLowerCase() : 'info';
                     appendLog('backup-log-area', data.status, data.detail, messageType, backupStatusMessageEl);
-                    if (data.status === "Backup completed with overall success: True" || data.status.startsWith("Backup completed with overall success: False")) {
+                    // Check for completion or failure statuses
+                    const lowerStatus = data.status.toLowerCase();
+                    if (lowerStatus.includes("completed") || lowerStatus.includes("failed") || lowerStatus.includes("error") || lowerStatus.includes("finish")) {
                         enablePageInteractions();
                         currentBackupTaskId = null;
-                        if (messageType === 'success' || (data.detail && data.detail.toUpperCase().includes("SUCCESS"))) {
+                        // Reload backups if the backup was successful (or partially successful and worth reloading)
+                        if (lowerStatus.includes("completed with overall success: true") || (messageType === 'success' || (data.detail && data.detail.toUpperCase().includes("SUCCESS")))) {
                             loadAvailableBackups();
                         }
                     }

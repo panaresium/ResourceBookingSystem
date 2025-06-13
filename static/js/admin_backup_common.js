@@ -1,4 +1,6 @@
 // --- Global Interactive Element Selectors ---
+let pageInteractionTimeout = null;
+
 const interactiveElementSelectors = [
     '#one-click-backup-btn',
     '#list-backups-btn',
@@ -38,6 +40,9 @@ const interactiveElementSelectors = [
 
 function disablePageInteractions() {
     console.log("Disabling page interactions.");
+    if (pageInteractionTimeout) {
+        clearTimeout(pageInteractionTimeout);
+    }
     interactiveElementSelectors.forEach(selector => {
         const elements = document.querySelectorAll(selector);
         elements.forEach(el => {
@@ -50,10 +55,15 @@ function disablePageInteractions() {
             }
         });
     });
+    pageInteractionTimeout = setTimeout(enablePageInteractions, 300000); // 5 minutes
 }
 
 function enablePageInteractions() {
     console.log("Enabling page interactions.");
+    if (pageInteractionTimeout) {
+        clearTimeout(pageInteractionTimeout);
+        pageInteractionTimeout = null;
+    }
     interactiveElementSelectors.forEach(selector => {
         const elements = document.querySelectorAll(selector);
         elements.forEach(el => {
