@@ -7,9 +7,24 @@ basedir = Path(__file__).resolve().parent
 
 # --- Core Flask App Configurations ---
 SECRET_KEY = os.environ.get('SECRET_KEY', 'dev_secret_key_123!@#_fallback_for_config.py')
-SERVER_NAME = os.environ.get('SERVER_NAME') # e.g., 'localhost:5000' or 'yourdomain.com'
+
+# SERVER_NAME Configuration with logging/print for diagnostics
+SERVER_NAME_FROM_ENV = os.environ.get('SERVER_NAME')
+if SERVER_NAME_FROM_ENV:
+    SERVER_NAME = SERVER_NAME_FROM_ENV
+    print(f"INFO: [config.py] SERVER_NAME configured from environment variable: {SERVER_NAME}")
+else:
+    SERVER_NAME = 'localhost:5000' # Default fallback
+    print(f"WARNING: [config.py] SERVER_NAME environment variable not set. Using default: {SERVER_NAME}. This may not be suitable for production or external URL generation by the scheduler.")
+
+# Ensure APPLICATION_ROOT and PREFERRED_URL_SCHEME also have their existing defaults
 APPLICATION_ROOT = os.environ.get('APPLICATION_ROOT', '/')
 PREFERRED_URL_SCHEME = os.environ.get('PREFERRED_URL_SCHEME', 'http') # Use 'https' in production
+
+print(f"INFO: [config.py] Final effective SERVER_NAME: {SERVER_NAME}")
+print(f"INFO: [config.py] Final effective APPLICATION_ROOT: {APPLICATION_ROOT}")
+print(f"INFO: [config.py] Final effective PREFERRED_URL_SCHEME: {PREFERRED_URL_SCHEME}")
+
 # For Flask-Session type extension
 SESSION_TYPE = os.environ.get('SESSION_TYPE', 'filesystem')
 SESSION_FILE_DIR = basedir / 'flask_session' # Directory for session files
