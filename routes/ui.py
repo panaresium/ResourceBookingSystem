@@ -246,7 +246,7 @@ def check_in_at_resource(resource_id):
             flash("Please log in to check-in for this resource.", "info")
 
         # Redirect to login, then auth logic should handle 'next' and session flags.
-        return redirect(url_for('auth.login', next=url_for('ui.check_in_at_resource', resource_id=resource_id, _external=True)))
+        return redirect(url_for('ui.serve_login', next=url_for('ui.check_in_at_resource', resource_id=resource_id, _external=True)))
 
 
 # Function to register this blueprint in the app factory
