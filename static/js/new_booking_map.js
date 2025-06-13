@@ -914,10 +914,10 @@ document.addEventListener('DOMContentLoaded', function () {
                                             if (newUnavailableDates.includes(dateStr)) {
                                                 return true;
                                             }
-                                            // Original logic for disabling past 5 PM for today's date
-                                            const todayStr = getTodayDateString(); // Ensure getTodayDateString is accessible
-                                            const isPastFivePMToday = dateStr === todayStr && isPastFivePM(); // Ensure isPastFivePM is accessible
-                                            return isPastFivePMToday;
+                                            // Add any other conditions for disabling dates here if necessary,
+                                            // otherwise, if only newUnavailableDates matters, this function can be simplified.
+                                            // For now, we will assume that if it's not in newUnavailableDates, it's not disabled by this specific part.
+                                            return false; // Or return based on other existing logic if present
                                         }
                                     ]);
                                     fpInstance.redraw(); // Trigger a redraw to apply changes
