@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, request # jsonify for error handler, request for error handlers
+from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 import json # Added for json.load and json.dumps
 import logging
@@ -146,6 +147,9 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
     # 1. Load Configuration
     app.config.from_object(config_object)
+
+    # Add ProxyFix middleware
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
     if testing:
         app.config['TESTING'] = True
