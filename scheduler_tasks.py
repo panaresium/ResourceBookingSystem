@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from flask import current_app, render_template
+from flask import current_app, render_template, url_for
 from extensions import db
 from models import Booking, User, Resource, FloorMap, BookingSettings
 from utils import add_audit_log, send_email, _get_map_configuration_data, _get_resource_configurations_data, _get_user_configurations_data, get_current_effective_time
@@ -457,34 +457,65 @@ def send_checkin_reminders(app):
 
             now_utc = datetime.now(timezone.utc)
             reminder_minutes = settings.checkin_reminder_minutes_before
+            # Get global_time_offset_hours from settings
+            current_offset_hours = settings.global_time_offset_hours if hasattr(settings, 'global_time_offset_hours') and settings.global_time_offset_hours is not None else 0
 
             # Assuming the scheduler runs approximately every 5 minutes.
             # This interval is used to define a window to catch bookings.
             scheduler_interval_minutes = 5
 
-            # We are looking for bookings whose start_time is such that (start_time - reminder_minutes) falls into
-            # the (now_utc - scheduler_interval_minutes, now_utc] window.
-            # This means start_time should be in the window:
-            # (now_utc + reminder_minutes - scheduler_interval_minutes, now_utc + reminder_minutes]
+            # Target window for booking start times in UTC
+            # A booking's start_time (converted to UTC) should fall in this window to get a reminder.
+            target_start_time_window_end_utc = now_utc + timedelta(minutes=reminder_minutes)
+            target_start_time_window_start_utc = target_start_time_window_end_utc - timedelta(minutes=scheduler_interval_minutes)
 
-            target_start_time_window_end = now_utc + timedelta(minutes=reminder_minutes)
-            target_start_time_window_start = target_start_time_window_end - timedelta(minutes=scheduler_interval_minutes)
+            logger.debug(f"Scheduler: Precise UTC window for booking start times: ({target_start_time_window_start_utc}, {target_start_time_window_end_utc}]")
+            logger.info(f"Scheduler: Using current_offset_hours: {current_offset_hours} for local time conversions.")
 
-            logger.debug(f"Scheduler: Check-in reminder window for booking start_time: ({target_start_time_window_start}, {target_start_time_window_end}]")
+            # Python filtering approach:
+            # 1. Calculate an approximate local time window for the initial query.
+            # Booking.start_time is naive venue local time.
+            now_local_naive_approx = now_utc + timedelta(hours=current_offset_hours)
+            reminder_time_local_naive_approx = now_local_naive_approx + timedelta(minutes=reminder_minutes)
 
-            potential_bookings = Booking.query.filter(
+            # Query window in naive local time for fetching candidates.
+            # Query a wider window to be safe, then filter precisely in Python.
+            query_window_start_local = reminder_time_local_naive_approx - timedelta(minutes=scheduler_interval_minutes * 2) # Wider start
+            query_window_end_local = reminder_time_local_naive_approx + timedelta(minutes=scheduler_interval_minutes)     # Wider end
+
+            logger.debug(f"Scheduler: Querying for potential bookings with naive local start_time between {query_window_start_local} and {query_window_end_local}")
+
+            potential_bookings_local_query = Booking.query.filter(
                 Booking.status == 'approved',
-                Booking.start_time > target_start_time_window_start, # Booking start_time is after the window start
-                Booking.start_time <= target_start_time_window_end, # Booking start_time is on or before the window end
+                Booking.start_time > query_window_start_local, # Booking.start_time is naive local
+                Booking.start_time <= query_window_end_local,  # Booking.start_time is naive local
                 Booking.checkin_reminder_sent_at.is_(None),
                 Booking.checked_in_at.is_(None)
             ).all()
 
-            sent_count = 0
-            if not potential_bookings:
-                logger.info("Scheduler: No potential bookings found for check-in reminders in this run.")
+            logger.info(f"Scheduler: Found {len(potential_bookings_local_query)} potential bookings in the local time window for further filtering.")
 
-            for booking in potential_bookings:
+            sent_count = 0
+            final_bookings_for_reminder = []
+
+            for booking in potential_bookings_local_query:
+                # Convert booking.start_time (naive local) to aware UTC
+                start_time_utc_aware = (booking.start_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc)
+
+                # Now check if this aware UTC time falls into the precise UTC window
+                if target_start_time_window_start_utc < start_time_utc_aware <= target_start_time_window_end_utc:
+                    final_bookings_for_reminder.append(booking)
+                else:
+                    logger.debug(f"Scheduler: Booking ID {booking.id} (Local Start: {booking.start_time}, Calculated UTC: {start_time_utc_aware}) filtered out. Does not match precise UTC window: ({target_start_time_window_start_utc} to {target_start_time_window_end_utc}].")
+
+            if not final_bookings_for_reminder:
+                logger.info("Scheduler: No bookings matched the precise UTC reminder window after Python filtering.")
+                logger.info("Scheduler: Task 'send_checkin_reminders' finished.") # Added finish log here
+                return
+
+            logger.info(f"Scheduler: {len(final_bookings_for_reminder)} bookings matched for sending reminders after time zone adjustments.")
+
+            for booking in final_bookings_for_reminder: # Iterate over the filtered list
                 user = User.query.filter_by(username=booking.user_name).first()
                 resource = db.session.get(Resource, booking.resource_id)
 
@@ -500,15 +531,10 @@ def send_checkin_reminders(app):
                     continue
 
                 try:
-                    # url_for needs to be imported or available in context. Assuming it is.
-                    from flask import url_for # Ensure url_for is available
                     checkin_url = url_for('ui.check_in_at_resource', resource_id=booking.resource_id, _external=True)
 
-                    # booking.start_time is naive UTC, treat as UTC for formatting
-                    booking_start_utc = booking.start_time.replace(tzinfo=timezone.utc)
-                    # Example: format for user's local time if user.timezone is available, else UTC.
-                    # For simplicity, sticking to UTC for now.
-                    booking_start_str = booking_start_utc.strftime("%Y-%m-%d %H:%M:%S %Z")
+                    # booking.start_time is naive venue local time. Format it as such for the email.
+                    booking_start_str = booking.start_time.strftime("%Y-%m-%d %H:%M:%S") + " (Venue Local Time)"
 
                     email_subject = f"Check-in Reminder: {booking.title or resource.name}"
                     app_name = current_app.config.get('APP_NAME', 'Smart Resource Booking System')
@@ -530,14 +556,14 @@ def send_checkin_reminders(app):
                                                 user_name=user.username)
 
                     send_email(
-                        recipient=user.email,
+                        to_address=user.email, # Changed from recipient to to_address
                         subject=email_subject,
-                        text_body=text_body,
+                        text_body=text_body, # Assuming send_email expects 'text_body' or 'body'
                         html_body=html_body
                     )
 
                     booking.checkin_reminder_sent_at = datetime.now(timezone.utc) # Mark as sent with current UTC time
-                    db.session.add(booking) # Add booking to session before commit
+                    db.session.add(booking)
                     db.session.commit()
                     sent_count += 1
                     logger.info(f"Scheduler: Sent check-in reminder for booking ID {booking.id} to {user.email}.")
@@ -548,9 +574,10 @@ def send_checkin_reminders(app):
 
             if sent_count > 0:
                 logger.info(f"Scheduler: Sent {sent_count} check-in reminders successfully.")
-            elif potential_bookings: # Potential bookings were found, but none resulted in sent email (e.g. user email missing)
-                logger.info("Scheduler: Processed potential bookings, but no reminders were ultimately sent (e.g., missing user emails, errors).")
-            # If no potential_bookings, already logged above.
+            elif final_bookings_for_reminder: # Check if there were bookings that were supposed to be sent
+                logger.info("Scheduler: Processed filtered bookings, but no reminders were ultimately sent (e.g., missing user emails, errors during send).")
+            # If no final_bookings_for_reminder and no potential_bookings_local_query, initial log handles it.
+            # If potential_bookings_local_query had items but final_bookings_for_reminder is empty, it's logged before return.
 
         except Exception as e_task:
             db.session.rollback()
