@@ -593,7 +593,7 @@
                         confirmationMessage = `{{ _('Are you sure you want to delete backup') }} '${displayTimestamp}'? {{ _('This action cannot be undone.') }}`;
                         actionVerb = "{{ _('delete') }}";
                         method = 'POST';
-                        currentDeleteTaskId = null;
+                        // currentDeleteTaskId = null; // Removed: Will be set from server response to ensure progress handler has correct ID
                     } else if (isVerifyJs) {
                         endpoint = '/api/admin/verify_backup';
                         confirmationMessage = `{{ _('Are you sure you want to verify backup') }} ${displayTimestamp}?`;
