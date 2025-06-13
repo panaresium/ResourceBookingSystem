@@ -300,10 +300,20 @@
 
                 socket.on('backup_delete_progress', function(data) {
                     console.log('Backup delete progress event:', data);
-                    console.log('DEBUG backup_delete_progress: currentDeleteTaskId at handler start =', currentDeleteTaskId);
+                    console.log('DEBUG backup_delete_progress: ENTRYPOINT. data.task_id =', data.task_id, '; currentDeleteTaskId =', currentDeleteTaskId, '; isAwaitingDeleteTaskIdFromServer =', isAwaitingDeleteTaskIdFromServer);
+
+                    console.log('DEBUG backup_delete_progress: PRE-CAPTURE CHECK. isAwaitingDeleteTaskIdFromServer =', isAwaitingDeleteTaskIdFromServer, '; !currentDeleteTaskId =', !currentDeleteTaskId, '; data.task_id (truthy?) =', !!data.task_id);
+                    if (isAwaitingDeleteTaskIdFromServer && !currentDeleteTaskId && data.task_id) {
+                        // If we were waiting for a task ID, and haven't got one from fetch yet,
+                        // and this message HAS a task_id, tentatively accept it.
+                        console.log('DEBUG backup_delete_progress: ছিল NULL currentDeleteTaskId. Socket message থেকে data.task_id দিয়ে সেট করা হচ্ছে:', data.task_id); // "Was NULL currentDeleteTaskId. Setting with data.task_id from Socket message"
+                        currentDeleteTaskId = data.task_id;
+                        isAwaitingDeleteTaskIdFromServer = false; // No longer awaiting from fetch primarily, but fetch might confirm/overwrite later if it's different (unlikely for same op)
+                        console.log('DEBUG backup_delete_progress: isAwaitingDeleteTaskIdFromServer is now false.');
+                    }
 
                     if (data.task_id !== currentDeleteTaskId) {
-                        console.log('DEBUG backup_delete_progress: Task ID mismatch. data.task_id =', data.task_id, 'currentDeleteTaskId =', currentDeleteTaskId, '. Bailing out.');
+                        console.log('DEBUG backup_delete_progress: Task ID mismatch AFTER potential capture. data.task_id =', data.task_id, '; currentDeleteTaskId =', currentDeleteTaskId, '. Bailing out.');
                         return;
                     }
 
