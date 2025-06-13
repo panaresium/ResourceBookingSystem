@@ -1151,45 +1151,54 @@ def update_booking_by_user(booking_id):
                     return jsonify({'error': f'Resource is under maintenance until {maint_until_str} (venue local) and the new time slot falls within this period.'}), 403
 
             if time_changed:
-                # Assign processed naive venue local times
+                # Tentatively set new times on the booking object for conflict checking
                 booking.start_time = parsed_new_start_time
                 booking.end_time = parsed_new_end_time
 
-                conflicting_booking = Booking.query.filter(
-                    Booking.resource_id == booking.resource_id,
-                    Booking.id != booking_id,
-                    Booking.start_time < booking.end_time, # Compares new venue local end time
-                    Booking.end_time > booking.start_time  # Compares new venue local start time
-                ).first()
+                with db.session.no_autoflush:
+                    conflicting_booking = Booking.query.filter(
+                        Booking.resource_id == booking.resource_id,
+                        Booking.id != booking_id,
+                        Booking.start_time < booking.end_time, # Uses new booking.end_time
+                        Booking.end_time > booking.start_time  # Uses new booking.start_time
+                    ).first()
+
+                    user_own_conflict = None
+                    if not conflicting_booking: # Only check if no resource conflict
+                        user_own_conflict = Booking.query.filter(
+                            Booking.user_name == current_user.username,
+                            Booking.resource_id != booking.resource_id,
+                            Booking.id != booking_id,
+                            Booking.start_time < booking.end_time, # Uses new booking.end_time
+                            Booking.end_time > booking.start_time    # Uses new booking.start_time
+                        ).first()
+
+                    user_self_conflict_check = None
+                    if not conflicting_booking and not user_own_conflict: # Only if no other conflicts
+                        active_conflict_statuses_for_self_check = ['approved', 'pending', 'checked_in', 'confirmed']
+                        user_self_conflict_check = Booking.query.filter(
+                            Booking.user_name == current_user.username,
+                            Booking.id != booking_id,
+                            Booking.start_time < booking.end_time, # Uses new booking.end_time
+                            Booking.end_time > booking.start_time,  # Uses new booking.start_time
+                            sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_conflict_statuses_for_self_check)
+                        ).first()
 
                 if conflicting_booking:
                     current_app.logger.warning(f"[API PUT /api/bookings/{booking_id}] Update for user '{current_user.username}' on resource ID {booking.resource_id} "
                                                f"conflicts with existing booking ID {conflicting_booking.id} on the same resource.")
-                    # Rollback the time change before returning error
-                    booking.start_time = old_start_time
+                    booking.start_time = old_start_time # Revert in-memory change
                     booking.end_time = old_end_time
                     return jsonify({'error': 'The updated time slot conflicts with an existing booking on this resource.'}), 409
 
-                # NEW CHECK: User's other bookings conflict on DIFFERENT resources
-                # parsed_new_start_time and parsed_new_end_time are already naive venue local
-                user_own_conflict = Booking.query.filter(
-                    Booking.user_name == current_user.username,
-                    Booking.resource_id != booking.resource_id,  # Critical: Different resource
-                    Booking.id != booking_id,                   # Critical: Not the current booking
-                    Booking.start_time < parsed_new_end_time,   # Compare against naive venue local
-                    Booking.end_time > parsed_new_start_time    # Compare against naive venue local
-                ).first()
-
-                if user_own_conflict:
+                if user_own_conflict: # This check was previously inside the no_autoflush, now it's correctly evaluated after
                     current_app.logger.warning(
                         f"[API PUT /api/bookings/{booking_id}] Update for user '{current_user.username}' "
                         f"conflicts with their own existing booking ID {user_own_conflict.id} "
                         f"for resource '{user_own_conflict.resource_booked.name if user_own_conflict.resource_booked else 'N/A'}' (ID: {user_own_conflict.resource_id})."
                     )
-                    # Revert time changes before returning error
-                    booking.start_time = old_start_time
+                    booking.start_time = old_start_time # Revert in-memory change
                     booking.end_time = old_end_time
-                    # No db.session.commit() should have happened for the main update yet.
                     return jsonify({
                         'error': f"The updated time slot conflicts with another of your existing bookings "
                                  f"for resource '{user_own_conflict.resource_booked.name if user_own_conflict.resource_booked else 'unknown resource'}' "
@@ -1197,41 +1206,28 @@ def update_booking_by_user(booking_id):
                                  f"on {user_own_conflict.start_time.strftime('%Y-%m-%d')}."
                     }), 409
 
-            # NEW CHECK: User's other bookings conflict (ANY resource)
-            # This check is to prevent a user from being double-booked with themselves,
-            # regardless of the resource or the allow_multiple_resources_same_time setting.
-            # Define active_conflict_statuses if not already available in this scope,
-            # or use a direct list like ['approved', 'pending', 'checked_in', 'confirmed'].
-            active_conflict_statuses_for_self_check = ['approved', 'pending', 'checked_in', 'confirmed']
-            user_self_conflict_check = Booking.query.filter(
-                Booking.user_name == current_user.username,
-                Booking.id != booking_id,  # Exclude the booking being updated itself
-                Booking.start_time < parsed_new_end_time,  # New end time of the booking being updated
-                Booking.end_time > parsed_new_start_time,   # New start time of the booking being updated
-                sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_conflict_statuses_for_self_check)
-            ).first()
+                if user_self_conflict_check: # This check was previously inside the no_autoflush
+                    current_app.logger.warning(
+                        f"[API PUT /api/bookings/{booking_id}] Update for user '{current_user.username}' "
+                        f"conflicts with THEIR OWN existing booking ID {user_self_conflict_check.id} "
+                        f"for resource '{user_self_conflict_check.resource_booked.name if user_self_conflict_check.resource_booked else 'N/A'}' (ID: {user_self_conflict_check.resource_id}) "
+                        f"during the new self-conflict check."
+                    )
+                    booking.start_time = old_start_time # Revert in-memory change
+                    booking.end_time = old_end_time
+                    return jsonify({
+                        'error': f"The updated time slot conflicts with another of your existing bookings "
+                                 f"for resource '{user_self_conflict_check.resource_booked.name if user_self_conflict_check.resource_booked else 'unknown resource'}' "
+                                 f"from {user_self_conflict_check.start_time.strftime('%H:%M')} to {user_self_conflict_check.end_time.strftime('%H:%M')} "
+                                 f"on {user_self_conflict_check.start_time.strftime('%Y-%m-%d')}."
+                    }), 409
 
-            if user_self_conflict_check:
-                current_app.logger.warning(
-                    f"[API PUT /api/bookings/{booking_id}] Update for user '{current_user.username}' "
-                    f"conflicts with THEIR OWN existing booking ID {user_self_conflict_check.id} "
-                    f"for resource '{user_self_conflict_check.resource_booked.name if user_self_conflict_check.resource_booked else 'N/A'}' (ID: {user_self_conflict_check.resource_id}) "
-                    f"during the new self-conflict check."
-                )
-                # Revert time changes before returning error
-                booking.start_time = old_start_time
-                booking.end_time = old_end_time
-                # No db.session.commit() should have happened for the main update yet.
-                return jsonify({
-                    'error': f"The updated time slot conflicts with another of your existing bookings "
-                             f"for resource '{user_self_conflict_check.resource_booked.name if user_self_conflict_check.resource_booked else 'unknown resource'}' "
-                             f"from {user_self_conflict_check.start_time.strftime('%H:%M')} to {user_self_conflict_check.end_time.strftime('%H:%M')} "
-                             f"on {user_self_conflict_check.start_time.strftime('%Y-%m-%d')}."
-                }), 409
-
-            current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] All conflict checks passed or were not applicable. Setting changes_made=True for time change.")
-            changes_made = True
-            change_details_list.append(f"time from {old_start_time.isoformat()} to {booking.start_time.isoformat()}-{booking.end_time.isoformat()}")
+            # If we reach here and time_changed is true, it means new times are set on booking object and no conflicts were found.
+            if time_changed: # This condition is now based on the initial comparison
+                current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] All conflict checks passed for time change. Setting changes_made=True.")
+                changes_made = True
+                # The booking object already has the new start/end times from the tentative update.
+                change_details_list.append(f"time from {old_start_time.isoformat()} to {booking.start_time.isoformat()}-{booking.end_time.isoformat()}")
 
         if not changes_made:
             current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' submitted update with no actual changes.")
