@@ -9,10 +9,28 @@ document.addEventListener('DOMContentLoaded', function () {
         return `${yyyy}-${mm}-${dd}`;
     }
 
+    function getEffectiveClientNow(adjustmentHours) {
+        const now = new Date();
+        // Subtracting hours: if adjustmentHours is positive (allow past booking), effective time is earlier.
+        // If adjustmentHours is negative (restrict future booking), effective time is later.
+        now.setHours(now.getHours() - adjustmentHours);
+        return now;
+    }
+
     // const mapAvailabilityDateInput = document.getElementById('new-booking-map-availability-date'); // Old input field, now removed from HTML
     const calendarContainer = document.getElementById('inline-calendar-container'); // New container for inline flatpickr
     const userId = calendarContainer ? calendarContainer.dataset.userId : null;
     console.log('[Debug] Flatpickr User ID:', userId);
+
+    let pastBookingAdjustmentHours = 0; // Default
+    if (calendarContainer && calendarContainer.dataset.pastBookingAdjustmentHours) {
+        pastBookingAdjustmentHours = parseFloat(calendarContainer.dataset.pastBookingAdjustmentHours);
+        if (isNaN(pastBookingAdjustmentHours)) {
+            pastBookingAdjustmentHours = 0;
+            console.warn('[Debug] Invalid past_booking_adjustment_hours, defaulting to 0.');
+        }
+    }
+    console.log('[Debug] Using pastBookingAdjustmentHours:', pastBookingAdjustmentHours);
     const mapLocationButtonsContainer = document.getElementById('new-booking-map-location-buttons-container'); // Will be used for combined buttons
     const mapContainer = document.getElementById('new-booking-map-container');
     const mapLoadingStatusDiv = document.getElementById('new-booking-map-loading-status');
@@ -124,16 +142,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
                         // Check for "today" and time
                         if (dateStr === todayStr) {
-                            const now = new Date();
+                            const effectiveNow = getEffectiveClientNow(pastBookingAdjustmentHours);
+                            const actualNow = new Date(); // For logging actual time
                             const latestSlotEndTimeHour = 17;
                             const latestSlotEndTimeMinute = 0;
                             let shouldDisableToday = false;
 
-                            if (now.getHours() > latestSlotEndTimeHour || (now.getHours() === latestSlotEndTimeHour && now.getMinutes() > latestSlotEndTimeMinute)) {
+                            if (effectiveNow.getHours() > latestSlotEndTimeHour || (effectiveNow.getHours() === latestSlotEndTimeHour && effectiveNow.getMinutes() > latestSlotEndTimeMinute)) {
                                 shouldDisableToday = true;
                             }
 
-                            console.log('[Debug] Flatpickr disable check for TODAY (' + dateStr + '): Current time is ' + now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0') + '. Disabling? ' + shouldDisableToday);
+                            console.log('[Debug] Flatpickr disable check for TODAY (' + dateStr + '): Actual time: ' + actualNow.getHours() + ':' + String(actualNow.getMinutes()).padStart(2, '0') + ', Effective time: ' + effectiveNow.getHours() + ':' + String(effectiveNow.getMinutes()).padStart(2, '0') + ' (Adjustment: ' + pastBookingAdjustmentHours + 'h). Disabling? ' + shouldDisableToday);
                             if (shouldDisableToday) {
                                 return true;
                             }
@@ -781,17 +800,21 @@ document.addEventListener('DOMContentLoaded', function () {
                 let slotHasPassed = false;
 
                 if (isToday) {
-                    const now = new Date();
-                    const currentHours = now.getHours();
-                    const currentMinutes = now.getMinutes();
+                    const effectiveNow = getEffectiveClientNow(pastBookingAdjustmentHours);
+                    // const actualNow = new Date(); // For potential logging of actual vs effective
+                    const currentHours = effectiveNow.getHours();
+                    const currentMinutes = effectiveNow.getMinutes();
                     const [slotEndHours, slotEndMinutes] = slot.endTime.split(':').map(Number);
+
+                    // console.log(`[Debug Modal] Slot ${slot.name} (${slot.endTime}) on ${dateString}: Actual Time: ${actualNow.getHours()}:${String(actualNow.getMinutes()).padStart(2,'0')}, Effective Time: ${currentHours}:${String(currentMinutes).padStart(2,'0')}`);
 
                     if (currentHours > slotEndHours || (currentHours === slotEndHours && currentMinutes >= slotEndMinutes)) {
                         slotHasPassed = true;
                         button.classList.add('time-slot-passed');
                         button.disabled = true;
-                        button.title = slot.name + ' has passed for today.';
+                        button.title = slot.name + ' has passed for today (effective time).';
                         button.textContent = slot.label + " (Passed)";
+                        // console.log(`[Debug Modal] Slot ${slot.name} disabled as passed. Effective: ${currentHours}:${currentMinutes} vs SlotEnd: ${slotEndHours}:${slotEndMinutes}`);
                     }
                 }
 

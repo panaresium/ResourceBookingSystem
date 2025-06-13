@@ -9,7 +9,7 @@
     <div id="location-selection-instruction" class="instruction-message">{{ _('Please select a location and floor to see the map.') }}</div>
 
     <div id="selection-controls-container" style="display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 20px;">
-        <div id="inline-calendar-container" style="flex: 1; min-width: 280px; max-width: 320px;" {% if current_user.is_authenticated %}data-user-id="{{ current_user.id }}"{% endif %}>
+        <div id="inline-calendar-container" style="flex: 1; min-width: 280px; max-width: 320px;" {% if current_user.is_authenticated %}data-user-id="{{ current_user.id }}"{% endif %} data-past-booking-adjustment-hours="{{ past_booking_adjustment_hours }}">
             <!-- Flatpickr inline calendar will render here -->
         </div>
         <div id="location-floor-wrapper" style="display: none; flex: 2; min-width: 300px;"> <!-- Wrapper for location buttons and their label -->
