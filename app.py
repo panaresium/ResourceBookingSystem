@@ -28,12 +28,12 @@ if __name__ == "__main__":
 
     # FLASK_DEBUG environment variable is commonly used.
     # Convert string "true" or "1" to boolean True.
-    flask_debug_env = os.environ.get("FLASK_DEBUG", "False").lower()
-    debug_mode = flask_debug_env in ("true", "1", "yes")
-    print(f"PRINT_DEBUG: APP.PY - FLASK_DEBUG env var: '{flask_debug_env}', Parsed debug_mode: {debug_mode}", flush=True)
+    #flask_debug_env = os.environ.get("FLASK_DEBUG", "False").lower()
+    #debug_mode = flask_debug_env in ("true", "1", "yes")
+    #print(f"PRINT_DEBUG: APP.PY - FLASK_DEBUG env var: '{flask_debug_env}', Parsed debug_mode: {debug_mode}", flush=True)
 
     # Use app.logger for consistency once app is created
-    app.logger.info(f"Starting application on {host}:{port} with debug mode: {debug_mode}")
+    #app.logger.info(f"Starting application on {host}:{port} with debug mode: {debug_mode}")
 
     # allow_unsafe_werkzeug=True is often needed for older Werkzeug versions with SocketIO's dev server.
     # Consider security implications or using a proper WSGI server for production.
