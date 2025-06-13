@@ -9,6 +9,11 @@ document.addEventListener('DOMContentLoaded', function () {
         return `${yyyy}-${mm}-${dd}`;
     }
 
+    function isPastFivePM() {
+        const now = new Date();
+        return now.getHours() >= 17; // 17 is 5 PM in 24-hour format
+    }
+
     // const mapAvailabilityDateInput = document.getElementById('new-booking-map-availability-date'); // Old input field, now removed from HTML
     const calendarContainer = document.getElementById('inline-calendar-container'); // New container for inline flatpickr
     const userId = calendarContainer ? calendarContainer.dataset.userId : null;
