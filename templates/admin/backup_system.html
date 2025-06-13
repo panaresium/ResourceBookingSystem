@@ -227,6 +227,7 @@
             let currentRestoreTaskId = null;
             let currentVerifyTaskId = null;
             let currentDeleteTaskId = null;
+            let isAwaitingDeleteTaskIdFromServer = false;
 
             // Pagination Variables
             let currentPage = 1;
@@ -593,6 +594,7 @@
                         confirmationMessage = `{{ _('Are you sure you want to delete backup') }} '${displayTimestamp}'? {{ _('This action cannot be undone.') }}`;
                         actionVerb = "{{ _('delete') }}";
                         method = 'POST';
+                        isAwaitingDeleteTaskIdFromServer = true;
                         // currentDeleteTaskId = null; // Removed: Will be set from server response to ensure progress handler has correct ID
                     } else if (isVerifyJs) {
                         endpoint = '/api/admin/verify_backup';
@@ -632,7 +634,11 @@
                     .then(response => response.json())
                     .then(data => {
                         if (isDryRun) currentRestoreTaskId = data.task_id; // Dry run uses restore_progress
-                        if (isDelete) currentDeleteTaskId = data.task_id;
+                        if (isDelete) {
+                            currentDeleteTaskId = data.task_id;
+                            isAwaitingDeleteTaskIdFromServer = false;
+                            console.log('DEBUG Delete Fetch Callback: currentDeleteTaskId set by fetch to', data.task_id, '; isAwaitingDeleteTaskIdFromServer is now false.');
+                        }
                         if (isVerifyJs) currentVerifyTaskId = data.task_id;
 
                         const messageType = data.success ? 'info' : 'error';
