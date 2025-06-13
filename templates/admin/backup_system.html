@@ -239,18 +239,41 @@
             if (typeof socket !== 'undefined') {
                 socket.on('backup_progress', function(data) {
                     console.log('Backup progress event:', data);
-                    if (data.task_id !== currentBackupTaskId) return;
+                    if (data.task_id !== currentBackupTaskId) {
+                        console.log('DEBUG backup_progress: Task ID mismatch. data.task_id =', data.task_id, 'currentBackupTaskId =', currentBackupTaskId, '. Bailing out.');
+                        return;
+                    }
+
                     let messageType = data.level ? data.level.toLowerCase() : 'info';
                     appendLog('backup-log-area', data.status, data.detail, messageType, backupStatusMessageEl);
-                    // Check for completion or failure statuses
+
                     const lowerStatus = data.status.toLowerCase();
-                    if (lowerStatus.includes("completed") || lowerStatus.includes("failed") || lowerStatus.includes("error") || lowerStatus.includes("finish")) {
+                    console.log('DEBUG backup_progress: Received data.status =', data.status, '; data.detail =', data.detail, '; data.level =', data.level);
+
+                    // Specific check for the final success message
+                    const isBackupReallyCompletedSuccessfully = lowerStatus.includes("backup completed with overall success: true");
+                    // Specific check for the final failure message
+                    const isBackupReallyCompletedWithFailure = lowerStatus.includes("backup completed with overall success: false");
+
+                    console.log('DEBUG backup_progress: isBackupReallyCompletedSuccessfully =', isBackupReallyCompletedSuccessfully);
+                    console.log('DEBUG backup_progress: isBackupReallyCompletedWithFailure =', isBackupReallyCompletedWithFailure);
+
+                    if (isBackupReallyCompletedSuccessfully || isBackupReallyCompletedWithFailure) {
+                        console.log('DEBUG backup_progress: Final completion message detected. Status:', data.status);
+                        console.log('DEBUG backup_progress: Attempting to call enablePageInteractions().');
                         enablePageInteractions();
                         currentBackupTaskId = null;
-                        // Reload backups if the backup was successful (or partially successful and worth reloading)
-                        if (lowerStatus.includes("completed with overall success: true") || (messageType === 'success' || (data.detail && data.detail.toUpperCase().includes("SUCCESS")))) {
-                            loadAvailableBackups(true); // Quick refresh
+                        console.log('DEBUG backup_progress: Interactions enabled, currentBackupTaskId nulled.');
+
+                        if (isBackupReallyCompletedSuccessfully) {
+                            console.log('DEBUG backup_progress: Backup was successful. Attempting to call loadAvailableBackups(true).');
+                            loadAvailableBackups(true);
+                        } else {
+                            console.log('DEBUG backup_progress: Backup completed with failure. Not calling loadAvailableBackups.');
                         }
+                    } else {
+                        // Optional: Log intermediate messages if needed, but not strictly required for this debug
+                        // console.log('DEBUG backup_progress: Intermediate message received:', data.status);
                     }
                 });
 
