@@ -91,6 +91,7 @@ class BookingSettings(db.Model):
     past_booking_time_adjustment_hours = db.Column(db.Integer, default=0)
     check_in_minutes_before = db.Column(db.Integer, nullable=False, default=15)
     check_in_minutes_after = db.Column(db.Integer, nullable=False, default=15)
+    checkin_reminder_minutes_before = db.Column(db.Integer, nullable=False, default=30)
     pin_auto_generation_enabled = db.Column(db.Boolean, default=True, nullable=False)
     pin_length = db.Column(db.Integer, default=6, nullable=False)
     pin_allow_manual_override = db.Column(db.Boolean, default=True, nullable=False)
@@ -174,6 +175,7 @@ class Booking(db.Model):
     admin_deleted_message = db.Column(db.String(255), nullable=True)
     check_in_token = db.Column(db.String(255), nullable=True) # New field
     check_in_token_expires_at = db.Column(db.DateTime, nullable=True) # New field
+    checkin_reminder_sent_at = db.Column(db.DateTime, nullable=True)
     last_modified = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     # New fields for storing the intended local display time (HH:MM:SS) of the booking slot

@@ -1,0 +1,15 @@
+Dear User,
+
+This is a reminder to check in for your upcoming booking:
+
+- Booking: {{ booking_title }}
+- Resource: {{ resource_name }}
+- Start Time: {{ booking_start_time }}
+
+Please check in using the link below:
+{{ checkin_url }}
+
+If you no longer need this booking, please cancel it via the 'My Bookings' page.
+
+Thank you,
+{{ app_name }}

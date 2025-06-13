@@ -442,3 +442,118 @@ def auto_release_unclaimed_bookings(app):
                 )
 
         logger.info("Scheduler: auto_release_unclaimed_bookings task finished.")
+
+
+def send_checkin_reminders(app):
+    with app.app_context():
+        logger = app.logger
+        logger.info("Scheduler: Starting send_checkin_reminders task...")
+        try:
+            settings = BookingSettings.query.first()
+            if not settings or settings.checkin_reminder_minutes_before is None or settings.checkin_reminder_minutes_before <= 0:
+                logger.info("Scheduler: Check-in reminders are disabled or reminder time is not set/valid.")
+                logger.info("Scheduler: Task 'send_checkin_reminders' finished early.")
+                return
+
+            now_utc = datetime.now(timezone.utc)
+            reminder_minutes = settings.checkin_reminder_minutes_before
+
+            # Assuming the scheduler runs approximately every 5 minutes.
+            # This interval is used to define a window to catch bookings.
+            scheduler_interval_minutes = 5
+
+            # We are looking for bookings whose start_time is such that (start_time - reminder_minutes) falls into
+            # the (now_utc - scheduler_interval_minutes, now_utc] window.
+            # This means start_time should be in the window:
+            # (now_utc + reminder_minutes - scheduler_interval_minutes, now_utc + reminder_minutes]
+
+            target_start_time_window_end = now_utc + timedelta(minutes=reminder_minutes)
+            target_start_time_window_start = target_start_time_window_end - timedelta(minutes=scheduler_interval_minutes)
+
+            logger.debug(f"Scheduler: Check-in reminder window for booking start_time: ({target_start_time_window_start}, {target_start_time_window_end}]")
+
+            potential_bookings = Booking.query.filter(
+                Booking.status == 'approved',
+                Booking.start_time > target_start_time_window_start, # Booking start_time is after the window start
+                Booking.start_time <= target_start_time_window_end, # Booking start_time is on or before the window end
+                Booking.checkin_reminder_sent_at.is_(None),
+                Booking.checked_in_at.is_(None)
+            ).all()
+
+            sent_count = 0
+            if not potential_bookings:
+                logger.info("Scheduler: No potential bookings found for check-in reminders in this run.")
+
+            for booking in potential_bookings:
+                user = User.query.filter_by(username=booking.user_name).first()
+                resource = db.session.get(Resource, booking.resource_id)
+
+                if not user:
+                    logger.warning(f"Scheduler: Could not find user '{booking.user_name}' for booking ID {booking.id}. Skipping reminder.")
+                    continue
+                if not resource:
+                    logger.warning(f"Scheduler: Could not find resource ID {booking.resource_id} for booking ID {booking.id}. Skipping reminder.")
+                    continue
+
+                if not user.email:
+                    logger.warning(f"Scheduler: User {user.username} has no email address. Skipping reminder for booking ID {booking.id}.")
+                    continue
+
+                try:
+                    # url_for needs to be imported or available in context. Assuming it is.
+                    from flask import url_for # Ensure url_for is available
+                    checkin_url = url_for('ui.check_in_at_resource', resource_id=booking.resource_id, _external=True)
+
+                    # booking.start_time is naive UTC, treat as UTC for formatting
+                    booking_start_utc = booking.start_time.replace(tzinfo=timezone.utc)
+                    # Example: format for user's local time if user.timezone is available, else UTC.
+                    # For simplicity, sticking to UTC for now.
+                    booking_start_str = booking_start_utc.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+                    email_subject = f"Check-in Reminder: {booking.title or resource.name}"
+                    app_name = current_app.config.get('APP_NAME', 'Smart Resource Booking System')
+
+                    html_body = render_template('email/checkin_reminder_email.html',
+                                                booking_title=booking.title or "Booking",
+                                                resource_name=resource.name,
+                                                booking_start_time=booking_start_str,
+                                                checkin_url=checkin_url,
+                                                app_name=app_name,
+                                                user_name=user.username) # Pass username for Dear {{user_name}} if template supports
+
+                    text_body = render_template('email/checkin_reminder_email.txt',
+                                                booking_title=booking.title or "Booking",
+                                                resource_name=resource.name,
+                                                booking_start_time=booking_start_str,
+                                                checkin_url=checkin_url,
+                                                app_name=app_name,
+                                                user_name=user.username)
+
+                    send_email(
+                        recipient=user.email,
+                        subject=email_subject,
+                        text_body=text_body,
+                        html_body=html_body
+                    )
+
+                    booking.checkin_reminder_sent_at = datetime.now(timezone.utc) # Mark as sent with current UTC time
+                    db.session.add(booking) # Add booking to session before commit
+                    db.session.commit()
+                    sent_count += 1
+                    logger.info(f"Scheduler: Sent check-in reminder for booking ID {booking.id} to {user.email}.")
+
+                except Exception as e_send:
+                    db.session.rollback()
+                    logger.error(f"Scheduler: Error sending reminder for booking ID {booking.id}: {e_send}", exc_info=True)
+
+            if sent_count > 0:
+                logger.info(f"Scheduler: Sent {sent_count} check-in reminders successfully.")
+            elif potential_bookings: # Potential bookings were found, but none resulted in sent email (e.g. user email missing)
+                logger.info("Scheduler: Processed potential bookings, but no reminders were ultimately sent (e.g., missing user emails, errors).")
+            # If no potential_bookings, already logged above.
+
+        except Exception as e_task:
+            db.session.rollback()
+            logger.error(f"Scheduler: Error in send_checkin_reminders task's main try block: {e_task}", exc_info=True)
+        finally:
+            logger.info("Scheduler: Task 'send_checkin_reminders' finished.")

@@ -54,6 +54,14 @@
             <input type="number" class="form-control" id="check_in_minutes_after" name="check_in_minutes_after" value="{{ settings.check_in_minutes_after if settings and settings.check_in_minutes_after is not none else 15 }}" min="0">
         </div>
 
+        <div class="form-group" id="checkin_reminder_minutes_before_group" style="margin-left: 20px;">
+            <label for="checkin_reminder_minutes_before">{{ _('Check-in Reminder Before (minutes)') }}</label>
+            <input type="number" class="form-control" id="checkin_reminder_minutes_before" name="checkin_reminder_minutes_before" value="{{ settings.checkin_reminder_minutes_before if settings and settings.checkin_reminder_minutes_before is not none else 30 }}" min="0">
+            <small class="form-text text-muted">
+                {{ _("How many minutes before a booking should a check-in reminder email be sent. This requires the scheduler task for sending reminders to be active. Set to 0 if not desired or if reminders are handled differently.") }}
+            </small>
+        </div>
+
         <fieldset style="margin-top: 20px; margin-bottom: 20px; padding-top: 10px; border-top: 1px solid #ccc;">
             <legend>{{ _('Resource PIN Settings') }}</legend>
 
