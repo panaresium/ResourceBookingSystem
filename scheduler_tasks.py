@@ -523,6 +523,7 @@ def send_checkin_reminders(app):
                         logger.warning(f"Scheduler: User {user.username} has no email address. Skipping reminder for booking ID {booking.id}.")
                     else:
                         try:
+                            logger.info(f"Scheduler: [send_checkin_reminders] Attempting to generate checkin_url. SERVER_NAME='{current_app.config.get('SERVER_NAME')}', APPLICATION_ROOT='{current_app.config.get('APPLICATION_ROOT')}', PREFERRED_URL_SCHEME='{current_app.config.get('PREFERRED_URL_SCHEME')}'")
                             checkin_url = url_for('ui.check_in_at_resource', resource_id=booking.resource_id, _external=True)
                             booking_start_str = booking_start_local_naive.strftime("%Y-%m-%d %H:%M:%S") + " (Venue Local Time)"
                             email_subject = f"Check-in Reminder: {booking.title or resource.name}"
