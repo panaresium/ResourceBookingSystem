@@ -300,14 +300,32 @@
                 socket.on('backup_delete_progress', function(data) {
                     console.log('Backup delete progress event:', data);
                     if (data.task_id !== currentDeleteTaskId) return;
-                    let messageType = data.level ? data.level.toLowerCase() : 'info';
+
+                    let messageType = data.level ? data.level.toLowerCase() : 'info'; // Used by appendLog and potentially for UI styling
                     appendLog('restore-log-area', data.status, data.detail, messageType, restoreStatusMessageEl);
+
                     const lowerStatus = data.status.toLowerCase();
                     const lowerDetail = data.detail ? data.detail.toLowerCase() : "";
 
-                    if (lowerStatus.includes("finished") || lowerStatus.includes("failed") || lowerStatus.includes("error") || lowerDetail.includes("success") || lowerDetail.includes("failure") || lowerDetail.includes("critical_error")) {
-                        enablePageInteractions(); currentDeleteTaskId = null;
-                        if (messageType === 'success' || (data.detail && data.detail.toUpperCase().includes("SUCCESS"))) {
+                    // Determine if the task is considered finished, failed, or errored for enabling interactions
+                    const isTaskCompletedOrFailed =
+                        lowerStatus.includes("finished") || // Catches "Backup set deletion process finished."
+                        lowerStatus.includes("failed") ||
+                        lowerStatus.includes("error") || // Catches "critical_error" in status
+                        (data.detail && data.detail.toUpperCase() === "SUCCESS") || // Route's direct success signal
+                        lowerDetail.includes("failure") ||
+                        lowerDetail.includes("critical_error"); // Explicit check for "critical_error" in detail
+
+                    if (isTaskCompletedOrFailed) {
+                        enablePageInteractions();
+                        currentDeleteTaskId = null;
+
+                        // Determine if the deletion was definitively successful for reloading the backup list
+                        const wasDeleteSuccessful =
+                            (data.detail && data.detail.toUpperCase() === "SUCCESS") || // Route's direct success
+                            (lowerStatus.includes("backup set deletion process finished") && lowerDetail.includes("overall success: true")); // azure_backup.py's final success
+
+                        if (wasDeleteSuccessful) {
                             loadAvailableBackups();
                         }
                     }
