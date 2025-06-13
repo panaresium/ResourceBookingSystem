@@ -9,11 +9,6 @@ document.addEventListener('DOMContentLoaded', function () {
         return `${yyyy}-${mm}-${dd}`;
     }
 
-    function isPastFivePM() {
-        const now = new Date();
-        return now.getHours() >= 17; // 17 is 5 PM in 24-hour format
-    }
-
     // const mapAvailabilityDateInput = document.getElementById('new-booking-map-availability-date'); // Old input field, now removed from HTML
     const calendarContainer = document.getElementById('inline-calendar-container'); // New container for inline flatpickr
     const userId = calendarContainer ? calendarContainer.dataset.userId : null;
@@ -919,10 +914,10 @@ document.addEventListener('DOMContentLoaded', function () {
                                             if (newUnavailableDates.includes(dateStr)) {
                                                 return true;
                                             }
-                                            // Original logic for disabling past 5 PM for today's date
-                                            const todayStr = getTodayDateString(); // Ensure getTodayDateString is accessible
-                                            const isPastFivePMToday = dateStr === todayStr && isPastFivePM(); // Ensure isPastFivePM is accessible
-                                            return isPastFivePMToday;
+                                            // Add any other conditions for disabling dates here if necessary,
+                                            // otherwise, if only newUnavailableDates matters, this function can be simplified.
+                                            // For now, we will assume that if it's not in newUnavailableDates, it's not disabled by this specific part.
+                                            return false; // Or return based on other existing logic if present
                                         }
                                     ]);
                                     fpInstance.redraw(); // Trigger a redraw to apply changes
