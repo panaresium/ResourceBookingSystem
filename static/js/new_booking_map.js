@@ -49,6 +49,8 @@ document.addEventListener('DOMContentLoaded', function () {
     let currentMapId = null; // Still used by loadMapDetails, perhaps can be merged with selectedMapId
     let currentSelectedDateStr = getTodayDateString(); // Initialize with today's date
 
+    let systemBookingSettings = { allowMultipleResourcesSameTime: false }; // Global variable for booking settings
+
     const mainBookingFormDateInput = document.getElementById('booking-date');
     const mainFormStartTimeInput = document.getElementById('start-time');
     const mainFormEndTimeInput = document.getElementById('end-time');
@@ -484,7 +486,17 @@ document.addEventListener('DOMContentLoaded', function () {
                             });
 
                             primarySlots.forEach(slot => {
-                                slot.isBookableByCurrentUser = (!slot.isGenerallyBooked && !slot.isConflictingWithUserOtherBookings);
+                                // Original conflict status based on user's other bookings
+                                const originalUserConflictStatus = slot.isConflictingWithUserOtherBookings;
+
+                                let consideredConflictForBookableStatus = slot.isConflictingWithUserOtherBookings;
+                                if (systemBookingSettings.allowMultipleResourcesSameTime) {
+                                    consideredConflictForBookableStatus = false; // Ignore user's own schedule conflict
+                                    // console.log(`[Debug MAP] Resource ${resource.id}, Slot ${slot.name}: AllowMultiple is TRUE. UserConflictInitially: ${originalUserConflictStatus}, ConsideredConflict: ${consideredConflictForBookableStatus}`);
+                                } else {
+                                    // console.log(`[Debug MAP] Resource ${resource.id}, Slot ${slot.name}: AllowMultiple is FALSE. UserConflictInitially: ${originalUserConflictStatus}, ConsideredConflict: ${consideredConflictForBookableStatus}`);
+                                }
+                                slot.isBookableByCurrentUser = (!slot.isGenerallyBooked && !consideredConflictForBookableStatus);
                             });
 
                             let finalClass = '';
@@ -632,6 +644,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     async function initializeMapSelectionUI() { // Renamed from loadAvailableMaps
+        // Fetch booking config status at the beginning
+        await fetchBookingConfigStatus(); // Ensure this is awaited if subsequent logic depends on it immediately
+
         if (!mapLocationButtonsContainer || !mapLoadingStatusDiv) { // Removed mapFloorSelect check
             console.error("Map buttons container or loading status div are missing from the DOM.");
             updateMapLoadingStatus("Map interface error. Please contact support.", true);
@@ -730,6 +745,23 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     } else {
         // console.log("New booking map container not found on this page. Map script not initialized.");
+    }
+
+    async function fetchBookingConfigStatus() {
+        try {
+            // console.log('Fetching booking config status...'); // Optional: for debugging
+            const data = await apiCall('/api/settings/booking_config_status', {}, null); // No specific error display element for this background fetch
+            if (data && typeof data.allow_multiple_resources_same_time === 'boolean') {
+                systemBookingSettings.allowMultipleResourcesSameTime = data.allow_multiple_resources_same_time;
+                // console.log('Successfully fetched booking config status:', systemBookingSettings); // Optional: for debugging
+            } else {
+                console.warn('Booking config status API response was not in the expected format. Using default.', data);
+                // systemBookingSettings.allowMultipleResourcesSameTime remains false (default)
+            }
+        } catch (error) {
+            console.error('Error fetching booking config status:', error.message, 'Using default settings.');
+            // systemBookingSettings.allowMultipleResourcesSameTime remains false (default)
+        }
     }
 
     const resourceDetailModal = document.getElementById('new-booking-time-slot-modal');

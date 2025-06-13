@@ -1149,3 +1149,27 @@ def api_admin_reload_configurations():
         current_app.logger.error(f"Error during configuration reload by {current_user.username}: {e}", exc_info=True)
         add_audit_log(action="RELOAD_CONFIGURATIONS_ERROR", details=f"Error: {str(e)}", user_id=current_user.id)
         return jsonify({'success': False, 'message': f'An error occurred during configuration reload: {str(e)}'}), 500
+
+@api_system_bp.route('/api/settings/booking_config_status', methods=['GET'])
+@login_required
+def get_booking_config_status():
+    """
+    Fetches the 'allow_multiple_resources_same_time' setting from BookingSettings.
+    """
+    try:
+        settings = BookingSettings.query.first()
+        allow_multiple = False # Default value
+        if settings:
+            if hasattr(settings, 'allow_multiple_resources_same_time'):
+                allow_multiple = settings.allow_multiple_resources_same_time
+            else:
+                current_app.logger.warning("BookingSettings found, but 'allow_multiple_resources_same_time' attribute is missing. Defaulting to False.")
+        else:
+            current_app.logger.warning("BookingSettings not found in the database. Defaulting 'allow_multiple_resources_same_time' to False.")
+
+        # current_app.logger.debug(f"API /api/settings/booking_config_status returning: {allow_multiple}")
+        return jsonify({'allow_multiple_resources_same_time': allow_multiple}), 200
+    except Exception as e:
+        current_app.logger.error(f"Error fetching booking_config_status for user {current_user.username}: {e}", exc_info=True)
+        # In case of error, still return the default value to prevent frontend issues
+        return jsonify({'allow_multiple_resources_same_time': False, 'error': 'Failed to fetch setting due to a server error.'}), 500
