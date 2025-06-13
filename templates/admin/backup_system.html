@@ -240,46 +240,32 @@
             if (typeof socket !== 'undefined') {
                 socket.on('backup_progress', function(data) {
                     console.log('Backup progress event:', data);
-                    console.log('DEBUG backup_progress: ENTRYPOINT. data.task_id =', data.task_id, '; currentBackupTaskId =', currentBackupTaskId, '; isAwaitingBackupTaskIdFromServer =', isAwaitingBackupTaskIdFromServer);
 
                     if (isAwaitingBackupTaskIdFromServer && !currentBackupTaskId && data.task_id) {
-                        console.log('DEBUG backup_progress: Capturing task ID from backup socket message:', data.task_id);
                         currentBackupTaskId = data.task_id;
                         isAwaitingBackupTaskIdFromServer = false; // We've captured an ID, stop actively awaiting from fetch for this purpose.
-                        console.log('DEBUG backup_progress: currentBackupTaskId is now', currentBackupTaskId, '; isAwaitingBackupTaskIdFromServer is now false (captured from socket).');
                     }
 
                     if (data.task_id !== currentBackupTaskId) {
-                        console.log('DEBUG backup_progress: Task ID mismatch. data.task_id =', data.task_id, 'currentBackupTaskId =', currentBackupTaskId, '. Bailing out.');
                         return;
                     }
 
                     let messageType = data.level ? data.level.toLowerCase() : 'info';
                     appendLog('backup-log-area', data.status, data.detail, messageType, backupStatusMessageEl);
 
-                    const lowerStatus = data.status.toLowerCase(); // Existing lowerStatus definition is fine here
-                    console.log('DEBUG backup_progress: Received data.status =', data.status, '; data.detail =', data.detail, '; data.level =', data.level);
+                    const lowerStatus = data.status.toLowerCase();
 
                     // Specific check for the final success message
                     const isBackupReallyCompletedSuccessfully = lowerStatus.includes("backup completed with overall success: true");
                     // Specific check for the final failure message
                     const isBackupReallyCompletedWithFailure = lowerStatus.includes("backup completed with overall success: false");
 
-                    console.log('DEBUG backup_progress: isBackupReallyCompletedSuccessfully =', isBackupReallyCompletedSuccessfully);
-                    console.log('DEBUG backup_progress: isBackupReallyCompletedWithFailure =', isBackupReallyCompletedWithFailure);
-
                     if (isBackupReallyCompletedSuccessfully || isBackupReallyCompletedWithFailure) {
-                        console.log('DEBUG backup_progress: Final completion message detected. Status:', data.status);
-                        console.log('DEBUG backup_progress: Attempting to call enablePageInteractions().');
                         enablePageInteractions();
                         currentBackupTaskId = null;
-                        console.log('DEBUG backup_progress: Interactions enabled, currentBackupTaskId nulled.');
 
                         if (isBackupReallyCompletedSuccessfully) {
-                            console.log('DEBUG backup_progress: Backup was successful. Attempting to call loadAvailableBackups(true).');
                             loadAvailableBackups(true);
-                        } else {
-                            console.log('DEBUG backup_progress: Backup completed with failure. Not calling loadAvailableBackups.');
                         }
                     } else {
                         // Optional: Log intermediate messages if needed, but not strictly required for this debug
@@ -333,20 +319,15 @@
 
                 socket.on('backup_delete_progress', function(data) {
                     console.log('Backup delete progress event:', data);
-                    console.log('DEBUG backup_delete_progress: ENTRYPOINT. data.task_id =', data.task_id, '; currentDeleteTaskId =', currentDeleteTaskId, '; isAwaitingDeleteTaskIdFromServer =', isAwaitingDeleteTaskIdFromServer);
 
-                    console.log('DEBUG backup_delete_progress: PRE-CAPTURE CHECK. isAwaitingDeleteTaskIdFromServer =', isAwaitingDeleteTaskIdFromServer, '; !currentDeleteTaskId =', !currentDeleteTaskId, '; data.task_id (truthy?) =', !!data.task_id);
                     if (isAwaitingDeleteTaskIdFromServer && !currentDeleteTaskId && data.task_id) {
                         // If we were waiting for a task ID, and haven't got one from fetch yet,
                         // and this message HAS a task_id, tentatively accept it.
-                        console.log('DEBUG backup_delete_progress: ছিল NULL currentDeleteTaskId. Socket message থেকে data.task_id দিয়ে সেট করা হচ্ছে:', data.task_id); // "Was NULL currentDeleteTaskId. Setting with data.task_id from Socket message"
                         currentDeleteTaskId = data.task_id;
                         isAwaitingDeleteTaskIdFromServer = false; // No longer awaiting from fetch primarily, but fetch might confirm/overwrite later if it's different (unlikely for same op)
-                        console.log('DEBUG backup_delete_progress: isAwaitingDeleteTaskIdFromServer is now false.');
                     }
 
                     if (data.task_id !== currentDeleteTaskId) {
-                        console.log('DEBUG backup_delete_progress: Task ID mismatch AFTER potential capture. data.task_id =', data.task_id, '; currentDeleteTaskId =', currentDeleteTaskId, '. Bailing out.');
                         return;
                     }
 
@@ -355,7 +336,6 @@
 
                     const lowerStatus = data.status.toLowerCase();
                     const lowerDetail = data.detail ? data.detail.toLowerCase() : "";
-                    console.log('DEBUG backup_delete_progress: lowerStatus =', lowerStatus, 'lowerDetail =', lowerDetail, 'data.level =', data.level);
 
                     const isTaskCompletedOrFailed =
                         lowerStatus.includes("finished") ||
@@ -365,28 +345,17 @@
                         lowerDetail.includes("failure") ||
                         lowerDetail.includes("critical_error");
 
-                    console.log('DEBUG backup_delete_progress: isTaskCompletedOrFailed =', isTaskCompletedOrFailed);
-
                     if (isTaskCompletedOrFailed) {
-                        console.log('DEBUG backup_delete_progress: Condition isTaskCompletedOrFailed is TRUE. Proceeding to enable interactions.');
                         enablePageInteractions();
                         currentDeleteTaskId = null; // Keep this here for now.
-                        console.log('DEBUG backup_delete_progress: Interactions enabled. currentDeleteTaskId nulled.');
 
                         const wasDeleteSuccessful =
                             (data.detail && data.detail.toUpperCase() === "SUCCESS") ||
                             (lowerStatus.includes("backup set deletion process finished") && lowerDetail.includes("overall success: true"));
 
-                        console.log('DEBUG backup_delete_progress: wasDeleteSuccessful =', wasDeleteSuccessful, '; data.detail =', data.detail, '; lowerStatus =', lowerStatus, '; lowerDetail =', lowerDetail);
-
                         if (wasDeleteSuccessful) {
-                            console.log('DEBUG backup_delete_progress: Condition wasDeleteSuccessful is TRUE. Attempting to call loadAvailableBackups(true) now.');
                             loadAvailableBackups(true);
-                        } else {
-                            console.log('DEBUG backup_delete_progress: Condition wasDeleteSuccessful is FALSE. Not calling loadAvailableBackups.');
                         }
-                    } else {
-                        console.log('DEBUG backup_delete_progress: Condition isTaskCompletedOrFailed is FALSE. Not enabling interactions or loading backups for this event.');
                     }
                 });
             } else {
@@ -402,7 +371,6 @@
                     appendLog('backup-log-area', "{{ _('Initiating backup request...') }}", '', 'info', backupStatusMessageEl);
 
                     isAwaitingBackupTaskIdFromServer = true;
-                    console.log('DEBUG Backup Click: isAwaitingBackupTaskIdFromServer set to true.');
 
                     disablePageInteractions();
                     fetch('/api/admin/one_click_backup', {
@@ -413,7 +381,6 @@
                     .then(data => {
                         currentBackupTaskId = data.task_id;
                         isAwaitingBackupTaskIdFromServer = false;
-                        console.log('DEBUG Backup Fetch Callback: currentBackupTaskId set to', data.task_id, '; isAwaitingBackupTaskIdFromServer is now false.');
                         const messageType = data.success ? 'info' : 'error';
                         appendLog('backup-log-area', data.message || (data.success ? "{{ _('Backup process started on server.') }}" : "{{ _('Failed to start backup process.') }}"), `Task ID: ${data.task_id || 'N/A'}`, messageType, backupStatusMessageEl);
                         if (!data.success) {
@@ -686,7 +653,6 @@
                         if (isDelete) {
                             currentDeleteTaskId = data.task_id;
                             isAwaitingDeleteTaskIdFromServer = false;
-                            console.log('DEBUG Delete Fetch Callback: currentDeleteTaskId set by fetch to', data.task_id, '; isAwaitingDeleteTaskIdFromServer is now false.');
                         }
                         if (isVerifyJs) currentVerifyTaskId = data.task_id;
 
