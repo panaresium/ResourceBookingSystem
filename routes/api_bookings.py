@@ -1637,6 +1637,26 @@ def check_in_booking(booking_id):
         check_in_window_start_local_naive = effective_check_in_base_time_local_naive - timedelta(minutes=check_in_minutes_before)
         check_in_window_end_local_naive = effective_check_in_base_time_local_naive + timedelta(minutes=check_in_minutes_after)
 
+        logger = current_app.logger # Ensure logger is defined in this scope if not already
+        logger.info(f"[Booking ID: {booking.id}] Check-in Window Debugging:")
+        logger.info(f"  effective_now_local_naive: {effective_now_local_naive.isoformat()}")
+        logger.info(f"  booking.start_time (DB value, naive local): {booking.start_time.isoformat()}")
+        logger.info(f"  booking_settings.check_in_minutes_before: {check_in_minutes_before}")
+        logger.info(f"  booking_settings.check_in_minutes_after: {check_in_minutes_after}")
+        logger.info(f"  booking_settings.past_booking_time_adjustment_hours: {past_booking_adjustment_hours}")
+
+        # Re-calculate effective_check_in_base_time_local_naive for clarity in logs, matching the existing logic
+        # booking_start_local_naive is already booking.start_time
+        calculated_effective_check_in_base_time = booking.start_time + timedelta(hours=past_booking_adjustment_hours)
+        logger.info(f"  Calculated effective_check_in_base_time_local_naive (start_time + past_adj): {calculated_effective_check_in_base_time.isoformat()}")
+
+        # The check_in_window_start_local_naive and check_in_window_end_local_naive are already calculated before this point based on this base.
+        logger.info(f"  Final calculated check_in_window_start_local_naive: {check_in_window_start_local_naive.isoformat()}")
+        logger.info(f"  Final calculated check_in_window_end_local_naive: {check_in_window_end_local_naive.isoformat()}")
+
+        condition_result = (check_in_window_start_local_naive <= effective_now_local_naive <= check_in_window_end_local_naive)
+        logger.info(f"  Condition check: ({check_in_window_start_local_naive.isoformat()} <= {effective_now_local_naive.isoformat()} <= {check_in_window_end_local_naive.isoformat()}) is {condition_result}")
+
         if not (check_in_window_start_local_naive <= effective_now_local_naive <= check_in_window_end_local_naive):
             current_app.logger.warning(f"User {current_user.username} check-in attempt for booking {booking_id} outside of allowed window. Booking start (local): {booking_start_local_naive.isoformat()}, Effective base (local): {effective_check_in_base_time_local_naive.isoformat()}, Window (local): {check_in_window_start_local_naive.isoformat()} to {check_in_window_end_local_naive.isoformat()}, Current time (local naive): {effective_now_local_naive.isoformat()}")
             return jsonify({'error': f'Check-in is only allowed from {check_in_minutes_before} minutes before to {check_in_minutes_after} minutes after the effective booking start time (considering adjustments).'}), 403
