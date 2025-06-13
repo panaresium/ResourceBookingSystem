@@ -918,8 +918,6 @@ document.addEventListener('DOMContentLoaded', function () {
                     fullDayBtn.disabled = true;
                 } else {
                     // If Full Day hasn't passed, check constituent slots
-                    const firstHalfBooked = firstHalfBtn.classList.contains('time-slot-booked');
-                    const secondHalfBooked = secondHalfBtn.classList.contains('time-slot-booked');
                     const firstHalfBooked = firstHalfBtn.classList.contains('time-slot-booked'); // General booking conflict
                     const secondHalfBooked = secondHalfBtn.classList.contains('time-slot-booked'); // General booking conflict
 
