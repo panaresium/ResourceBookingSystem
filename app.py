@@ -1,10 +1,12 @@
 import os
 from app_factory import create_app
 from extensions import socketio # For socketio.run
+import logging
 
 # Create the Flask app instance using the factory
 print("PRINT_DEBUG: APP.PY - About to call create_app()", flush=True)
 app = create_app()
+app.logger.setLevel(logging.ERROR)
 
 if __name__ == "__main__":
     # Configuration for the development server run
