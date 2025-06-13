@@ -46,7 +46,7 @@
                     {% endif %}
 
                     <hr>
-                    <a href="{{ url_for('ui.index') }}" class="btn btn-secondary mr-2">Go to Homepage</a>
+                    <a href="{{ url_for('ui.serve_index') }}" class="btn btn-secondary mr-2">Go to Homepage</a>
                     {# 'resource_id' might not be passed if it's a generic failure before resource context is known #}
                     {# 'resource_name' is usually passed, so we check its existence too #}
                     {% if not success and resource_id is defined and resource_id and resource_name is defined and resource_name %}
