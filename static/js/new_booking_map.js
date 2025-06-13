@@ -119,17 +119,37 @@ document.addEventListener('DOMContentLoaded', function () {
                 disable: [
                     function(date) {
                         const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                        const today = new Date();
+                        const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+                        // Check for "today" and time
+                        if (dateStr === todayStr) {
+                            const now = new Date();
+                            const latestSlotEndTimeHour = 17;
+                            const latestSlotEndTimeMinute = 0;
+                            let shouldDisableToday = false;
+
+                            if (now.getHours() > latestSlotEndTimeHour || (now.getHours() === latestSlotEndTimeHour && now.getMinutes() > latestSlotEndTimeMinute)) {
+                                shouldDisableToday = true;
+                            }
+
+                            console.log('[Debug] Flatpickr disable check for TODAY (' + dateStr + '): Current time is ' + now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0') + '. Disabling? ' + shouldDisableToday);
+                            if (shouldDisableToday) {
+                                return true;
+                            }
+                        }
 
                         // unavailableDatesList is passed to initializeFlatpickr
-                        const isDisabled = unavailableDatesList.includes(dateStr);
+                        const isDisabledByUnavailableList = unavailableDatesList.includes(dateStr);
 
                         // Optional: keep a simple log for debugging
                         // Added a condition to ensure some logging for relevant test dates if list is empty
-                        if (unavailableDatesList.length > 0 || dateStr.startsWith("2025-06")) {
-                            console.log(`[Debug] Flatpickr disable check for ${dateStr}: inList = ${isDisabled} (list length: ${unavailableDatesList.length})`);
+                        // Modified to avoid logging twice for today if it wasn't disabled by time
+                        if (! (dateStr === todayStr) && (unavailableDatesList.length > 0 || dateStr.startsWith("2025-06"))) {
+                           console.log(`[Debug] Flatpickr disable check for ${dateStr}: inList = ${isDisabledByUnavailableList} (list length: ${unavailableDatesList.length})`);
                         }
 
-                        return isDisabled;
+                        return isDisabledByUnavailableList;
                     }
                 ],
                 defaultDate: currentSelectedDateStr, // Set defaultDate to client's current date
@@ -752,77 +772,120 @@ document.addEventListener('DOMContentLoaded', function () {
                 button.textContent = slot.label;
                 button.classList.add('time-slot-item', 'button');
                 button.dataset.slotId = slot.id;
-                button.classList.remove('time-slot-available', 'time-slot-booked', 'time-slot-user-busy', 'selected', 'time-slot-selected');
+                button.classList.remove('time-slot-available', 'time-slot-booked', 'time-slot-user-busy', 'selected', 'time-slot-selected', 'time-slot-passed');
                 button.disabled = false;
                 button.textContent = slot.label;
                 button.title = '';
-                const isGenerallyConflicting = checkConflict(slot.startTime, slot.endTime, bookedSlots);
-                if (isGenerallyConflicting) {
-                    button.classList.add('time-slot-booked');
-                    button.disabled = true;
-                    button.title = `${slot.name} is unavailable due to existing bookings on this resource.`;
-                } else {
-                    let isUserBusyElsewhere = false;
-                    const loggedInUsernameChecked = sessionStorage.getItem('loggedInUserUsername');
-                    if (loggedInUsernameChecked && userBookingsForDate && userBookingsForDate.length > 0) {
-                        const slotStart = new Date(`${dateString}T${slot.startTime}:00`);
-                        const slotEnd = new Date(`${dateString}T${slot.endTime}:00`);
-                        for (const userBooking of userBookingsForDate) {
-                            if (String(userBooking.resource_id) !== String(resource.id)) {
-                                const userBookingStart = new Date(`${dateString}T${userBooking.start_time}`);
-                                const userBookingEnd = new Date(`${dateString}T${userBooking.end_time}`);
-                                if (userBookingStart < slotEnd && userBookingEnd > slotStart) {
-                                    isUserBusyElsewhere = true;
-                                    break;
+
+                const isToday = dateString === getTodayDateString();
+                let slotHasPassed = false;
+
+                if (isToday) {
+                    const now = new Date();
+                    const currentHours = now.getHours();
+                    const currentMinutes = now.getMinutes();
+                    const [slotEndHours, slotEndMinutes] = slot.endTime.split(':').map(Number);
+
+                    if (currentHours > slotEndHours || (currentHours === slotEndHours && currentMinutes >= slotEndMinutes)) {
+                        slotHasPassed = true;
+                        button.classList.add('time-slot-passed');
+                        button.disabled = true;
+                        button.title = slot.name + ' has passed for today.';
+                        button.textContent = slot.label + " (Passed)";
+                    }
+                }
+
+                if (!slotHasPassed) { // Only apply other logic if slot hasn't passed
+                    const isGenerallyConflicting = checkConflict(slot.startTime, slot.endTime, bookedSlots);
+                    if (isGenerallyConflicting) {
+                        button.classList.add('time-slot-booked');
+                        button.disabled = true;
+                        button.title = `${slot.name} is unavailable due to existing bookings on this resource.`;
+                    } else {
+                        let isUserBusyElsewhere = false;
+                        const loggedInUsernameChecked = sessionStorage.getItem('loggedInUserUsername');
+                        if (loggedInUsernameChecked && userBookingsForDate && userBookingsForDate.length > 0) {
+                            const slotStart = new Date(`${dateString}T${slot.startTime}:00`);
+                            const slotEnd = new Date(`${dateString}T${slot.endTime}:00`);
+                            for (const userBooking of userBookingsForDate) {
+                                if (String(userBooking.resource_id) !== String(resource.id)) {
+                                    const userBookingStart = new Date(`${dateString}T${userBooking.start_time}`);
+                                    const userBookingEnd = new Date(`${dateString}T${userBooking.end_time}`);
+                                    if (userBookingStart < slotEnd && userBookingEnd > slotStart) {
+                                        isUserBusyElsewhere = true;
+                                        break;
+                                    }
                                 }
                             }
                         }
-                    }
-                    if (isUserBusyElsewhere) {
-                        button.classList.add('time-slot-user-busy');
-                        button.disabled = true;
-                        button.title = `${slot.name} is unavailable as you have another booking at this time.`;
-                        button.textContent = slot.label + " (Your Conflict)";
-                    } else {
-                        button.classList.add('time-slot-available');
-                        button.title = `${slot.name} is available.`;
-                        button.addEventListener('click', function() {
-                            const allButtons = modalTimeSlotsListDiv.querySelectorAll('button.time-slot-item');
-                            allButtons.forEach(btn => btn.classList.remove('time-slot-selected', 'selected'));
-                            this.classList.add('time-slot-selected', 'selected');
-                            selectedTimeSlotForNewBooking = { startTimeStr: slot.startTime, endTimeStr: slot.endTime };
-                            if (modalStatusMessageP) modalStatusMessageP.textContent = '';
-                            if (mainFormStartTimeInput) mainFormStartTimeInput.value = slot.startTime;
-                            if (mainFormEndTimeInput) mainFormEndTimeInput.value = slot.endTime;
-                        });
+                        if (isUserBusyElsewhere) {
+                            button.classList.add('time-slot-user-busy');
+                            button.disabled = true;
+                            button.title = `${slot.name} is unavailable as you have another booking at this time.`;
+                            button.textContent = slot.label + " (Your Conflict)";
+                        } else {
+                            button.classList.add('time-slot-available');
+                            button.title = `${slot.name} is available.`;
+                            button.addEventListener('click', function() {
+                                const allButtons = modalTimeSlotsListDiv.querySelectorAll('button.time-slot-item');
+                                allButtons.forEach(btn => btn.classList.remove('time-slot-selected', 'selected'));
+                                this.classList.add('time-slot-selected', 'selected');
+                                selectedTimeSlotForNewBooking = { startTimeStr: slot.startTime, endTimeStr: slot.endTime };
+                                if (modalStatusMessageP) modalStatusMessageP.textContent = '';
+                                if (mainFormStartTimeInput) mainFormStartTimeInput.value = slot.startTime;
+                                if (mainFormEndTimeInput) mainFormEndTimeInput.value = slot.endTime;
+                            });
+                        }
                     }
                 }
                 modalTimeSlotsListDiv.appendChild(button);
             });
+
             const firstHalfBtn = modalTimeSlotsListDiv.querySelector('[data-slot-id="first_half"]');
             const secondHalfBtn = modalTimeSlotsListDiv.querySelector('[data-slot-id="second_half"]');
             const fullDayBtn = modalTimeSlotsListDiv.querySelector('[data-slot-id="full_day"]');
+
             if (fullDayBtn && firstHalfBtn && secondHalfBtn) {
-                const isFullDayGenerallyBooked = fullDayBtn.classList.contains('time-slot-booked');
-                if (!isFullDayGenerallyBooked) {
+                const fullDaySlotDetails = predefinedSlots.find(s => s.id === 'full_day');
+                // Check if Full Day itself has passed first (most restrictive)
+                if (fullDayBtn.classList.contains('time-slot-passed')) {
+                    // Title and text already set by the loop if it passed.
+                    // Ensure it's disabled.
+                    fullDayBtn.disabled = true;
+                } else {
+                    // If Full Day hasn't passed, check constituent slots
                     const firstHalfBooked = firstHalfBtn.classList.contains('time-slot-booked');
                     const secondHalfBooked = secondHalfBtn.classList.contains('time-slot-booked');
                     const firstHalfUserConflict = firstHalfBtn.classList.contains('time-slot-user-busy');
                     const secondHalfUserConflict = secondHalfBtn.classList.contains('time-slot-user-busy');
-                    const fullDaySlotDetails = predefinedSlots.find(s => s.id === 'full_day');
+                    const firstHalfPassed = firstHalfBtn.classList.contains('time-slot-passed');
+                    const secondHalfPassed = secondHalfBtn.classList.contains('time-slot-passed');
+
                     if (firstHalfBooked || secondHalfBooked) {
                         fullDayBtn.disabled = true;
-                        fullDayBtn.classList.remove('time-slot-available', 'time-slot-user-busy', 'selected', 'time-slot-selected');
+                        fullDayBtn.classList.remove('time-slot-available', 'time-slot-user-busy', 'time-slot-passed', 'selected', 'time-slot-selected');
                         fullDayBtn.classList.add('time-slot-booked');
                         fullDayBtn.title = "Full Day is unavailable because part of the day is booked on this resource.";
                         if (fullDaySlotDetails) fullDayBtn.textContent = fullDaySlotDetails.label + " (Booked)";
                     } else if (firstHalfUserConflict || secondHalfUserConflict) {
                         fullDayBtn.disabled = true;
-                        fullDayBtn.classList.remove('time-slot-available', 'time-slot-booked', 'selected', 'time-slot-selected');
+                        fullDayBtn.classList.remove('time-slot-available', 'time-slot-booked', 'time-slot-passed', 'selected', 'time-slot-selected');
                         fullDayBtn.classList.add('time-slot-user-busy');
                         fullDayBtn.title = "Full Day is unavailable because you have other bookings conflicting with part of this day.";
                         if (fullDaySlotDetails) fullDayBtn.textContent = fullDaySlotDetails.label + " (Your Conflict)";
+                    } else if (firstHalfPassed || secondHalfPassed) {
+                        // If either half has passed, and full day itself hasn't been marked as passed yet (e.g. if full_day.endTime is later)
+                        fullDayBtn.disabled = true;
+                        fullDayBtn.classList.remove('time-slot-available', 'time-slot-booked', 'time-slot-user-busy', 'selected', 'time-slot-selected');
+                        fullDayBtn.classList.add('time-slot-passed'); // Mark full day as passed too
+                        fullDayBtn.title = "Full Day is unavailable because part of the day has already passed.";
+                        if (fullDaySlotDetails) fullDayBtn.textContent = fullDaySlotDetails.label + " (Passed)";
                     }
+                    // If fullDayBtn was already generally booked (isFullDayGenerallyBooked from before), it would be caught by the slot.isGenerallyBooked check
+                    // This explicit check here might be redundant if the loop correctly handles fullDayBtn's general booking status.
+                    // However, keeping it for now as a safeguard for combined conditions.
+                    // The main thing is that if fullDay itself hasn't passed by its own end time, but one of its sub-slots has,
+                    // it becomes unavailable due to that sub-slot.
                 }
             }
         } catch (error) {
