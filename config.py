@@ -7,6 +7,9 @@ basedir = Path(__file__).resolve().parent
 
 # --- Core Flask App Configurations ---
 SECRET_KEY = os.environ.get('SECRET_KEY', 'dev_secret_key_123!@#_fallback_for_config.py')
+SERVER_NAME = os.environ.get('SERVER_NAME') # e.g., 'localhost:5000' or 'yourdomain.com'
+APPLICATION_ROOT = os.environ.get('APPLICATION_ROOT', '/')
+PREFERRED_URL_SCHEME = os.environ.get('PREFERRED_URL_SCHEME', 'http') # Use 'https' in production
 # For Flask-Session type extension
 SESSION_TYPE = os.environ.get('SESSION_TYPE', 'filesystem')
 SESSION_FILE_DIR = basedir / 'flask_session' # Directory for session files
