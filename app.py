@@ -6,7 +6,19 @@ import logging
 # Create the Flask app instance using the factory
 print("PRINT_DEBUG: APP.PY - About to call create_app()", flush=True)
 app = create_app()
-app.logger.setLevel(logging.ERROR)
+
+# Configure logger level based on APP_GLOBAL_LOG_LEVEL environment variable
+log_level_str = os.environ.get("APP_GLOBAL_LOG_LEVEL", "INFO").upper()
+log_level_map = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
+log_level = log_level_map.get(log_level_str, logging.INFO)
+app.logger.setLevel(log_level)
+app.logger.info(f"Logger level set to: {logging.getLevelName(app.logger.getEffectiveLevel())}")
 
 if __name__ == "__main__":
     # Configuration for the development server run
