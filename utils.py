@@ -1720,12 +1720,24 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
         return {'total_primary_slots': 0, 'available_primary_slots_for_user': 0}
 
     current_offset_hours = 0
+    allow_multiple_resources_same_time_setting = False  # Default value
     try:
         settings = BookingSettings.query.first()
-        if settings and hasattr(settings, 'global_time_offset_hours') and settings.global_time_offset_hours is not None:
-            current_offset_hours = settings.global_time_offset_hours
+        if settings:
+            if hasattr(settings, 'global_time_offset_hours') and settings.global_time_offset_hours is not None:
+                current_offset_hours = settings.global_time_offset_hours
+            if hasattr(settings, 'allow_multiple_resources_same_time'): # Check if the attribute exists
+                allow_multiple_resources_same_time_setting = settings.allow_multiple_resources_same_time
+                logger_instance.info(f"BookingSetting 'allow_multiple_resources_same_time' is {allow_multiple_resources_same_time_setting}.")
+            else:
+                logger_instance.warning("BookingSetting 'allow_multiple_resources_same_time' attribute not found. Defaulting to False.")
+        else:
+            logger_instance.warning("BookingSettings not found. Using default for 'allow_multiple_resources_same_time' (False) and 'global_time_offset_hours' (0).")
+
     except Exception as e_settings:
-        logger_instance.error(f"Error fetching BookingSettings for detailed availability: {e_settings}. Using 0 offset.")
+        logger_instance.error(f"Error fetching BookingSettings for detailed availability: {e_settings}. Using default for 'allow_multiple_resources_same_time' (False) and 'global_time_offset_hours' (0).")
+        # current_offset_hours remains 0
+        # allow_multiple_resources_same_time_setting remains False
 
     # Fetch all bookings for the user on the target_date across all resources
     try:
@@ -1844,16 +1856,23 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
             # A slot is counted towards available_primary_slots_for_user if:
             # - It is NOT generally booked by anyone (which also covers not booked by current user here).
             # - It is NOT under slot-specific maintenance.
-            # - It does NOT conflict with the user's other bookings.
+            # - It does NOT conflict with the user's other bookings (unless allow_multiple_resources_same_time_setting is True).
+
+            can_book_based_on_user_schedule = True # Assume true by default
+            if not allow_multiple_resources_same_time_setting: # Check the new setting
+                if slot_conflicts_with_user_other_bookings:
+                    can_book_based_on_user_schedule = False
+                    logger_instance.debug(f"Slot {slot_start_dt}-{slot_end_dt} for resource {resource.id} cannot be booked due to conflict with user's other bookings (allow_multiple_resources_same_time is False).")
+
             if not is_generally_booked_by_anyone and \
                not slot_is_under_maintenance and \
-               not slot_conflicts_with_user_other_bookings:
+               can_book_based_on_user_schedule:
                 available_primary_slots_for_user += 1
                 logger_instance.debug(f"Slot {slot_start_dt}-{slot_end_dt} on resource {resource.id} counted as available for user {user.username}.")
             else:
-                logger_instance.debug(f"Slot {slot_start_dt}-{slot_end_dt} on resource {resource.id} NOT available for user {user.username}. Reasons: generally_booked={is_generally_booked_by_anyone}, maintenance={slot_is_under_maintenance}, conflict_other={slot_conflicts_with_user_other_bookings}.")
+                logger_instance.debug(f"Slot {slot_start_dt}-{slot_end_dt} on resource {resource.id} NOT available for user {user.username}. Reasons: generally_booked={is_generally_booked_by_anyone}, maintenance={slot_is_under_maintenance}, can_book_user_schedule={can_book_based_on_user_schedule} (conflict_other={slot_conflicts_with_user_other_bookings}, allow_multiple={allow_multiple_resources_same_time_setting}).")
 
-    logger_instance.info(f"Detailed availability for user {user.username} on {target_date}: Total Primary Slots={total_primary_slots}, Available for User={available_primary_slots_for_user} across {len(resources_list)} resources.")
+    logger_instance.info(f"Detailed availability for user {user.username} on {target_date}: Total Primary Slots={total_primary_slots}, Available for User={available_primary_slots_for_user} across {len(resources_list)} resources. allow_multiple_resources_same_time={allow_multiple_resources_same_time_setting}")
     return {'total_primary_slots': total_primary_slots, 'available_primary_slots_for_user': available_primary_slots_for_user}
 
 

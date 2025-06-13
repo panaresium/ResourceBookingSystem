@@ -942,10 +942,154 @@ class TestAdminBookingSettingsRoutes(AppTests):
         self.assertEqual(settings_after_error.auto_release_if_not_checked_in_minutes, initial_settings.auto_release_if_not_checked_in_minutes)
         self.logout()
 
+
+class TestMapAvailabilityAPI(AppTests):
+    def setUp(self):
+        super().setUp()
+        self.map_user = User.query.filter_by(username='map_test_user').first()
+        if not self.map_user:
+            self.map_user = User(username='map_test_user', email='map_test_user@example.com', is_admin=False)
+            self.map_user.set_password('map_password')
+            db.session.add(self.map_user)
+            db.session.commit()
+
+        self.test_map = FloorMap.query.filter_by(name='Test Map For Availability API').first()
+        if not self.test_map:
+            self.test_map = FloorMap(name='Test Map For Availability API', image_filename='map_avail_test.png')
+            db.session.add(self.test_map)
+            db.session.commit()
+
+        self.map_res1 = Resource(
+            name='MapTestResource1', capacity=5, equipment='Display', tags='map_test',
+            floor_map_id=self.test_map.id, status='published',
+            map_coordinates=json.dumps({'type': 'rect', 'x': 10, 'y': 10, 'width': 20, 'height': 20})
+        )
+        self.map_res2 = Resource(
+            name='MapTestResource2', capacity=5, equipment='Display', tags='map_test',
+            floor_map_id=self.test_map.id, status='published',
+            map_coordinates=json.dumps({'type': 'rect', 'x': 40, 'y': 10, 'width': 20, 'height': 20})
+        )
+        db.session.add_all([self.map_res1, self.map_res2])
+        db.session.commit()
+
+    def _set_allow_multiple_bookings_setting(self, allow_multiple: bool):
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings()
+            db.session.add(settings)
+        settings.allow_multiple_resources_same_time = allow_multiple
+        db.session.commit()
+        # Ensure current_app logger is available or use a fallback for testing
+        logger = flask_current_app.logger if flask_current_app else MagicMock()
+        logger.info(f"Test: Set allow_multiple_resources_same_time to {allow_multiple}")
+
+
+    def _make_booking(self, user_name: str, resource_id: int, date_obj: date, start_time_obj: time, end_time_obj: time, title: str) -> Booking:
+        start_datetime = datetime.combine(date_obj, start_time_obj)
+        end_datetime = datetime.combine(date_obj, end_time_obj)
+        # Bookings in the DB are stored as naive UTC.
+        # For tests, if date_obj and time_obj are naive, combine gives naive datetime.
+        # Assuming test inputs are for the "effective" local time of the venue.
+        # If global_time_offset_hours is 0 (default for tests), this naive datetime is treated as UTC.
+        booking = Booking(
+            user_name=user_name,
+            resource_id=resource_id,
+            start_time=start_datetime, # Naive datetime, assumed UTC for DB
+            end_time=end_datetime,     # Naive datetime, assumed UTC for DB
+            title=title,
+            status='approved'
+        )
+        db.session.add(booking)
+        db.session.commit()
+        return booking
+
+    def test_map_availability_with_multiple_booking_setting(self):
+        self.login(self.map_user.username, 'map_password')
+
+        target_date = date(2025, 7, 1)
+        # Primary slots as defined in routes/api_maps.py
+        primary_slot1_start = time(8, 0)
+        primary_slot1_end = time(12, 0)
+        primary_slot2_start = time(13, 0)
+        primary_slot2_end = time(17, 0)
+
+        # Scenario A: allow_multiple_resources_same_time = False
+        self._set_allow_multiple_bookings_setting(False)
+
+        # Create a booking for self.map_user on self.map_res1 for the first primary slot
+        self._make_booking(
+            user_name=self.map_user.username,
+            resource_id=self.map_res1.id,
+            date_obj=target_date,
+            start_time_obj=primary_slot1_start,
+            end_time_obj=primary_slot1_end,
+            title="Booking for Scenario A"
+        )
+
+        response_a = self.client.get(f'/api/maps-availability?date={target_date.isoformat()}')
+        self.assertEqual(response_a.status_code, 200)
+        data_a = response_a.get_json()
+
+        status_when_multiple_false = "not_found" # Default if map not in response
+        for map_data in data_a.get('maps_availability', []):
+            if map_data['map_id'] == self.test_map.id:
+                status_when_multiple_false = map_data['availability_status']
+                break
+        self.assertNotEqual(status_when_multiple_false, "not_found", "Test map not found in API response for Scenario A")
+
+        # Log details for Scenario A
+        if flask_current_app:
+            flask_current_app.logger.info(f"Scenario A (multiple=false): Map {self.test_map.id} availability status = {status_when_multiple_false}")
+            flask_current_app.logger.info(f"Data A: {data_a}")
+
+
+        # Scenario B: allow_multiple_resources_same_time = True
+        self._set_allow_multiple_bookings_setting(True)
+
+        # The booking on self.map_res1 still exists
+        response_b = self.client.get(f'/api/maps-availability?date={target_date.isoformat()}')
+        self.assertEqual(response_b.status_code, 200)
+        data_b = response_b.get_json()
+
+        status_when_multiple_true = "not_found" # Default if map not in response
+        for map_data in data_b.get('maps_availability', []):
+            if map_data['map_id'] == self.test_map.id:
+                status_when_multiple_true = map_data['availability_status']
+                break
+        self.assertNotEqual(status_when_multiple_true, "not_found", "Test map not found in API response for Scenario B")
+
+        # Log details for Scenario B
+        if flask_current_app:
+            flask_current_app.logger.info(f"Scenario B (multiple=true): Map {self.test_map.id} availability status = {status_when_multiple_true}")
+            flask_current_app.logger.info(f"Data B: {data_b}")
+
+
+        # Crucial Assertion
+        availability_order = {"low": 0, "medium": 1, "high": 2, "full":3, "booked":0} # "booked" could be treated as "low" for user
+
+        # Adjust "booked" to "low" if that's how the frontend/logic interprets it for this comparison
+        # The API might return "booked" if all slots on that specific resource are taken by the user,
+        # but for map-level availability, this might translate to a different aggregate status.
+        # For this test, we rely on the defined availability_order.
+        # If status_when_multiple_false is 'booked', map it to 'low' or 0.
+        # If status_when_multiple_true is 'booked', map it to 'low' or 0.
+
+        numeric_status_false = availability_order.get(status_when_multiple_false, -1) # -1 if status unknown
+        numeric_status_true = availability_order.get(status_when_multiple_true, -1)   # -1 if status unknown
+
+        self.assertGreaterEqual(numeric_status_true, numeric_status_false,
+                                f"Availability with multiple=true ({status_when_multiple_true}) should be >= availability with multiple=false ({status_when_multiple_false})")
+
+        self.logout()
+
 # Scheduler Task Unit Tests
 # Importing the tasks and other necessary components
 from scheduler_tasks import auto_release_unclaimed_bookings, auto_checkout_overdue_bookings
 from utils import get_current_effective_time # To mock this
+
+# Ensure datetime, date, time are imported for type hinting and usage if not already at the top
+from datetime import datetime, date, time
+
 
 class TestAutoReleaseTask(AppTests):
     def setUp(self):
