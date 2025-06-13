@@ -62,7 +62,16 @@ def serve_index():
 @ui_bp.route("/resources")
 @login_required
 def serve_resources():
-    return render_template("resources.html")
+    adjustment_hours = 0  # Default value
+    try:
+        booking_settings = BookingSettings.query.first()
+        if booking_settings and booking_settings.past_booking_time_adjustment_hours is not None:
+            adjustment_hours = booking_settings.past_booking_time_adjustment_hours
+        current_app.logger.info(f"Passing past_booking_adjustment_hours: {adjustment_hours} to resources.html")
+    except Exception as e:
+        current_app.logger.error(f"Error fetching BookingSettings for /resources page: {e}", exc_info=True)
+        # adjustment_hours remains 0 (default)
+    return render_template("resources.html", past_booking_adjustment_hours=adjustment_hours)
 
 @ui_bp.route("/login")
 def serve_login():
