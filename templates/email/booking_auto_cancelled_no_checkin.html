@@ -74,17 +74,17 @@
         </div>
         <div class="content">
             <p>Dear {{ user_name }},</p>
-            <p>This email is to inform you that your booking for <strong>{{ resource_name }}</strong> from <strong>{{ start_time }}</strong> to <strong>{{ end_time }}</strong> has been automatically cancelled.</p>
-            <p><strong>Reason:</strong> This is because the booking was not checked in within the allowed time period of {{ release_minutes }} minutes after the scheduled start time.</p>
+            <p>This email is to inform you that your booking for <strong>{{ resource_name }}</strong> from <strong>{{ start_time_local }}</strong> to <strong>{{ end_time_local }}</strong> has been automatically cancelled.</p>
+            <p><strong>Reason:</strong> {{ explanation }}</p>
         </div>
 
         <div class="booking-details">
             <h3>Booking Details:</h3>
             <p><strong>Resource:</strong> {{ resource_name }}</p>
             <p><strong>Booking Title:</strong> {{ booking_title | default('N/A') }}</p>
-            <p><strong>Scheduled Start:</strong> {{ start_time }}</p>
-            <p><strong>Scheduled End:</strong> {{ end_time }}</p>
-            <p><strong>Cancelled At (Deadline):</strong> {{ cancelled_at_time }}</p>
+            <p><strong>Scheduled Start:</strong> {{ start_time_local }}</p>
+            <p><strong>Scheduled End:</strong> {{ end_time_local }}</p>
+            <p><strong>Check-in Deadline:</strong> {{ check_in_deadline_local }}</p>
             <p><strong>Location:</strong> {{ location | default('N/A') }}</p>
             <p><strong>Floor:</strong> {{ floor | default('N/A') }}</p>
         </div>
