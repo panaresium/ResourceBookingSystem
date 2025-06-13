@@ -950,6 +950,19 @@ def update_booking_settings():
                 flash(_('Invalid input for Auto-release minutes. Please enter a whole number.'), 'danger')
                 return redirect(url_for('admin_ui.serve_booking_settings_page'))
 
+        # New setting for check-in reminder
+        checkin_reminder_minutes_before_str = request.form.get('checkin_reminder_minutes_before', '30')
+        try:
+            checkin_reminder_minutes_before_val = int(checkin_reminder_minutes_before_str) if checkin_reminder_minutes_before_str.strip() else 30
+            if checkin_reminder_minutes_before_val < 0:
+                # Using f-string for error message as _() might not be appropriate for dynamic parts
+                raise ValueError("Check-in Reminder Minutes Before must be non-negative.")
+            settings.checkin_reminder_minutes_before = checkin_reminder_minutes_before_val
+        except ValueError as ve_reminder_minutes:
+            db.session.rollback()
+            flash(f'{_("Invalid Check-in Reminder Minutes Before")}: {str(ve_reminder_minutes)}', 'danger')
+            return redirect(url_for('admin_ui.serve_booking_settings_page'))
+
         db.session.commit()
         # Log changed settings
         changed_settings_log = (
@@ -968,7 +981,8 @@ def update_booking_settings():
             f"allow_check_in_without_pin={settings.allow_check_in_without_pin}, "
             f"enable_auto_checkout={settings.enable_auto_checkout}, "
             f"auto_checkout_delay_minutes={settings.auto_checkout_delay_minutes}, "
-            f"auto_release_if_not_checked_in_minutes={settings.auto_release_if_not_checked_in_minutes}"
+            f"auto_release_if_not_checked_in_minutes={settings.auto_release_if_not_checked_in_minutes}, "
+            f"checkin_reminder_minutes_before={settings.checkin_reminder_minutes_before}"
         )
         # Assuming add_audit_log is available and imported
         # from utils import add_audit_log # Ensure this import is at the top of the file

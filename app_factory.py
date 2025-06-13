@@ -29,7 +29,7 @@ from routes.gmail_auth import init_gmail_auth_routes # Added for Gmail OAuth flo
 
 # For scheduler
 from apscheduler.schedulers.background import BackgroundScheduler
-from scheduler_tasks import cancel_unchecked_bookings, apply_scheduled_resource_status_changes, run_scheduled_backup_job, run_scheduled_booking_csv_backup, auto_checkout_overdue_bookings, auto_release_unclaimed_bookings
+from scheduler_tasks import cancel_unchecked_bookings, apply_scheduled_resource_status_changes, run_scheduled_backup_job, run_scheduled_booking_csv_backup, auto_checkout_overdue_bookings, auto_release_unclaimed_bookings, send_checkin_reminders
 # Conditional import for azure_backup
 try:
     from azure_backup import restore_latest_backup_set_on_startup, backup_if_changed as azure_backup_if_changed, restore_incremental_bookings
@@ -489,6 +489,22 @@ def create_app(config_object=config, testing=False): # Added testing parameter
                 app.logger.info(f"Scheduled auto_release_unclaimed_bookings job: Interval {release_interval} minutes.")
             else:
                 app.logger.warning("auto_release_unclaimed_bookings function not found in scheduler_tasks. Job not added.")
+
+            # Add the new send_checkin_reminders job
+            if send_checkin_reminders:
+                # Default interval of 5 minutes. Consider making this configurable.
+                reminder_interval_minutes = app.config.get('CHECKIN_REMINDER_JOB_INTERVAL_MINUTES', 5)
+                scheduler.add_job(
+                    id='send_checkin_reminders_task',
+                    func=send_checkin_reminders,
+                    trigger='interval',
+                    minutes=reminder_interval_minutes,
+                    replace_existing=True,
+                    args=[app]
+                )
+                app.logger.info(f"Scheduled send_checkin_reminders job: Interval {reminder_interval_minutes} minutes.")
+            else:
+                app.logger.warning("send_checkin_reminders function not found in scheduler_tasks. Job not added.")
 
             if azure_backup_if_changed: # Legacy Azure backup, check if function exists
                  scheduler.add_job(azure_backup_if_changed, 'interval', minutes=app.config.get('AZURE_BACKUP_INTERVAL_MINUTES', 60))

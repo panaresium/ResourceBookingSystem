@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Check-in Reminder for {{ booking_title }}</title>
+</head>
+<body>
+    <p>Dear User,</p>
+    <p>This is a reminder to check in for your upcoming booking:</p>
+    <ul>
+        <li><strong>Booking:</strong> {{ booking_title }}</li>
+        <li><strong>Resource:</strong> {{ resource_name }}</li>
+        <li><strong>Start Time:</strong> {{ booking_start_time }}</li>
+    </ul>
+    <p>Please check in using the link below:</p>
+    <p><a href="{{ checkin_url }}">Check-in Now</a></p>
+    <p>If you no longer need this booking, please cancel it via the 'My Bookings' page.</p>
+    <p>Thank you,<br>
+    {{ app_name }}</p>
+</body>
+</html>
