@@ -141,11 +141,11 @@ def login_google_callback():
 # --- Google Account Linking/Unlinking ---
 
 def get_google_link_flow():
-    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+    # os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
     scopes = current_app.config.get('SCOPES', ['openid', 'email', 'profile'])
     # IMPORTANT: This redirect_uri MUST match exactly what's configured in Google Cloud Console
     # for the OAuth client, under "Authorized redirect URIs".
-    redirect_uri_dynamic = url_for('auth.link_google_callback', _external=True)
+    redirect_uri_dynamic = url_for('auth.link_google_callback', _external=True, _scheme='https')
     current_app.logger.info(f"Generated Google Link Flow redirect URI: {redirect_uri_dynamic}")
     return Flow.from_client_config(
         client_config={'web': {
