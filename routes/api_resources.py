@@ -268,24 +268,18 @@ def get_unavailable_dates():
                     # current_processing_date, resource_to_check, logger are all from outer scopes.
                     is_server_today = (current_processing_date == now.date()) # Compared to now.date()
 
-                    # Determine if the time-based cutoff check should apply to this slot
-                    apply_time_cutoff_to_this_slot = False
-                    if not booking_settings.allow_past_bookings and is_server_today:
-                        apply_time_cutoff_to_this_slot = True
-
-                    if apply_time_cutoff_to_this_slot:
+                    if is_server_today:
+                        # Always check slots on "today" against the effective cutoff time
                         if slot_start_datetime_utc < effective_cutoff_datetime_utc:
-                            logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on SERVER TODAY {current_processing_date.strftime('%Y-%m-%d')} (allow_past_bookings=FALSE) is 'passed' based on effective_cutoff_datetime_utc ({effective_cutoff_datetime_utc.isoformat()}). Skipping.")
-                            continue # Skip this slot
+                            logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on SERVER TODAY {current_processing_date.strftime('%Y-%m-%d')} is 'passed' based on effective_cutoff_datetime_utc ({effective_cutoff_datetime_utc.isoformat()}). Skipping.")
+                            continue # Skip this slot as it's effectively passed
                         else:
-                            logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on SERVER TODAY {current_processing_date.strftime('%Y-%m-%d')} (allow_past_bookings=FALSE) is 'timely'. Proceeding to conflict checks.")
-                    else:
-                        # This path is taken if:
-                        # 1. booking_settings.allow_past_bookings is TRUE (for any date: past, today, future)
-                        #    OR
-                        # 2. booking_settings.allow_past_bookings is FALSE, but current_processing_date is a FUTURE date (not today, not past).
-                        #    (Strictly past dates with allow_past_bookings=FALSE are already handled by the 'continue' at the start of the date loop)
-                        logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on {current_processing_date.strftime('%Y-%m-%d')}. Time-cutoff based on 'now' and 'past_booking_time_adjustment_hours' is SKIPPED because either allow_past_bookings=TRUE, or it's a future date. Proceeding to booking/conflict checks.")
+                            logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on SERVER TODAY {current_processing_date.strftime('%Y-%m-%d')} is 'timely' relative to effective_cutoff_datetime_utc ({effective_cutoff_datetime_utc.isoformat()}). Proceeding to conflict checks.")
+                    # else: # This else block is for future dates. Past dates are handled by Rule A1.
+                        # For future dates (not is_server_today), this time-based check against 'now' is skipped.
+                        # logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on FUTURE DATE {current_processing_date.strftime('%Y-%m-%d')}. Time-cutoff check is SKIPPED. Proceeding to booking/conflict checks.")
+                        # No explicit logging needed for future dates skipping this specific time check,
+                        # as it's the default behavior if not is_server_today.
 
                     # Conflict Check 1: Resource Slot Generally Booked?
                     is_generally_booked = Booking.query.filter(
