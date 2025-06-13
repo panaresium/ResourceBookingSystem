@@ -248,7 +248,7 @@
                         currentBackupTaskId = null;
                         // Reload backups if the backup was successful (or partially successful and worth reloading)
                         if (lowerStatus.includes("completed with overall success: true") || (messageType === 'success' || (data.detail && data.detail.toUpperCase().includes("SUCCESS")))) {
-                            loadAvailableBackups();
+                            loadAvailableBackups(true); // Quick refresh
                         }
                     }
                 });
@@ -326,7 +326,7 @@
                             (lowerStatus.includes("backup set deletion process finished") && lowerDetail.includes("overall success: true")); // azure_backup.py's final success
 
                         if (wasDeleteSuccessful) {
-                            loadAvailableBackups();
+                            loadAvailableBackups(true); // Quick refresh
                         }
                     }
                 });
@@ -411,8 +411,10 @@
                 });
             }
 
-            function loadAvailableBackups() {
-                disablePageInteractions();
+            function loadAvailableBackups(isQuickRefresh = false) {
+                if (!isQuickRefresh) {
+                    disablePageInteractions();
+                }
                 appendLog('restore-log-area', "{{ _('Fetching available full system backups...') }}", '', 'info', restoreStatusMessageEl);
                 if(availableBackupsTbody) availableBackupsTbody.innerHTML = '<tr><td colspan="2">{{ _("Loading...") }}</td></tr>';
                 if(paginationNav) paginationNav.style.display = 'none';
@@ -447,7 +449,9 @@
                     if(paginationNav) paginationNav.style.display = 'none';
                 })
                 .finally(() => {
-                    enablePageInteractions();
+                    if (!isQuickRefresh) {
+                        enablePageInteractions();
+                    }
                 });
             }
 
@@ -517,7 +521,7 @@
                 }
             }
 
-            if(listBackupsButton) listBackupsButton.addEventListener('click', loadAvailableBackups);
+            if(listBackupsButton) listBackupsButton.addEventListener('click', function() { loadAvailableBackups(false); });
             if(prevPageBtn) prevPageBtn.addEventListener('click', function(e) {
                 e.preventDefault();
                 if (currentPage > 1) { currentPage--; displayBackupsPage(); }
