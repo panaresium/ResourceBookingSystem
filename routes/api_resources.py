@@ -256,7 +256,16 @@ def get_unavailable_dates():
                 current_iter_date += timedelta(days=1)
                 continue
 
+            is_server_today = (current_processing_date == now.date()) # Define is_server_today before potential logging block
+
+            if is_server_today: # Moved this block up to wrap all "today" specific logic
+                logger.debug(f"[UNAVAIL_DATES][TODAY] For user {target_user.username} on {current_processing_date.strftime('%Y-%m-%d')}: Effective cutoff time UTC: {effective_cutoff_datetime_utc.isoformat()}")
+                logger.debug(f"[UNAVAIL_DATES][TODAY] allow_multiple_resources_same_time: {booking_settings.allow_multiple_resources_same_time}")
+                logger.debug(f"[UNAVAIL_DATES][TODAY] User bookings on this date for conflict check ({len(user_bookings_on_this_date)}): {[(b.id, b.resource_id, b.start_time.isoformat(), b.end_time.isoformat()) for b in user_bookings_on_this_date]}")
+
             for resource_to_check in active_resources_for_date:
+                if is_server_today: # Log specific resource being processed only if it's today
+                    logger.debug(f"[UNAVAIL_DATES][TODAY] Processing resource ID: {resource_to_check.id}, Name: '{resource_to_check.name}'")
                 for slot_def in STANDARD_SLOTS:
                     # Ensure time objects are combined with current_processing_date and made timezone-aware for comparison
                     slot_start_datetime_utc = datetime.combine(current_processing_date, slot_def['start'])
@@ -266,18 +275,24 @@ def get_unavailable_dates():
 
                     # now, booking_settings, effective_cutoff_datetime_utc,
                     # current_processing_date, resource_to_check, logger are all from outer scopes.
-                    is_server_today = (current_processing_date == now.date()) # Compared to now.date()
+                    # is_server_today is already defined above
 
                     if is_server_today:
-                        # Always check slots on "today" against the effective cutoff time
-                        if slot_start_datetime_utc < effective_cutoff_datetime_utc:
-                            logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on SERVER TODAY {current_processing_date.strftime('%Y-%m-%d')} is 'passed' based on effective_cutoff_datetime_utc ({effective_cutoff_datetime_utc.isoformat()}). Skipping.")
+                        logger.debug(f"[UNAVAIL_DATES][TODAY]   Checking slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} for resource ID: {resource_to_check.id}")
+
+                        # Corrected Time-passed check: A slot is considered passed if the effective cutoff time is at or after the slot's END time.
+                        is_slot_time_passed = effective_cutoff_datetime_utc >= slot_end_datetime_utc
+                        logger.debug(
+                            f"[UNAVAIL_DATES][TODAY]     SLOT TIME CHECK: Effective cutoff {effective_cutoff_datetime_utc.strftime('%H:%M:%S')} >= Slot End {slot_end_datetime_utc.strftime('%H:%M:%S')}? "
+                            f"Result: {is_slot_time_passed}"
+                        )
+                        if is_slot_time_passed:
+                            logger.debug(f"[UNAVAIL_DATES][TODAY]     SLOT SKIPPED (time passed): Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} for resource ID: {resource_to_check.id} because effective cutoff is at or after slot end.")
                             continue # Skip this slot as it's effectively passed
                         else:
-                            logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on SERVER TODAY {current_processing_date.strftime('%Y-%m-%d')} is 'timely' relative to effective_cutoff_datetime_utc ({effective_cutoff_datetime_utc.isoformat()}). Proceeding to conflict checks.")
+                            logger.debug(f"[UNAVAIL_DATES][TODAY]     Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} for resource ID: {resource_to_check.id} is 'timely'. Proceeding to conflict checks.")
                     # else: # This else block is for future dates. Past dates are handled by Rule A1.
                         # For future dates (not is_server_today), this time-based check against 'now' is skipped.
-                        # logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on FUTURE DATE {current_processing_date.strftime('%Y-%m-%d')}. Time-cutoff check is SKIPPED. Proceeding to booking/conflict checks.")
                         # No explicit logging needed for future dates skipping this specific time check,
                         # as it's the default behavior if not is_server_today.
 
@@ -289,9 +304,14 @@ def get_unavailable_dates():
                         Booking.status.in_(['approved', 'pending', 'checked_in', 'confirmed'])
                     ).first() is not None
 
+                    if is_server_today: # Log only if it's today
+                        logger.debug(f"[UNAVAIL_DATES][TODAY]     Generally booked? {is_generally_booked}")
+
                     if is_generally_booked:
-                        logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on {resource_to_check.name} for {current_processing_date.strftime('%Y-%m-%d')} is generally booked.")
-                        logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on {resource_to_check.name} for {current_processing_date.strftime('%Y-%m-%d')} is generally booked.")
+                        if is_server_today: # Add reason for skipping only if it's today
+                            logger.debug(f"[UNAVAIL_DATES][TODAY]     SLOT SKIPPED (generally booked): Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} for resource ID: {resource_to_check.id}.")
+                        else: # Keep original generic log for non-today cases if needed
+                            logger.debug(f"Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on {resource_to_check.name} for {current_processing_date.strftime('%Y-%m-%d')} is generally booked. Skipping.")
                         continue # Next slot
 
                     # Conflict Check 2: User's Own Schedule Conflicts with this Potential Slot?
@@ -307,35 +327,56 @@ def get_unavailable_dates():
 
                                 if user_booking_start_dt < slot_end_datetime_utc and user_booking_end_dt > slot_start_datetime_utc: # Use renamed slot datetimes
                                     user_schedule_conflicts = True
-                                    logger.debug(
-                                        f"User {target_user.username} has a conflicting booking (ID: {user_booking.id} "
-                                        f"on resource {user_booking.resource_id}) with slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} "
-                                        f"on {current_processing_date.strftime('%Y-%m-%d')} for resource {resource_to_check.name}. "
-                                        f"on {current_processing_date.strftime('%Y-%m-%d')} for resource {resource_to_check.name}. "
-                                        "Multiple bookings at the same time are disallowed by settings."
-                                    )
+                                    if is_server_today:
+                                        logger.debug(
+                                            f"[UNAVAIL_DATES][TODAY]       User conflict FOUND with their booking ID: {user_booking.id} "
+                                            f"({user_booking.start_time.strftime('%H:%M')}-{user_booking.end_time.strftime('%H:%M')} on resource {user_booking.resource_id}) "
+                                            f"for slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on resource {resource_to_check.name}."
+                                        )
+                                    # else: # Original generic log for non-today
+                                    #     logger.debug(
+                                    #         f"User {target_user.username} has a conflicting booking (ID: {user_booking.id} "
+                                    #         f"on resource {user_booking.resource_id}) with slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} "
+                                    #         f"on {current_processing_date.strftime('%Y-%m-%d')} for resource {resource_to_check.name}. "
+                                    #         "Multiple bookings at the same time are disallowed by settings."
+                                    #     )
                                     break # Found a conflict
 
+                    if is_server_today: # Log only if it's today
+                        logger.debug(f"[UNAVAIL_DATES][TODAY]     User schedule conflicts? {user_schedule_conflicts}")
+
                     if user_schedule_conflicts:
-                        # This condition is now only met if allow_multiple_resources_same_time is False AND a conflict exists.
-                        logger.debug(
-                            f"User schedule conflict (allow_multiple_resources_same_time is False) "
-                            f"for slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on {resource_to_check.name} "
-                            f"for {current_processing_date.strftime('%Y-%m-%d')}. Skipping this slot."
-                        )
+                        if is_server_today: # Add reason for skipping only if it's today
+                             logger.debug(f"[UNAVAIL_DATES][TODAY]     SLOT SKIPPED (user conflict): Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} for resource ID: {resource_to_check.id}.")
+                        # else: # Original generic log for non-today
+                        #     logger.debug(
+                        #         f"User schedule conflict (allow_multiple_resources_same_time is False) "
+                        #         f"for slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on {resource_to_check.name} "
+                        #         f"for {current_processing_date.strftime('%Y-%m-%d')}. Skipping this slot."
+                        #     )
                         continue # Next slot
 
                     any_slot_bookable_for_user_this_date = True
-                    logger.debug(f"Found bookable slot for user {target_user.username} on {current_processing_date.strftime('%Y-%m-%d')}: Resource {resource_to_check.name}, Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')}.")
-                    break
+                    if is_server_today:
+                        logger.debug(f"[UNAVAIL_DATES][TODAY]     SLOT BOOKABLE: Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on resource ID: {resource_to_check.id} IS bookable for user {target_user.username}. Setting any_slot_bookable_for_user_this_date = True.")
+                    # else: # Original generic log
+                    #    logger.debug(f"Found bookable slot for user {target_user.username} on {current_processing_date.strftime('%Y-%m-%d')}: Resource {resource_to_check.name}, Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')}.")
+                    break # Found a bookable slot for this resource, move to next resource or date
+
+                if is_server_today: # Log after iterating slots for a resource
+                    logger.debug(f"[UNAVAIL_DATES][TODAY] Finished resource ID: {resource_to_check.id}. any_slot_bookable_for_user_this_date is now: {any_slot_bookable_for_user_this_date}")
 
                 if any_slot_bookable_for_user_this_date:
-                    break
+                    break # Found a bookable slot on this date, move to next date
 
             # d. Final Decision for the Date
+            if is_server_today:
+                logger.debug(f"[UNAVAIL_DATES][TODAY] Final check for {current_processing_date.strftime('%Y-%m-%d')}: any_slot_bookable_for_user_this_date = {any_slot_bookable_for_user_this_date}. Adding to unavailable: {not any_slot_bookable_for_user_this_date}")
+
             if not any_slot_bookable_for_user_this_date:
                 unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
-                logger.debug(f"Date {current_processing_date} determined unavailable for user {target_user.username} (no bookable standard slots found). Added to unavailable.")
+                # Original generic log for this, can be kept or made specific for today as well
+                logger.debug(f"Date {current_processing_date.strftime('%Y-%m-%d')} determined unavailable for user {target_user.username} (no bookable standard slots found). Added to unavailable.")
 
             current_iter_date += timedelta(days=1)
 
