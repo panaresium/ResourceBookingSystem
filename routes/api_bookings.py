@@ -1633,7 +1633,7 @@ def check_in_booking(booking_id):
         effective_now_local_naive = effective_now_aware.replace(tzinfo=None)
 
         booking_start_local_naive = booking.start_time # Naive venue local
-        effective_check_in_base_time_local_naive = booking_start_local_naive + timedelta(hours=past_booking_adjustment_hours)
+        effective_check_in_base_time_local_naive = booking_start_local_naive # Removed: + timedelta(hours=past_booking_adjustment_hours)
         check_in_window_start_local_naive = effective_check_in_base_time_local_naive - timedelta(minutes=check_in_minutes_before)
         check_in_window_end_local_naive = effective_check_in_base_time_local_naive + timedelta(minutes=check_in_minutes_after)
 
