@@ -67,7 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const bookingCardDiv = bookingItemClone.querySelector('.booking-card'); // Use the main card div
 
         // Apply conditional classes for status
-        bookingCardDiv.classList.remove('booking-completed', 'booking-cancelled', 'booking-rejected', 'booking-cancelled-by-admin', 'booking-cancelled-admin-acknowledged');
+        bookingCardDiv.classList.remove('booking-completed', 'booking-cancelled', 'booking-rejected', 'booking-cancelled-by-admin', 'booking-cancelled-admin-acknowledged', 'cancelled', 'system-cancelled-no-checkin');
         const statusClass = `booking-${booking.status.toLowerCase().replace(/_/g, '-')}`;
         bookingCardDiv.classList.add(statusClass);
 
