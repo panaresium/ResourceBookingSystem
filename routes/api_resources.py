@@ -328,14 +328,21 @@ def get_unavailable_dates():
                 if is_server_today:
                     logger.debug(f"[UNAVAIL_DATES][TODAY] Iterating Resource ID: {resource_to_check.id}, Name: '{resource_to_check.name}'")
                 for slot_def in STANDARD_SLOTS:
-                    slot_start_datetime_utc = datetime.combine(current_processing_date, slot_def['start']).replace(tzinfo=timezone.utc)
-                    slot_end_datetime_utc = datetime.combine(current_processing_date, slot_def['end']).replace(tzinfo=timezone.utc)
+                    # global_time_offset_hours is already fetched and available here
+                    slot_start_local_naive = datetime.combine(current_processing_date, slot_def['start'])
+                    slot_end_local_naive = datetime.combine(current_processing_date, slot_def['end'])
+
+                    # Convert venue local naive slot times to actual UTC by subtracting the offset
+                    # (e.g., if venue is UTC-5, global_time_offset_hours = -5. 8:00 local is 8:00 - (-5) = 13:00 UTC)
+                    slot_start_for_comparison_utc = (slot_start_local_naive - timedelta(hours=global_time_offset_hours)).replace(tzinfo=timezone.utc)
+                    slot_end_for_comparison_utc = (slot_end_local_naive - timedelta(hours=global_time_offset_hours)).replace(tzinfo=timezone.utc)
 
                     is_slot_time_passed = False
                     if is_server_today:
-                        logger.debug(f"[UNAVAIL_DATES][TODAY]   Checking slot: Resource ID {resource_to_check.id}, Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')}")
-                        is_slot_time_passed = effective_cutoff_datetime_utc >= slot_end_datetime_utc
-                        logger.debug(f"[UNAVAIL_DATES][TODAY]     Effective Cutoff UTC: {effective_cutoff_datetime_utc.isoformat()}, Slot End UTC: {slot_end_datetime_utc.isoformat()}")
+                        logger.debug(f"[UNAVAIL_DATES][TODAY]   Checking slot: Resource ID {resource_to_check.id}, Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} (Venue Local Time)")
+                        # Compare venue's cutoff time (expressed in UTC) with venue's slot end time (now correctly expressed in UTC)
+                        is_slot_time_passed = effective_cutoff_datetime_utc >= slot_end_for_comparison_utc
+                        logger.debug(f"[UNAVAIL_DATES][TODAY]     Effective Cutoff Venue Time (as UTC): {effective_cutoff_datetime_utc.isoformat()}, Slot End Venue Time (as UTC): {slot_end_for_comparison_utc.isoformat()}")
                         logger.debug(f"[UNAVAIL_DATES][TODAY]     Is Slot Time Passed? {is_slot_time_passed}")
                         if is_slot_time_passed:
                             logger.debug(f"[UNAVAIL_DATES][TODAY]     SLOT SKIPPED (time passed).")
@@ -343,10 +350,12 @@ def get_unavailable_dates():
                         else:
                             logger.debug(f"[UNAVAIL_DATES][TODAY]     Slot is 'timely'.")
 
+                    # Booking.start_time and Booking.end_time are stored as naive UTC.
+                    # So, compare with slot times also as naive UTC.
                     is_generally_booked = Booking.query.filter(
                         Booking.resource_id == resource_to_check.id,
-                        Booking.start_time < slot_end_datetime_utc,
-                        Booking.end_time > slot_start_datetime_utc,
+                        Booking.start_time < slot_end_for_comparison_utc.replace(tzinfo=None), # Compare naive UTC with naive UTC slot end
+                        Booking.end_time > slot_start_for_comparison_utc.replace(tzinfo=None),   # Compare naive UTC with naive UTC slot start
                         Booking.status.in_(['approved', 'pending', 'checked_in', 'confirmed'])
                     ).first() is not None
 
