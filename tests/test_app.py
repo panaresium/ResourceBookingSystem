@@ -56,26 +56,36 @@ class AppTests(unittest.TestCase):
         import uuid
         unique_name = f"Test Map {uuid.uuid4()}"
         unique_file = f"{uuid.uuid4()}.png"
-        floor_map = FloorMap(name=unique_name, image_filename=unique_file)
-        db.session.add(floor_map)
-        db.session.commit()
+        # Ensure a FloorMap exists for resources
+        floor_map = FloorMap.query.first()
+        if not floor_map:
+            floor_map = FloorMap(name=unique_name, image_filename=unique_file)
+            db.session.add(floor_map)
+            db.session.commit()
+        self.floor_map = floor_map
+
 
         res1 = Resource(
             name='Room A', capacity=10, equipment='Projector,Whiteboard', tags='large',
-            floor_map_id=floor_map.id, status='published',
+            floor_map_id=self.floor_map.id, status='published',
             map_coordinates=json.dumps({'type': 'rect', 'x': 10, 'y': 20, 'width': 30, 'height': 30})
         )
         res2 = Resource(
             name='Room B', capacity=4, equipment='Whiteboard', tags='small',
-            floor_map_id=floor_map.id, status='published',
+            floor_map_id=self.floor_map.id, status='published',
             map_coordinates=json.dumps({'type': 'rect', 'x': 50, 'y': 20, 'width': 30, 'height': 30})
         )
-        db.session.add_all([res1, res2])
+        # Add a third resource for tests that need it
+        res3 = Resource(
+            name='Room C', capacity=5, equipment='Monitor', tags='medium',
+            floor_map_id=self.floor_map.id, status='published'
+        )
+        db.session.add_all([res1, res2, res3])
         db.session.commit()
 
-        self.floor_map = floor_map
         self.resource1 = res1
         self.resource2 = res2
+        self.resource3 = res3 # Make it available to tests
         
         self.client = app.test_client()
 
@@ -1726,12 +1736,21 @@ class TestUnavailableDatesAPI(AppTests):
         self.test_user = User.query.filter_by(username='testuser').first()
         # Login the user
         self.login(self.test_user.username, 'password')
-        # Ensure at least one published resource exists
-        if not Resource.query.filter_by(status='published').first():
-            res = Resource(name='Test Resource for Unavailable Dates', status='published', capacity=2)
-            db.session.add(res)
+
+        # Ensure resources from AppTests.setUp are available via self
+        # self.resource1, self.resource2 are already set up by AppTests
+
+        # Create a third resource specific to this test class if needed, or ensure it's in AppTests
+        res3_name = 'Room C for UnavailableDatesAPI'
+        self.resource3 = Resource.query.filter_by(name=res3_name).first()
+        if not self.resource3:
+            self.resource3 = Resource(name=res3_name, capacity=5, status='published', floor_map_id=self.floor_map.id)
+            db.session.add(self.resource3)
             db.session.commit()
-            self.resource1 = res # Or use existing self.resource1 if it's always published
+        else: # Ensure it's published if it exists
+            self.resource3.status = 'published'
+            db.session.commit()
+
 
     def _set_booking_settings(self, allow_past_bookings, past_booking_time_adjustment_hours, global_time_offset_hours):
         settings = BookingSettings.query.first()
@@ -1752,11 +1771,6 @@ class TestUnavailableDatesAPI(AppTests):
         # --- Scenario Setup ---
         # Venue is UTC+2. Current UTC time is 10:00. Effective venue time is 12:00.
         # Past adjustment is 1 hour. Cutoff is 12:00 - 1hr = 11:00 venue time.
-        # Standard slots: 08:00-12:00 and 13:00-17:00.
-        # The 08:00-12:00 slot's end (12:00) is AFTER the cutoff (11:00), so it should be considered partially available.
-        # However, get_unavailable_dates marks a date unavailable if NO slots are bookable.
-        # If the cutoff (11:00) makes the 8-12 slot unbookable (e.g. if it requires full slot),
-        # and the 13-17 slot is bookable, then the day should NOT be unavailable.
 
         self._set_booking_settings(
             allow_past_bookings=False,  # Typical setting
@@ -1766,11 +1780,9 @@ class TestUnavailableDatesAPI(AppTests):
 
         mock_now_utc = datetime_original(2025, 7, 15, 10, 0, 0, tzinfo=timezone_original.utc) # 10:00 UTC
         mock_datetime_in_api.now = MagicMock(return_value=mock_now_utc)
-        # This ensures that when api_resources.py calls datetime.now(timezone.utc), it gets our mock_now_utc
-        # And that other calls to datetime.datetime(...) still work
         mock_datetime_in_api.combine = datetime_original.combine
         mock_datetime_in_api.strptime = datetime_original.strptime
-        # mock_datetime_in_api.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args and not (len(args)==1 and isinstance(args[0], timezone_original)) else mock_now_utc
+        mock_datetime_in_api.fromisoformat = datetime_original.fromisoformat
 
 
         # --- API Call ---
@@ -1779,26 +1791,18 @@ class TestUnavailableDatesAPI(AppTests):
         unavailable_dates_list = response.get_json()
 
         # --- Assertions ---
-        # Today's date string
         today_str = mock_now_utc.date().isoformat() # "2025-07-15"
 
-        # Debugging output
-        print(f"Test: Positive Offset (New Logic). Today: {today_str}. Unavailable Dates: {unavailable_dates_list}")
-        # Expected (New Logic): Cutoff 11:00 UTC (Venue Time).
-        # Morning slot (08:00-12:00 VT) -> Start 06:00 UTC. 11:00 >= 06:00 -> Morning PASSED.
-        # Afternoon slot (13:00-17:00 VT) -> Start 11:00 UTC. 11:00 >= 11:00 -> Afternoon PASSED.
-        # Both slots passed, so today should BE in the unavailable list.
+        print(f"Test: Positive Offset (New Logic - Universal Cutoff). Today: {today_str}. Unavailable Dates: {unavailable_dates_list}")
+        # Expected (New Logic - Universal Cutoff): Cutoff 11:00 UTC (Venue Time).
+        # Morning slot (08:00-12:00 VT) -> Start 06:00 UTC. Cutoff 11:00 UTC >= Slot Start 06:00 UTC -> Morning PASSED.
+        # Afternoon slot (13:00-17:00 VT) -> Start 11:00 UTC. Cutoff 11:00 UTC >= Slot Start 11:00 UTC -> Afternoon PASSED.
+        # Both standard slots are passed, so today should BE in the unavailable list.
         self.assertIn(today_str, unavailable_dates_list,
-                      f"Today ({today_str}) SHOULD be unavailable as the cutoff (11:00 Venue Time) makes both morning (starts 08:00 VT / 06:00 UTC) and afternoon (starts 13:00 VT / 11:00 UTC) slots passed.")
+                      f"Today ({today_str}) SHOULD BE unavailable as the cutoff (11:00 Venue Time) makes both standard slots passed (starts 08:00 and 13:00 Venue Time).")
 
     @patch('routes.api_resources.datetime')
     def test_unavailable_all_day_today_due_to_cutoff(self, mock_datetime_in_api):
-        # --- Scenario Setup ---
-        # Venue is UTC+0. Current UTC time is 10:00. Effective venue time is 10:00.
-        # Past adjustment is -8 hours (cutoff is 8 hours IN THE FUTURE).
-        # Cutoff is 10:00 - (-8hr) = 18:00 venue time.
-        # Standard slots: 08:00-12:00 and 13:00-17:00. Both end before 18:00.
-        # So, all slots for today are effectively "past" the cutoff. The day should be unavailable.
         self._set_booking_settings(
             allow_past_bookings=False,
             past_booking_time_adjustment_hours=-8, # Cutoff is 8 hours in the future
@@ -1809,32 +1813,23 @@ class TestUnavailableDatesAPI(AppTests):
         mock_datetime_in_api.now = MagicMock(return_value=mock_now_utc)
         mock_datetime_in_api.combine = datetime_original.combine
         mock_datetime_in_api.strptime = datetime_original.strptime
-        # mock_datetime_in_api.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args and not (len(args)==1 and isinstance(args[0], timezone_original)) else mock_now_utc
+        mock_datetime_in_api.fromisoformat = datetime_original.fromisoformat
 
-        # --- API Call ---
         response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
         self.assertEqual(response.status_code, 200, response.get_json())
         unavailable_dates_list = response.get_json()
 
-        # --- Assertions ---
         today_str = mock_now_utc.date().isoformat() # "2025-07-15"
-        print(f"Test: Cutoff in Future (New Logic). Today: {today_str}. Unavailable Dates: {unavailable_dates_list}")
+        print(f"Test: Cutoff in Future (New Logic - Universal Cutoff). Today: {today_str}. Unavailable Dates: {unavailable_dates_list}")
         # Expected: Cutoff 18:00 UTC (Venue Time).
-        # Morning slot (08:00-12:00 VT) -> Start 08:00 UTC. 18:00 >= 08:00 -> Morning PASSED.
-        # Afternoon slot (13:00-17:00 VT) -> Start 13:00 UTC. 18:00 >= 13:00 -> Afternoon PASSED.
-        # Both slots passed, so today *should* be in the unavailable list.
+        # Morning slot (08:00-12:00 VT) -> Start 08:00 UTC. Cutoff 18:00 UTC >= Slot Start 08:00 UTC -> Morning PASSED.
+        # Afternoon slot (13:00-17:00 VT) -> Start 13:00 UTC. Cutoff 18:00 UTC >= Slot Start 13:00 UTC -> Afternoon PASSED.
+        # Both standard slots passed, so today *should* be in the unavailable list.
         self.assertIn(today_str, unavailable_dates_list,
-                      f"Today ({today_str}) SHOULD be unavailable as cutoff (18:00 Venue Time) makes all standard slots (starting 08:00 and 13:00 Venue Time) unavailable.")
+                      f"Today ({today_str}) SHOULD be unavailable as cutoff (18:00 Venue Time) makes all standard slots passed.")
 
     @patch('routes.api_resources.datetime')
     def test_unavailable_today_afternoon_with_negative_global_offset(self, mock_datetime_in_api):
-        # --- Scenario Setup ---
-        # Venue is UTC-2. Current UTC time is 18:00. Effective venue time is 16:00.
-        # Past adjustment is 1 hour. Cutoff is 16:00 - 1hr = 15:00 venue time.
-        # Standard slots: 08:00-12:00 (unavailable due to cutoff) and 13:00-17:00.
-        # The 13:00-17:00 slot: 13:00 is before cutoff 15:00. 17:00 is after cutoff 15:00.
-        # So, this slot should be considered partially available by the logic in get_unavailable_dates.
-        # If any part of a standard slot is available, the day is not marked unavailable.
         self._set_booking_settings(
             allow_past_bookings=False,
             past_booking_time_adjustment_hours=1,
@@ -1845,14 +1840,12 @@ class TestUnavailableDatesAPI(AppTests):
         mock_datetime_in_api.now = MagicMock(return_value=mock_now_utc)
         mock_datetime_in_api.combine = datetime_original.combine
         mock_datetime_in_api.strptime = datetime_original.strptime
-        # mock_datetime_in_api.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args and not (len(args)==1 and isinstance(args[0], timezone_original)) else mock_now_utc
+        mock_datetime_in_api.fromisoformat = datetime_original.fromisoformat
 
-        # --- API Call ---
         response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
         self.assertEqual(response.status_code, 200, response.get_json())
         unavailable_dates_list = response.get_json()
 
-        # --- Assertions ---
         today_str = mock_now_utc.date().isoformat() # "2025-07-15"
         print(f"Test: Negative Offset (New Logic - Universal Cutoff). Today: {today_str}. Unavailable Dates: {unavailable_dates_list}")
         # Expected (New Logic - Universal Cutoff): Cutoff 15:00 UTC (Venue Time).
@@ -1875,37 +1868,34 @@ class TestUnavailableDatesAPI(AppTests):
 
         mock_now_utc = datetime_original(2025, 7, 15, 1, 0, 0, tzinfo=timezone_original.utc) # Mock current time
 
-        # Configure mock_datetime_in_api to only mock datetime.now(timezone.utc)
         mock_datetime_in_api.now = MagicMock(return_value=mock_now_utc)
-        # Ensure that datetime.combine and other methods use the original datetime
         mock_datetime_in_api.combine = datetime_original.combine
         mock_datetime_in_api.strptime = datetime_original.strptime
-        # If other specific datetime static/class methods are used by the endpoint, mock them too if side_effect is broad
-        # For instance, if datetime.fromisoformat is used:
-        # mock_datetime_in_api.fromisoformat = datetime_original.fromisoformat
+        mock_datetime_in_api.fromisoformat = datetime_original.fromisoformat
 
         target_date_obj = date(2025, 7, 15)
         target_date_str = target_date_obj.isoformat()
 
-        # Ensure only self.resource1 and self.resource2 are published for this test
         all_resources_db = Resource.query.all()
         original_statuses = {res.id: res.status for res in all_resources_db}
+
+        # Ensure self.resource1, self.resource2, self.resource3 are published for this test
+        # and others are draft
+        resource_ids_to_publish = [self.resource1.id, self.resource2.id, self.resource3.id]
         for res_db in all_resources_db:
-            if res_db.id == self.resource1.id or res_db.id == self.resource2.id:
+            if res_db.id in resource_ids_to_publish:
                 res_db.status = 'published'
             else:
                 res_db.status = 'draft'
         db.session.commit()
-        # Re-fetch self.resource1 and self.resource2 if their status was changed by the loop above
+
         self.resource1 = Resource.query.get(self.resource1.id)
         self.resource2 = Resource.query.get(self.resource2.id)
-        self.resource1.status = 'published'
-        self.resource2.status = 'published'
-        db.session.commit()
+        self.resource3 = Resource.query.get(self.resource3.id)
 
+        # Bookings are stored as naive UTC. With global_time_offset_hours=0, venue time = UTC.
         booking1_start_dt = datetime.combine(target_date_obj, time(8, 0))
         booking1_end_dt = datetime.combine(target_date_obj, time(12, 0))
-        # Bookings are stored as naive UTC (representing venue's local time when offset is 0)
         booking1 = Booking(user_name=self.test_user.username, resource_id=self.resource1.id,
                            start_time=booking1_start_dt, end_time=booking1_end_dt,
                            title="Morning R1", status="approved")
@@ -1919,18 +1909,19 @@ class TestUnavailableDatesAPI(AppTests):
         db.session.add_all([booking1, booking2])
         db.session.commit()
 
-        response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
-        self.assertEqual(response.status_code, 200, f"API call failed: {response.get_json()}")
-        unavailable_dates_list = response.get_json()
+        try:
+            response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+            self.assertEqual(response.status_code, 200, f"API call failed: {response.get_json()}")
+            unavailable_dates_list = response.get_json()
 
-        self.assertIn(target_date_str, unavailable_dates_list,
-                      f"{target_date_str} should be unavailable due to user conflicts on all resources when multiple bookings are disabled.")
-
-        # Restore original statuses
-        for res_id, status in original_statuses.items():
-            res_db_restore = Resource.query.get(res_id)
-            if res_db_restore: res_db_restore.status = status
-        db.session.commit()
+            self.assertIn(target_date_str, unavailable_dates_list,
+                          f"{target_date_str} should be unavailable due to user conflicts on all resources when multiple bookings are disabled.")
+        finally:
+            # Restore original statuses
+            for res_id, status in original_statuses.items():
+                res_db_restore = Resource.query.get(res_id)
+                if res_db_restore: res_db_restore.status = status
+            db.session.commit()
 
     @patch('routes.api_resources.datetime')
     def test_day_available_when_conflict_but_multi_enabled(self, mock_datetime_in_api):
@@ -1947,18 +1938,24 @@ class TestUnavailableDatesAPI(AppTests):
         mock_datetime_in_api.now = MagicMock(return_value=mock_now_utc)
         mock_datetime_in_api.combine = datetime_original.combine
         mock_datetime_in_api.strptime = datetime_original.strptime
+        mock_datetime_in_api.fromisoformat = datetime_original.fromisoformat
 
         target_date_obj = date(2025, 7, 15)
         target_date_str = target_date_obj.isoformat()
 
-        # Ensure self.resource1 and self.resource2 are published
-        self.resource1.status = 'published'
-        self.resource2.status = 'published'
-        all_other_resources = Resource.query.filter(Resource.id.notin_([self.resource1.id, self.resource2.id])).all()
-        original_statuses_others = {res.id: res.status for res in all_other_resources}
-        for res in all_other_resources:
-            res.status = 'draft' # Unpublish others
+        # Ensure self.resource1 and self.resource2 are published, others draft
+        original_statuses = {}
+        all_resources_q = Resource.query.all()
+        for r in all_resources_q:
+            original_statuses[r.id] = r.status
+            if r.id == self.resource1.id or r.id == self.resource2.id:
+                r.status = 'published'
+            else:
+                r.status = 'draft'
         db.session.commit()
+
+        self.resource1 = Resource.query.get(self.resource1.id) # Re-fetch
+        self.resource2 = Resource.query.get(self.resource2.id) # Re-fetch
 
         booking1_start_dt = datetime.combine(target_date_obj, time(8, 0))
         booking1_end_dt = datetime.combine(target_date_obj, time(12, 0))
@@ -1968,18 +1965,273 @@ class TestUnavailableDatesAPI(AppTests):
         db.session.add(booking1)
         db.session.commit()
 
-        response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
-        self.assertEqual(response.status_code, 200, f"API call failed: {response.get_json()}")
-        unavailable_dates_list = response.get_json()
+        try:
+            response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+            self.assertEqual(response.status_code, 200, f"API call failed: {response.get_json()}")
+            unavailable_dates_list = response.get_json()
 
-        self.assertNotIn(target_date_str, unavailable_dates_list,
-                         f"{target_date_str} should NOT be unavailable when multiple bookings are enabled, even with a booking on one resource, as other resources are available.")
+            self.assertNotIn(target_date_str, unavailable_dates_list,
+                             f"{target_date_str} should NOT be unavailable when multiple bookings are enabled, even with a booking on one resource, as other resources are available.")
+        finally:
+            # Restore original statuses for other resources
+            for res_id, status in original_statuses.items():
+                res_db_restore = Resource.query.get(res_id)
+                if res_db_restore: res_db_restore.status = status
+            db.session.commit()
 
-        # Restore original statuses for other resources
-        for res_id, status in original_statuses_others.items():
-            res_db_restore = Resource.query.get(res_id)
-            if res_db_restore: res_db_restore.status = status
+    @patch('routes.api_resources.datetime')
+    def test_unavailable_due_to_resource_permissions(self, mock_datetime_in_api):
+        original_test_user_is_admin = self.test_user.is_admin
+        self.test_user.is_admin = False
         db.session.commit()
+
+        self._set_booking_settings(
+            allow_past_bookings=False,
+            past_booking_time_adjustment_hours=24,
+            global_time_offset_hours=0
+        )
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings(allow_multiple_resources_same_time=False)
+            db.session.add(settings)
+        else:
+            settings.allow_multiple_resources_same_time = False
+        db.session.commit()
+
+
+        mock_now_utc = datetime_original(2025, 7, 15, 10, 0, 0, tzinfo=timezone_original.utc)
+        mock_datetime_in_api.now = MagicMock(return_value=mock_now_utc)
+        mock_datetime_in_api.combine = datetime_original.combine
+        mock_datetime_in_api.strptime = datetime_original.strptime
+        mock_datetime_in_api.fromisoformat = datetime_original.fromisoformat
+
+        target_date_str = date(2025, 7, 15).isoformat()
+
+        original_resource1_status = self.resource1.status
+        original_resource1_restriction = self.resource1.booking_restriction
+        original_resource2_status = self.resource2.status
+        original_resource2_restriction = self.resource2.booking_restriction
+
+        other_resources_original_statuses = {}
+        all_resources_q = Resource.query.filter(Resource.id.notin_([self.resource1.id, self.resource2.id]))
+        for r_other in all_resources_q.all():
+            other_resources_original_statuses[r_other.id] = r_other.status
+
+        try:
+            self.resource1.status = 'published'
+            self.resource1.booking_restriction = 'admin_only'
+            self.resource2.status = 'published'
+            self.resource2.booking_restriction = None
+            for r_other_id in other_resources_original_statuses.keys():
+                r_to_draft = Resource.query.get(r_other_id)
+                if r_to_draft: r_to_draft.status = 'draft'
+            db.session.commit()
+
+            self.resource1 = Resource.query.get(self.resource1.id)
+            self.resource2 = Resource.query.get(self.resource2.id)
+
+            response1 = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+            self.assertEqual(response1.status_code, 200, f"API call failed (Scenario 1): {response1.get_json()}")
+            unavailable_dates_list1 = response1.get_json()
+
+            self.assertNotIn(target_date_str, unavailable_dates_list1,
+                             f"{target_date_str} should NOT be unavailable when ResourceB is bookable by the user. List: {unavailable_dates_list1}")
+
+            self.resource2.booking_restriction = 'admin_only'
+            db.session.commit()
+            self.resource2 = Resource.query.get(self.resource2.id)
+
+            response2 = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+            self.assertEqual(response2.status_code, 200, f"API call failed (Scenario 2): {response2.get_json()}")
+            unavailable_dates_list2 = response2.get_json()
+
+            self.assertIn(target_date_str, unavailable_dates_list2,
+                          f"{target_date_str} SHOULD be unavailable when both ResourceA and ResourceB are unbookable by the user due to permissions. List: {unavailable_dates_list2}")
+
+        finally:
+            self.test_user.is_admin = original_test_user_is_admin
+            db.session.commit()
+
+            self.resource1 = Resource.query.get(self.resource1.id) # Re-fetch before restoring
+            self.resource2 = Resource.query.get(self.resource2.id) # Re-fetch before restoring
+            if self.resource1:
+                self.resource1.status = original_resource1_status
+                self.resource1.booking_restriction = original_resource1_restriction
+            if self.resource2:
+                self.resource2.status = original_resource2_status
+                self.resource2.booking_restriction = original_resource2_restriction
+            db.session.commit() # Commit resource1 and resource2 changes
+
+            for r_id_key, original_status in other_resources_original_statuses.items():
+                res_db_restore = Resource.query.get(r_id_key)
+                if res_db_restore:
+                    res_db_restore.status = original_status
+            db.session.commit() # Commit changes for other resources
+
+    # New Test Method 1
+    @patch('routes.api_resources.datetime')
+    def test_june14_scenario_morning_cutoff_afternoon_conflict(self, mock_datetime_in_api):
+        GLOBAL_OFFSET = -5
+        self._set_booking_settings(
+            allow_past_bookings=False,
+            past_booking_time_adjustment_hours=4,
+            global_time_offset_hours=GLOBAL_OFFSET
+        )
+        settings = BookingSettings.query.first()
+        settings.allow_multiple_resources_same_time = False
+        db.session.commit()
+
+        # effective_cutoff is 08:30 Venue Time on 2025-06-14
+        # Venue 08:30 is 13:30 UTC. effective_cutoff_datetime_utc = 2025-06-14 13:30:00 UTC
+        # effective_venue_now_utc = 13:30 UTC + 4h = 17:30 UTC
+        # mock_now_utc = 17:30 UTC - (-5h) = 22:30 UTC
+        mock_now_utc = datetime_original(2025, 6, 14, 22, 30, 0, tzinfo=timezone_original.utc)
+        mock_datetime_in_api.now = MagicMock(return_value=mock_now_utc)
+        mock_datetime_in_api.combine = datetime_original.combine
+        mock_datetime_in_api.strptime = datetime_original.strptime
+        mock_datetime_in_api.fromisoformat = datetime_original.fromisoformat
+
+        target_date_obj_venue = date(2025, 6, 14)
+        target_date_str = target_date_obj_venue.isoformat()
+
+        # Store original states
+        original_statuses = {res.id: (res.status, res.booking_restriction) for res in Resource.query.all()}
+
+        resource_ids_to_publish = [self.resource1.id, self.resource2.id, self.resource3.id]
+
+        try:
+            for res_db in Resource.query.all():
+                if res_db.id in resource_ids_to_publish:
+                    res_db.status = 'published'
+                    res_db.booking_restriction = None # User can book
+                else:
+                    res_db.status = 'draft'
+            db.session.commit()
+
+            # Re-fetch to be safe
+            self.resource1 = Resource.query.get(self.resource1.id)
+            self.resource2 = Resource.query.get(self.resource2.id)
+            self.resource3 = Resource.query.get(self.resource3.id)
+
+            # User booking on resource3 for the afternoon slot (Venue Time)
+            # Convert to naive UTC for storage
+            booking_afternoon_start_venue = datetime.combine(target_date_obj_venue, time(13,0))
+            booking_afternoon_end_venue = datetime.combine(target_date_obj_venue, time(17,0))
+
+            booking_afternoon_start_utc_naive = (booking_afternoon_start_venue - timedelta(hours=GLOBAL_OFFSET)).replace(tzinfo=None)
+            booking_afternoon_end_utc_naive = (booking_afternoon_end_venue - timedelta(hours=GLOBAL_OFFSET)).replace(tzinfo=None)
+
+            user_booking = Booking(user_name=self.test_user.username, resource_id=self.resource3.id,
+                                   start_time=booking_afternoon_start_utc_naive,
+                                   end_time=booking_afternoon_end_utc_naive,
+                                   title="Afternoon R3 User Booking", status="approved")
+            db.session.add(user_booking)
+            db.session.commit()
+
+            response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+            self.assertEqual(response.status_code, 200, f"API call failed: {response.get_json()}")
+            unavailable_dates_list = response.get_json()
+
+            self.assertIn(target_date_str, unavailable_dates_list,
+                          f"{target_date_str} should be unavailable. Morning slots passed by cutoff (08:30 VT), afternoon slots on R1/R2 conflict with user's R3 booking.")
+
+        finally:
+            # Cleanup bookings
+            Booking.query.filter_by(user_name=self.test_user.username, resource_id=self.resource3.id).delete()
+            # Restore original resource states
+            for res_id, (status, restriction) in original_statuses.items():
+                res_db_restore = Resource.query.get(res_id)
+                if res_db_restore:
+                    res_db_restore.status = status
+                    res_db_restore.booking_restriction = restriction
+            db.session.commit()
+
+    # New Test Method 2
+    @patch('routes.api_resources.datetime')
+    def test_june15_scenario_all_slots_booked_by_user_multi_false(self, mock_datetime_in_api):
+        GLOBAL_OFFSET = -5
+        self._set_booking_settings(
+            allow_past_bookings=False,
+            past_booking_time_adjustment_hours=24, # Cutoff not an issue
+            global_time_offset_hours=GLOBAL_OFFSET
+        )
+        settings = BookingSettings.query.first()
+        settings.allow_multiple_resources_same_time = False
+        db.session.commit()
+
+        mock_now_utc = datetime_original(2025, 6, 15, 1, 0, 0, tzinfo=timezone_original.utc) # Early June 15th
+        mock_datetime_in_api.now = MagicMock(return_value=mock_now_utc)
+        mock_datetime_in_api.combine = datetime_original.combine
+        mock_datetime_in_api.strptime = datetime_original.strptime
+        mock_datetime_in_api.fromisoformat = datetime_original.fromisoformat
+
+        target_date_obj_venue = date(2025, 6, 15)
+        target_date_str = target_date_obj_venue.isoformat()
+
+        # Store original states
+        original_statuses = {res.id: (res.status, res.booking_restriction) for res in Resource.query.all()}
+        resource_ids_to_publish = [self.resource1.id, self.resource2.id]
+
+        try:
+            for res_db in Resource.query.all():
+                if res_db.id in resource_ids_to_publish:
+                    res_db.status = 'published'
+                    res_db.booking_restriction = None # User can book
+                else:
+                    res_db.status = 'draft'
+            db.session.commit()
+
+            self.resource1 = Resource.query.get(self.resource1.id) # Re-fetch
+            self.resource2 = Resource.query.get(self.resource2.id) # Re-fetch
+
+            bookings_to_add = []
+            # Bookings for resource1 (Venue Time)
+            r1_slots_venue = [
+                (datetime.combine(target_date_obj_venue, time(8,0)), datetime.combine(target_date_obj_venue, time(12,0))),
+                (datetime.combine(target_date_obj_venue, time(13,0)), datetime.combine(target_date_obj_venue, time(17,0)))
+            ]
+            for start_vt, end_vt in r1_slots_venue:
+                start_utc_naive = (start_vt - timedelta(hours=GLOBAL_OFFSET)).replace(tzinfo=None)
+                end_utc_naive = (end_vt - timedelta(hours=GLOBAL_OFFSET)).replace(tzinfo=None)
+                bookings_to_add.append(Booking(user_name=self.test_user.username, resource_id=self.resource1.id,
+                                               start_time=start_utc_naive, end_time=end_utc_naive,
+                                               title=f"R1 {start_vt.strftime('%H%M')}", status="approved"))
+
+            # Bookings for resource2 (Venue Time)
+            r2_slots_venue = [
+                (datetime.combine(target_date_obj_venue, time(8,0)), datetime.combine(target_date_obj_venue, time(12,0))),
+                (datetime.combine(target_date_obj_venue, time(13,0)), datetime.combine(target_date_obj_venue, time(17,0)))
+            ]
+            for start_vt, end_vt in r2_slots_venue:
+                start_utc_naive = (start_vt - timedelta(hours=GLOBAL_OFFSET)).replace(tzinfo=None)
+                end_utc_naive = (end_vt - timedelta(hours=GLOBAL_OFFSET)).replace(tzinfo=None)
+                bookings_to_add.append(Booking(user_name=self.test_user.username, resource_id=self.resource2.id,
+                                               start_time=start_utc_naive, end_time=end_utc_naive,
+                                               title=f"R2 {start_vt.strftime('%H%M')}", status="approved"))
+
+            db.session.add_all(bookings_to_add)
+            db.session.commit()
+
+            response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+            self.assertEqual(response.status_code, 200, f"API call failed: {response.get_json()}")
+            unavailable_dates_list = response.get_json()
+
+            self.assertIn(target_date_str, unavailable_dates_list,
+                          f"{target_date_str} should be unavailable as all slots on all published/allowed resources are booked by the user.")
+
+        finally:
+            # Cleanup bookings
+            Booking.query.filter(Booking.user_name == self.test_user.username, func.date(Booking.start_time + timedelta(hours=GLOBAL_OFFSET)) == target_date_obj_venue).delete()
+            # Restore original resource states
+            for res_id, (status, restriction) in original_statuses.items():
+                res_db_restore = Resource.query.get(res_id)
+                if res_db_restore:
+                    res_db_restore.status = status
+                    res_db_restore.booking_restriction = restriction
+            db.session.commit()
+
 
 if __name__ == '__main__':
     unittest.main()
+
+[end of tests/test_app.py]
