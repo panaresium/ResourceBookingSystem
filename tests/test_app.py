@@ -1078,6 +1078,191 @@ class TestBookingResourceRelease(AppTests):
         self.assertIn("is already booked or conflicts", response_conflict.get_json().get('error', ''))
         self.logout()
 
+    def test_user_can_book_other_resource_after_own_booking_cancelled(self):
+        user1, user2 = self._common_user_setup()
+
+        # 1. Set up BookingSettings
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings(allow_multiple_resources_same_time=False, global_time_offset_hours=0)
+            db.session.add(settings)
+        else:
+            settings.allow_multiple_resources_same_time = False
+            settings.global_time_offset_hours = 0
+        db.session.commit()
+
+        # 2. Log in as user1
+        login_response = self.login(user1.username, 'password')
+        self.assertEqual(login_response.status_code, 200)
+
+        # 3. Define a future time slot
+        # Use datetime_original and timedelta_original for consistency with other tests
+        booking_start_dt = datetime_original.utcnow().replace(microsecond=0) + timedelta_original(days=3, hours=10) # e.g., 3 days from now at 10:00 UTC
+        booking_end_dt = booking_start_dt + timedelta_original(hours=1) # 1-hour duration
+
+        # Prepare payload strings (assuming global_time_offset_hours=0, so UTC times are effectively local for the API)
+        date_str_payload = booking_start_dt.strftime('%Y-%m-%d')
+        start_time_str_payload = booking_start_dt.strftime('%H:%M')
+        end_time_str_payload = booking_end_dt.strftime('%H:%M')
+
+        # 4. Create an initial booking for user1 on self.resource1
+        initial_booking_payload = {
+            'resource_id': self.resource1.id,
+            'user_name': user1.username,
+            'date_str': date_str_payload,
+            'start_time_str': start_time_str_payload,
+            'end_time_str': end_time_str_payload,
+            'title': 'User1 Initial Booking on R1'
+        }
+        response_initial = self.client.post('/api/bookings', data=json.dumps(initial_booking_payload), content_type='application/json')
+        self.assertEqual(response_initial.status_code, 201, f"Initial booking for user1 failed: {response_initial.get_json()}")
+        initial_booking_id = response_initial.get_json()['bookings'][0]['id']
+
+        # 5. Retrieve the created booking and change its status to 'cancelled'
+        booking_to_cancel = db.session.get(Booking, initial_booking_id)
+        self.assertIsNotNone(booking_to_cancel, "Initial booking not found in DB")
+        booking_to_cancel.status = 'cancelled' # Using 'cancelled' as one of the example statuses
+        # With the new logic in create_booking, we should NOT delete the booking.
+        # The application should handle reusing this 'cancelled' slot.
+        # db.session.delete(booking_to_cancel)
+        db.session.commit()
+
+        # 6. Log out user1
+        self.logout()
+
+        # 7. Verification Part 1 (Different User, Same Resource)
+        login_response_user2 = self.login(user2.username, 'password')
+        self.assertEqual(login_response_user2.status_code, 200)
+
+        booking_payload_user2_r1 = {
+            'resource_id': self.resource1.id, # Same resource
+            'user_name': user2.username,
+            'date_str': date_str_payload,      # Same time slot
+            'start_time_str': start_time_str_payload,
+            'end_time_str': end_time_str_payload,
+            'title': 'User2 Booking on R1 after User1 cancelled'
+        }
+        response_user2_r1 = self.client.post('/api/bookings', data=json.dumps(booking_payload_user2_r1), content_type='application/json')
+        self.assertEqual(response_user2_r1.status_code, 201, f"Booking for user2 on resource1 failed: {response_user2_r1.get_json()}")
+
+        # Clean up user2's booking before next step if necessary (optional, but good practice)
+        user2_booking_id = response_user2_r1.get_json()['bookings'][0]['id']
+        booking_to_delete = db.session.get(Booking, user2_booking_id)
+        if booking_to_delete:
+            db.session.delete(booking_to_delete)
+            db.session.commit()
+        self.logout()
+
+
+        # 8. Verification Part 2 (Original User, Different Resource, Same Time)
+        login_response_user1_again = self.login(user1.username, 'password')
+        self.assertEqual(login_response_user1_again.status_code, 200)
+
+        booking_payload_user1_r2 = {
+            'resource_id': self.resource2.id, # Different resource (self.resource2)
+            'user_name': user1.username,
+            'date_str': date_str_payload,      # Same time slot
+            'start_time_str': start_time_str_payload,
+            'end_time_str': end_time_str_payload,
+            'title': 'User1 Booking on R2 (Same Time as Cancelled R1 Booking)'
+        }
+        response_user1_r2 = self.client.post('/api/bookings', data=json.dumps(booking_payload_user1_r2), content_type='application/json')
+        self.assertEqual(response_user1_r2.status_code, 201, f"Booking for user1 on resource2 failed: {response_user1_r2.get_json()}")
+        self.logout()
+
+    def test_original_user_can_rebook_own_cancelled_slot(self):
+        user1, _ = self._common_user_setup() # We only need user1 for this test
+
+        # Ensure BookingSettings exist and global_time_offset_hours is 0
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings(global_time_offset_hours=0)
+            db.session.add(settings)
+        else:
+            settings.global_time_offset_hours = 0
+        db.session.commit()
+
+        self.login(user1.username, 'password')
+
+        # Define a future time slot
+        booking_start_dt = datetime_original.utcnow().replace(microsecond=0) + timedelta_original(days=4, hours=11) # e.g., 4 days from now at 11:00 UTC
+        booking_end_dt = booking_start_dt + timedelta_original(hours=1)
+
+        date_str_payload = booking_start_dt.strftime('%Y-%m-%d')
+        start_time_str_payload = booking_start_dt.strftime('%H:%M')
+        end_time_str_payload = booking_end_dt.strftime('%H:%M')
+
+        # Create initial booking for user1 on self.resource1
+        initial_payload = {
+            'resource_id': self.resource1.id,
+            'user_name': user1.username,
+            'date_str': date_str_payload,
+            'start_time_str': start_time_str_payload,
+            'end_time_str': end_time_str_payload,
+            'title': 'User1 Original Booking'
+        }
+        response_initial = self.client.post('/api/bookings', data=json.dumps(initial_payload), content_type='application/json')
+        self.assertEqual(response_initial.status_code, 201, f"Initial booking failed: {response_initial.get_json()}")
+        initial_booking_data = response_initial.get_json()['bookings'][0]
+        original_booking_id = initial_booking_data['id']
+
+        # Fetch and store last_modified and token to check later if they change
+        booking_to_cancel = db.session.get(Booking, original_booking_id)
+        self.assertIsNotNone(booking_to_cancel)
+        original_last_modified = booking_to_cancel.last_modified
+        original_check_in_token = booking_to_cancel.check_in_token
+
+        # Change status to 'cancelled'
+        booking_to_cancel.status = 'cancelled'
+        db.session.commit()
+        # Ensure last_modified is updated by the cancellation to make the later check more robust
+        # Depending on DB precision, we might need a slight delay or ensure the update is distinct
+        # For now, assume the commit updates it sufficiently or the rebook logic will.
+        cancelled_last_modified = booking_to_cancel.last_modified
+        self.assertIsNotNone(cancelled_last_modified)
+        # self.assertNotEqual(original_last_modified, cancelled_last_modified) # This might be too sensitive
+
+        # User1 (still logged in) attempts to re-book the exact same slot
+        rebook_payload = {
+            'resource_id': self.resource1.id,
+            'user_name': user1.username,
+            'date_str': date_str_payload,
+            'start_time_str': start_time_str_payload,
+            'end_time_str': end_time_str_payload,
+            'title': 'User1 Re-booked Title' # Can be same or different
+        }
+        response_rebook = self.client.post('/api/bookings', data=json.dumps(rebook_payload), content_type='application/json')
+        self.assertEqual(response_rebook.status_code, 201, f"Re-booking failed: {response_rebook.get_json()}")
+
+        rebooked_data = response_rebook.get_json()['bookings'][0]
+
+        # Verify no new booking record was created; ID should be the same
+        self.assertEqual(rebooked_data['id'], original_booking_id, "Booking ID changed, indicating a new record was created instead of update.")
+
+        # Fetch the booking from DB and verify its state
+        rebooked_booking_db = db.session.get(Booking, original_booking_id)
+        self.assertIsNotNone(rebooked_booking_db)
+        self.assertEqual(rebooked_booking_db.user_name, user1.username)
+        self.assertEqual(rebooked_booking_db.status, 'approved')
+        self.assertEqual(rebooked_booking_db.title, 'User1 Re-booked Title')
+
+        # Check that last_modified has been updated
+        self.assertIsNotNone(rebooked_booking_db.last_modified)
+        # This check can be flaky due to timing and DB precision.
+        # A more robust check would be to ensure it's greater than original_last_modified if that was captured before the cancellation commit.
+        # For now, we rely on the fact that the update path sets it.
+        # If cancelled_last_modified was captured after the cancel commit, compare with that.
+        if original_last_modified and cancelled_last_modified: # Ensure both were captured
+             self.assertGreater(rebooked_booking_db.last_modified, cancelled_last_modified, "last_modified should be updated on rebook.")
+        else: # Fallback if original_last_modified wasn't different from cancelled_last_modified
+             self.assertNotEqual(rebooked_booking_db.last_modified, original_last_modified, "last_modified should be updated on rebook (compared to very original).")
+
+
+        # Check if check_in_token was regenerated (it should be)
+        self.assertIsNotNone(rebooked_booking_db.check_in_token)
+        self.assertNotEqual(rebooked_booking_db.check_in_token, original_check_in_token, "Check-in token should be regenerated on rebook.")
+
+        self.logout()
 
 class TestMapAvailabilityAPI(AppTests):
     def setUp(self):
