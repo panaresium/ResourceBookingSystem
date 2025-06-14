@@ -325,8 +325,22 @@ def get_unavailable_dates():
                 logger.debug(f"[UNAVAIL_DATES][TODAY] User bookings for conflict check ({len(user_bookings_on_this_date)}): {[(b.id, b.resource_id, b.start_time.isoformat(), b.end_time.isoformat()) for b in user_bookings_on_this_date]}")
 
             for resource_to_check in active_resources_for_date:
+                # Ensure target_user is defined in this function's scope (it is, as a parameter)
+                # Ensure logger is defined (it is, as current_app.logger)
+
+                can_book_this_resource, _ = check_booking_permission(
+                    user=target_user,
+                    resource=resource_to_check,
+                    logger_instance=logger
+                )
+
+                if not can_book_this_resource:
+                    if is_server_today: # Log if checking for today
+                        logger.debug(f"[UNAVAIL_DATES][TODAY] User {target_user.username} does not have permission for resource {resource_to_check.id} ('{resource_to_check.name}'). Skipping its slots for availability check.")
+                    continue # Skip to the next resource if user cannot book this one
+
                 if is_server_today:
-                    logger.debug(f"[UNAVAIL_DATES][TODAY] Iterating Resource ID: {resource_to_check.id}, Name: '{resource_to_check.name}'")
+                    logger.debug(f"[UNAVAIL_DATES][TODAY] Iterating Resource ID: {resource_to_check.id}, Name: '{resource_to_check.name}' (User has permission)")
                 for slot_def in STANDARD_SLOTS:
                     # global_time_offset_hours is already fetched and available here
                     slot_start_local_naive = datetime.combine(current_processing_date, slot_def['start'])
@@ -403,15 +417,15 @@ def get_unavailable_dates():
                             logger.debug(f"[UNAVAIL_DATES][TODAY]     SLOT SKIPPED (user conflict).")
                         continue
 
-                    any_slot_bookable_for_user_this_date = True
-                    if is_server_today:
-                        logger.debug(f"[UNAVAIL_DATES][TODAY]     SLOT IS BOOKABLE for user. Marking date as potentially available.")
-                    break
+                    # If a bookable slot is found on this permitted resource:
+                    if not is_slot_time_passed and not is_generally_booked and not user_schedule_conflicts:
+                        any_slot_bookable_for_user_this_date = True
+                        if is_server_today:
+                            logger.debug(f"[UNAVAIL_DATES][TODAY]     SLOT IS BOOKABLE for user on permitted resource {resource_to_check.id}. Marking date as potentially available.")
+                        break # Found a bookable slot on this resource
 
-                if is_server_today:
-                    logger.debug(f"[UNAVAIL_DATES][TODAY] Finished resource ID: {resource_to_check.id}. any_slot_bookable_for_user_this_date is now: {any_slot_bookable_for_user_this_date}")
                 if any_slot_bookable_for_user_this_date:
-                    break
+                    break # Found a bookable resource for the day
 
             if is_server_today:
                 logger.debug(f"[UNAVAIL_DATES][TODAY] Final check for today ({current_processing_date.strftime('%Y-%m-%d')}): any_slot_bookable_for_user_this_date = {any_slot_bookable_for_user_this_date}. Adding to unavailable_dates_set: {not any_slot_bookable_for_user_this_date}")
