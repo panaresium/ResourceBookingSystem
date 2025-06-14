@@ -62,16 +62,22 @@ def serve_index():
 @ui_bp.route("/resources")
 @login_required
 def serve_resources():
-    adjustment_hours = 0  # Default value
+    adjustment_hours = 0  # Default value for past_booking_time_adjustment_hours
+    global_offset_hours = 0 # Default value for global_time_offset_hours
     try:
         booking_settings = BookingSettings.query.first()
-        if booking_settings and booking_settings.past_booking_time_adjustment_hours is not None:
-            adjustment_hours = booking_settings.past_booking_time_adjustment_hours
-        current_app.logger.info(f"Passing past_booking_adjustment_hours: {adjustment_hours} to resources.html")
+        if booking_settings:
+            if booking_settings.past_booking_time_adjustment_hours is not None:
+                adjustment_hours = booking_settings.past_booking_time_adjustment_hours
+            if hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None:
+                global_offset_hours = booking_settings.global_time_offset_hours
+        current_app.logger.info(f"Passing past_booking_adjustment_hours: {adjustment_hours} and global_time_offset_hours: {global_offset_hours} to resources.html")
     except Exception as e:
         current_app.logger.error(f"Error fetching BookingSettings for /resources page: {e}", exc_info=True)
-        # adjustment_hours remains 0 (default)
-    return render_template("resources.html", past_booking_adjustment_hours=adjustment_hours)
+        # adjustment_hours and global_offset_hours remain at their default values
+    return render_template("resources.html",
+                           past_booking_adjustment_hours=adjustment_hours,
+                           global_time_offset_hours=global_offset_hours)
 
 @ui_bp.route("/login")
 def serve_login():

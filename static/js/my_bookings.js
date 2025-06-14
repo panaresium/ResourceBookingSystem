@@ -145,11 +145,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const cancelBtnExisting = bookingCardDiv.querySelector('.cancel-booking-btn');
 
         // Control Visibility and Attributes
-        const terminalStatuses = ['completed', 'cancelled', 'rejected', 'cancelled_by_admin', 'cancelled_admin_acknowledged'];
+        const terminalStatuses = ['completed', 'cancelled', 'rejected', 'cancelled_by_admin', 'cancelled_admin_acknowledged', 'system_cancelled_no_checkin'];
 
         // Check-In Controls
         if (checkInControls && pinInput && checkInBtnExisting) {
-            if (checkInOutEnabled && booking.can_check_in && !booking.checked_in_at) {
+            if (checkInOutEnabled && booking.can_check_in && !booking.checked_in_at && !terminalStatuses.includes(booking.status)) {
                 checkInControls.style.display = 'inline-block';
                 checkInBtnExisting.dataset.bookingId = booking.id; // Set for button regardless of PIN field
 
@@ -170,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Check-Out Button
         if (checkOutBtnExisting) {
-            if (checkInOutEnabled && booking.checked_in_at && !booking.checked_out_at) {
+            if (checkInOutEnabled && booking.checked_in_at && !booking.checked_out_at && !terminalStatuses.includes(booking.status)) {
                 checkOutBtnExisting.style.display = 'inline-block';
                 checkOutBtnExisting.dataset.bookingId = booking.id;
             } else {
