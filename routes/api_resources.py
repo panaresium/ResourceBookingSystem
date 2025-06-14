@@ -262,16 +262,23 @@ def get_unavailable_dates():
             # a. Past Date Check
             date_is_past = current_processing_date < now.date() # 'now' is datetime.now(timezone.utc)
 
-            # Ensure booking_settings is fetched and has a default for past_booking_time_adjustment_hours
+            # Ensure booking_settings is fetched and has defaults
             if not booking_settings:
                 logger.warning("get_unavailable_dates: BookingSettings not found when expected in loop. Using default adjustment hours.")
                 past_adjustment_hours = 0
+                global_time_offset_hours = 0
             else:
                 past_adjustment_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings.past_booking_time_adjustment_hours is not None else 0
+                global_time_offset_hours = booking_settings.global_time_offset_hours if hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
 
-            effective_cutoff_datetime_utc = now - timedelta(hours=past_adjustment_hours)
-            # Log the effective cutoff for debugging purposes, can be removed later
-            logger.debug(f"For date {current_processing_date}: now_utc={now}, past_adjustment_hours={past_adjustment_hours}, effective_cutoff_datetime_utc={effective_cutoff_datetime_utc}")
+            # Calculate effective_venue_now_utc by applying global offset
+            effective_venue_now_utc = now + timedelta(hours=global_time_offset_hours)
+
+            # Calculate effective_cutoff_datetime_utc based on the venue's effective now
+            effective_cutoff_datetime_utc = effective_venue_now_utc - timedelta(hours=past_adjustment_hours)
+
+            # Log the components for debugging
+            logger.debug(f"For date {current_processing_date}: now_utc={now}, global_time_offset_hours={global_time_offset_hours}, effective_venue_now_utc={effective_venue_now_utc}, past_adjustment_hours={past_adjustment_hours}, effective_cutoff_datetime_utc={effective_cutoff_datetime_utc}")
 
             # New Rule for allow_past_bookings == FALSE and strictly past dates
             if booking_settings and not booking_settings.allow_past_bookings and date_is_past:
