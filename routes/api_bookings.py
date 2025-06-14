@@ -418,7 +418,7 @@ def create_booking():
 
             if first_slot_user_conflict:
                 conflicting_resource_name = first_slot_user_conflict.resource_booked.name if first_slot_user_conflict.resource_booked else "an unknown resource"
-                current_app.logger.info(f"User {user_name_for_record} booking conflict (first slot) with booking {first_slot_user_conflict.id} for resource '{conflicting_resource_name}' due to allow_multiple_resources_same_time=False.")
+                current_app.logger.info(f"User {user_name_for_record} booking conflict (first slot) with booking ID: {first_slot_user_conflict.id}, Status: '{first_slot_user_conflict.status}' for resource '{conflicting_resource_name}' due to allow_multiple_resources_same_time=False.")
                 return jsonify({'error': f"You already have a booking for resource '{conflicting_resource_name}' from {first_slot_user_conflict.start_time.strftime('%H:%M')} to {first_slot_user_conflict.end_time.strftime('%H:%M')} that overlaps with the requested time slot on {first_occ_start.strftime('%Y-%m-%d')}."}), 409
 
     for occ_start, occ_end in occurrences:
@@ -429,7 +429,7 @@ def create_booking():
             sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_conflict_statuses)
         ).first()
         if conflicting:
-            current_app.logger.info(f"Booking conflict for resource {resource_id} on slot {occ_start}-{occ_end} with existing booking {conflicting.id}.")
+            current_app.logger.info(f"Booking conflict for resource {resource_id} on slot {occ_start}-{occ_end} with existing booking ID: {conflicting.id}, Status: '{conflicting.status}'.")
             # Waitlist logic (condensed for brevity, assuming it's still desired)
             if WaitlistEntry.query.filter_by(resource_id=resource_id).count() < current_app.config.get('MAX_WAITLIST_PER_RESOURCE', 2): # Example: make max waitlist configurable
                 existing_entry = WaitlistEntry.query.filter_by(resource_id=resource_id, user_id=current_user.id).first()
@@ -451,7 +451,7 @@ def create_booking():
 
             if user_conflicting_recurring:
                 conflicting_resource_name = user_conflicting_recurring.resource_booked.name if user_conflicting_recurring.resource_booked else "an unknown resource"
-                current_app.logger.info(f"User {user_name_for_record} booking conflict (recurring slot) with booking {user_conflicting_recurring.id} for resource '{conflicting_resource_name}' due to allow_multiple_resources_same_time=False.")
+                current_app.logger.info(f"User {user_name_for_record} booking conflict (recurring slot) with booking ID: {user_conflicting_recurring.id}, Status: '{user_conflicting_recurring.status}' for resource '{conflicting_resource_name}' due to allow_multiple_resources_same_time=False.")
                 return jsonify({'error': f"You already have a booking for resource '{conflicting_resource_name}' from {user_conflicting_recurring.start_time.strftime('%H:%M')} to {user_conflicting_recurring.end_time.strftime('%H:%M')} that overlaps with the requested occurrence on {occ_start.strftime('%Y-%m-%d')}."}), 409
 
     try:
