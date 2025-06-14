@@ -17,12 +17,11 @@ document.addEventListener('DOMContentLoaded', function () {
         return now;
     }
 
-    // const mapAvailabilityDateInput = document.getElementById('new-booking-map-availability-date'); // Old input field, now removed from HTML
-    const calendarContainer = document.getElementById('inline-calendar-container'); // New container for inline flatpickr
+    const calendarContainer = document.getElementById('inline-calendar-container');
     const userId = calendarContainer ? calendarContainer.dataset.userId : null;
     console.log('[Debug] Flatpickr User ID:', userId);
 
-    let pastBookingAdjustmentHours = 0; // Default
+    let pastBookingAdjustmentHours = 0;
     if (calendarContainer && calendarContainer.dataset.pastBookingAdjustmentHours) {
         pastBookingAdjustmentHours = parseFloat(calendarContainer.dataset.pastBookingAdjustmentHours);
         if (isNaN(pastBookingAdjustmentHours)) {
@@ -31,25 +30,22 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
     console.log('[Debug] Using pastBookingAdjustmentHours:', pastBookingAdjustmentHours);
-    const mapLocationButtonsContainer = document.getElementById('new-booking-map-location-buttons-container'); // Will be used for combined buttons
+    const mapLocationButtonsContainer = document.getElementById('new-booking-map-location-buttons-container');
     const mapContainer = document.getElementById('new-booking-map-container');
     const mapLoadingStatusDiv = document.getElementById('new-booking-map-loading-status');
     const resourceSelectBooking = document.getElementById('resource-select-booking');
 
-    // New UI elements for instruction and visibility control
     const dateSelectionInstructionDiv = document.getElementById('date-selection-instruction');
     const locationSelectionInstructionDiv = document.getElementById('location-selection-instruction');
     const locationFloorWrapperDiv = document.getElementById('location-floor-wrapper');
     const mapViewWrapperDiv = document.getElementById('map-view-wrapper');
 
-    let allMapInfo = []; // Stores full map configuration {id, name, location, floor, ...}
-    // let allUniqueLocations = []; // Removed
-    // let selectedLocationName = null; // Removed
-    let selectedMapId = null; // Stores the ID of the currently selected map
-    let currentMapId = null; // Still used by loadMapDetails, perhaps can be merged with selectedMapId
-    let currentSelectedDateStr = getTodayDateString(); // Initialize with today's date
+    let allMapInfo = [];
+    let selectedMapId = null;
+    let currentMapId = null;
+    let currentSelectedDateStr = getTodayDateString();
 
-    let systemBookingSettings = { allowMultipleResourcesSameTime: false }; // Global variable for booking settings
+    let systemBookingSettings = { allowMultipleResourcesSameTime: false };
 
     const mainBookingFormDateInput = document.getElementById('booking-date');
     const mainFormStartTimeInput = document.getElementById('start-time');
@@ -67,22 +63,13 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function disableMapSelectors() {
-        // if (mapLocationSelect) { // Removed
-        //     mapLocationSelect.innerHTML = '<option value="">-- Not Available --</option>';
-        //     mapLocationSelect.disabled = true;
-        // }
         if (mapLocationButtonsContainer) {
-            mapLocationButtonsContainer.innerHTML = '<p>No maps available or date not selected.</p>'; // Updated message
+            mapLocationButtonsContainer.innerHTML = '<p>No maps available or date not selected.</p>';
         }
-        // if (mapFloorSelect) { // Removed
-        //     mapFloorSelect.innerHTML = '<option value="">-- Not Available --</option>';
-        //     mapFloorSelect.disabled = true;
-        // }
     }
 
     function highlightSelectedResourceOnMap() {
         if (!resourceSelectBooking) {
-            // console.warn('#resource-select-booking dropdown not found for highlighting.'); // Kept for internal debugging if needed
             return;
         }
         const selectedResourceId = resourceSelectBooking.value;
@@ -95,12 +82,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // const today = getTodayDateString(); // currentSelectedDateStr is initialized with this
-
-    // serverTodayDateStr removed
-
-    function fetchDataAndInitializeFlatpickr() { // Renamed and async removed
-        // Directly proceed with existing Flatpickr initialization logic that depends on unavailableDatesList
+    function fetchDataAndInitializeFlatpickr() {
         const calendarContainer = document.getElementById('inline-calendar-container');
         const userId = calendarContainer ? calendarContainer.dataset.userId : null;
 
@@ -121,20 +103,18 @@ document.addEventListener('DOMContentLoaded', function () {
                 console.info('User ID not found. Initializing Flatpickr without user-specific unavailable dates.');
             }
             if (calendarContainer) {
-                initializeFlatpickr([]); // Initialize with empty list if no user, calendar still needs to show
+                initializeFlatpickr([]);
             }
         }
     }
 
     function initializeFlatpickr(unavailableDatesList = []) {
         if (calendarContainer) {
-            // currentSelectedDateStr is an outer scope variable.
-            // Initialize/update it here before Flatpickr uses it for defaultDate.
             currentSelectedDateStr = getTodayDateString();
 
             flatpickr(calendarContainer, {
                 inline: true,
-                static: true, // Keep existing options
+                static: true,
                 dateFormat: "Y-m-d",
                 disable: [
                     function(date) {
@@ -142,10 +122,9 @@ document.addEventListener('DOMContentLoaded', function () {
                         const today = new Date();
                         const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-                        // Check for "today" and time
                         if (dateStr === todayStr) {
                             const effectiveNow = getEffectiveClientNow(pastBookingAdjustmentHours);
-                            const actualNow = new Date(); // For logging actual time
+                            const actualNow = new Date();
                             const latestSlotEndTimeHour = 17;
                             const latestSlotEndTimeMinute = 0;
                             let shouldDisableToday = false;
@@ -159,44 +138,32 @@ document.addEventListener('DOMContentLoaded', function () {
                                 return true;
                             }
                         }
-
-                        // unavailableDatesList is passed to initializeFlatpickr
                         const isDisabledByUnavailableList = unavailableDatesList.includes(dateStr);
-
-                        // Optional: keep a simple log for debugging
-                        // Added a condition to ensure some logging for relevant test dates if list is empty
-                        // Modified to avoid logging twice for today if it wasn't disabled by time
                         if (! (dateStr === todayStr) && (unavailableDatesList.length > 0 || dateStr.startsWith("2025-06"))) {
                            console.log(`[Debug] Flatpickr disable check for ${dateStr}: inList = ${isDisabledByUnavailableList} (list length: ${unavailableDatesList.length})`);
                         }
-
                         return isDisabledByUnavailableList;
                     }
                 ],
-                defaultDate: currentSelectedDateStr, // Set defaultDate to client's current date
+                defaultDate: currentSelectedDateStr,
                 onChange: function(selectedDates, dateStr, instance) {
-                    currentSelectedDateStr = dateStr; // Update on change
+                    currentSelectedDateStr = dateStr;
 
                     if (dateSelectionInstructionDiv) dateSelectionInstructionDiv.style.display = 'none';
-                    if (locationFloorWrapperDiv) locationFloorWrapperDiv.style.display = 'flex'; // Assuming flex display
+                    if (locationFloorWrapperDiv) locationFloorWrapperDiv.style.display = 'flex';
                     if (locationSelectionInstructionDiv) locationSelectionInstructionDiv.style.display = 'block';
-                    if (mapViewWrapperDiv) mapViewWrapperDiv.style.display = 'none'; // Hide map view when date changes
+                    if (mapViewWrapperDiv) mapViewWrapperDiv.style.display = 'none';
 
                     updateLocationFloorButtons().then(() => {
-                        // loadMapDetails is called within updateLocationFloorButtons if a map is selected,
-                        // or map is cleared if no map is selected after buttons update.
-                        // For now, ensure map is cleared if no map is selected yet.
                         if (!selectedMapId) {
-                            loadMapDetails(null, currentSelectedDateStr); // Clears map
+                            loadMapDetails(null, currentSelectedDateStr);
                         }
-                        // Scroll to location/floor selection area
                         if (locationFloorWrapperDiv) {
                             locationFloorWrapperDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
                         }
                     });
                 }
             });
-            // Also update the main booking form's date input if it exists, to reflect this initial date
             if (mainBookingFormDateInput && mainBookingFormDateInput.value !== currentSelectedDateStr) {
                 mainBookingFormDateInput.value = currentSelectedDateStr;
             }
@@ -205,18 +172,14 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    fetchDataAndInitializeFlatpickr(); // Call the refactored function
-
-    // function updateFloorSelectOptions() { // Removed }
+    fetchDataAndInitializeFlatpickr();
 
     async function updateLocationFloorButtons() {
-        // Now uses currentSelectedDateStr instead of mapAvailabilityDateInput.value
         if (!calendarContainer || !mapLocationButtonsContainer) {
             console.error("Calendar container or location buttons container not found for updateLocationFloorButtons");
             return;
         }
-        // const selectedDate = mapAvailabilityDateInput.value; // Old way
-        const selectedDate = currentSelectedDateStr; // Use global date string
+        const selectedDate = currentSelectedDateStr;
         if (!selectedDate) {
             mapLocationButtonsContainer.innerHTML = "<p>Please select a date to see map availability.</p>";
             return;
@@ -224,27 +187,21 @@ document.addEventListener('DOMContentLoaded', function () {
 
         showLoading(mapLoadingStatusDiv, 'Fetching map availability...');
         try {
-            // mapsAvailabilityData structure: [{ map_id, map_name, location, floor, is_available_for_user }, ...]
             const mapsAvailabilityData = await apiCall(`/api/maps-availability?date=${selectedDate}`, {}, mapLoadingStatusDiv);
-            mapLocationButtonsContainer.innerHTML = ''; // Clear previous buttons
+            mapLocationButtonsContainer.innerHTML = '';
 
-            if (!allMapInfo || allMapInfo.length === 0) { // Use allMapInfo to render all configured maps
+            if (!allMapInfo || allMapInfo.length === 0) {
                 mapLocationButtonsContainer.innerHTML = "<p>No maps configured in the system.</p>";
                 hideMessage(mapLoadingStatusDiv);
                 return;
             }
 
-            allMapInfo.forEach(mapInfo => { // Iterate through all configured maps
+            allMapInfo.forEach(mapInfo => {
                 const button = document.createElement('button');
-                // Assuming mapInfo.name is descriptive like "EAPRO FL1" or similar.
-                // If not, use: button.textContent = `${mapInfo.location} - ${mapInfo.floor}`;
                 button.textContent = mapInfo.name;
-                button.classList.add('location-button', 'button'); // Re-use 'location-button' or new 'map-button'
+                button.classList.add('location-button', 'button');
                 button.dataset.mapId = mapInfo.id;
-
-                // Remove all potential old/new classes first
                 button.classList.remove('location-button-available', 'location-button-unavailable', 'location-button-partially-available');
-
                 const availabilityInfo = mapsAvailabilityData.find(availMap => availMap.map_id === mapInfo.id);
 
                 if (availabilityInfo && availabilityInfo.availability_status) {
@@ -262,41 +219,33 @@ document.addEventListener('DOMContentLoaded', function () {
                             button.title = `${mapInfo.name} (${mapInfo.location} - Floor ${mapInfo.floor}) - Low Availability`;
                             break;
                         default:
-                            button.classList.add('location-button-unavailable'); // Default to unavailable visually
+                            button.classList.add('location-button-unavailable');
                             button.title = `${mapInfo.name} (${mapInfo.location} - Floor ${mapInfo.floor}) - Availability Status Unknown`;
                             break;
                     }
                 } else {
-                    // If map not in availability data or availability_status is missing.
-                    button.classList.add('location-button-unavailable'); // Default to unavailable visually
+                    button.classList.add('location-button-unavailable');
                     button.title = `${mapInfo.name} (${mapInfo.location} - Floor ${mapInfo.floor}) - Availability Data Missing`;
                 }
 
                 if (mapInfo.id === selectedMapId) {
-                    button.classList.add('selected-map-button'); // Or reuse 'selected-location-button'
+                    button.classList.add('selected-map-button');
                 }
-
-                // Disable button if it's marked as unavailable
-                // This check is after all class assignments and title settings.
                 if (button.classList.contains('location-button-unavailable')) {
                     button.disabled = true;
                 }
 
                 button.addEventListener('click', function() {
                     selectedMapId = mapInfo.id;
-                    currentMapId = mapInfo.id; // Sync currentMapId as well
-
+                    currentMapId = mapInfo.id;
                     document.querySelectorAll('#new-booking-map-location-buttons-container .location-button').forEach(btn => {
-                        btn.classList.remove('selected-map-button'); // Or 'selected-location-button'
+                        btn.classList.remove('selected-map-button');
                     });
-                    this.classList.add('selected-map-button'); // Or 'selected-location-button'
-
-                    loadMapDetails(selectedMapId, currentSelectedDateStr); // Use global date string
-
+                    this.classList.add('selected-map-button');
+                    loadMapDetails(selectedMapId, currentSelectedDateStr);
                     if (locationSelectionInstructionDiv) locationSelectionInstructionDiv.style.display = 'none';
                     if (mapViewWrapperDiv) mapViewWrapperDiv.style.display = 'block';
-
-                    if (mapViewWrapperDiv) { // Scroll to the map view wrapper
+                    if (mapViewWrapperDiv) {
                         mapViewWrapperDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     }
                 });
@@ -319,47 +268,28 @@ document.addEventListener('DOMContentLoaded', function () {
     async function getEffectiveMapResourceOpacity() {
         const defaultOpacity = 0.7;
         let uiOpacity;
-
         try {
-            const response = await fetch('/api/admin/system-settings/map-opacity'); // Use the correct API endpoint path
+            const response = await fetch('/api/admin/system-settings/map-opacity');
             if (response.ok) {
                 const data = await response.json();
                 if (data.opacity !== undefined && typeof data.opacity === 'number' && data.opacity >= 0.0 && data.opacity <= 1.0) {
                     uiOpacity = data.opacity;
-                    // console.log('Using UI configured opacity:', uiOpacity); // Optional: for debugging
                     return uiOpacity;
-                } else {
-                    // console.warn('UI configured opacity is invalid or not found, falling back. Data:', data); // Optional: for debugging
                 }
             } else {
-                // console.warn('Failed to fetch UI configured opacity, status:', response.status); // Optional: for debugging
-                // If response is not ok (e.g. 403 for non-admins), this path is taken.
-                // We want to treat this as a non-critical failure and proceed to fallbacks.
                 console.warn(`API call to fetch map opacity failed with status ${response.status}. Using fallback opacity values.`);
             }
         } catch (error) {
-            // console.error('Error fetching UI configured opacity:', error); // Original console.error
             console.warn(`Error fetching UI configured opacity: ${error.message}. Using fallback opacity values.`);
         }
-
-        // Fallback to environment variable if UI opacity is not valid or fetch failed
         if (typeof window.MAP_RESOURCE_OPACITY === 'number' && window.MAP_RESOURCE_OPACITY >= 0.0 && window.MAP_RESOURCE_OPACITY <= 1.0) {
-            // console.log('Falling back to environment variable opacity:', window.MAP_RESOURCE_OPACITY); // Optional: for debugging
             return window.MAP_RESOURCE_OPACITY;
-        } else if (typeof window.MAP_RESOURCE_OPACITY !== 'undefined') {
-            // console.warn('Environment MAP_RESOURCE_OPACITY is invalid. Using default. Value:', window.MAP_RESOURCE_OPACITY); // Optional: for debugging
         }
-
-        // console.log('Falling back to default opacity:', defaultOpacity); // Optional: for debugging
         return defaultOpacity;
     }
 
-    // Make loadMapDetails async
     async function loadMapDetails(mapId, dateString) {
-        // Get opacity using the new async function
         const mapResourceOpacity = await getEffectiveMapResourceOpacity();
-        // console.log('Effective mapResourceOpacity to be used:', mapResourceOpacity); // Optional: for debugging
-
         if (!mapId) {
             if (mapContainer) {
                  mapContainer.innerHTML = '';
@@ -384,10 +314,9 @@ document.addEventListener('DOMContentLoaded', function () {
             try {
                 userBookingsForDate = await apiCall(`/api/bookings/my_bookings_for_date?date=${dateString}`, {}, null);
             } catch (err) {
-                console.warn(`Could not fetch user's bookings for date ${dateString}:`, err.message); // Keep this warning
+                console.warn(`Could not fetch user's bookings for date ${dateString}:`, err.message);
             }
         }
-        // REMOVED: console.log("DEBUG MAP: User's other bookings for the day (userBookingsForDate) at start of loadMapDetails:", JSON.stringify(userBookingsForDate));
 
         function timeToMinutes(timeStr) {
             const parts = timeStr.split(':');
@@ -398,32 +327,23 @@ document.addEventListener('DOMContentLoaded', function () {
             const apiUrl = `/api/map_details/${mapId}?date=${dateString}`;
             const data = await apiCall(apiUrl, {}, mapLoadingStatusDiv);
             const mapDetails = data.map_details;
-            // These offsets are specific to the "Resource Availability" page (new_booking_map.js)
-            // and are intentionally applied here to adjust resource positions on this particular display.
             const offsetX = parseInt(mapDetails.offset_x) || 0;
             const offsetY = parseInt(mapDetails.offset_y) || 0;
 
             if (mapContainer) {
                 mapContainer.style.backgroundImage = `url(${mapDetails.image_url})`;
             }
-
-            // Define colorMap before the loop
             const colorMap = {
-                'map-area-green': '212, 237, 218',        // #d4edda
-                'map-area-yellow': '255, 243, 205',       // #fff3cd
-                'map-area-light-blue': '209, 236, 241',   // #d1ecf1
-                'map-area-red': '248, 215, 218',          // #f8d7da
-                'map-area-dark-orange': '255, 232, 204'   // #ffe8cc
-                // Add other map-area-* classes if they are used for backgrounds and need translucency
+                'map-area-green': '212, 237, 218',
+                'map-area-yellow': '255, 243, 205',
+                'map-area-light-blue': '209, 236, 241',
+                'map-area-red': '248, 215, 218',
+                'map-area-dark-orange': '255, 232, 204'
             };
 
             if (data.mapped_resources && data.mapped_resources.length > 0) {
                 data.mapped_resources.forEach(resource => {
                     if (resource.map_coordinates && resource.map_coordinates.type === 'rect') {
-                        // REMOVED: console.log("DEBUG MAP: --- Resource:", resource.name, "(ID:", resource.id, ") ---");
-                        // REMOVED: console.log("DEBUG MAP: Maintenance:", resource.is_under_maintenance, "Maintenance Until:", resource.maintenance_until);
-                        // REMOVED: console.log("DEBUG MAP: General Bookings on this resource (resource.bookings_on_date):", JSON.stringify(resource.bookings_on_date));
-
                         const coords = resource.map_coordinates;
                         const areaDiv = document.createElement('div');
                         areaDiv.className = 'resource-area';
@@ -435,19 +355,12 @@ document.addEventListener('DOMContentLoaded', function () {
                         areaDiv.dataset.resourceId = resource.id;
 
                         console.log("[DEBUG MAP] Processing resource:", resource.id, resource.name, "current_user_can_book:", resource.current_user_can_book);
-
-                        console.log("[DEBUG MAP] About to check current_user_can_book for resource:", resource.id);
                         if (resource.current_user_can_book === false) {
-                            console.log("[DEBUG MAP] Entered current_user_can_book === false for resource:", resource.id);
                             areaDiv.className = 'resource-area resource-area-permission-denied';
                             areaDiv.title = resource.name + ' (Permission Denied)';
-                            // Ensure 'resource-area-permission-denied' is in colorMap or CSS handles its appearance
-                            const permissionDeniedRgbString = colorMap['resource-area-permission-denied'] || '173, 216, 230'; // Fallback to light blue
+                            const permissionDeniedRgbString = colorMap['resource-area-permission-denied'] || '173, 216, 230';
                             areaDiv.style.setProperty('background-color', `rgba(${permissionDeniedRgbString}, ${mapResourceOpacity})`, 'important');
-                            // No event listener, not clickable.
                         } else {
-                            console.log("[DEBUG MAP] Entered ELSE (current_user_can_book is true or undefined) for resource:", resource.id);
-                            // User has permission, proceed with detailed availability logic
                             const primarySlots = [
                                 { name: "first_half", start: 8 * 60, end: 12 * 60, isGenerallyBooked: false, isBookedByCurrentUser: false, isConflictingWithUserOtherBookings: false, isBookableByCurrentUser: false },
                                 { name: "second_half", start: 13 * 60, end: 17 * 60, isGenerallyBooked: false, isBookedByCurrentUser: false, isConflictingWithUserOtherBookings: false, isBookableByCurrentUser: false }
@@ -458,7 +371,6 @@ document.addEventListener('DOMContentLoaded', function () {
                                 slot.isBookedByCurrentUser = false;
                                 slot.isConflictingWithUserOtherBookings = false;
                                 slot.isBookableByCurrentUser = false;
-
                                 if (resource.bookings_on_date && resource.bookings_on_date.length > 0) {
                                     for (const booking of resource.bookings_on_date) {
                                         const bookingStartMinutes = timeToMinutes(booking.start_time);
@@ -486,15 +398,10 @@ document.addEventListener('DOMContentLoaded', function () {
                             });
 
                             primarySlots.forEach(slot => {
-                                // Original conflict status based on user's other bookings
                                 const originalUserConflictStatus = slot.isConflictingWithUserOtherBookings;
-
                                 let consideredConflictForBookableStatus = slot.isConflictingWithUserOtherBookings;
                                 if (systemBookingSettings.allowMultipleResourcesSameTime) {
-                                    consideredConflictForBookableStatus = false; // Ignore user's own schedule conflict
-                                    // console.log(`[Debug MAP] Resource ${resource.id}, Slot ${slot.name}: AllowMultiple is TRUE. UserConflictInitially: ${originalUserConflictStatus}, ConsideredConflict: ${consideredConflictForBookableStatus}`);
-                                } else {
-                                    // console.log(`[Debug MAP] Resource ${resource.id}, Slot ${slot.name}: AllowMultiple is FALSE. UserConflictInitially: ${originalUserConflictStatus}, ConsideredConflict: ${consideredConflictForBookableStatus}`);
+                                    consideredConflictForBookableStatus = false;
                                 }
                                 slot.isBookableByCurrentUser = (!slot.isGenerallyBooked && !consideredConflictForBookableStatus);
                             });
@@ -502,7 +409,6 @@ document.addEventListener('DOMContentLoaded', function () {
                             let finalClass = '';
                             let finalTitle = resource.name;
                             let isMapAreaClickable = false;
-
                             const numPrimarySlots = primarySlots.length;
                             const numBookableByCurrentUser = primarySlots.filter(s => s.isBookableByCurrentUser).length;
                             const numBookedByCurrentUser = primarySlots.filter(s => s.isBookedByCurrentUser).length;
@@ -530,7 +436,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                     if (numBookableByCurrentUser === numPrimarySlots) {
                                         finalClass = 'map-area-green';
                                         finalTitle += ' (Available)';
-                                    } else if (numBookableByCurrentUser > 0) {
+                                    } else if (numBookableByCurrentUser > 0) { // Typo fixed from 'numBookableByCurrentUser'
                                         finalClass = 'map-area-yellow';
                                         finalTitle += ' (Partially Available to You - Schedule Conflicts)';
                                     } else {
@@ -547,17 +453,15 @@ document.addEventListener('DOMContentLoaded', function () {
                                     }
                                 }
                             }
-
                             if (finalClass === 'map-area-unknown' || finalClass === '') {
                                  finalClass = 'map-area-light-blue';
                                  finalTitle += ' (Status Unknown)';
                             }
-
                             if (finalClass === 'map-area-green' || finalClass === 'map-area-yellow') {
                                 isMapAreaClickable = true;
                             }
 
-                            areaDiv.className = 'resource-area'; // Reset class
+                            areaDiv.className = 'resource-area';
                             areaDiv.classList.add(finalClass);
                             const rgbString = colorMap[finalClass] || colorMap['map-area-light-blue'];
                             if (rgbString) {
@@ -565,11 +469,9 @@ document.addEventListener('DOMContentLoaded', function () {
                             }
                             areaDiv.title = finalTitle;
 
-                            console.log("[DEBUG MAP] In ELSE block, for resource:", resource.id, "finalClass:", finalClass, "isMapAreaClickable:", isMapAreaClickable);
-                            if (isMapAreaClickable) { // This check is now correctly placed after all logic for permitted users
+                            if (isMapAreaClickable) {
                                 areaDiv.classList.add('map-area-clickable');
                                 areaDiv.addEventListener('click', function() {
-                                    console.log("[DEBUG MAP] Click listener EXECUTED for resource:", resource.id, "Name:", resource.name);
                                     if (resourceSelectBooking) {
                                         resourceSelectBooking.value = resource.id;
                                         resourceSelectBooking.dispatchEvent(new Event('change'));
@@ -594,7 +496,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (mapLoadingStatusDiv) showSuccess(mapLoadingStatusDiv, 'No resources are mapped to this floor plan.');
             }
         } catch (error) {
-            console.error('Error fetching or rendering map details:', error); // Keep this error
+            console.error('Error fetching or rendering map details:', error);
             if (mapContainer) mapContainer.style.backgroundImage = 'none';
             if (mapLoadingStatusDiv && !mapLoadingStatusDiv.classList.contains('error')) {
                 showError(mapLoadingStatusDiv, `Error loading map: ${error.message}`);
@@ -603,51 +505,39 @@ document.addEventListener('DOMContentLoaded', function () {
         highlightSelectedResourceOnMap();
     }
 
-    function handleFilterChange(source = 'map') { // 'source' might be less relevant now
-        if (isSyncingDate) return; // Still useful if date syncing from main form
+    function handleFilterChange(source = 'map') {
+        if (isSyncingDate) return;
         isSyncingDate = true;
-
-        // let newDate = mapAvailabilityDateInput ? mapAvailabilityDateInput.value : getTodayDateString(); // Old way
-        let newDate = currentSelectedDateStr; // Use global
-
-        if (source === 'form' && mainBookingFormDateInput) { // If change initiated from main booking form's date
+        let newDate = currentSelectedDateStr;
+        if (source === 'form' && mainBookingFormDateInput) {
             newDate = mainBookingFormDateInput.value;
-            // if (mapAvailabilityDateInput && mapAvailabilityDateInput.value !== newDate) { // Old way
             if (currentSelectedDateStr !== newDate) {
-                currentSelectedDateStr = newDate; // Update global
-                // Update flatpickr instance if possible
+                currentSelectedDateStr = newDate;
                 const flatpickrInstance = calendarContainer ? calendarContainer._flatpickr : null;
                 if (flatpickrInstance) {
-                    flatpickrInstance.setDate(newDate, false); // Update flatpickr without triggering its onChange
+                    flatpickrInstance.setDate(newDate, false);
                 }
             }
-        } else { // If flatpickr initiated or general call, currentSelectedDateStr is already set by flatpickr's onChange
-             newDate = currentSelectedDateStr; // Ensure we use the global
+        } else {
+             newDate = currentSelectedDateStr;
              if (mainBookingFormDateInput && mainBookingFormDateInput.value !== newDate) {
                  mainBookingFormDateInput.value = newDate;
              }
         }
-
-        // Primary action on date change is to update buttons and then reload map if one is active
-        // Flatpickr's onChange now calls updateLocationFloorButtons and then loadMapDetails directly.
-        // So, handleFilterChange, if called from mainBookingFormDateInput, needs to ensure flatpickr UI is updated
-        // and then trigger the same sequence.
         updateLocationFloorButtons().then(() => {
             if (selectedMapId) {
                 loadMapDetails(selectedMapId, newDate);
             } else {
-                loadMapDetails(null, newDate); // Ensure map is cleared if no map is selected
+                loadMapDetails(null, newDate);
             }
         }).finally(() => {
             isSyncingDate = false;
         });
     }
 
-    async function initializeMapSelectionUI() { // Renamed from loadAvailableMaps
-        // Fetch booking config status at the beginning
-        await fetchBookingConfigStatus(); // Ensure this is awaited if subsequent logic depends on it immediately
-
-        if (!mapLocationButtonsContainer || !mapLoadingStatusDiv) { // Removed mapFloorSelect check
+    async function initializeMapSelectionUI() {
+        await fetchBookingConfigStatus();
+        if (!mapLocationButtonsContainer || !mapLoadingStatusDiv) {
             console.error("Map buttons container or loading status div are missing from the DOM.");
             updateMapLoadingStatus("Map interface error. Please contact support.", true);
             disableMapSelectors();
@@ -655,7 +545,6 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         updateMapLoadingStatus("Loading map configurations...", false);
         try {
-            // Fetch all basic map configurations first to have a list of all maps
             const response = await fetch('/api/maps');
             const responseText = await response.text();
             if (!response.ok) {
@@ -678,56 +567,37 @@ document.addEventListener('DOMContentLoaded', function () {
                 disableMapSelectors();
                 return;
             }
-            allMapInfo = maps; // Store {id, name, location, floor, ...} for all maps
+            allMapInfo = maps;
             if (!allMapInfo || allMapInfo.length === 0) {
-                updateMapLoadingStatus('No maps configured in the system.', true); // Make it an error
+                updateMapLoadingStatus('No maps configured in the system.', true);
                 disableMapSelectors();
                 return;
             }
-
-            // Now call updateLocationFloorButtons which fetches availability and renders
             await updateLocationFloorButtons();
-
-            // No floor select to initialize or add event listeners to
-            // Event listener for mapAvailabilityDateInput (flatpickr) is set up when flatpickr is initialized.
-            // Main booking form date input listener:
             if (mainBookingFormDateInput) mainBookingFormDateInput.addEventListener('change', () => handleFilterChange('form'));
             if (resourceSelectBooking) resourceSelectBooking.addEventListener('change', highlightSelectedResourceOnMap);
-            
             if (mapLoadingStatusDiv && !mapLoadingStatusDiv.classList.contains('error') && !mapLoadingStatusDiv.classList.contains('success')) {
                 if (allMapInfo.length > 0) {
                     updateMapLoadingStatus('Please select a map to view details.', false);
                 } else {
-                    // This case is already handled above, but as a fallback:
                     updateMapLoadingStatus('No maps found in configurations.', false);
                 }
             }
-            // highlightSelectedResourceOnMap(); // Removed duplicate call, one at the end of the function is sufficient
-
-            
             highlightSelectedResourceOnMap();
-
-            // If a map was previously selected (e.g. selectedMapId is not null from a previous state or default)
-            // ensure its details are loaded for the current date.
-            // This might be more relevant if we introduce persisting selectedMapId (e.g. in URL params or localStorage)
-            // Initial state setup:
             if (dateSelectionInstructionDiv) dateSelectionInstructionDiv.style.display = 'block';
             if (locationSelectionInstructionDiv) locationSelectionInstructionDiv.style.display = 'none';
             if (locationFloorWrapperDiv) locationFloorWrapperDiv.style.display = 'none';
             if (mapViewWrapperDiv) mapViewWrapperDiv.style.display = 'none';
 
             if (selectedMapId) {
-                 loadMapDetails(selectedMapId, currentSelectedDateStr); // Use global
-                 // If a map is pre-selected, potentially show map view and hide location instruction
+                 loadMapDetails(selectedMapId, currentSelectedDateStr);
                  if (locationSelectionInstructionDiv) locationSelectionInstructionDiv.style.display = 'none';
                  if (mapViewWrapperDiv) mapViewWrapperDiv.style.display = 'block';
-                 if (dateSelectionInstructionDiv) dateSelectionInstructionDiv.style.display = 'none'; // Hide date instruction too
-                 if (locationFloorWrapperDiv) locationFloorWrapperDiv.style.display = 'flex'; // Show location wrapper
+                 if (dateSelectionInstructionDiv) dateSelectionInstructionDiv.style.display = 'none';
+                 if (locationFloorWrapperDiv) locationFloorWrapperDiv.style.display = 'flex';
             } else {
-                // Ensure map is cleared if no specific map is selected on load
-                loadMapDetails(null, currentSelectedDateStr); // Use global
+                loadMapDetails(null, currentSelectedDateStr);
             }
-
         } catch (error) {
             updateMapLoadingStatus('Could not load map configurations. Network or server error.', true);
             disableMapSelectors();
@@ -735,32 +605,26 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     if (mapContainer) {
-        initializeMapSelectionUI(); // Call the renamed function
+        initializeMapSelectionUI();
         document.addEventListener('refreshNewBookingMap', function(event) {
-            if (selectedMapId && currentSelectedDateStr) { // Use selectedMapId and global date string
+            if (selectedMapId && currentSelectedDateStr) {
                 loadMapDetails(selectedMapId, currentSelectedDateStr);
             } else {
                 console.warn('Cannot refresh new_booking_map: selectedMapId or currentSelectedDateStr is not set.');
             }
         });
-    } else {
-        // console.log("New booking map container not found on this page. Map script not initialized.");
     }
 
     async function fetchBookingConfigStatus() {
         try {
-            // console.log('Fetching booking config status...'); // Optional: for debugging
-            const data = await apiCall('/api/settings/booking_config_status', {}, null); // No specific error display element for this background fetch
+            const data = await apiCall('/api/settings/booking_config_status', {}, null);
             if (data && typeof data.allow_multiple_resources_same_time === 'boolean') {
                 systemBookingSettings.allowMultipleResourcesSameTime = data.allow_multiple_resources_same_time;
-                // console.log('Successfully fetched booking config status:', systemBookingSettings); // Optional: for debugging
             } else {
                 console.warn('Booking config status API response was not in the expected format. Using default.', data);
-                // systemBookingSettings.allowMultipleResourcesSameTime remains false (default)
             }
         } catch (error) {
             console.error('Error fetching booking config status:', error.message, 'Using default settings.');
-            // systemBookingSettings.allowMultipleResourcesSameTime remains false (default)
         }
     }
 
@@ -773,11 +637,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const modalTimeSlotsListDiv = document.getElementById('new-booking-modal-time-slots-list');
     const modalBookingTitleInput = document.getElementById('new-booking-modal-booking-title');
     const modalConfirmBookingBtn = document.getElementById('new-booking-modal-confirm-booking-btn');
-    let selectedTimeSlotForNewBooking = null; // Used for hourly and predefined slots in this modal
+    let selectedTimeSlotForNewBooking = null;
 
     async function openResourceDetailModal(resource, dateString, userBookingsForDate = []) {
         if (!resourceDetailModal || !modalResourceNameSpan || !modalDateSpan || !modalResourceImageImg || !modalTimeSlotsListDiv || !modalBookingTitleInput || !modalConfirmBookingBtn || !modalStatusMessageP) {
-                console.error('One or more modal elements are missing for new booking.');
+            console.error('One or more modal elements are missing for new booking.');
             return;
         }
         modalResourceNameSpan.textContent = resource.name || 'N/A';
@@ -785,7 +649,7 @@ document.addEventListener('DOMContentLoaded', function () {
         modalBookingTitleInput.value = `Booking for ${resource.name}`;
         modalTimeSlotsListDiv.innerHTML = '';
         modalStatusMessageP.textContent = '';
-        selectedTimeSlotForNewBooking = null; // Reset on modal open
+        selectedTimeSlotForNewBooking = null;
         if (resource.image_url) {
             modalResourceImageImg.src = resource.image_url;
             modalResourceImageImg.alt = resource.name || 'Resource Image';
@@ -800,7 +664,7 @@ document.addEventListener('DOMContentLoaded', function () {
         modalConfirmBookingBtn.dataset.resourceName = resource.name;
         showLoading(modalStatusMessageP, 'Loading time slots...');
 
-        const resourceId = resource.id; // Capture resourceId for use in hourly slot logic
+        const resourceId = resource.id;
 
         try {
             const apiAvailabilityData = await apiCall(`/api/resources/${resource.id}/availability?date=${dateString}`, {}, modalStatusMessageP);
@@ -809,7 +673,6 @@ document.addEventListener('DOMContentLoaded', function () {
             const actualBookedSlots = apiAvailabilityData.booked_slots || [];
             const standardSlotStatusesFromAPI = apiAvailabilityData.standard_slot_statuses || {};
             const loggedInUsername = sessionStorage.getItem('loggedInUserUsername');
-
 
             const predefinedSlotsConfig = [
                 { name: "First Half-Day", label: "Book First Half-Day (08:00-12:00)", startTime: "08:00", endTime: "12:00", id: "first_half" },
@@ -859,7 +722,6 @@ document.addEventListener('DOMContentLoaded', function () {
                         button.textContent = slotConf.label + " (Booked)";
                     } else {
                         let hasPredefinedUserConflict = false;
-                        // systemBookingSettings.allowMultipleResourcesSameTime is fetched globally
                         if (!systemBookingSettings.allowMultipleResourcesSameTime && userBookingsForDate && userBookingsForDate.length > 0) {
                             for (const userBooking of userBookingsForDate) {
                                 if (String(userBooking.resource_id) !== String(resourceId)) {
@@ -874,7 +736,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         }
 
                         if (hasPredefinedUserConflict) {
-                            button.classList.add('time-slot-user-busy'); // Use 'time-slot-user-busy' for consistency
+                            button.classList.add('time-slot-user-busy');
                             button.disabled = true;
                             button.title = `${slotConf.name} is unavailable as you have another booking at this time.`;
                             button.textContent = slotConf.label + " (Your Conflict)";
@@ -900,17 +762,17 @@ document.addEventListener('DOMContentLoaded', function () {
             const fullDayBtn = modalTimeSlotsListDiv.querySelector('[data-slot-id="full_day"]');
 
             if (fullDayBtn && !fullDayBtn.classList.contains('slot-passed')) {
-                const firstHalfBooked = firstHalfBtn && (firstHalfBtn.classList.contains('time-slot-booked') || firstHalfBtn.classList.contains('slot-passed'));
-                const secondHalfBooked = secondHalfBtn && (secondHalfBtn.classList.contains('time-slot-booked') || secondHalfBtn.classList.contains('slot-passed'));
+                const firstHalfBookedOrPassed = firstHalfBtn && (firstHalfBtn.classList.contains('time-slot-booked') || firstHalfBtn.classList.contains('slot-passed'));
+                const secondHalfBookedOrPassed = secondHalfBtn && (secondHalfBtn.classList.contains('time-slot-booked') || secondHalfBtn.classList.contains('slot-passed'));
                 const firstHalfUserBusy = firstHalfBtn && firstHalfBtn.classList.contains('time-slot-user-busy');
                 const secondHalfUserBusy = secondHalfBtn && secondHalfBtn.classList.contains('time-slot-user-busy');
                 const fullDaySlotDetails = predefinedSlotsConfig.find(s => s.id === 'full_day');
                 const fullDayBaseText = fullDaySlotDetails ? fullDaySlotDetails.label : "Book Full Day (08:00-17:00)";
 
-                if (firstHalfBooked || secondHalfBooked) {
+                if (firstHalfBookedOrPassed || secondHalfBookedOrPassed) {
                     fullDayBtn.disabled = true;
                     fullDayBtn.classList.remove('time-slot-available', 'time-slot-user-busy', 'time-slot-selected', 'selected');
-                    if (firstHalfBtn.classList.contains('slot-passed') || secondHalfBtn.classList.contains('slot-passed')) {
+                    if ((firstHalfBtn && firstHalfBtn.classList.contains('slot-passed')) || (secondHalfBtn && secondHalfBtn.classList.contains('slot-passed'))) {
                         fullDayBtn.classList.add('slot-passed');
                          fullDayBtn.textContent = fullDayBaseText + " (Partially Passed)";
                          fullDayBtn.title = "Full Day is unavailable because part of the day has passed.";
@@ -928,97 +790,14 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             }
 
-            const separator = document.createElement('hr');
-            modalTimeSlotsListDiv.appendChild(separator);
+            // REMOVED: Hourly slot generation loop and separator
+            // const separator = document.createElement('hr');
+            // modalTimeSlotsListDiv.appendChild(separator);
+            // const workDayStartHour = 8;
+            // const workDayEndHour = 17;
+            // const slotDurationHours = 1;
+            // for (let hour = workDayStartHour; hour < workDayEndHour; hour += slotDurationHours) { ... }
 
-            const workDayStartHour = 8;
-            const workDayEndHour = 17;
-            const slotDurationHours = 1;
-
-            for (let hour = workDayStartHour; hour < workDayEndHour; hour += slotDurationHours) {
-                const slotStart = new Date(`${dateString}T${String(hour).padStart(2, '0')}:00:00`);
-                const slotEnd = new Date(slotStart.getTime() + slotDurationHours * 60 * 60 * 1000);
-                const startTimeStr = `${String(slotStart.getHours()).padStart(2, '0')}:00`;
-                const endTimeStr = `${String(slotEnd.getHours()).padStart(2, '0')}:00`;
-                const slotLabel = `${startTimeStr} - ${endTimeStr}`;
-
-                const slotDiv = document.createElement('div');
-                slotDiv.classList.add('time-slot-item');
-                // slotDiv.dataset.startTime = startTimeStr; // Moved to available slot logic
-                // slotDiv.dataset.endTime = endTimeStr;   // Moved to available slot logic
-                slotDiv.textContent = slotLabel;
-
-                let isPassed = false;
-                if (hour >= 8 && hour < 12) {
-                    if (standardSlotStatusesFromAPI.first_half && standardSlotStatusesFromAPI.first_half.is_passed) isPassed = true;
-                }
-                if (hour >= 13 && hour < 17) {
-                    if (standardSlotStatusesFromAPI.second_half && standardSlotStatusesFromAPI.second_half.is_passed) isPassed = true;
-                }
-                if (standardSlotStatusesFromAPI.full_day && standardSlotStatusesFromAPI.full_day.is_passed && hour >= 8 && hour < 17) {
-                    isPassed = true;
-                }
-
-                if (isPassed) {
-                    slotDiv.textContent = slotLabel + " (Passed)";
-                    slotDiv.classList.add('slot-passed', 'time-slot-booked'); // Visually unavailable
-                } else {
-                    let isBookedOnResource = false;
-                    if (apiAvailabilityData.booked_slots && apiAvailabilityData.booked_slots.length > 0) {
-                        for (const booked of apiAvailabilityData.booked_slots) {
-                            const bookedStartDateTime = new Date(dateString + 'T' + booked.start_time);
-                            const bookedEndDateTime = new Date(dateString + 'T' + booked.end_time);
-                            if (bookedStartDateTime < slotEnd && bookedEndDateTime > slotStart) {
-                                isBookedOnResource = true;
-                                slotDiv.textContent = slotLabel + (booked.user_name === loggedInUsername ? ' (Your Booking)' : ' (Booked)');
-                                slotDiv.classList.add('time-slot-booked');
-                                // Add check-in button logic if needed (future enhancement)
-                                break;
-                            }
-                        }
-                    }
-
-                    if (!isBookedOnResource) {
-                        let hasUserConflict = false;
-                        // systemBookingSettings.allowMultipleResourcesSameTime is fetched globally
-                        const allowSimultaneousBookings = systemBookingSettings.allowMultipleResourcesSameTime;
-
-                        if (!allowSimultaneousBookings && userBookingsForDate && userBookingsForDate.length > 0) {
-                            for (const userBooking of userBookingsForDate) {
-                                if (String(userBooking.resource_id) !== String(resourceId)) {
-                                    const userBookingStartDateTime = new Date(dateString + 'T' + userBooking.start_time);
-                                    const userBookingEndDateTime = new Date(dateString + 'T' + userBooking.end_time);
-                                    if (userBookingStartDateTime < slotEnd && userBookingEndDateTime > slotStart) {
-                                        hasUserConflict = true;
-                                        slotDiv.textContent = slotLabel + ` (Conflict: ${userBooking.resource_name})`;
-                                        slotDiv.classList.add('time-slot-user-conflict');
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (!hasUserConflict) {
-                            slotDiv.textContent = slotLabel;
-                            slotDiv.classList.add('time-slot-available');
-                            slotDiv.dataset.startTime = startTimeStr;
-                            slotDiv.dataset.endTime = endTimeStr;
-                            slotDiv.addEventListener('click', function() {
-                                const previouslySelected = modalTimeSlotsListDiv.querySelector('.time-slot-selected');
-                                if (previouslySelected) {
-                                    previouslySelected.classList.remove('time-slot-selected');
-                                }
-                                this.classList.add('time-slot-selected');
-                                selectedTimeSlotForNewBooking = { startTimeStr: this.dataset.startTime, endTimeStr: this.dataset.endTime };
-                                if(modalStatusMessageP) modalStatusMessageP.textContent = '';
-                                if (mainFormStartTimeInput) mainFormStartTimeInput.value = this.dataset.startTime;
-                                if (mainFormEndTimeInput) mainFormEndTimeInput.value = this.dataset.endTime;
-                            });
-                        }
-                    }
-                }
-                modalTimeSlotsListDiv.appendChild(slotDiv);
-            }
         } catch (error) {
             console.error(`Error fetching time slots for resource ${resource.id}:`, error.message);
             if (!modalStatusMessageP.classList.contains('error')) {
@@ -1082,9 +861,9 @@ document.addEventListener('DOMContentLoaded', function () {
                         if (resourceDetailModal) resourceDetailModal.style.display = "none";
                         selectedTimeSlotForNewBooking = null;
                     }, 2000);
-                    if (currentMapId && currentSelectedDateStr) { // Use global date string
+                    if (currentMapId && currentSelectedDateStr) {
                         loadMapDetails(currentMapId, currentSelectedDateStr);
-                        updateLocationFloorButtons(); // Update map selection buttons
+                        updateLocationFloorButtons();
 
                         if (userId && calendarContainer) {
                             try {
@@ -1094,7 +873,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
                                 if (fpInstance && newUnavailableDates) {
                                     console.log('[Booking Success] Fetched new unavailable dates:', newUnavailableDates);
-                                    // Re-construct the disable function with the new list
                                     const newDisableFunc = function(date) {
                                         const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
                                         const today = new Date();
@@ -1131,7 +909,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     }
                 }
             } catch (error) {
-                console.error('Booking from modal failed:', error.message); // Keep this error
+                console.error('Booking from modal failed:', error.message);
                  if (!modalStatusMessageP.classList.contains('error')) {
                      showError(modalStatusMessageP, `Booking failed: ${error.message}`);
                  }
@@ -1140,4 +918,4 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
 });
-// console.log('new_booking_map.js script execution finished.'); // Keep general load confirmation
+// console.log('new_booking_map.js script execution finished.');
