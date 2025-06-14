@@ -1742,7 +1742,7 @@ class TestUnavailableDatesAPI(AppTests):
         settings.past_booking_time_adjustment_hours = past_booking_time_adjustment_hours
         settings.global_time_offset_hours = global_time_offset_hours
         # Default other relevant settings if necessary for get_unavailable_dates logic
-        settings.allow_multiple_resources_same_time = True # Or False, depending on test focus
+        settings.allow_multiple_resources_same_time = True # Default to true, specific tests can override
         db.session.commit()
 
     # Patch 'routes.api_resources.datetime' to mock datetime.now(timezone.utc)
@@ -1765,10 +1765,12 @@ class TestUnavailableDatesAPI(AppTests):
         )
 
         mock_now_utc = datetime_original(2025, 7, 15, 10, 0, 0, tzinfo=timezone_original.utc) # 10:00 UTC
-        mock_datetime_in_api.now.return_value = mock_now_utc
+        mock_datetime_in_api.now = MagicMock(return_value=mock_now_utc)
         # This ensures that when api_resources.py calls datetime.now(timezone.utc), it gets our mock_now_utc
         # And that other calls to datetime.datetime(...) still work
-        mock_datetime_in_api.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args and not (len(args)==1 and isinstance(args[0], timezone_original)) else mock_now_utc
+        mock_datetime_in_api.combine = datetime_original.combine
+        mock_datetime_in_api.strptime = datetime_original.strptime
+        # mock_datetime_in_api.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args and not (len(args)==1 and isinstance(args[0], timezone_original)) else mock_now_utc
 
 
         # --- API Call ---
@@ -1802,8 +1804,10 @@ class TestUnavailableDatesAPI(AppTests):
         )
 
         mock_now_utc = datetime_original(2025, 7, 15, 10, 0, 0, tzinfo=timezone_original.utc) # 10:00 UTC
-        mock_datetime_in_api.now.return_value = mock_now_utc
-        mock_datetime_in_api.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args and not (len(args)==1 and isinstance(args[0], timezone_original)) else mock_now_utc
+        mock_datetime_in_api.now = MagicMock(return_value=mock_now_utc)
+        mock_datetime_in_api.combine = datetime_original.combine
+        mock_datetime_in_api.strptime = datetime_original.strptime
+        # mock_datetime_in_api.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args and not (len(args)==1 and isinstance(args[0], timezone_original)) else mock_now_utc
 
         # --- API Call ---
         response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
@@ -1834,8 +1838,10 @@ class TestUnavailableDatesAPI(AppTests):
         )
 
         mock_now_utc = datetime_original(2025, 7, 15, 18, 0, 0, tzinfo=timezone_original.utc) # 18:00 UTC
-        mock_datetime_in_api.now.return_value = mock_now_utc
-        mock_datetime_in_api.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args and not (len(args)==1 and isinstance(args[0], timezone_original)) else mock_now_utc
+        mock_datetime_in_api.now = MagicMock(return_value=mock_now_utc)
+        mock_datetime_in_api.combine = datetime_original.combine
+        mock_datetime_in_api.strptime = datetime_original.strptime
+        # mock_datetime_in_api.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args and not (len(args)==1 and isinstance(args[0], timezone_original)) else mock_now_utc
 
         # --- API Call ---
         response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
@@ -1851,6 +1857,124 @@ class TestUnavailableDatesAPI(AppTests):
         self.assertNotIn(today_str, unavailable_dates_list,
                          f"Today ({today_str}) should NOT be unavailable with negative offset making part of afternoon slot available.")
 
+    @patch('routes.api_resources.datetime')
+    def test_day_unavailable_due_to_conflict_multi_disabled(self, mock_datetime_in_api):
+        self._set_booking_settings(
+            allow_past_bookings=False,
+            past_booking_time_adjustment_hours=24, # Make today fully available from time cutoff
+            global_time_offset_hours=0
+        )
+        settings = BookingSettings.query.first() # Get the settings instance
+        settings.allow_multiple_resources_same_time = False # Key setting for this test
+        db.session.commit()
+
+        mock_now_utc = datetime_original(2025, 7, 15, 1, 0, 0, tzinfo=timezone_original.utc) # Mock current time
+
+        # Configure mock_datetime_in_api to only mock datetime.now(timezone.utc)
+        mock_datetime_in_api.now = MagicMock(return_value=mock_now_utc)
+        # Ensure that datetime.combine and other methods use the original datetime
+        mock_datetime_in_api.combine = datetime_original.combine
+        mock_datetime_in_api.strptime = datetime_original.strptime
+        # If other specific datetime static/class methods are used by the endpoint, mock them too if side_effect is broad
+        # For instance, if datetime.fromisoformat is used:
+        # mock_datetime_in_api.fromisoformat = datetime_original.fromisoformat
+
+        target_date_obj = date(2025, 7, 15)
+        target_date_str = target_date_obj.isoformat()
+
+        # Ensure only self.resource1 and self.resource2 are published for this test
+        all_resources_db = Resource.query.all()
+        original_statuses = {res.id: res.status for res in all_resources_db}
+        for res_db in all_resources_db:
+            if res_db.id == self.resource1.id or res_db.id == self.resource2.id:
+                res_db.status = 'published'
+            else:
+                res_db.status = 'draft'
+        db.session.commit()
+        # Re-fetch self.resource1 and self.resource2 if their status was changed by the loop above
+        self.resource1 = Resource.query.get(self.resource1.id)
+        self.resource2 = Resource.query.get(self.resource2.id)
+        self.resource1.status = 'published'
+        self.resource2.status = 'published'
+        db.session.commit()
+
+        booking1_start_dt = datetime.combine(target_date_obj, time(8, 0))
+        booking1_end_dt = datetime.combine(target_date_obj, time(12, 0))
+        # Bookings are stored as naive UTC (representing venue's local time when offset is 0)
+        booking1 = Booking(user_name=self.test_user.username, resource_id=self.resource1.id,
+                           start_time=booking1_start_dt, end_time=booking1_end_dt,
+                           title="Morning R1", status="approved")
+
+        booking2_start_dt = datetime.combine(target_date_obj, time(13, 0))
+        booking2_end_dt = datetime.combine(target_date_obj, time(17, 0))
+        booking2 = Booking(user_name=self.test_user.username, resource_id=self.resource1.id,
+                           start_time=booking2_start_dt, end_time=booking2_end_dt,
+                           title="Afternoon R1", status="approved")
+
+        db.session.add_all([booking1, booking2])
+        db.session.commit()
+
+        response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+        self.assertEqual(response.status_code, 200, f"API call failed: {response.get_json()}")
+        unavailable_dates_list = response.get_json()
+
+        self.assertIn(target_date_str, unavailable_dates_list,
+                      f"{target_date_str} should be unavailable due to user conflicts on all resources when multiple bookings are disabled.")
+
+        # Restore original statuses
+        for res_id, status in original_statuses.items():
+            res_db_restore = Resource.query.get(res_id)
+            if res_db_restore: res_db_restore.status = status
+        db.session.commit()
+
+    @patch('routes.api_resources.datetime')
+    def test_day_available_when_conflict_but_multi_enabled(self, mock_datetime_in_api):
+        self._set_booking_settings(
+            allow_past_bookings=False,
+            past_booking_time_adjustment_hours=24,
+            global_time_offset_hours=0
+        )
+        settings = BookingSettings.query.first()
+        settings.allow_multiple_resources_same_time = True # Key setting for this test
+        db.session.commit()
+
+        mock_now_utc = datetime_original(2025, 7, 15, 1, 0, 0, tzinfo=timezone_original.utc)
+        mock_datetime_in_api.now = MagicMock(return_value=mock_now_utc)
+        mock_datetime_in_api.combine = datetime_original.combine
+        mock_datetime_in_api.strptime = datetime_original.strptime
+
+        target_date_obj = date(2025, 7, 15)
+        target_date_str = target_date_obj.isoformat()
+
+        # Ensure self.resource1 and self.resource2 are published
+        self.resource1.status = 'published'
+        self.resource2.status = 'published'
+        all_other_resources = Resource.query.filter(Resource.id.notin_([self.resource1.id, self.resource2.id])).all()
+        original_statuses_others = {res.id: res.status for res in all_other_resources}
+        for res in all_other_resources:
+            res.status = 'draft' # Unpublish others
+        db.session.commit()
+
+        booking1_start_dt = datetime.combine(target_date_obj, time(8, 0))
+        booking1_end_dt = datetime.combine(target_date_obj, time(12, 0))
+        booking1 = Booking(user_name=self.test_user.username, resource_id=self.resource1.id,
+                           start_time=booking1_start_dt, end_time=booking1_end_dt,
+                           title="Morning R1", status="approved")
+        db.session.add(booking1)
+        db.session.commit()
+
+        response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+        self.assertEqual(response.status_code, 200, f"API call failed: {response.get_json()}")
+        unavailable_dates_list = response.get_json()
+
+        self.assertNotIn(target_date_str, unavailable_dates_list,
+                         f"{target_date_str} should NOT be unavailable when multiple bookings are enabled, even with a booking on one resource, as other resources are available.")
+
+        # Restore original statuses for other resources
+        for res_id, status in original_statuses_others.items():
+            res_db_restore = Resource.query.get(res_id)
+            if res_db_restore: res_db_restore.status = status
+        db.session.commit()
 
 if __name__ == '__main__':
     unittest.main()

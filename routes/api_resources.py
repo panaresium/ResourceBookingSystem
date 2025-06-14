@@ -375,14 +375,20 @@ def get_unavailable_dates():
                              logger.debug(f"[UNAVAIL_DATES][TODAY]     Allow Multiple Resources Same Time? {booking_settings.allow_multiple_resources_same_time}. Checking user conflicts.")
                         for user_booking in user_bookings_on_this_date:
                             if user_booking.resource_id != resource_to_check.id:
-                                user_booking_start_dt = user_booking.start_time.replace(tzinfo=timezone.utc) if user_booking.start_time.tzinfo is None else user_booking.start_time
-                                user_booking_end_dt = user_booking.end_time.replace(tzinfo=timezone.utc) if user_booking.end_time.tzinfo is None else user_booking.end_time
-                                if user_booking_start_dt < slot_end_datetime_utc and user_booking_end_dt > slot_start_datetime_utc:
+                                # user_booking.start_time and .end_time are naive UTC from DB
+                                # slot_start_for_comparison_utc and slot_end_for_comparison_utc are aware UTC
+                                # Make user_booking times aware UTC for direct comparison.
+                                user_booking_start_aware_utc = user_booking.start_time.replace(tzinfo=timezone.utc)
+                                user_booking_end_aware_utc = user_booking.end_time.replace(tzinfo=timezone.utc)
+
+                                if user_booking_start_aware_utc < slot_end_for_comparison_utc and \
+                                   user_booking_end_aware_utc > slot_start_for_comparison_utc:
                                     user_schedule_conflicts = True
                                     if is_server_today: # Detailed conflict log only for today
                                         logger.debug(
                                             f"[UNAVAIL_DATES][TODAY]       User conflict FOUND with their booking ID: {user_booking.id} "
-                                            f"({user_booking.start_time.strftime('%H:%M')}-{user_booking.end_time.strftime('%H:%M')} on resource {user_booking.resource_id})."
+                                            f"({user_booking.start_time.strftime('%H:%M')}-{user_booking.end_time.strftime('%H:%M')} on resource {user_booking.resource_id}). "
+                                            f"Comparing with slot (UTC): {slot_start_for_comparison_utc.strftime('%H:%M')}-{slot_end_for_comparison_utc.strftime('%H:%M')} on resource {resource_to_check.id}."
                                         )
                                     break
                     elif is_server_today : # allow_multiple_resources_same_time is TRUE
