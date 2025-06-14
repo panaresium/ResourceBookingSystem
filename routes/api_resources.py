@@ -351,17 +351,19 @@ def get_unavailable_dates():
                     slot_start_for_comparison_utc = (slot_start_local_naive - timedelta(hours=global_time_offset_hours)).replace(tzinfo=timezone.utc)
                     slot_end_for_comparison_utc = (slot_end_local_naive - timedelta(hours=global_time_offset_hours)).replace(tzinfo=timezone.utc)
 
-                    is_slot_time_passed = False
-                    if is_server_today:
+                    # Calculate is_slot_time_passed for ALL current_processing_date values
+                    is_slot_time_passed = effective_cutoff_datetime_utc >= slot_start_for_comparison_utc
+
+                    if is_server_today: # Conditional logging is fine
                         logger.debug(f"[UNAVAIL_DATES][TODAY]   Checking slot: Resource ID {resource_to_check.id}, Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} (Venue Local Time)")
-                        # Compare venue's cutoff time (expressed in UTC) with venue's slot START time (correctly expressed in UTC)
-                        is_slot_time_passed = effective_cutoff_datetime_utc >= slot_start_for_comparison_utc
                         logger.debug(f"[UNAVAIL_DATES][TODAY]     Effective Cutoff Venue Time (as UTC): {effective_cutoff_datetime_utc.isoformat()}, Slot START Venue Time (as UTC): {slot_start_for_comparison_utc.isoformat()}. Passed?: {is_slot_time_passed}")
-                        if is_slot_time_passed:
+
+                    if is_slot_time_passed:
+                        if is_server_today: # More specific logging for today if needed
                             logger.debug(f"[UNAVAIL_DATES][TODAY]     SLOT SKIPPED (time passed).")
-                            continue
-                        else:
-                            logger.debug(f"[UNAVAIL_DATES][TODAY]     Slot is 'timely'.")
+                        # else: # Optional: log for non-today dates if a slot is passed
+                        #    logger.debug(f"[UNAVAIL_DATES] Date {current_processing_date}: Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} on R:{resource_to_check.id} SKIPPED (time passed by cutoff {effective_cutoff_datetime_utc.isoformat()}).")
+                        continue # Skip this slot if it's passed
 
                     # Booking.start_time and Booking.end_time are stored as naive UTC.
                     # So, compare with slot times also as naive UTC.

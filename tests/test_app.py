@@ -1854,12 +1854,13 @@ class TestUnavailableDatesAPI(AppTests):
 
         # --- Assertions ---
         today_str = mock_now_utc.date().isoformat() # "2025-07-15"
-        print(f"Test: Negative Offset. Today: {today_str}. Unavailable Dates: {unavailable_dates_list}")
-        # Expected: Venue time is 16:00. Cutoff is 15:00.
-        # Afternoon slot 13:00-17:00. The part from 15:00-17:00 should be available.
-        # So, today should NOT be in the unavailable list.
-        self.assertNotIn(today_str, unavailable_dates_list,
-                         f"Today ({today_str}) should NOT be unavailable with negative offset making part of afternoon slot available.")
+        print(f"Test: Negative Offset (New Logic - Universal Cutoff). Today: {today_str}. Unavailable Dates: {unavailable_dates_list}")
+        # Expected (New Logic - Universal Cutoff): Cutoff 15:00 UTC (Venue Time).
+        # Morning slot (08:00-12:00 VT) -> Start 10:00 UTC. Cutoff 15:00 UTC >= Slot Start 10:00 UTC -> Morning PASSED.
+        # Afternoon slot (13:00-17:00 VT) -> Start 15:00 UTC. Cutoff 15:00 UTC >= Slot Start 15:00 UTC -> Afternoon PASSED.
+        # Both standard slots passed, so today *should* be in the unavailable list.
+        self.assertIn(today_str, unavailable_dates_list,
+                         f"Today ({today_str}) SHOULD BE unavailable as the cutoff (15:00 Venue Time) makes both standard slots passed.")
 
     @patch('routes.api_resources.datetime')
     def test_day_unavailable_due_to_conflict_multi_disabled(self, mock_datetime_in_api):
