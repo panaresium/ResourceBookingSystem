@@ -943,6 +943,142 @@ class TestAdminBookingSettingsRoutes(AppTests):
         self.logout()
 
 
+class TestBookingResourceRelease(AppTests):
+    def _common_user_setup(self):
+        user1 = User.query.filter_by(username='testuser1_release').first()
+        if not user1:
+            user1 = User(username='testuser1_release', email='testuser1_release@example.com')
+            user1.set_password('password')
+            db.session.add(user1)
+        user2 = User.query.filter_by(username='testuser2_release').first()
+        if not user2:
+            user2 = User(username='testuser2_release', email='testuser2_release@example.com')
+            user2.set_password('password')
+            db.session.add(user2)
+        db.session.commit()
+        return user1, user2
+
+    def test_resource_available_after_system_cancelled_no_checkin(self):
+        user1, user2 = self._common_user_setup()
+
+        # Ensure BookingSettings exist for global_time_offset_hours
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings(global_time_offset_hours=0) # Default to 0 for predictability
+            db.session.add(settings)
+            db.session.commit()
+        else: # Ensure offset is predictable for test payload generation
+            settings.global_time_offset_hours = 0
+            db.session.commit()
+
+
+        self.login(user1.username, 'password')
+
+        # Define a future time slot to avoid conflicts with past booking logic validation
+        # Using datetime_original from AppTests context for consistency if time is ever mocked globally
+        booking_start_dt = datetime_original.utcnow().replace(microsecond=0) + timedelta_original(days=1, hours=2) # Tomorrow at T+2 hours UTC
+        booking_end_dt = booking_start_dt + timedelta_original(hours=1)
+
+        # Create initial booking payload
+        # Times are naive UTC, which the API then treats as venue local time
+        # For this test, with global_time_offset_hours=0, naive UTC = naive venue local
+        initial_booking_payload = {
+            'resource_id': self.resource1.id,
+            'user_name': user1.username,
+            'date_str': booking_start_dt.strftime('%Y-%m-%d'),
+            'start_time_str': booking_start_dt.strftime('%H:%M'),
+            'end_time_str': booking_end_dt.strftime('%H:%M'),
+            'title': 'Initial Booking by User1'
+        }
+        response_initial = self.client.post('/api/bookings', data=json.dumps(initial_booking_payload), content_type='application/json')
+        self.assertEqual(response_initial.status_code, 201, f"Initial booking failed: {response_initial.get_json()}")
+        initial_booking_id = response_initial.get_json()['bookings'][0]['id']
+
+        # Simulate System Cancellation
+        booking_to_cancel = db.session.get(Booking, initial_booking_id)
+        self.assertIsNotNone(booking_to_cancel, "Initial booking not found in DB")
+        booking_to_cancel.status = 'system_cancelled_no_checkin'
+        db.session.commit()
+        self.logout()
+
+        # Attempt New Booking by User2 for the same slot
+        self.login(user2.username, 'password')
+        new_booking_payload = {
+            'resource_id': self.resource1.id,
+            'user_name': user2.username,
+            'date_str': booking_start_dt.strftime('%Y-%m-%d'), # Same date
+            'start_time_str': booking_start_dt.strftime('%H:%M'), # Same start time
+            'end_time_str': booking_end_dt.strftime('%H:%M'),   # Same end time
+            'title': 'New Booking by User2'
+        }
+        response_new = self.client.post('/api/bookings', data=json.dumps(new_booking_payload), content_type='application/json')
+        self.assertEqual(response_new.status_code, 201, f"New booking by user2 failed: {response_new.get_json()}")
+
+        # Assertions
+        new_booking_id = response_new.get_json()['bookings'][0]['id']
+        new_booking_db = db.session.get(Booking, new_booking_id)
+        self.assertIsNotNone(new_booking_db, "New booking by user2 not found in DB")
+        self.assertEqual(new_booking_db.status, 'approved') # Default status for new bookings
+
+        original_booking_db = db.session.get(Booking, initial_booking_id)
+        self.assertIsNotNone(original_booking_db, "Original booking by user1 not found in DB after new booking")
+        self.assertEqual(original_booking_db.status, 'system_cancelled_no_checkin')
+        self.logout()
+
+    def test_resource_unavailable_for_approved_status_conflict(self):
+        user1, user2 = self._common_user_setup()
+
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings(global_time_offset_hours=0)
+            db.session.add(settings)
+            db.session.commit()
+        else:
+            settings.global_time_offset_hours = 0
+            db.session.commit()
+
+        self.login(user1.username, 'password')
+
+        # Define a different future time slot for this test
+        booking_start_dt = datetime_original.utcnow().replace(microsecond=0) + timedelta_original(days=2, hours=4) # Day after tomorrow T+4 hours UTC
+        booking_end_dt = booking_start_dt + timedelta_original(hours=1)
+
+        # Create initial booking payload (status will be 'approved' by default)
+        initial_booking_payload = {
+            'resource_id': self.resource1.id,
+            'user_name': user1.username,
+            'date_str': booking_start_dt.strftime('%Y-%m-%d'),
+            'start_time_str': booking_start_dt.strftime('%H:%M'),
+            'end_time_str': booking_end_dt.strftime('%H:%M'),
+            'title': 'Approved Booking by User1'
+        }
+        response_initial = self.client.post('/api/bookings', data=json.dumps(initial_booking_payload), content_type='application/json')
+        self.assertEqual(response_initial.status_code, 201, f"Initial booking for conflict test failed: {response_initial.get_json()}")
+        initial_booking_id = response_initial.get_json()['bookings'][0]['id']
+
+        # Verify it's approved
+        booking_db = db.session.get(Booking, initial_booking_id)
+        self.assertEqual(booking_db.status, 'approved')
+        self.logout()
+
+        # Attempt Conflicting Booking by User2
+        self.login(user2.username, 'password')
+        conflicting_booking_payload = {
+            'resource_id': self.resource1.id,
+            'user_name': user2.username,
+            'date_str': booking_start_dt.strftime('%Y-%m-%d'), # Same date
+            'start_time_str': booking_start_dt.strftime('%H:%M'), # Same start time
+            'end_time_str': booking_end_dt.strftime('%H:%M'),   # Same end time
+            'title': 'Conflicting Booking by User2'
+        }
+        response_conflict = self.client.post('/api/bookings', data=json.dumps(conflicting_booking_payload), content_type='application/json')
+
+        # Assertion
+        self.assertEqual(response_conflict.status_code, 409, f"Conflicting booking did not fail as expected: {response_conflict.get_json()}")
+        self.assertIn("is already booked or conflicts", response_conflict.get_json().get('error', ''))
+        self.logout()
+
+
 class TestMapAvailabilityAPI(AppTests):
     def setUp(self):
         super().setUp()
