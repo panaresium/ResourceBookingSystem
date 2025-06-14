@@ -354,10 +354,9 @@ def get_unavailable_dates():
                     is_slot_time_passed = False
                     if is_server_today:
                         logger.debug(f"[UNAVAIL_DATES][TODAY]   Checking slot: Resource ID {resource_to_check.id}, Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} (Venue Local Time)")
-                        # Compare venue's cutoff time (expressed in UTC) with venue's slot end time (now correctly expressed in UTC)
-                        is_slot_time_passed = effective_cutoff_datetime_utc >= slot_end_for_comparison_utc
-                        logger.debug(f"[UNAVAIL_DATES][TODAY]     Effective Cutoff Venue Time (as UTC): {effective_cutoff_datetime_utc.isoformat()}, Slot End Venue Time (as UTC): {slot_end_for_comparison_utc.isoformat()}")
-                        logger.debug(f"[UNAVAIL_DATES][TODAY]     Is Slot Time Passed? {is_slot_time_passed}")
+                        # Compare venue's cutoff time (expressed in UTC) with venue's slot START time (correctly expressed in UTC)
+                        is_slot_time_passed = effective_cutoff_datetime_utc >= slot_start_for_comparison_utc
+                        logger.debug(f"[UNAVAIL_DATES][TODAY]     Effective Cutoff Venue Time (as UTC): {effective_cutoff_datetime_utc.isoformat()}, Slot START Venue Time (as UTC): {slot_start_for_comparison_utc.isoformat()}. Passed?: {is_slot_time_passed}")
                         if is_slot_time_passed:
                             logger.debug(f"[UNAVAIL_DATES][TODAY]     SLOT SKIPPED (time passed).")
                             continue
