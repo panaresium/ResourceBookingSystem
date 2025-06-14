@@ -258,6 +258,7 @@ def get_unavailable_dates():
         current_iter_date = start_range_date
         while current_iter_date <= end_range_date:
             current_processing_date = current_iter_date
+            logger.debug(f"[VERBOSE_UNAVAIL] Processing Date: {current_processing_date}")
 
             # a. Past Date Check
             date_is_past = current_processing_date < now.date() # 'now' is datetime.now(timezone.utc)
@@ -333,15 +334,18 @@ def get_unavailable_dates():
                     resource=resource_to_check,
                     logger_instance=logger
                 )
+                logger.debug(f"[VERBOSE_UNAVAIL] Date: {current_processing_date}, Resource: {resource_to_check.id} ('{resource_to_check.name}'), Permitted: {can_book_this_resource}")
 
                 if not can_book_this_resource:
                     if is_server_today: # Log if checking for today
                         logger.debug(f"[UNAVAIL_DATES][TODAY] User {target_user.username} does not have permission for resource {resource_to_check.id} ('{resource_to_check.name}'). Skipping its slots for availability check.")
+                    logger.debug(f"[VERBOSE_UNAVAIL]   User {target_user.username} no permission for R_ID: {resource_to_check.id}. Skipping.")
                     continue # Skip to the next resource if user cannot book this one
 
                 if is_server_today:
                     logger.debug(f"[UNAVAIL_DATES][TODAY] Iterating Resource ID: {resource_to_check.id}, Name: '{resource_to_check.name}' (User has permission)")
                 for slot_def in STANDARD_SLOTS:
+                    logger.debug(f"[VERBOSE_UNAVAIL] Date: {current_processing_date}, R_ID: {resource_to_check.id}, Slot: {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} (Venue Local)")
                     # global_time_offset_hours is already fetched and available here
                     slot_start_local_naive = datetime.combine(current_processing_date, slot_def['start'])
                     slot_end_local_naive = datetime.combine(current_processing_date, slot_def['end'])
@@ -353,6 +357,7 @@ def get_unavailable_dates():
 
                     # Calculate is_slot_time_passed for ALL current_processing_date values
                     is_slot_time_passed = effective_cutoff_datetime_utc >= slot_start_for_comparison_utc
+                    logger.debug(f"[VERBOSE_UNAVAIL]   Attempting to check if slot passed. Cutoff: {effective_cutoff_datetime_utc.isoformat()}, Slot Start (UTC): {slot_start_for_comparison_utc.isoformat()}, Passed?: {is_slot_time_passed}")
 
                     if is_server_today: # Conditional logging is fine
                         logger.debug(f"[UNAVAIL_DATES][TODAY]   Checking slot: Resource ID {resource_to_check.id}, Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} (Venue Local Time)")
@@ -373,6 +378,7 @@ def get_unavailable_dates():
                         Booking.end_time > slot_start_for_comparison_utc.replace(tzinfo=None),   # Compare naive UTC with naive UTC slot start
                         Booking.status.in_(['approved', 'pending', 'checked_in', 'confirmed'])
                     ).first() is not None
+                    logger.debug(f"[VERBOSE_UNAVAIL]   Generally Booked?: {is_generally_booked}")
 
                     if is_server_today:
                         logger.debug(f"[UNAVAIL_DATES][TODAY]     Is Generally Booked? {is_generally_booked}")
@@ -408,6 +414,7 @@ def get_unavailable_dates():
                                     break
                     elif is_server_today : # allow_multiple_resources_same_time is TRUE
                         logger.debug(f"[UNAVAIL_DATES][TODAY]     Allow Multiple Resources Same Time? {booking_settings.allow_multiple_resources_same_time}. Skipping user conflict check.")
+                    logger.debug(f"[VERBOSE_UNAVAIL]   User Conflict (allow_multiple={booking_settings.allow_multiple_resources_same_time})?: {user_schedule_conflicts}")
 
 
                     if is_server_today:
@@ -420,18 +427,21 @@ def get_unavailable_dates():
 
                     # If a bookable slot is found on this permitted resource:
                     if not is_slot_time_passed and not is_generally_booked and not user_schedule_conflicts:
+                        logger.debug(f"[VERBOSE_UNAVAIL]   DECISION: Slot determined BOOKABLE for user. Setting any_slot_bookable_for_user_this_date = True. Breaking from slots loop for this resource.")
                         any_slot_bookable_for_user_this_date = True
                         if is_server_today:
                             logger.debug(f"[UNAVAIL_DATES][TODAY]     SLOT IS BOOKABLE for user on permitted resource {resource_to_check.id}. Marking date as potentially available.")
                         break # Found a bookable slot on this resource
 
                 if any_slot_bookable_for_user_this_date:
+                    logger.debug(f"[VERBOSE_UNAVAIL] Date: {current_processing_date}, Found bookable slot on R_ID: {resource_to_check.id}. Breaking from resources loop for this date.")
                     break # Found a bookable resource for the day
 
             if is_server_today:
                 logger.debug(f"[UNAVAIL_DATES][TODAY] Final check for today ({current_processing_date.strftime('%Y-%m-%d')}): any_slot_bookable_for_user_this_date = {any_slot_bookable_for_user_this_date}. Adding to unavailable_dates_set: {not any_slot_bookable_for_user_this_date}")
 
             if not any_slot_bookable_for_user_this_date:
+                logger.debug(f"[VERBOSE_UNAVAIL] Date: {current_processing_date}, FINAL: No bookable slot found for user. Adding to unavailable_dates_set.")
                 unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
                 # Original generic log for this, can be kept or made specific for today as well
                 logger.debug(f"Date {current_processing_date.strftime('%Y-%m-%d')} determined unavailable for user {target_user.username} (no bookable standard slots found). Added to unavailable.")
@@ -441,6 +451,7 @@ def get_unavailable_dates():
         # The old 5 PM server logic block is now removed.
 
         logger.info(f"Returning {len(unavailable_dates_set)} unavailable dates for user {user_id}.")
+        logger.debug(f"[VERBOSE_UNAVAIL] Final unavailable_dates_set for user {target_user.id}: {sorted(list(unavailable_dates_set))}")
         return jsonify(sorted(list(unavailable_dates_set)))
 
     except Exception as e:
