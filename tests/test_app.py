@@ -1719,5 +1719,138 @@ class TestEmailTemplates(AppTests):
             self.assertIn("more than 60 minute(s) past its scheduled end time.", text_output)
 
 
+class TestUnavailableDatesAPI(AppTests):
+    def setUp(self):
+        super().setUp()
+        # Create a dedicated user for these tests or use self.client with existing testuser
+        self.test_user = User.query.filter_by(username='testuser').first()
+        # Login the user
+        self.login(self.test_user.username, 'password')
+        # Ensure at least one published resource exists
+        if not Resource.query.filter_by(status='published').first():
+            res = Resource(name='Test Resource for Unavailable Dates', status='published', capacity=2)
+            db.session.add(res)
+            db.session.commit()
+            self.resource1 = res # Or use existing self.resource1 if it's always published
+
+    def _set_booking_settings(self, allow_past_bookings, past_booking_time_adjustment_hours, global_time_offset_hours):
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings()
+            db.session.add(settings)
+        settings.allow_past_bookings = allow_past_bookings
+        settings.past_booking_time_adjustment_hours = past_booking_time_adjustment_hours
+        settings.global_time_offset_hours = global_time_offset_hours
+        # Default other relevant settings if necessary for get_unavailable_dates logic
+        settings.allow_multiple_resources_same_time = True # Or False, depending on test focus
+        db.session.commit()
+
+    # Patch 'routes.api_resources.datetime' to mock datetime.now(timezone.utc)
+    # The actual datetime object is imported as 'datetime' in api_resources.py
+    @patch('routes.api_resources.datetime')
+    def test_unavailable_today_morning_with_positive_global_offset(self, mock_datetime_in_api):
+        # --- Scenario Setup ---
+        # Venue is UTC+2. Current UTC time is 10:00. Effective venue time is 12:00.
+        # Past adjustment is 1 hour. Cutoff is 12:00 - 1hr = 11:00 venue time.
+        # Standard slots: 08:00-12:00 and 13:00-17:00.
+        # The 08:00-12:00 slot's end (12:00) is AFTER the cutoff (11:00), so it should be considered partially available.
+        # However, get_unavailable_dates marks a date unavailable if NO slots are bookable.
+        # If the cutoff (11:00) makes the 8-12 slot unbookable (e.g. if it requires full slot),
+        # and the 13-17 slot is bookable, then the day should NOT be unavailable.
+
+        self._set_booking_settings(
+            allow_past_bookings=False,  # Typical setting
+            past_booking_time_adjustment_hours=1,
+            global_time_offset_hours=2
+        )
+
+        mock_now_utc = datetime_original(2025, 7, 15, 10, 0, 0, tzinfo=timezone_original.utc) # 10:00 UTC
+        mock_datetime_in_api.now.return_value = mock_now_utc
+        # This ensures that when api_resources.py calls datetime.now(timezone.utc), it gets our mock_now_utc
+        # And that other calls to datetime.datetime(...) still work
+        mock_datetime_in_api.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args and not (len(args)==1 and isinstance(args[0], timezone_original)) else mock_now_utc
+
+
+        # --- API Call ---
+        response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+        self.assertEqual(response.status_code, 200, response.get_json())
+        unavailable_dates_list = response.get_json()
+
+        # --- Assertions ---
+        # Today's date string
+        today_str = mock_now_utc.date().isoformat() # "2025-07-15"
+
+        # Debugging output
+        print(f"Test: Positive Offset. Today: {today_str}. Unavailable Dates: {unavailable_dates_list}")
+        # Expected: With cutoff at 11:00 venue time, the afternoon slot (13:00-17:00) should be available.
+        # So, today should NOT be in the unavailable list.
+        self.assertNotIn(today_str, unavailable_dates_list,
+                         f"Today ({today_str}) should NOT be unavailable with positive offset making morning slots cut but afternoon available.")
+
+    @patch('routes.api_resources.datetime')
+    def test_unavailable_all_day_today_due_to_cutoff(self, mock_datetime_in_api):
+        # --- Scenario Setup ---
+        # Venue is UTC+0. Current UTC time is 10:00. Effective venue time is 10:00.
+        # Past adjustment is -8 hours (cutoff is 8 hours IN THE FUTURE).
+        # Cutoff is 10:00 - (-8hr) = 18:00 venue time.
+        # Standard slots: 08:00-12:00 and 13:00-17:00. Both end before 18:00.
+        # So, all slots for today are effectively "past" the cutoff. The day should be unavailable.
+        self._set_booking_settings(
+            allow_past_bookings=False,
+            past_booking_time_adjustment_hours=-8, # Cutoff is 8 hours in the future
+            global_time_offset_hours=0
+        )
+
+        mock_now_utc = datetime_original(2025, 7, 15, 10, 0, 0, tzinfo=timezone_original.utc) # 10:00 UTC
+        mock_datetime_in_api.now.return_value = mock_now_utc
+        mock_datetime_in_api.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args and not (len(args)==1 and isinstance(args[0], timezone_original)) else mock_now_utc
+
+        # --- API Call ---
+        response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+        self.assertEqual(response.status_code, 200, response.get_json())
+        unavailable_dates_list = response.get_json()
+
+        # --- Assertions ---
+        today_str = mock_now_utc.date().isoformat() # "2025-07-15"
+        print(f"Test: Cutoff in Future. Today: {today_str}. Unavailable Dates: {unavailable_dates_list}")
+        # Expected: With cutoff at 18:00 venue time, all standard slots (ending by 17:00) are past.
+        # So, today *should* be in the unavailable list.
+        self.assertIn(today_str, unavailable_dates_list,
+                      f"Today ({today_str}) SHOULD be unavailable as cutoff (18:00) makes all standard slots (ending 17:00) unavailable.")
+
+    @patch('routes.api_resources.datetime')
+    def test_unavailable_today_afternoon_with_negative_global_offset(self, mock_datetime_in_api):
+        # --- Scenario Setup ---
+        # Venue is UTC-2. Current UTC time is 18:00. Effective venue time is 16:00.
+        # Past adjustment is 1 hour. Cutoff is 16:00 - 1hr = 15:00 venue time.
+        # Standard slots: 08:00-12:00 (unavailable due to cutoff) and 13:00-17:00.
+        # The 13:00-17:00 slot: 13:00 is before cutoff 15:00. 17:00 is after cutoff 15:00.
+        # So, this slot should be considered partially available by the logic in get_unavailable_dates.
+        # If any part of a standard slot is available, the day is not marked unavailable.
+        self._set_booking_settings(
+            allow_past_bookings=False,
+            past_booking_time_adjustment_hours=1,
+            global_time_offset_hours=-2 # Venue is UTC-2
+        )
+
+        mock_now_utc = datetime_original(2025, 7, 15, 18, 0, 0, tzinfo=timezone_original.utc) # 18:00 UTC
+        mock_datetime_in_api.now.return_value = mock_now_utc
+        mock_datetime_in_api.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args and not (len(args)==1 and isinstance(args[0], timezone_original)) else mock_now_utc
+
+        # --- API Call ---
+        response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+        self.assertEqual(response.status_code, 200, response.get_json())
+        unavailable_dates_list = response.get_json()
+
+        # --- Assertions ---
+        today_str = mock_now_utc.date().isoformat() # "2025-07-15"
+        print(f"Test: Negative Offset. Today: {today_str}. Unavailable Dates: {unavailable_dates_list}")
+        # Expected: Venue time is 16:00. Cutoff is 15:00.
+        # Afternoon slot 13:00-17:00. The part from 15:00-17:00 should be available.
+        # So, today should NOT be in the unavailable list.
+        self.assertNotIn(today_str, unavailable_dates_list,
+                         f"Today ({today_str}) should NOT be unavailable with negative offset making part of afternoon slot available.")
+
+
 if __name__ == '__main__':
     unittest.main()
