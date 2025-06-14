@@ -1255,10 +1255,10 @@ document.addEventListener('DOMContentLoaded', function() {
                             
                             button.addEventListener('click', async function() {
                                 console.log(`Resource button clicked: ${this.dataset.resourceName} (ID: ${this.dataset.resourceId})`);
-                                const clickedButton = this; // Keep reference to the button
+                                const clickedButton = this;
         
-                                if (clickedButton.classList.contains('unavailable') && !clickedButton.classList.contains('partial')) {
-                                    console.log("Resource button is completely unavailable, click ignored.");
+                                if (clickedButton.classList.contains('unavailable') && !clickedButton.classList.contains('partial') && !clickedButton.title.includes("Passed")) { // Allow clicking if only "Passed"
+                                    console.log("Resource button is completely unavailable (and not just passed), click ignored.");
                                     return;
                                 }
                                 
@@ -1266,6 +1266,18 @@ document.addEventListener('DOMContentLoaded', function() {
                                 const resourceName = clickedButton.dataset.resourceName;
                                 const selectedDate = availabilityDateInput ? availabilityDateInput.value : getTodayDateString();
                                 const imageUrl = clickedButton.dataset.imageUrl;
+
+                                // Read global_time_offset_hours
+                                const calendarContainer = document.getElementById('inline-calendar-container');
+                                const global_time_offset_hours = parseFloat(calendarContainer ? calendarContainer.dataset.globalTimeOffsetHours : 0 || 0);
+                                console.log(`Global time offset hours: ${global_time_offset_hours}`);
+
+                                // Calculate venueCurrentTime
+                                const now = new Date(); // Browser's local time
+                                const venueCurrentTime = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+                                                                         now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds()));
+                                venueCurrentTime.setHours(venueCurrentTime.getHours() + global_time_offset_hours);
+                                console.log(`Venue's current time calculated as: ${venueCurrentTime.toISOString()}`);
         
                                 console.log(`Modal to be opened for: ID=${resourceId}, Name=${resourceName}, Date=${selectedDate}`);
         
@@ -1284,11 +1296,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                 if (modalConfirmBtn) modalConfirmBtn.dataset.resourceId = resourceId;
         
                                 const cacheKey = resourceId + '_' + selectedDate;
-                                let resourceBookings = currentResourceBookingsCache[cacheKey];
-                                if (!resourceBookings) {
+                                let apiAvailabilityData = currentResourceBookingsCache[cacheKey];
+                                if (!apiAvailabilityData) {
                                     try {
-                                        resourceBookings = await apiCall(`/api/resources/${resourceId}/availability?date=${selectedDate}`, {}, modalStatusMsg);
-                                        currentResourceBookingsCache[cacheKey] = resourceBookings;
+                                        // API now returns an object: { booked_slots: [], standard_slot_statuses: {} }
+                                        apiAvailabilityData = await apiCall(`/api/resources/${resourceId}/availability?date=${selectedDate}`, {}, modalStatusMsg);
+                                        currentResourceBookingsCache[cacheKey] = apiAvailabilityData;
                                     } catch (error) {
                                         showError(modalStatusMsg, `Could not load availability for ${resourceName}.`);
                                         if (bookingModal) bookingModal.style.display = 'block';
@@ -1296,7 +1309,10 @@ document.addEventListener('DOMContentLoaded', function() {
                                     }
                                 }
 
-                                let userBookingsForDate = []; // Renamed from userBookings
+                                const actualBookedSlots = apiAvailabilityData.booked_slots || [];
+                                const standardSlotStatusesFromAPI = apiAvailabilityData.standard_slot_statuses || {};
+
+                                let userBookingsForDate = [];
                                 const loggedInUserId = sessionStorage.getItem('loggedInUserId');
                                 if (loggedInUserId) {
                                     try {
@@ -1335,81 +1351,106 @@ document.addEventListener('DOMContentLoaded', function() {
 
                                     btn.disabled = false;
                                     // Ensure all potentially conflicting classes are removed
-                                    btn.classList.remove('slot-available', 'slot-booked-resource', 'slot-user-busy', 'selected');
+                                    btn.classList.remove('slot-available', 'slot-booked-resource', 'slot-user-busy', 'slot-passed', 'selected');
                                     const baseText = btn.dataset.baseText || btn.textContent.split(" (")[0]; // Store base text if not already
                                     btn.dataset.baseText = baseText;
+                                    btn.textContent = baseText; // Reset text
+                                    btn.title = ""; // Clear title
 
+                                    const slotApiStatus = standardSlotStatusesFromAPI[slotType];
 
-                                    let isResourceBookedForSlot = false;
-                                    if (resourceBookings && resourceBookings.length > 0) { // resourceBookings is general availability for THIS resource
-                                        for (const booking of resourceBookings) {
-                                            const bookingStartMinutes = parseTimeHHMMSS(booking.start_time);
-                                            const bookingEndMinutes = parseTimeHHMMSS(booking.end_time);
-                                            if (Math.max(definedSlot.start, bookingStartMinutes) < Math.min(definedSlot.end, bookingEndMinutes)) {
-                                                isResourceBookedForSlot = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-
-                                    if (isResourceBookedForSlot) {
+                                    if (slotApiStatus && slotApiStatus.is_passed) {
                                         btn.disabled = true;
-                                        btn.classList.add('slot-booked-resource');
-                                        btn.textContent = baseText + " (Booked)";
-                                        btn.title = "This time slot is booked on this resource.";
+                                        btn.classList.add('slot-passed');
+                                        btn.textContent = baseText + " (Passed)";
+                                        btn.title = "This time slot has passed.";
                                     } else {
-                                        let isUserBusyElsewhere = false;
-                                        if (userBookingsForDate && userBookingsForDate.length > 0) {
-                                            for (const userBooking of userBookingsForDate) {
-                                                if (String(userBooking.resource_id) !== String(resourceId)) { // User booking on a DIFFERENT resource
-                                                    const userBookingStartMinutes = parseTimeHHMMSS(userBooking.start_time);
-                                                    const userBookingEndMinutes = parseTimeHHMMSS(userBooking.end_time);
-                                                    if (Math.max(definedSlot.start, userBookingStartMinutes) < Math.min(definedSlot.end, userBookingEndMinutes)) {
-                                                        isUserBusyElsewhere = true;
-                                                        break;
-                                                    }
+                                        let isResourceBookedForSlot = false;
+                                        // Use actualBookedSlots from the API response
+                                        if (actualBookedSlots && actualBookedSlots.length > 0) {
+                                            for (const booking of actualBookedSlots) {
+                                                const bookingStartMinutes = parseTimeHHMMSS(booking.start_time);
+                                                const bookingEndMinutes = parseTimeHHMMSS(booking.end_time);
+                                                if (Math.max(definedSlot.start, bookingStartMinutes) < Math.min(definedSlot.end, bookingEndMinutes)) {
+                                                    isResourceBookedForSlot = true;
+                                                    break;
                                                 }
                                             }
                                         }
 
-                                        if (isUserBusyElsewhere) {
-                                            btn.disabled = true; // Disable if user has a conflict
-                                            btn.classList.add('slot-user-busy');
-                                            btn.textContent = baseText + " (Your Conflict)";
-                                            btn.title = "You have another booking at this time on a different resource.";
+                                        if (isResourceBookedForSlot) {
+                                            btn.disabled = true;
+                                            btn.classList.add('slot-booked-resource');
+                                            btn.textContent = baseText + " (Booked)";
+                                            btn.title = "This time slot is booked on this resource.";
                                         } else {
-                                            btn.classList.add('slot-available');
-                                            btn.textContent = baseText; // Or baseText + " (Available)"
-                                            btn.title = "This time slot is available.";
+                                            let isUserBusyElsewhere = false;
+                                            if (userBookingsForDate && userBookingsForDate.length > 0) {
+                                                for (const userBooking of userBookingsForDate) {
+                                                    if (String(userBooking.resource_id) !== String(resourceId)) {
+                                                        const userBookingStartMinutes = parseTimeHHMMSS(userBooking.start_time);
+                                                        const userBookingEndMinutes = parseTimeHHMMSS(userBooking.end_time);
+                                                        if (Math.max(definedSlot.start, userBookingStartMinutes) < Math.min(definedSlot.end, userBookingEndMinutes)) {
+                                                            isUserBusyElsewhere = true;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            if (isUserBusyElsewhere) {
+                                                btn.disabled = true;
+                                                btn.classList.add('slot-user-busy');
+                                                btn.textContent = baseText + " (Your Conflict)";
+                                                btn.title = "You have another booking at this time on a different resource.";
+                                            } else {
+                                                btn.classList.add('slot-available');
+                                                btn.textContent = baseText;
+                                                btn.title = "This time slot is available.";
+                                            }
                                         }
                                     }
                                 });
 
-                                // Special handling for full_day if half-days are affected
+                                // Special handling for full_day if half-days are affected or passed
                                 const firstHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="first_half"]');
                                 const secondHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]');
                                 const fullDayBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]');
 
-                                if (fullDayBtn && !fullDayBtn.classList.contains('slot-booked-resource')) {
+                                if (fullDayBtn && !fullDayBtn.classList.contains('slot-passed') && !fullDayBtn.classList.contains('slot-booked-resource')) {
+                                    // Check constituent slots ONLY if fullDayBtn itself isn't already passed or resource-booked by its own check
                                     const firstHalfBookedOnResource = firstHalfBtn && firstHalfBtn.classList.contains('slot-booked-resource');
                                     const secondHalfBookedOnResource = secondHalfBtn && secondHalfBtn.classList.contains('slot-booked-resource');
                                     const firstHalfUserBusy = firstHalfBtn && firstHalfBtn.classList.contains('slot-user-busy');
                                     const secondHalfUserBusy = secondHalfBtn && secondHalfBtn.classList.contains('slot-user-busy');
+                                    const firstHalfPassed = firstHalfBtn && firstHalfBtn.classList.contains('slot-passed');
+                                    const secondHalfPassed = secondHalfBtn && secondHalfBtn.classList.contains('slot-passed');
+
+                                    const fullDayBaseText = fullDayBtn.dataset.baseText || "Full Day";
 
                                     if (firstHalfBookedOnResource || secondHalfBookedOnResource) {
                                         fullDayBtn.disabled = true;
-                                        fullDayBtn.classList.remove('slot-available', 'slot-user-busy'); // Clear other states
-                                        fullDayBtn.classList.add('slot-booked-resource');
-                                        fullDayBtn.textContent = (fullDayBtn.dataset.baseText || "Full Day") + " (Unavailable)";
+                                        fullDayBtn.classList.remove('slot-available', 'slot-user-busy', 'slot-passed');
+                                        fullDayBtn.classList.add('slot-booked-resource'); // Higher precedence than user-busy or passed for sub-slots
+                                        fullDayBtn.textContent = fullDayBaseText + " (Unavailable)";
                                         fullDayBtn.title = "Part of the day is booked on this resource.";
                                     } else if (firstHalfUserBusy || secondHalfUserBusy) {
                                         fullDayBtn.disabled = true;
-                                        fullDayBtn.classList.remove('slot-available', 'slot-booked-resource'); // Clear other states
+                                        fullDayBtn.classList.remove('slot-available', 'slot-booked-resource', 'slot-passed');
                                         fullDayBtn.classList.add('slot-user-busy');
-                                        fullDayBtn.textContent = (fullDayBtn.dataset.baseText || "Full Day") + " (Your Conflict)";
+                                        fullDayBtn.textContent = fullDayBaseText + " (Your Conflict)";
                                         fullDayBtn.title = "You have other bookings conflicting with part of this day.";
+                                    } else if (firstHalfPassed || secondHalfPassed) {
+                                        // If one half has passed and the other is available (not resource-booked, not user-busy)
+                                        // then the full day slot is also effectively unavailable or at least partially passed.
+                                        fullDayBtn.disabled = true;
+                                        fullDayBtn.classList.remove('slot-available', 'slot-user-busy', 'slot-booked-resource');
+                                        fullDayBtn.classList.add('slot-passed');
+                                        fullDayBtn.textContent = fullDayBaseText + " (Partially Passed)";
+                                        fullDayBtn.title = "Part of this time slot has passed.";
                                     }
-                                    // If neither, fullDayBtn retains its original 'slot-available' state from the loop above.
+                                    // Note: if both firstHalfPassed and secondHalfPassed are true, the main loop for fullDayBtn
+                                    // using slotApiStatus.is_passed for 'full_day' should have already marked it as 'slot-passed'.
                                 }
         
                                 if (bookingModal) bookingModal.style.display = 'block';
@@ -1463,18 +1504,21 @@ document.addEventListener('DOMContentLoaded', function() {
 
                             // START of new availability logic for unassigned resources
                             const cacheKey = resourceId + '_' + selectedDate;
-                            let resourceBookings = currentResourceBookingsCache[cacheKey];
-                            if (!resourceBookings) {
+                            let apiAvailabilityData = currentResourceBookingsCache[cacheKey]; // Use new name
+                            if (!apiAvailabilityData) {
                                 try {
-                                    resourceBookings = await apiCall(`/api/resources/${resourceId}/availability?date=${selectedDate}`, {}, modalStatusMsg);
-                                    currentResourceBookingsCache[cacheKey] = resourceBookings;
+                                    apiAvailabilityData = await apiCall(`/api/resources/${resourceId}/availability?date=${selectedDate}`, {}, modalStatusMsg);
+                                    currentResourceBookingsCache[cacheKey] = apiAvailabilityData;
                                 } catch (error) {
                                     showError(modalStatusMsg, `Could not load availability for ${resourceName}.`);
                                     if (bookingModal) bookingModal.style.display = 'block'; return;
                                 }
                             }
+                             const actualBookedSlotsUnassigned = apiAvailabilityData.booked_slots || [];
+                             const standardSlotStatusesFromAPIUnassigned = apiAvailabilityData.standard_slot_statuses || {};
 
-                            let userBookings = [];
+
+                            let userBookings = []; // Should be userBookingsForDate
                             const loggedInUserId = sessionStorage.getItem('loggedInUserId');
                             if (loggedInUserId) {
                                 try {
@@ -1501,69 +1545,112 @@ document.addEventListener('DOMContentLoaded', function() {
                                 return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
                             }
 
+                            // Re-calculate venueCurrentTime here as it's a separate scope/event
+                            const calendarContainerUnassigned = document.getElementById('inline-calendar-container');
+                            const global_time_offset_hours_unassigned = parseFloat(calendarContainerUnassigned ? calendarContainerUnassigned.dataset.globalTimeOffsetHours : 0 || 0);
+                            const nowUnassigned = new Date();
+                            const venueCurrentTimeUnassigned = new Date(Date.UTC(nowUnassigned.getUTCFullYear(), nowUnassigned.getUTCMonth(), nowUnassigned.getUTCDate(),
+                                                                  nowUnassigned.getUTCHours(), nowUnassigned.getUTCMinutes(), nowUnassigned.getUTCSeconds()));
+                            venueCurrentTimeUnassigned.setHours(venueCurrentTimeUnassigned.getHours() + global_time_offset_hours_unassigned);
+
+
                             slotButtons.forEach(btn => {
                                 const slotType = btn.dataset.slotType;
                                 const definedSlot = definedSlots[slotType];
                                 if (!definedSlot) return;
 
                                 btn.disabled = false;
-                                btn.classList.remove('slot-available', 'slot-booked-resource', 'slot-user-busy', 'selected', 'unavailable', 'booked', 'partial');
-                                const baseText = btn.textContent.split(" (")[0];
+                                btn.classList.remove('slot-available', 'slot-booked-resource', 'slot-user-busy', 'selected', 'unavailable', 'booked', 'partial', 'slot-passed');
+                                const baseText = btn.dataset.baseText || btn.textContent.split(" (")[0];
+                                btn.dataset.baseText = baseText;
+                                btn.textContent = baseText;
+                                btn.title = "";
 
-                                let isResourceBookedForSlot = false;
-                                if (resourceBookings && resourceBookings.length > 0) {
-                                    for (const booking of resourceBookings) {
-                                        const bookingStartMinutes = parseTimeHHMMSS(booking.start_time);
-                                        const bookingEndMinutes = parseTimeHHMMSS(booking.end_time);
-                                        if (Math.max(definedSlot.start, bookingStartMinutes) < Math.min(definedSlot.end, bookingEndMinutes)) {
-                                            isResourceBookedForSlot = true;
-                                            break;
-                                        }
-                                    }
-                                }
+                                const slotApiStatusUnassigned = standardSlotStatusesFromAPIUnassigned[slotType];
 
-                                if (isResourceBookedForSlot) {
+                                if (slotApiStatusUnassigned && slotApiStatusUnassigned.is_passed) {
                                     btn.disabled = true;
-                                    btn.classList.add('slot-booked-resource');
-                                    btn.textContent = baseText + " (Booked)";
+                                    btn.classList.add('slot-passed');
+                                    btn.textContent = baseText + " (Passed)";
+                                    btn.title = "This time slot has passed.";
                                 } else {
-                                    let isUserBusyElsewhere = false;
-                                    if (userBookings && userBookings.length > 0) {
-                                        for (const userBooking of userBookings) {
-                                            if (String(userBooking.resource_id) !== String(resourceId)) {
-                                                const userBookingStartMinutes = parseTimeHHMMSS(userBooking.start_time);
-                                                const userBookingEndMinutes = parseTimeHHMMSS(userBooking.end_time);
-                                                if (Math.max(definedSlot.start, userBookingStartMinutes) < Math.min(definedSlot.end, userBookingEndMinutes)) {
-                                                    isUserBusyElsewhere = true;
-                                                    break;
-                                                }
+                                    let isResourceBookedForSlot = false;
+                                    if (actualBookedSlotsUnassigned && actualBookedSlotsUnassigned.length > 0) {
+                                        for (const booking of actualBookedSlotsUnassigned) {
+                                            const bookingStartMinutes = parseTimeHHMMSS(booking.start_time);
+                                            const bookingEndMinutes = parseTimeHHMMSS(booking.end_time);
+                                            if (Math.max(definedSlot.start, bookingStartMinutes) < Math.min(definedSlot.end, bookingEndMinutes)) {
+                                                isResourceBookedForSlot = true;
+                                                break;
                                             }
                                         }
                                     }
 
-                                    if (isUserBusyElsewhere) {
-                                        btn.classList.add('slot-user-busy');
-                                        btn.textContent = baseText + " (User Busy)";
+                                    if (isResourceBookedForSlot) {
+                                        btn.disabled = true;
+                                        btn.classList.add('slot-booked-resource');
+                                        btn.textContent = baseText + " (Booked)";
+                                        btn.title = "This time slot is booked on this resource.";
                                     } else {
-                                        btn.classList.add('slot-available');
-                                        btn.textContent = baseText;
+                                        let isUserBusyElsewhere = false;
+                                        if (userBookings && userBookings.length > 0) { // userBookings is userBookingsForDate in this scope
+                                            for (const userBooking of userBookings) {
+                                                if (String(userBooking.resource_id) !== String(resourceId)) {
+                                                    const userBookingStartMinutes = parseTimeHHMMSS(userBooking.start_time);
+                                                    const userBookingEndMinutes = parseTimeHHMMSS(userBooking.end_time);
+                                                    if (Math.max(definedSlot.start, userBookingStartMinutes) < Math.min(definedSlot.end, userBookingEndMinutes)) {
+                                                        isUserBusyElsewhere = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if (isUserBusyElsewhere) {
+                                            btn.disabled = true;
+                                            btn.classList.add('slot-user-busy');
+                                            btn.textContent = baseText + " (Your Conflict)";
+                                            btn.title = "You have another booking at this time on a different resource.";
+                                        } else {
+                                            btn.classList.add('slot-available');
+                                            btn.textContent = baseText;
+                                            btn.title = "This time slot is available.";
+                                        }
                                     }
                                 }
                             });
 
-                            const firstHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="first_half"]');
-                            const secondHalfBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]');
-                            const fullDayBtn = modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]');
+                            const firstHalfBtnUnassigned = modalSlotOptionsContainer.querySelector('[data-slot-type="first_half"]');
+                            const secondHalfBtnUnassigned = modalSlotOptionsContainer.querySelector('[data-slot-type="second_half"]');
+                            const fullDayBtnUnassigned = modalSlotOptionsContainer.querySelector('[data-slot-type="full_day"]');
 
-                            if (fullDayBtn && !fullDayBtn.classList.contains('slot-booked-resource')) {
-                                const firstHalfBookedOnResource = firstHalfBtn && firstHalfBtn.classList.contains('slot-booked-resource');
-                                const secondHalfBookedOnResource = secondHalfBtn && secondHalfBtn.classList.contains('slot-booked-resource');
+                            if (fullDayBtnUnassigned && !fullDayBtnUnassigned.classList.contains('slot-passed') && !fullDayBtnUnassigned.classList.contains('slot-booked-resource')) {
+                                const firstHalfBookedOnResource = firstHalfBtnUnassigned && firstHalfBtnUnassigned.classList.contains('slot-booked-resource');
+                                const secondHalfBookedOnResource = secondHalfBtnUnassigned && secondHalfBtnUnassigned.classList.contains('slot-booked-resource');
+                                const firstHalfUserBusy = firstHalfBtnUnassigned && firstHalfBtnUnassigned.classList.contains('slot-user-busy');
+                                const secondHalfUserBusy = secondHalfBtnUnassigned && secondHalfBtnUnassigned.classList.contains('slot-user-busy');
+                                const firstHalfPassed = firstHalfBtnUnassigned && firstHalfBtnUnassigned.classList.contains('slot-passed');
+                                const secondHalfPassed = secondHalfBtnUnassigned && secondHalfBtnUnassigned.classList.contains('slot-passed');
+                                const fullDayBaseText = fullDayBtnUnassigned.dataset.baseText || "Full Day";
 
                                 if (firstHalfBookedOnResource || secondHalfBookedOnResource) {
-                                    fullDayBtn.disabled = true;
-                                    fullDayBtn.classList.remove('slot-available', 'slot-user-busy');
-                                    fullDayBtn.classList.add('slot-booked-resource');
-                                    fullDayBtn.textContent = fullDayBtn.textContent.split(" (")[0] + " (Unavailable)";
+                                    fullDayBtnUnassigned.disabled = true;
+                                    fullDayBtnUnassigned.classList.remove('slot-available', 'slot-user-busy', 'slot-passed');
+                                    fullDayBtnUnassigned.classList.add('slot-booked-resource');
+                                    fullDayBtnUnassigned.textContent = fullDayBaseText + " (Unavailable)";
+                                    fullDayBtnUnassigned.title = "Part of the day is booked on this resource.";
+                                } else if (firstHalfUserBusy || secondHalfUserBusy) {
+                                    fullDayBtnUnassigned.disabled = true;
+                                    fullDayBtnUnassigned.classList.remove('slot-available', 'slot-booked-resource', 'slot-passed');
+                                    fullDayBtnUnassigned.classList.add('slot-user-busy');
+                                    fullDayBtnUnassigned.textContent = fullDayBaseText + " (Your Conflict)";
+                                    fullDayBtnUnassigned.title = "You have other bookings conflicting with part of this day.";
+                                } else if (firstHalfPassed || secondHalfPassed) {
+                                    fullDayBtnUnassigned.disabled = true;
+                                    fullDayBtnUnassigned.classList.remove('slot-available', 'slot-user-busy', 'slot-booked-resource');
+                                    fullDayBtnUnassigned.classList.add('slot-passed');
+                                    fullDayBtnUnassigned.textContent = fullDayBaseText + " (Partially Passed)";
+                                    fullDayBtnUnassigned.title = "Part of this time slot has passed.";
                                 }
                             }
                             // END of new availability logic for unassigned resources
@@ -1595,34 +1682,39 @@ document.addEventListener('DOMContentLoaded', function() {
             const resourceName = button.dataset.resourceName;
             // console.log(`Updating MODIFIED button color for resource ${resourceId} ('${resourceName}') on date ${dateStr}`);
 
-            let generalBookings;
+            let apiResponseForButton; // Changed from generalBookings to be more specific
             const cacheKey = resourceId + '_' + dateStr;
 
             if (currentResourceBookingsCache[cacheKey]) {
-                generalBookings = currentResourceBookingsCache[cacheKey];
-                // console.log(`Using cached general availability for ${resourceId} on ${dateStr}`);
+                apiResponseForButton = currentResourceBookingsCache[cacheKey];
             } else {
                 try {
-                    generalBookings = await apiCall(`/api/resources/${resourceId}/availability?date=${dateStr}`, {}, null);
-                    currentResourceBookingsCache[cacheKey] = generalBookings;
-                    // console.log(`Fetched general availability for ${resourceId} on ${dateStr}:`, generalBookings);
+                    // This API call now returns { booked_slots: [], standard_slot_statuses: {} }
+                    apiResponseForButton = await apiCall(`/api/resources/${resourceId}/availability?date=${dateStr}`, {}, null);
+                    currentResourceBookingsCache[cacheKey] = apiResponseForButton;
                 } catch (error) {
                     console.error(`Failed to fetch general availability for ${resourceId} on ${dateStr}:`, error);
                     button.classList.remove('available', 'partial', 'unavailable', 'unavailable-user-conflict', 'error');
                     button.classList.add('error');
                     button.title = `${resourceName} - Error loading availability`;
-                    button.style.display = ''; // Ensure button is visible if error
+                    button.style.display = '';
                     return;
                 }
             }
 
+            // Use the new structure from apiResponseForButton
+            const bookedSlotsForThisResource = apiResponseForButton.booked_slots || [];
+            const standardSlotStatusesForThisResource = apiResponseForButton.standard_slot_statuses || {};
+
+
             const primarySlots = [
-                { name: "First Half", startHour: 8, endHour: 12, isGenerallyAvailable: true, isAvailableToUser: true, startTimeStr: "08:00:00", endTimeStr: "12:00:00" },
-                { name: "Second Half", startHour: 13, endHour: 17, isGenerallyAvailable: true, isAvailableToUser: true, startTimeStr: "13:00:00", endTimeStr: "17:00:00" }
+                { key: "first_half", name: "First Half", startHour: 8, endHour: 12, isGenerallyAvailable: true, isAvailableToUser: true, startTimeStr: "08:00:00", endTimeStr: "12:00:00" },
+                { key: "second_half", name: "Second Half", startHour: 13, endHour: 17, isGenerallyAvailable: true, isAvailableToUser: true, startTimeStr: "13:00:00", endTimeStr: "17:00:00" }
             ];
 
-            if (generalBookings && generalBookings.length > 0) {
-                generalBookings.forEach(booking => {
+            // Update isGenerallyAvailable based on bookedSlotsForThisResource
+            if (bookedSlotsForThisResource.length > 0) {
+                bookedSlotsForThisResource.forEach(booking => {
                     const bookingStartHour = parseInt(booking.start_time.split(':')[0], 10);
                     const bookingEndHour = parseInt(booking.end_time.split(':')[0], 10);
                     primarySlots.forEach(slot => {
@@ -1633,15 +1725,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
 
+            // Update isAvailableToUser based on userBookingsForDate (for other resources)
             const loggedInUserId = sessionStorage.getItem('loggedInUserId');
             if (loggedInUserId && userBookingsForDate && userBookingsForDate.length > 0) {
                 userBookingsForDate.forEach(userBooking => {
-                    if (String(userBooking.resource_id) !== String(resourceId)) { // Booking on a DIFFERENT resource
-                        const userBookingStartHour = parseInt(userBooking.start_time.split(':')[0], 10); // Assuming 'HH:MM:SS'
+                    if (String(userBooking.resource_id) !== String(resourceId)) {
+                        const userBookingStartHour = parseInt(userBooking.start_time.split(':')[0], 10);
                         const userBookingEndHour = parseInt(userBooking.end_time.split(':')[0], 10);
-
                         primarySlots.forEach(slot => {
-                            if (slot.isGenerallyAvailable) { // Only check user conflict if the slot is generally available
+                            if (slot.isGenerallyAvailable) {
                                 if (userBookingStartHour < slot.endHour && userBookingEndHour > slot.startHour) {
                                     slot.isAvailableToUser = false;
                                 }
@@ -1650,6 +1742,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 });
             }
+
+            // Check "passed" status from API for primary slots
+            primarySlots.forEach(slot => {
+                const apiSlotStatus = standardSlotStatusesForThisResource[slot.key];
+                if (apiSlotStatus && apiSlotStatus.is_passed) {
+                    slot.isGenerallyAvailable = false; // Treat passed as generally unavailable for button coloring
+                    slot.isAvailableToUser = false;   // Also unavailable to user
+                }
+            });
+
 
             button.classList.remove('available', 'partial', 'unavailable', 'unavailable-user-conflict', 'error');
 
@@ -1662,47 +1764,39 @@ document.addEventListener('DOMContentLoaded', function() {
                 id: resourceId, name: resourceName,
                 booking_restriction: button.dataset.bookingRestriction,
                 allowed_user_ids: button.dataset.allowedUserIds,
-                roles: parseRolesFromDataset(button.dataset.roles) // Ensure 'roles' dataset, not 'roleIds'
+                roles: parseRolesFromDataset(button.dataset.roles)
             };
 
             if (!checkUserPermissionForResource(resourceDataForPermission, currentUserId, currentUserIsAdmin)) {
-                button.classList.add('unavailable'); // Or 'restricted'
+                button.classList.add('unavailable');
                 button.title = `${resourceName} - Restricted Access`;
             } else {
                 const generallyAvailableSlots = primarySlots.filter(s => s.isGenerallyAvailable);
                 const userAvailableSlots = generallyAvailableSlots.filter(s => s.isAvailableToUser);
 
                 if (loggedInUserId && generallyAvailableSlots.length > 0 && userAvailableSlots.length === 0) {
-                    // User is logged in, there are generally available slots, but none are available to the user due to their own conflicts
                     button.classList.add('unavailable-user-conflict');
                     button.title = `${resourceName} - Unavailable (Your existing bookings conflict)`;
                 } else if (userAvailableSlots.length === generallyAvailableSlots.length && generallyAvailableSlots.length > 0) {
-                    // All generally available slots are also available to the user
                     button.classList.add('available');
                     button.title = `${resourceName} - Available`;
                 } else if (userAvailableSlots.length > 0) {
-                    // Some, but not all, generally available slots are available to the user
                     button.classList.add('partial');
                     button.title = `${resourceName} - Partially Available`;
                 } else {
-                    // No slots available to the user (either all generally unavailable, or remaining general ones are blocked by user)
-                    // This also covers the case where generallyAvailableSlots.length === 0
                     button.classList.add('unavailable');
                      button.title = `${resourceName} - Unavailable`;
                 }
             }
 
-            // Visibility Logic
             const isEffectivelyUnavailable = button.classList.contains('unavailable') || button.classList.contains('unavailable-user-conflict');
             const isPermissionRestricted = button.title.includes('Restricted Access');
             const isErrorState = button.classList.contains('error');
 
             if (isEffectivelyUnavailable && !isPermissionRestricted && !isErrorState) {
                 button.style.display = 'none';
-                // console.log(`Resource ${resourceId} is effectively unavailable and not restricted/error, hiding button.`);
             } else {
                 button.style.display = '';
-                // console.log(`Resource ${resourceId} is available, partial, restricted, or error, showing button. Classes: ${button.className}`);
             }
         }
 
@@ -1710,12 +1804,10 @@ document.addEventListener('DOMContentLoaded', function() {
         // 4. updateAllButtonColors() function
         async function updateAllButtonColors() {
             const dateStr = availabilityDateInput ? availabilityDateInput.value : getTodayDateString();
-            // console.log(`Updating all button colors for date: ${dateStr}`);
-            currentResourceBookingsCache = {}; // Clear cache for general availability
+            currentResourceBookingsCache = {};
 
             const buttons = resourceButtonsContainer.querySelectorAll('.resource-availability-button');
             if (buttons.length === 0) {
-                // console.log("No resource buttons found to update.");
                 return;
             }
             
@@ -1726,10 +1818,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (loggedInUserId) {
                 try {
                     userBookingsForDate = await apiCall(`/api/bookings/my_bookings_for_date?date=${dateStr}`, {}, null);
-                    // console.log(`Fetched user's bookings for ${dateStr}:`, userBookingsForDate);
                 } catch (error) {
                     console.warn(`Could not fetch user's bookings for date ${dateStr}: ${error.message}. Proceeding without user-specific checks.`);
-                    userBookingsForDate = []; // Ensure it's an empty array on failure
+                    userBookingsForDate = [];
                 }
             }
 
@@ -1741,18 +1832,13 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 await Promise.all(updatePromises);
                 console.log("All button colors updated.");
-                if (resourceLoadingStatusDiv && !resourceLoadingStatusDiv.classList.contains('error')) { // Check if an error occurred during any update
-                    hideMessage(resourceLoadingStatusDiv); // Hide general loading message
+                if (resourceLoadingStatusDiv && !resourceLoadingStatusDiv.classList.contains('error')) {
+                    hideMessage(resourceLoadingStatusDiv);
                 }
-                updateGroupVisibility(); // Call here after successful updates
+                updateGroupVisibility();
             } catch (error) {
                 console.error("Error during Promise.all for updateAllButtonColors:", error);
-                // Individual errors are handled in updateButtonColor. 
-                // This catch is for Promise.all itself if it rejects for some reason not caught by individual calls.
                 if (resourceLoadingStatusDiv) showError(resourceLoadingStatusDiv, "An error occurred while updating resource statuses.");
-                // Consider if updateGroupVisibility() should also be called in case of error, 
-                // if partially updated button states are possible and groups might need hiding.
-                // For now, calling only on full success of all button updates.
             }
         }
         
@@ -1764,23 +1850,21 @@ document.addEventListener('DOMContentLoaded', function() {
         if (modalSlotOptionsContainer) {
             modalSlotOptionsContainer.querySelectorAll('.time-slot-btn').forEach(slotBtn => {
                 slotBtn.addEventListener('click', function() {
-                    if (this.classList.contains('unavailable') || this.classList.contains('booked')) {
-                        console.log("Clicked on a disabled/booked slot button. No action.");
+                    if (this.classList.contains('unavailable') || this.classList.contains('booked') || this.classList.contains('slot-passed') || this.classList.contains('slot-user-busy')) { // Added slot-passed and slot-user-busy
+                        console.log("Clicked on a disabled/booked/passed/user-busy slot button. No action.");
                         return;
                     }
-                    // Remove 'selected' from all slot buttons within the same container
                     modalSlotOptionsContainer.querySelectorAll('.time-slot-btn').forEach(btn => {
                         btn.classList.remove('selected');
                     });
-                    // Add 'selected' to the clicked button
                     this.classList.add('selected');
                     selectedSlotDetails = {
                         startTimeStr: this.dataset.startTime,
                         endTimeStr: this.dataset.endTime,
-                        slotName: this.dataset.slotName // e.g. "First Half", "Full Day"
+                        slotName: this.dataset.slotName
                     };
                     console.log("Slot selected:", selectedSlotDetails);
-                    if (modalStatusMsg) modalStatusMsg.textContent = ''; // Clear any previous status messages
+                    if (modalStatusMsg) modalStatusMsg.textContent = '';
                 });
             });
         } else {
@@ -1801,11 +1885,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!loggedInUsername) {
                     showError(modalStatusMsg, 'You must be logged in to book. Please log in and try again.');
                     console.warn("User not logged in for booking.");
-                    // Optionally, redirect to login page or show login modal
                     return;
                 }
 
-                const resourceId = this.dataset.resourceId; // Retained from when modal was opened
+                const resourceId = this.dataset.resourceId;
                 const dateStr = modalSelectedDate ? modalSelectedDate.textContent : null;
                 const title = modalBookingTitle ? modalBookingTitle.value.trim() : `Booking for ${modalResourceName.textContent}`;
 
@@ -1820,8 +1903,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     date_str: dateStr,
                     start_time_str: selectedSlotDetails.startTimeStr,
                     end_time_str: selectedSlotDetails.endTimeStr,
-                    title: title || `Booking for ${modalResourceName.textContent}`, // Ensure title is not empty
-                    user_name: loggedInUsername // Backend will use authenticated user, but good to send for logging/confirmation
+                    title: title || `Booking for ${modalResourceName.textContent}`,
+                    user_name: loggedInUsername
                 };
                 console.log("Booking payload:", payload);
 
@@ -1829,14 +1912,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     const responseData = await apiCall('/api/bookings', {
                         method: 'POST',
                         body: JSON.stringify(payload)
-                    }, modalStatusMsg); // modalStatusMsg will show "Processing..." then success/error
+                    }, modalStatusMsg);
 
                     console.log("Booking API call successful, response:", responseData);
                     
-                    // On Success:
-                    await updateAllButtonColors(); // Refresh main page button colors
+                    await updateAllButtonColors();
 
-                    // Hide form elements, show acknowledgement
                     if (modalConfirmBtn) modalConfirmBtn.style.display = 'none';
                     if (modalSlotOptionsContainer) modalSlotOptionsContainer.style.display = 'none';
                     if (modalBookingTitle && modalBookingTitle.parentElement) modalBookingTitle.parentElement.style.display = 'none';
@@ -1851,11 +1932,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     let countdown = 5;
                     const detailedMessage = `Booking Confirmed!<br>Resource: ${resourceNameForMsg}<br>Date: ${dateStrForMsg}<br>Time: ${startTimeForMsg} - ${endTimeForMsg}${bookingTitleValue ? '<br>Title: ' + bookingTitleValue : ''}<br><br>Closing in <span id="rpbm-countdown-timer">${countdown}</span>s...`;
                     
-                    // apiCall might have already shown a simple success message. Overwrite with detailed one.
-                    showSuccess(modalStatusMsg, detailedMessage); // showSuccess uses innerHTML
+                    showSuccess(modalStatusMsg, detailedMessage);
 
                     const timerSpan = document.getElementById('rpbm-countdown-timer');
-                    if (countdownInterval) clearInterval(countdownInterval); // Clear any existing interval
+                    if (countdownInterval) clearInterval(countdownInterval);
                     countdownInterval = setInterval(() => {
                         countdown--;
                         if (timerSpan) timerSpan.textContent = countdown;
@@ -1864,14 +1944,11 @@ document.addEventListener('DOMContentLoaded', function() {
                             countdownInterval = null;
                             if (bookingModal) bookingModal.style.display = 'none';
                             console.log("Modal closed by countdown.");
-                            // resetRpbmModal(); // Modal will be reset when next opened
                         }
                     }, 1000);
 
                 } catch (error) {
                     console.error("Booking failed:", error);
-                    // apiCall already showed the error in modalStatusMsg.
-                    // Optionally, add more specific error handling here if needed.
                 }
             });
         } else {
@@ -1888,7 +1965,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.log("Countdown interval cleared by AckClose button.");
                 }
                 if (bookingModal) bookingModal.style.display = 'none';
-                // resetRpbmModal(); // Modal will be reset when next opened
             });
         } else {
              console.error("Modal acknowledgement close button (rpbm-ack-close-btn) not found!");
@@ -1896,7 +1972,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 9. Window Click Outside Modal for resource-page-booking-modal
         // AND main (X) close button
-        if (closeModalBtn) { // The 'X' span
+        if (closeModalBtn) {
             closeModalBtn.addEventListener('click', function() {
                 console.log("Modal (X) close button clicked.");
                 if (countdownInterval) {
@@ -1905,14 +1981,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.log("Countdown interval cleared by (X) close button.");
                 }
                 if (bookingModal) bookingModal.style.display = 'none';
-                // resetRpbmModal(); // Modal will be reset when next opened
             });
         } else {
             console.error("Modal main close button (rpbm-close-modal-btn) not found!");
         }
 
         window.addEventListener('click', function(event) {
-            if (bookingModal && event.target == bookingModal) { // Clicked on the modal backdrop
+            if (bookingModal && event.target == bookingModal) {
                 console.log("Clicked outside modal content area.");
                 if (countdownInterval) {
                     clearInterval(countdownInterval);
@@ -1920,7 +1995,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.log("Countdown interval cleared by clicking outside modal.");
                 }
                 bookingModal.style.display = 'none';
-                // resetRpbmModal(); // Modal will be reset when next opened
             }
         });
 
@@ -1945,7 +2019,6 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
-        // Initial call to fetch and render resources and their button states
         fetchAndRenderResources();
         console.log("Initial fetchAndRenderResources called.");
 
@@ -1956,7 +2029,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const adminMapsPageIdentifier = document.getElementById('upload-map-form');
     if (adminMapsPageIdentifier) { 
         const uploadMapForm = document.getElementById('upload-map-form');
-        const mapsListUl = document.getElementById('maps-list'); // This might be legacy if table is used in admin_maps.html
+        const mapsListUl = document.getElementById('maps-list');
         const uploadStatusDiv = document.getElementById('upload-status'); 
         const adminMapsListStatusDiv = document.getElementById('admin-maps-list-status'); 
 
@@ -1993,15 +2066,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const SELECTED_LINE_WIDTH = 2;
 
 
-        // Function to fetch and display maps (original simple list, might need adaptation for new table)
         async function fetchAndDisplayMaps() {
-            // This function is now largely superseded by the inline script in admin_maps.html
-            // which populates a table. Keeping it here for now, but it might be removed
-            // or adapted if parts of its logic are still needed by other functions in this file.
-            // For now, the new table rendering in admin_maps.html handles the display.
             console.log("Legacy fetchAndDisplayMaps in script.js called. Consider removing if new table in admin_maps.html is sufficient.");
-            if (!mapsListUl || !adminMapsListStatusDiv) { // mapsListUl is the old <ul>
-                // If mapsListUl doesn't exist (because it's a table now), this function might not be needed.
+            if (!mapsListUl || !adminMapsListStatusDiv) {
                 return;
             }
             try {
@@ -2023,7 +2090,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <br>
                         <button class="select-map-for-areas-btn button" data-map-id="${map.id}" data-map-name="${map.name}" data-map-image-url="${map.image_url}">Define Areas</button>
                         <button class="delete-map-btn button btn-danger btn-sm" data-map-id="${map.id}" data-map-name="${map.name}" style="margin-left: 5px;">Delete Map</button>
-                    `; // Added "button" class and Delete Map button
+                    `;
                     mapsListUl.appendChild(listItem);
                 });
             } catch (error) {
@@ -2062,7 +2129,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         fetchAndDisplayMaps();
         
-        // Populate Roles for Checkbox List in Define Area Form
         async function initializeRolesForAreaDefinitionUI() {
             const checkboxContainer = document.getElementById('define-area-roles-checkbox-container');
             const rolesLoadingMsg = document.getElementById('define-area-roles-loading-message');
@@ -2072,37 +2138,31 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
-            // Clear only previous role checkboxes (elements with class 'checkbox-item')
             const existingCheckboxItems = checkboxContainer.querySelectorAll('div.checkbox-item');
             existingCheckboxItems.forEach(item => item.remove());
 
-            // apiCall will use rolesLoadingMsg (or checkboxContainer as fallback) for its messages
             try {
                 const roles = await apiCall('/api/admin/roles', {}, rolesLoadingMsg || checkboxContainer);
 
-                // After successful API call (which might have hidden rolesLoadingMsg or shown success):
                 if (!roles || roles.length === 0) {
                     if (rolesLoadingMsg) {
-                        rolesLoadingMsg.textContent = 'No roles found. You can create roles in User Management.'; // Flask's _() won't work here directly
+                        rolesLoadingMsg.textContent = 'No roles found. You can create roles in User Management.';
                         rolesLoadingMsg.style.display = 'block';
                     } else {
-                        // Fallback if rolesLoadingMsg doesn't exist, though less ideal
                         checkboxContainer.innerHTML = '<small>No roles found. You can create roles in User Management.</small>';
                     }
                 } else {
-                    // Roles found and populated
                     if (rolesLoadingMsg && !(rolesLoadingMsg.classList.contains('error') || rolesLoadingMsg.classList.contains('success'))) {
-                        // Hide loading message if it's not showing a specific status from apiCall
                          rolesLoadingMsg.style.display = 'none';
                     }
                     roles.forEach(role => {
                         const div = document.createElement('div');
-                        div.className = 'checkbox-item'; // Ensure new items have this class
+                        div.className = 'checkbox-item';
                         const checkbox = document.createElement('input');
                         checkbox.type = 'checkbox';
                         checkbox.id = `define-area-role-${role.id}`;
                         checkbox.value = role.id;
-                        checkbox.name = 'define_area_authorized_role_ids'; // Matches original logic
+                        checkbox.name = 'define_area_authorized_role_ids';
                         const label = document.createElement('label');
                         label.htmlFor = `define-area-role-${role.id}`;
                         label.textContent = role.name + (role.description ? ` (${role.description})` : '');
@@ -2112,10 +2172,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     });
                 }
             } catch (error) {
-                // apiCall should have already displayed an error message in rolesLoadingMsg or checkboxContainer.
-                // No need for additional showError here unless apiCall's error handling is insufficient.
                 console.error("Error in initializeRolesForAreaDefinitionUI during/after apiCall:", error);
-                // If rolesLoadingMsg exists and is not already showing an error, ensure it does.
                 if (rolesLoadingMsg && !rolesLoadingMsg.classList.contains('error')) {
                     showError(rolesLoadingMsg, 'Could not load roles due to an error.');
                 } else if (!rolesLoadingMsg && !checkboxContainer.classList.contains('error')) {
@@ -2124,9 +2181,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         window.initializeRolesForAreaDefinitionUI = initializeRolesForAreaDefinitionUI;
-        // populateDefineAreaRolesCheckboxes(); // This is likely called on DOMContentLoaded or when Define Areas is shown.
 
-        // Expose fetchAndDrawExistingMapAreas
         window.fetchAndDrawExistingMapAreas = async function(mapId) {
             existingMapAreas = [];
             const defineAreasStatusDiv = document.getElementById('define-areas-status');
@@ -2144,7 +2199,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 map_coordinates: resource.map_coordinates,
                                 booking_restriction: resource.booking_restriction,
                                 allowed_user_ids: resource.allowed_user_ids,
-                                roles: resource.roles, // Assuming roles is an array of objects [{id, name}, ...]
+                                roles: resource.roles,
                                 status: resource.status, floor_map_id: resource.floor_map_id
                             });
                         }
@@ -2161,31 +2216,22 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window");
         }
-        window.fetchAndDrawExistingMapAreas = fetchAndDrawExistingMapAreas; // Expose it
+        window.fetchAndDrawExistingMapAreas = fetchAndDrawExistingMapAreas;
 
-        // Expose redrawCanvas
         window.redrawCanvas = function() {
             if (!canvasCtx) {
                 console.warn("Canvas context not initialized for redrawCanvas.");
                 return;
             }
             canvasCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
-
-            // The IS_ADMIN_MAP_DEFINE_AREAS_PAGE flag differentiates the admin "Define Areas" context
-            // from other potential canvas drawing contexts. In the admin view, areas are drawn
-            // using raw coordinates (offsets are zeroed out).
-            // Other contexts might apply offsets (though new_booking_map.js handles its own offset logic).
             const isAdminPage = typeof IS_ADMIN_MAP_DEFINE_AREAS_PAGE !== 'undefined' && IS_ADMIN_MAP_DEFINE_AREAS_PAGE;
-
-            // effectiveOffsetX and effectiveOffsetY ensure that drawing uses raw coordinates (0,0 offset)
-            // on the admin "Define Areas" page, and map-defined offsets otherwise.
             const effectiveOffsetX = (window.currentMapContext && !isAdminPage) ? (window.currentMapContext.offsetX || 0) : 0;
             const effectiveOffsetY = (window.currentMapContext && !isAdminPage) ? (window.currentMapContext.offsetY || 0) : 0;
 
             canvasCtx.font = "10px Arial";
             existingMapAreas.forEach(area => {
                 if (selectedAreaForEditing && selectedAreaForEditing.id === area.id) {
-                    return; // Skip drawing here, will be drawn as selected
+                    return;
                 }
                 if (area.map_coordinates && area.map_coordinates.type === 'rect') {
                     const coords = area.map_coordinates;
@@ -2239,8 +2285,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 canvasCtx.strokeStyle = 'rgba(0, 0, 255, 0.7)';
                 canvasCtx.fillStyle = 'rgba(0, 0, 255, 0.1)';
                 canvasCtx.lineWidth = 2;
-
-                // Do NOT apply global offsets to currentDrawnRect as it's drawn relative to mouse which is already on canvas
                 let x = currentDrawnRect.x;
                 let y = currentDrawnRect.y;
                 let w = currentDrawnRect.width;
@@ -2254,26 +2298,23 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        function updateCoordinateInputs(coords) { // This function remains local as it directly manipulates DOM elements in this scope
+        function updateCoordinateInputs(coords) {
             document.getElementById('coord-x').value = Math.round(coords.x);
             document.getElementById('coord-y').value = Math.round(coords.y);
             document.getElementById('coord-width').value = Math.round(coords.width);
             document.getElementById('coord-height').value = Math.round(coords.height);
         }
 
-        async function saveSelectedAreaDimensions(coords) { // Only saves dimensions, not other properties
+        async function saveSelectedAreaDimensions(coords) {
             if (!selectedAreaForEditing) return;
-            const areaDefStatusDiv = document.getElementById('area-definition-status'); // Corrected ID
+            const areaDefStatusDiv = document.getElementById('area-definition-status');
             const payload = {
-                floor_map_id: selectedAreaForEditing.floor_map_id, // Should be correct from selectedAreaForEditing
+                floor_map_id: selectedAreaForEditing.floor_map_id,
                 coordinates: { type: 'rect', x: coords.x, y: coords.y, width: coords.width, height: coords.height }
-                // No need to send booking_restriction, allowed_user_ids, role_ids here
-                // as this function is only for updating geometry after drag/resize.
-                // Those are handled by the main form submission.
             };
             try {
                 await apiCall(
-                    `/api/admin/resources/${selectedAreaForEditing.id}/map_info`, // Uses resource ID
+                    `/api/admin/resources/${selectedAreaForEditing.id}/map_info`,
                     { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
                     areaDefStatusDiv
                 );
@@ -2290,12 +2331,11 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!resourceToMapSelect) return;
 
             try {
-                const resources = await apiCall('/api/admin/resources', {}, defineAreasStatusDiv); // Changed to admin resources endpoint
+                const resources = await apiCall('/api/admin/resources', {}, defineAreasStatusDiv);
                 resourceToMapSelect.innerHTML = '<option value="">-- Select a Resource to Map --</option>';
                 let count = 0;
                 if (resources && resources.length > 0) {
                     resources.forEach(r => {
-                        // Only show resources that are not mapped OR are mapped to the CURRENT map
                         if (!r.floor_map_id || !r.map_coordinates || r.floor_map_id === parseInt(currentMapId)) {
                             count++;
                             const opt = new Option(`${r.name} (ID: ${r.id}) - Status: ${r.status || 'N/A'}`, r.id);
@@ -2303,7 +2343,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 resourceId: r.id, resourceName: r.name, resourceStatus: r.status || 'draft',
                                 bookingRestriction: r.booking_restriction || "",
                                 allowedUserIds: r.allowed_user_ids || "",
-                                roleIds: (r.roles || []).map(role => role.id).join(','), // Store role IDs
+                                roleIds: (r.roles || []).map(role => role.id).join(','),
                                 imageUrl: r.image_url || "",
                                 isUnderMaintenance: r.is_under_maintenance ? "true" : "false",
                                 maintenanceUntil: r.maintenance_until || "",
@@ -2318,57 +2358,41 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (count === 0) showSuccess(defineAreasStatusDiv, "No new resources available for mapping to this map.");
                     else if (!defineAreasStatusDiv.classList.contains('error')) hideMessage(defineAreasStatusDiv);
                 }
-                // The section for populating role checkboxes ('define-area-authorized-roles-checkbox-container')
-                // has been removed from here. The "Define Area" section in admin_maps.html uses a <select> dropdown
-                // (#define-area-roles-select) and has its own specific logic for loading and populating roles
-                // (loadAllRolesForAreaDefinition and populateDefineAreaRolesSelect in admin_maps.html).
-                // Calling populateRolesCheckboxesForResource here was incorrect for that context as it targets a
-                // checkbox container that doesn't exist in the "Define Area" form and uses a different UI paradigm.
             } catch (error) {
                 resourceToMapSelect.innerHTML = '<option value="">Error loading resources</option>';
-                // If defineAreasStatusDiv was used for loading message by apiCall, error will be shown there.
-                // Consider explicitly showing error here if needed for this specific catch.
                 const defineAreasStatusDiv = document.getElementById('define-areas-status');
-                if (defineAreasStatusDiv && !defineAreasStatusDiv.classList.contains('error')) { // Avoid overwriting specific API errors
+                if (defineAreasStatusDiv && !defineAreasStatusDiv.classList.contains('error')) {
                     showError(defineAreasStatusDiv, 'Failed to load resources for mapping.');
                 }
             }
         }
-        window.populateResourcesForMapping = populateResourcesForMapping; // Expose it
+        window.populateResourcesForMapping = populateResourcesForMapping;
 
-        // New function to encapsulate canvas setup and event listener attachment
         function initializeDefineAreasCanvasLogic() {
             if (!drawingCanvas || !selectedMapImageImg) {
                 console.error("Canvas or map image element not found for initialization.");
                 return;
             }
-
-            // This function should be called after selectedMapImageImg.src is set and it's loaded.
-            // The new 'Define Areas' button in admin_maps.html inline script should handle this.
-            // Ensure selectedMapImageImg has loaded before setting canvas dimensions.
             if (!selectedMapImageImg.complete || selectedMapImageImg.naturalWidth === 0) {
                 console.warn("Selected map image not loaded yet. Canvas initialization might be inaccurate or deferred.");
-                // It's better if the caller ensures image is loaded.
-                // For now, we proceed, but this could lead to 0x0 canvas if image isn't ready.
             }
 
             drawingCanvas.width = selectedMapImageImg.clientWidth;
             drawingCanvas.height = selectedMapImageImg.clientHeight;
-            canvasCtx = drawingCanvas.getContext('2d'); // Ensure canvasCtx is accessible by handlers
+            canvasCtx = drawingCanvas.getContext('2d');
 
-            // Attach mouse event handlers (these are the existing functions, they will be updated for offsets later)
-            drawingCanvas.onmousedown = function(event) { // Start of onmousedown
+            drawingCanvas.onmousedown = function(event) {
                 const globalOffsetX = window.currentMapContext ? (window.currentMapContext.offsetX || 0) : 0;
                 const globalOffsetY = window.currentMapContext ? (window.currentMapContext.offsetY || 0) : 0;
 
-                const clickX = event.offsetX - globalOffsetX; // Adjust click by global offset
-                const clickY = event.offsetY - globalOffsetY; // Adjust click by global offset
-                const rawClickX = event.offsetX; // Keep raw for handle checks if handles are drawn without offset
+                const clickX = event.offsetX - globalOffsetX;
+                const clickY = event.offsetY - globalOffsetY;
+                const rawClickX = event.offsetX;
                 const rawClickY = event.offsetY;
 
                 const editDeleteButtonsDiv = document.getElementById('edit-delete-buttons');
 
-                const getHandleUnderCursor = (x, y, rect) => { // x,y are raw canvas click coordinates
+                const getHandleUnderCursor = (x, y, rect) => {
                     const rectDrawX = rect.x + globalOffsetX;
                     const rectDrawY = rect.y + globalOffsetY;
                     const half = HANDLE_SIZE / 2;
@@ -2384,14 +2408,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     const handle = getHandleUnderCursor(rawClickX, rawClickY, coords);
                     if (handle) {
                         isResizingArea = true; resizeHandle = handle; isDrawing = false; isMovingArea = false; currentDrawnRect = null;
-                        dragStartX = rawClickX; dragStartY = rawClickY; // Use raw canvas coords for drag calculation start
+                        dragStartX = rawClickX; dragStartY = rawClickY;
                         initialAreaX = coords.x; initialAreaY = coords.y; initialAreaWidth = coords.width; initialAreaHeight = coords.height;
                         if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window"); return;
                     }
-                    // Check click within the drawn area (using adjusted clickX/Y for logical coords)
                     if (clickX >= coords.x && clickX <= coords.x + coords.width && clickY >= coords.y && clickY <= coords.y + coords.height) {
                         isMovingArea = true; isDrawing = false; currentDrawnRect = null;
-                        dragStartX = rawClickX; dragStartY = rawClickY; // Use raw canvas coords
+                        dragStartX = rawClickX; dragStartY = rawClickY;
                         initialAreaX = coords.x; initialAreaY = coords.y;
                         if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window"); return;
                     }
@@ -2401,7 +2424,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 for (const area of existingMapAreas) {
                     if (area.map_coordinates && area.map_coordinates.type === 'rect') {
                         const coords = area.map_coordinates;
-                        // Check click within the logical area (using adjusted clickX/Y)
                         if (clickX >= coords.x && clickX <= coords.x + coords.width && clickY >= coords.y && clickY <= coords.y + coords.height) {
                             selectedAreaForEditing = area;
                             console.log('Area selected:', JSON.parse(JSON.stringify(selectedAreaForEditing)));
@@ -2410,14 +2432,11 @@ document.addEventListener('DOMContentLoaded', function() {
                             updateCoordinateInputs(coords);
                             if (resourceToMapSelect) resourceToMapSelect.value = area.resource_id;
                             if (bookingPermissionDropdown) bookingPermissionDropdown.value = area.booking_restriction || "";
-                            // Replace existing role checkbox logic with a call to populateDefineAreaRolesCheckboxes
                             if (typeof populateDefineAreaRolesCheckboxes === 'function') {
-                                const selectedRoleIds = (area.roles || []).map(r => r.id); // Ensure IDs are passed as expected
+                                const selectedRoleIds = (area.roles || []).map(r => r.id);
                                 populateDefineAreaRolesCheckboxes(selectedRoleIds);
                             } else {
                                 console.error('populateDefineAreaRolesCheckboxes function is not defined globally. Check admin_maps.html inline script.');
-                                // Fallback or error handling if the global function isn't available
-                                // For example, clear existing checkboxes or show an error to the user in the UI
                                 if (authorizedRolesCheckboxContainer) {
                                     authorizedRolesCheckboxContainer.innerHTML = '<p class="error">Error: Role selection unavailable.</p>';
                                 }
@@ -2432,7 +2451,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     selectedAreaForEditing = null;
                     if (editDeleteButtonsDiv) editDeleteButtonsDiv.style.display = 'none';
                     isDrawing = true;
-                    startX = clickX; // Use adjusted click coordinates for drawing start
+                    startX = clickX;
                     startY = clickY;
                     currentDrawnRect = { x: startX, y: startY, width: 0, height: 0 };
                     const defineAreaFormElement = document.getElementById('define-area-form');
@@ -2447,13 +2466,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     resourceToMapSelect.dispatchEvent(new Event('change'));
                 }
                 if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window");
-            }; // End of onmousedown
+            };
 
-            drawingCanvas.onmousemove = function(event) { // Start of onmousemove
+            drawingCanvas.onmousemove = function(event) {
                 const globalOffsetX = window.currentMapContext ? (window.currentMapContext.offsetX || 0) : 0;
                 const globalOffsetY = window.currentMapContext ? (window.currentMapContext.offsetY || 0) : 0;
-                const currentX = event.offsetX - globalOffsetX; // Adjust by global offset
-                const currentY = event.offsetY - globalOffsetY; // Adjust by global offset
+                const currentX = event.offsetX - globalOffsetX;
+                const currentY = event.offsetY - globalOffsetY;
                 const rawCurrentX = event.offsetX;
                 const rawCurrentY = event.offsetY;
 
@@ -2464,7 +2483,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const deltaX = rawCurrentX - dragStartX; const deltaY = rawCurrentY - dragStartY;
                     const coords = selectedAreaForEditing.map_coordinates;
                     coords.x = initialAreaX + deltaX; coords.y = initialAreaY + deltaY;
-                    updateCoordinateInputs(coords); currentDrawnRect = { ...coords }; // Store logical, un-offsetted coords
+                    updateCoordinateInputs(coords); currentDrawnRect = { ...coords };
                     if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window");
                 } else if (isResizingArea && selectedAreaForEditing) {
                     const deltaX = rawCurrentX - dragStartX; const deltaY = rawCurrentY - dragStartY;
@@ -2478,18 +2497,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     if (newW < 1) newW = 1; if (newH < 1) newH = 1;
                     coords.x = newX; coords.y = newY; coords.width = newW; coords.height = newH;
-                    updateCoordinateInputs(coords); currentDrawnRect = { ...coords }; // Store logical, un-offsetted coords
+                    updateCoordinateInputs(coords); currentDrawnRect = { ...coords };
                     if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window");
                 }
-            }; // End of onmousemove
+            };
 
-            drawingCanvas.onmouseup = async function(event) { // Start of onmouseup
+            drawingCanvas.onmouseup = async function(event) {
                 if (isDrawing) {
                     isDrawing = false;
                     let {x,y,width,height} = currentDrawnRect;
                     if (width < 0) { x += width; width = -width; }
                     if (height < 0) { y += height; height = -height; }
-                    currentDrawnRect = { x, y, width, height }; // These are logical, un-offsetted coords
+                    currentDrawnRect = { x, y, width, height };
                     updateCoordinateInputs(currentDrawnRect);
                     if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window");
                 } else if ((isMovingArea || isResizingArea) && selectedAreaForEditing) {
@@ -2499,64 +2518,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     await saveSelectedAreaDimensions(coords);
                     if (typeof window.redrawCanvas === 'function') window.redrawCanvas(); else console.warn("redrawCanvas not on window");
                 }
-            }; // End of onmouseup
+            };
 
             console.log("Define Areas canvas logic initialized/re-initialized.");
         }
-        window.initializeDefineAreasCanvasLogic = initializeDefineAreasCanvasLogic; // Expose it
+        window.initializeDefineAreasCanvasLogic = initializeDefineAreasCanvasLogic;
 
-
-        // The old mapsListUl event listener for 'select-map-for-areas-btn' needs to be removed or adapted.
-        // Since the new 'Define Areas' button is in admin_maps.html (handled by its inline script),
-        // the old listener on mapsListUl (if it still exists and has such buttons) might conflict or be redundant.
-        // For now, we are focusing on exposing functions. The actual call to initializeDefineAreasCanvasLogic
-        // will be from the inline script in admin_maps.html after the image is loaded.
-        // The original selectedMapImageImg.onload within the old mapsListUl click listener
-        // has its core logic now encapsulated or to be called by initializeDefineAreasCanvasLogic.
-
-        /*
-        // This entire block for mapsListUl is commented out as its functionality is replaced
-        // by the inline script in templates/admin_maps.html which uses a table and global functions.
-        if (mapsListUl) { // This targets the old UL. The new table has its own delete logic.
-            mapsListUl.addEventListener('click', async function(event) {
-                if (event.target.classList.contains('delete-map-btn')) { // This is for the old list
-                    const button = event.target;
-                    const mapId = button.dataset.mapId;
-                    const mapName = button.dataset.mapName;
-
-                    if (confirm(`Are you sure you want to delete the map "${mapName}" (ID: ${mapId})? This will also unmap any resources on it.`)) {
-                        showLoading(adminMapsListStatusDiv, `Deleting map ${mapName}...`);
-                        try {
-                            await apiCall(`/api/admin/maps/${mapId}`, { method: 'DELETE' }, adminMapsListStatusDiv);
-                            showSuccess(adminMapsListStatusDiv, `Map "${mapName}" deleted successfully.`);
-                            fetchAndDisplayMaps(); // Refresh the list
-
-                            // If the deleted map was being edited, hide the define areas section
-                            if (defineAreasSection.style.display !== 'none' && hiddenFloorMapIdInput.value === mapId) {
-                                defineAreasSection.style.display = 'none';
-                                if (selectedMapNameH3) selectedMapNameH3.textContent = '';
-                                if (selectedMapImageImg) { selectedMapImageImg.src = '#'; selectedMapImageImg.alt = 'No map selected'; }
-                                if (canvasCtx) canvasCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
-                                if (hiddenFloorMapIdInput) hiddenFloorMapIdInput.value = '';
-                                if (resourceToMapSelect) resourceToMapSelect.innerHTML = '<option value="">-- Select a Resource to Map --</option>';
-                                if (defineAreaForm) defineAreaForm.reset();
-                                if (areaDefinitionStatusDiv) areaDefinitionStatusDiv.innerHTML = '';
-                                existingMapAreas = [];
-                                currentDrawnRect = null;
-                                selectedAreaForEditing = null;
-                                const editDelBtns = document.getElementById('edit-delete-buttons');
-                                if (editDelBtns) editDelBtns.style.display = 'none';
-                                if (resourceActionsContainer) resourceActionsContainer.innerHTML = '<p><em>Select a resource to see its status or actions.</em></p>';
-                            }
-                        } catch (error) {
-                            // apiCall already shows the error in adminMapsListStatusDiv
-                            console.error(`Error deleting map ${mapName}:`, error);
-                        }
-                    }
-                }
-            });
-        }
-        */
 
         if (defineAreaForm) {
             defineAreaForm.addEventListener('submit', async function(event) {
@@ -2592,7 +2559,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         selectedUserIds.push(parseInt(cb.value));
                     });
                 }
-                // const roleIdsStr = authorizedRolesInput ? authorizedRolesInput.value : ""; // This was causing ReferenceError
 
                 let selectedRoleIds = [];
                 const rolesContainer = document.getElementById('define-area-authorized-roles-checkbox-container');
@@ -2606,18 +2572,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 const payload = { 
                     floor_map_id: floorMapId, 
                     coordinates: coordinates,
-                    // Send other properties if the form is extended to manage them directly
-                    // For now, assuming these are managed on the main Resource Management page,
-                    // and map_info PUT only updates map-specific data.
-                    // If you want to update these here, add them to payload:
-                    booking_restriction: bookingPermissionDropdown.value, // Example: if you want to update this
-                    allowed_user_ids: selectedUserIds.join(','), // Example: if you want to update this
-                    role_ids: selectedRoleIds // Send as array of ints
+                    booking_restriction: bookingPermissionDropdown.value,
+                    allowed_user_ids: selectedUserIds.join(','),
+                    role_ids: selectedRoleIds
                 };
 
                 try {
-                    // This endpoint is for mapping an existing resource.
-                    // If the resource itself (name, capacity etc) needs update, use /api/admin/resources/{id}
                     const responseData = await apiCall(
                         `/api/admin/resources/${selectedResourceId}/map_info`, 
                         { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 
@@ -2626,13 +2586,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     showSuccess(areaDefinitionStatusDiv, `Area mapping saved for resource '${responseData.name || selectedResourceId}'!`);
                     const mapIdRefresh = hiddenFloorMapIdInput.value;
                     if (mapIdRefresh) {
-                        await populateResourcesForMapping(mapIdRefresh); // Refresh dropdown
-                        await fetchAndDrawExistingMapAreas(mapIdRefresh); // Redraw map areas
+                        await populateResourcesForMapping(mapIdRefresh);
+                        await fetchAndDrawExistingMapAreas(mapIdRefresh);
                     }
                     currentDrawnRect = null; 
-                    if (selectedAreaForEditing && selectedAreaForEditing.resource_id === parseInt(selectedResourceId)) { // Use resource_id
+                    if (selectedAreaForEditing && selectedAreaForEditing.resource_id === parseInt(selectedResourceId)) {
                         selectedAreaForEditing.map_coordinates = coordinates; 
-                        // Update other fields if they were part of payload and response
                     }
                     redrawCanvas(); 
                 } catch (error) {
@@ -2646,7 +2605,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (deleteSelectedAreaBtn) {
             deleteSelectedAreaBtn.addEventListener('click', async function() {
-                console.log('Attempting to delete area. Current selectedAreaForEditing:', JSON.parse(JSON.stringify(selectedAreaForEditing || {}))); // DEBUG
+                console.log('Attempting to delete area. Current selectedAreaForEditing:', JSON.parse(JSON.stringify(selectedAreaForEditing || {})));
                 if (!selectedAreaForEditing || !selectedAreaForEditing.id) {
                     alert("No area selected for deletion, or selected area has no valid resource ID."); return;
                 }
@@ -2655,7 +2614,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
                 showLoading(areaDefinitionStatusDiv, `Deleting mapping for ${resourceName}...`);
                 try {
-                    const resourceIdForDeletion = selectedAreaForEditing.id; // This should be the resource_id
+                    const resourceIdForDeletion = selectedAreaForEditing.id;
                     const responseData = await apiCall(
                         `/api/admin/resources/${resourceIdForDeletion}/map_info`,
                         { method: 'DELETE' },
@@ -2669,7 +2628,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     if(resourceToMapSelect) resourceToMapSelect.value = '';
                     if(bookingPermissionDropdown) bookingPermissionDropdown.value = "";
                     if (authorizedRolesCheckboxContainer) authorizedRolesCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
-                    // Also clear authorizedUsersCheckboxContainer if it's being used in this form
                     if (authorizedUsersCheckboxContainer) authorizedUsersCheckboxContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
                     currentDrawnRect = null;
                     const mapIdRefresh = hiddenFloorMapIdInput.value;
@@ -2680,12 +2638,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     redrawCanvas();
                 } catch (error) {
                     console.error('Error deleting map mapping:', error.message);
-                     // apiCall should handle displaying the error in areaDefinitionStatusDiv
                 }
             });
         }
 
-        if (editSelectedAreaBtn) { // This button just populates the form for editing
+        if (editSelectedAreaBtn) {
             editSelectedAreaBtn.addEventListener('click', function() {
                 if (!selectedAreaForEditing || !selectedAreaForEditing.id || !selectedAreaForEditing.map_coordinates) {
                     alert("No area selected for editing, or selected area is missing data."); return;
@@ -2750,7 +2707,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         publishBtn.dataset.resourceId = resourceId;
                         publishBtn.addEventListener('click', handlePublishResource); 
                         resourceActionsContainer.appendChild(publishBtn);
-                    } else { // Covers 'published', 'archived', etc.
+                    } else {
                         const statusText = document.createElement('p');
                         statusText.textContent = `Status: ${resourceStatus.charAt(0).toUpperCase() + resourceStatus.slice(1)}`;
                         resourceActionsContainer.appendChild(statusText);
@@ -2797,13 +2754,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const mapId = mapContainer.dataset.mapId;
         const mapLoadingStatusDiv = document.getElementById('map-loading-status');
         const mapViewTitleH1 = document.getElementById('map-view-title');
-        const mapAvailabilityDateInput = document.getElementById('map-availability-date'); // This is for map_view.html
+        const mapAvailabilityDateInput = document.getElementById('map-availability-date');
         const mapLocationSelect = document.getElementById('map-location-select');
         const mapFloorSelect = document.getElementById('map-floor-select');
         let allMapInfo = [];
         
         if(mapAvailabilityDateInput) { 
-            mapAvailabilityDateInput.value = getTodayDateString(); // Use global getTodayDateString
+            mapAvailabilityDateInput.value = getTodayDateString();
         }
 
         function updateFloorSelectOptions() {
@@ -2827,7 +2784,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const fl = mapFloorSelect ? mapFloorSelect.value : '';
             const found = allMapInfo.find(m => (!loc || m.location === loc) && (!fl || m.floor === fl));
             if (found && found.id != mapId) {
-                window.location.href = `/map_view/${found.id}${window.location.search}`; // Preserve query params like date
+                window.location.href = `/map_view/${found.id}${window.location.search}`;
             }
         }
 
@@ -2867,10 +2824,6 @@ document.addEventListener('DOMContentLoaded', function() {
                             const coords = resource.map_coordinates;
                             const areaDiv = document.createElement('div');
                             areaDiv.className = 'resource-area';
-                            // For this general map view (map_view.html), map_details.offset_x and map_details.offset_y
-                            // (available from the API) are intentionally NOT applied.
-                            // This page displays the map with raw coordinates as stored.
-                            // Offsets are applied selectively on other pages like new_booking_map.js.
                             areaDiv.style.left = `${coords.x}px`; areaDiv.style.top = `${coords.y}px`;
                             areaDiv.style.width = `${coords.width}px`; areaDiv.style.height = `${coords.height}px`;
                             areaDiv.textContent = resource.name;
@@ -2929,7 +2882,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             if (isMapAreaClickable && mapAreaAvailabilityClass !== 'resource-area-fully-booked' && mapAreaAvailabilityClass !== 'resource-area-unknown') { 
                                 areaDiv.classList.add('map-area-clickable');
                                 const newAreaDiv = areaDiv.cloneNode(true);
-                                areaDiv.parentNode?.replaceChild(newAreaDiv, areaDiv); // Check parentNode
+                                areaDiv.parentNode?.replaceChild(newAreaDiv, areaDiv);
                                 areaDiv = newAreaDiv; 
 
                                 areaDiv.addEventListener('click', function() {
@@ -3014,7 +2967,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const bookedEnd = new Date(`${dateString}T${booked.end_time}`);
                     if (bookedStart < slotEnd && bookedEnd > slotStart) {
                         isBooked = true;
-                        if (booked.user_name === sessionStorage.getItem('loggedInUserUsername')) myBookingInfo = booked; // Corrected key
+                        if (booked.user_name === sessionStorage.getItem('loggedInUserUsername')) myBookingInfo = booked;
                         break;
                     }
                 }
@@ -3025,13 +2978,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     slotDiv.classList.add('time-slot-booked');
                     if (myBookingInfo) {
                         slotDiv.textContent += ' (Your Booking)';
-                        if (myBookingInfo.can_check_in) { // Assuming can_check_in is a boolean field
+                        if (myBookingInfo.can_check_in) {
                             const btn = document.createElement('button');
-                            btn.textContent = 'Check In'; btn.className = 'button button-sm button-success ms-2'; // Standardized classes
+                            btn.textContent = 'Check In'; btn.className = 'button button-sm button-success ms-2';
                             btn.addEventListener('click', async (e)=>{
                                 e.stopPropagation();
                                 try {
-                                    await apiCall(`/api/bookings/${myBookingInfo.booking_id}/check_in`, {method: 'POST'}, modalStatusMessage); // Ensure POST
+                                    await apiCall(`/api/bookings/${myBookingInfo.booking_id}/check_in`, {method: 'POST'}, modalStatusMessage);
                                     btn.remove(); slotDiv.textContent = slotLabel + ' (Checked In)';
                                 } catch (err) { console.error('Check in failed', err); }
                             });
@@ -3063,7 +3016,7 @@ document.addEventListener('DOMContentLoaded', function() {
             modalConfirmBookingBtn.addEventListener('click', async function() {
                 modalStatusMessage.textContent = ''; 
                 if (!selectedTimeSlotForBooking) { showError(modalStatusMessage, 'Please select an available time slot.'); return; }
-                const loggedInUsername = sessionStorage.getItem('loggedInUserUsername'); // Corrected key
+                const loggedInUsername = sessionStorage.getItem('loggedInUserUsername');
                 if (!loggedInUsername) { showError(modalStatusMessage, 'Please login to make a booking.'); return; }
 
                 const resourceId = this.dataset.resourceId; 
@@ -3072,7 +3025,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const bookingData = {
                     resource_id: parseInt(resourceId, 10), date_str: dateString,
                     start_time_str: selectedTimeSlotForBooking.startTimeStr, end_time_str: selectedTimeSlotForBooking.endTimeStr,
-                    title: title, user_name: loggedInUsername // Corrected key
+                    title: title, user_name: loggedInUsername
                 };
                 showLoading(modalStatusMessage, 'Submitting booking...');
                 try {
@@ -3102,7 +3055,7 @@ document.addEventListener('DOMContentLoaded', function() {
             <label>Equipment: <input type="text" id="filter-equipment" placeholder="Projector" class="form-control-sm"></label>
             <label>Tags: <input type="text" id="filter-tags" placeholder="tag1,tag2" class="form-control-sm"></label>
             <button id="apply-resource-filters" class="button button-primary">Apply Filters</button>
-        `; // Added some classes for styling
+        `;
         availableResourcesListDiv.parentElement.insertBefore(filterContainer, availableResourcesListDiv);
         document.getElementById('apply-resource-filters').addEventListener('click', displayAvailableResourcesNow);
         displayAvailableResourcesNow();
@@ -3110,17 +3063,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Accessibility Controls ---
     // ... (Keep existing accessibility controls logic as is) ...
-    // Theme Toggle (now in footer)
     const themeToggleBtn = document.getElementById('theme-toggle');
     if (themeToggleBtn) themeToggleBtn.addEventListener('click', toggleTheme);
 
-    // High Contrast Toggle (new button in footer)
     const toggleHighContrastBtnNew = document.getElementById('toggle-high-contrast');
     if (toggleHighContrastBtnNew) {
         toggleHighContrastBtnNew.addEventListener('click', toggleHighContrast);
     }
 
-    // Font Size Buttons (new buttons in footer)
     const increaseFontSizeBtnNew = document.getElementById('increase-font-size');
     if (increaseFontSizeBtnNew) {
         increaseFontSizeBtnNew.addEventListener('click', increaseFontSize);
@@ -3136,7 +3086,6 @@ document.addEventListener('DOMContentLoaded', function() {
         resetFontSizeBtnNew.addEventListener('click', resetFontSize);
     }
 
-    // Keep existing functions for these controls
     function toggleHighContrast() {
         document.body.classList.toggle('high-contrast');
         localStorage.setItem('highContrastEnabled', document.body.classList.contains('high-contrast'));
@@ -3163,7 +3112,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (currentSizeStyle && currentSizeStyle.endsWith('rem')) return parseFloat(currentSizeStyle);
         const computedRootFontSize = getComputedStyle(document.documentElement).fontSize;
         if (computedRootFontSize && computedRootFontSize.endsWith('px')) {
-            const rootBasePxFromCSS = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-size').trim().replace('px','')) || 16; // Ensure :root --font-size is read if set in px
+            const rootBasePxFromCSS = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-size').trim().replace('px','')) || 16;
             return parseFloat(computedRootFontSize) / rootBasePxFromCSS;
         }
         return BASE_FONT_SIZE_REM;
@@ -3182,7 +3131,6 @@ document.addEventListener('DOMContentLoaded', function() {
             document.documentElement.style.fontSize = savedFontSize;
         } else localStorage.removeItem('rootFontSize');
     }
-    // Event listeners for new font size buttons are already added above.
 
     if (manualBackupBtn) {
         const manualBackupStatusDiv = document.getElementById('manual-backup-status');
@@ -3204,8 +3152,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     loadHighContrastPreference(); loadFontSizePreference(); loadThemePreference();
 
-    // --- Language Selection ---
-    // ... (Keep existing language selection logic as is) ...
     const languageSelector = document.getElementById('language-selector');
     function handleLanguageChange() {
         const selectedLang = languageSelector.value;
@@ -3232,14 +3178,11 @@ document.addEventListener('DOMContentLoaded', function() {
     if (languageSelector) languageSelector.addEventListener('change', handleLanguageChange);
     loadLanguagePreference();
 
-    // --- Real-time Updates via Socket.IO ---
-    // ... (Keep existing Socket.IO logic as is) ...
     if (typeof io !== 'undefined') {
         const socket = io();
-        socket.on('booking_updated', (data) => { // Added data argument
+        socket.on('booking_updated', (data) => {
             console.log('Socket.IO: booking_updated received', data);
-            // Calendar view on resources.html
-            if (calendarTable && roomSelectDropdown && availabilityDateInputCalendar && roomSelectDropdown.value == data.resource_id) { // Check if update affects current view
+            if (calendarTable && roomSelectDropdown && availabilityDateInputCalendar && roomSelectDropdown.value == data.resource_id) {
                 const selectedOption = roomSelectDropdown.selectedOptions[0];
                 if (selectedOption) {
                     const resourceDetails = {
@@ -3252,35 +3195,19 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
 
-            // Map view page
             if (typeof fetchAndRenderMap === 'function' && mapContainer && mapContainer.dataset.mapId) {
-                // Check if the update is relevant to any resource on the current map
-                // This might require fetching map details again or checking against currently displayed resources.
-                // For simplicity, just refetch/render if any booking changes.
-                // A more optimized approach would be to check if data.resource_id is on the current map.
                 console.log('Socket.IO: Refreshing map view due to booking update.');
                 const mapId = mapContainer.dataset.mapId;
-                const dateInputMap = document.getElementById('map-availability-date'); // Date picker on map_view.html
+                const dateInputMap = document.getElementById('map-availability-date');
                 const dateStr = dateInputMap ? dateInputMap.value : getTodayDateString();
                 fetchAndRenderMap(mapId, dateStr);
             }
 
-            // Resource buttons grid on resources.html
             if (typeof updateAllButtonColors === 'function' && resourceButtonsContainer) {
                  console.log('Socket.IO: Refreshing resource button colors due to booking update for resource_id:', data.resource_id);
-                 // More targeted update: only update the specific button if possible
-                 // Decided to call updateAllButtonColors to ensure userBookingsForDate is refreshed.
-                 // const buttonToUpdate = resourceButtonsContainer.querySelector(`.resource-availability-button[data-resource-id="${data.resource_id}"]`);
-                 // if (buttonToUpdate && availabilityDateInput) {
-                 //     updateButtonColorModified(buttonToUpdate, availabilityDateInput.value); // This would need userBookingsForDate
-                 // } else if (buttonToUpdate) {
-                 //     updateButtonColorModified(buttonToUpdate, getTodayDateString()); // This would need userBookingsForDate
-                 // } else {
                     updateAllButtonColors();
-                 // }
             }
 
-            // For the new booking map (if active)
             const newBookingMapContainer = document.getElementById('new-booking-map-container');
             if (newBookingMapContainer) {
                 console.log('Socket.IO: Requesting refresh for new_booking_map.js map view via custom event.');
@@ -3292,9 +3219,6 @@ document.addEventListener('DOMContentLoaded', function() {
         socket.on('connect_error', (err) => console.error('Socket.IO connection error:', err));
     }
 
-
-    // --- User Dropdown Menu Logic (Global) ---
-    // ... (Keep existing user dropdown logic as is) ...
     const userDropdownButtonGlobal = document.getElementById('user-dropdown-button');
     const userDropdownMenuGlobal = document.getElementById('user-dropdown-menu');
     if (userDropdownButtonGlobal && userDropdownMenuGlobal) {
@@ -3314,32 +3238,29 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     const logoutLinkDropdownGlobal = document.getElementById('logout-link-dropdown');
-    if (logoutLinkDropdownGlobal && typeof handleLogout === 'function') { // Ensure handleLogout is defined
-        logoutLinkDropdownGlobal.removeEventListener('click', handleLogout); // Prevent duplicates if script runs multiple times or parts are reloaded
+    if (logoutLinkDropdownGlobal && typeof handleLogout === 'function') {
+        logoutLinkDropdownGlobal.removeEventListener('click', handleLogout);
         logoutLinkDropdownGlobal.addEventListener('click', handleLogout);
     }
 
-    // --- Mobile Menu Toggle Logic ---
     const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
-    const sidebarNav = document.getElementById('sidebar'); // nav#sidebar
+    const sidebarNav = document.getElementById('sidebar');
 
     if (mobileMenuToggle && sidebarNav) {
         mobileMenuToggle.addEventListener('click', function() {
             sidebarNav.classList.toggle('sidebar-open');
             const isExpanded = sidebarNav.classList.contains('sidebar-open');
             this.setAttribute('aria-expanded', isExpanded);
-            // Optional: Change hamburger to X icon
             if (isExpanded) {
-                this.innerHTML = '<span>&times;</span>'; // Simple X
-                this.style.fontSize = '2rem'; // Adjust X size if needed
+                this.innerHTML = '<span>&times;</span>';
+                this.style.fontSize = '2rem';
             } else {
-                this.innerHTML = '<span></span><span></span><span></span>'; // Hamburger bars
-                this.style.fontSize = '1.5rem'; // Reset to original hamburger size
+                this.innerHTML = '<span></span><span></span><span></span>';
+                this.style.fontSize = '1.5rem';
             }
         });
     }
 
-    // --- Embedded Login Form for PIN Check-in Page ---
     const embeddedCheckinLoginForm = document.getElementById('embedded-checkin-login-form');
     if (embeddedCheckinLoginForm) {
         embeddedCheckinLoginForm.addEventListener('submit', async function(event) {
@@ -3373,7 +3294,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        // CSRF token is typically not required for login routes marked @csrf.exempt
                     },
                     body: JSON.stringify({ username, password })
                 });
@@ -3385,19 +3305,15 @@ document.addEventListener('DOMContentLoaded', function() {
                         messageDiv.className = 'status-message success-message';
                         messageDiv.style.display = 'block';
                     }
-                    // Update auth status for the navbar etc.
-                    // Since this is a full redirect, updateAuthLink() might not be strictly necessary before redirect,
-                    // but good to ensure session storage is updated if any subsequent script on the *next* page relies on it immediately.
                     if (data.user) {
                          sessionStorage.setItem('loggedInUserUsername', data.user.username);
                          sessionStorage.setItem('loggedInUserIsAdmin', data.user.is_admin ? 'true' : 'false');
                          sessionStorage.setItem('loggedInUserId', data.user.id);
                     }
-                    sessionStorage.setItem('userPerformedLoginAction', 'true'); // Signal that login was intentional
+                    sessionStorage.setItem('userPerformedLoginAction', 'true');
                     sessionStorage.removeItem('explicitlyLoggedOut');
 
 
-                    // Redirect to the original check-in URL
                     window.location.href = nextUrl;
                 } else {
                     if (messageDiv) {
@@ -3417,4 +3333,3 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
-

@@ -46,18 +46,50 @@ def get_resources():
 @api_resources_bp.route('/resources/<int:resource_id>/availability', methods=['GET'])
 def get_resource_availability(resource_id):
     logger = current_app.logger
-    active_booking_statuses = ['approved', 'pending', 'checked_in', 'confirmed'] # Define active statuses
+    active_booking_statuses = ['approved', 'pending', 'checked_in', 'confirmed']
 
-    date_str = request.args.get('date')
-    target_date_obj = None
-    if date_str:
-        try:
-            target_date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
-        except ValueError:
-            logger.warning(f"Invalid date format provided: {date_str}")
-            return jsonify({'error': 'Invalid date format. Please use YYYY-MM-DD.'}), 400
+    # Fetch BookingSettings for global_time_offset_hours
+    booking_settings = BookingSettings.query.first()
+    global_time_offset_hours = 0
+    if booking_settings and hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None:
+        global_time_offset_hours = booking_settings.global_time_offset_hours
     else:
-        target_date_obj = date.today()
+        logger.warning(f"API Availability: BookingSettings not found or global_time_offset_hours not set for resource {resource_id}. Using 0 offset.")
+
+    # Calculate effective_current_datetime_venue_local_naive
+    now_utc = datetime.now(timezone.utc)
+    effective_current_datetime_venue_local_aware = now_utc + timedelta(hours=global_time_offset_hours)
+    effective_current_datetime_venue_local_naive = effective_current_datetime_venue_local_aware.replace(tzinfo=None)
+
+    # Get and validate target_date_obj from request.args.get('date')
+    date_str = request.args.get('date')
+    if not date_str:
+        logger.warning(f"API Availability: 'date' parameter missing for resource {resource_id}.")
+        return jsonify({'error': 'Date parameter is required', 'message': 'Please provide a date in YYYY-MM-DD format.'}), 400
+    try:
+        target_date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        logger.warning(f"API Availability: Invalid date format '{date_str}' for resource {resource_id}.")
+        return jsonify({'error': 'Invalid date format', 'message': 'Please use YYYY-MM-DD format for the date.'}), 400
+
+    # Define standard slots and determine their "passed" status
+    standard_slots_definition = {
+        "first_half": {"name": "First Half-Day", "start_time_str": "08:00:00", "end_time_str": "12:00:00"},
+        "second_half": {"name": "Second Half-Day", "start_time_str": "13:00:00", "end_time_str": "17:00:00"},
+        "full_day": {"name": "Full Day", "start_time_str": "08:00:00", "end_time_str": "17:00:00"}
+    }
+    standard_slot_statuses = {}
+    for key, slot_info in standard_slots_definition.items():
+        slot_end_hour, slot_end_minute, _ = map(int, slot_info["end_time_str"].split(':'))
+        slot_end_datetime_on_target_date_naive = datetime.combine(target_date_obj, time(slot_end_hour, slot_end_minute))
+
+        is_passed = slot_end_datetime_on_target_date_naive < effective_current_datetime_venue_local_naive
+
+        standard_slot_statuses[key] = {
+            "start_time_str": slot_info["start_time_str"],
+            "end_time_str": slot_info["end_time_str"],
+            "is_passed": is_passed
+        }
 
     try:
         resource = Resource.query.get(resource_id)
@@ -70,25 +102,47 @@ def get_resource_availability(resource_id):
 
         bookings_on_date = Booking.query.filter(
             Booking.resource_id == resource_id,
-            func.date(Booking.start_time) == target_date_obj,
+            func.date(Booking.start_time) == target_date_obj, # Compares date part of stored naive local start_time
             func.trim(func.lower(Booking.status)).in_(active_booking_statuses)
         ).all()
-        booked_slots = []
+
+        booked_slots_result = [] # Renamed from booked_slots to avoid confusion with variable name in loop
         for booking in bookings_on_date:
-            grace = current_app.config.get('CHECK_IN_GRACE_MINUTES', 15)
-            now = datetime.now(timezone.utc)
-            booking_start_time_aware = booking.start_time.replace(tzinfo=timezone.utc) if booking.start_time.tzinfo is None else booking.start_time
-            can_check_in = (booking.checked_in_at is None and
-                            booking_start_time_aware - timedelta(minutes=grace) <= now <= booking_start_time_aware + timedelta(minutes=grace))
-            booked_slots.append({
+            # Check-in window calculation logic (from existing _fetch_user_bookings_data, simplified for this context)
+            # This 'can_check_in' flag is specific to the current user viewing their own bookings.
+            # For general availability, this flag might not be relevant or needs context of who is viewing.
+            # Assuming here it's for the booking owner if current_user is available, otherwise false.
+            can_check_in_flag_for_this_booking = False
+            if current_user.is_authenticated and booking.user_name == current_user.username:
+                if booking_settings and booking_settings.enable_check_in_out:
+                    check_in_minutes_before = booking_settings.check_in_minutes_before if booking_settings.check_in_minutes_before is not None else 15
+                    check_in_minutes_after = booking_settings.check_in_minutes_after if booking_settings.check_in_minutes_after is not None else 15
+
+                    # effective_check_in_base_time_local_naive is booking.start_time (naive local)
+                    # as per recent change (no past_booking_adjustment_hours for check-in window base)
+                    booking_start_local_naive_for_checkin = booking.start_time
+                    check_in_window_start = booking_start_local_naive_for_checkin - timedelta(minutes=check_in_minutes_before)
+                    check_in_window_end = booking_start_local_naive_for_checkin + timedelta(minutes=check_in_minutes_after)
+
+                    if booking.checked_in_at is None and booking.status == 'approved' and \
+                       (check_in_window_start <= effective_current_datetime_venue_local_naive <= check_in_window_end):
+                        can_check_in_flag_for_this_booking = True
+
+            booked_slots_result.append({
                 'title': booking.title, 'user_name': booking.user_name,
-                'start_time': booking.start_time.strftime('%H:%M:%S'), 'end_time': booking.end_time.strftime('%H:%M:%S'),
+                'start_time': booking.start_time.strftime('%H:%M:%S'), # Naive local time
+                'end_time': booking.end_time.strftime('%H:%M:%S'),     # Naive local time
                 'booking_id': booking.id,
-                'checked_in_at': booking.checked_in_at.isoformat() if booking.checked_in_at else None,
-                'checked_out_at': booking.checked_out_at.isoformat() if booking.checked_out_at else None,
-                'can_check_in': can_check_in
+                'checked_in_at': booking.checked_in_at.isoformat() if booking.checked_in_at else None, # Assuming naive UTC storage
+                'checked_out_at': booking.checked_out_at.isoformat() if booking.checked_out_at else None, # Assuming naive UTC storage
+                'can_check_in': can_check_in_flag_for_this_booking
             })
-        return jsonify(booked_slots), 200
+
+        return jsonify({
+            "booked_slots": booked_slots_result,
+            "standard_slot_statuses": standard_slot_statuses,
+            "effective_date_processed": date_str
+        }), 200
     except Exception as e:
         logger.exception(f"Error fetching availability for resource {resource_id} on {target_date_obj}:")
         return jsonify({'error': 'Failed to fetch resource availability due to a server error.'}), 500
