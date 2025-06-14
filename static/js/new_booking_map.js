@@ -30,6 +30,17 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
     console.log('[Debug] Using pastBookingAdjustmentHours:', pastBookingAdjustmentHours);
+
+    let globalTimeOffsetHours = 0;
+    if (calendarContainer && calendarContainer.dataset.globalTimeOffsetHours) {
+        globalTimeOffsetHours = parseFloat(calendarContainer.dataset.globalTimeOffsetHours);
+        if (isNaN(globalTimeOffsetHours)) {
+            globalTimeOffsetHours = 0;
+            console.warn('[Debug] Invalid global_time_offset_hours, defaulting to 0.');
+        }
+    }
+    console.log('[Debug] Using globalTimeOffsetHours:', globalTimeOffsetHours);
+
     const mapLocationButtonsContainer = document.getElementById('new-booking-map-location-buttons-container');
     const mapContainer = document.getElementById('new-booking-map-container');
     const mapLoadingStatusDiv = document.getElementById('new-booking-map-loading-status');
@@ -123,19 +134,56 @@ document.addEventListener('DOMContentLoaded', function () {
                         const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
                         if (dateStr === todayStr) {
-                            const effectiveNow = getEffectiveClientNow(pastBookingAdjustmentHours);
-                            const actualNow = new Date();
-                            const latestSlotEndTimeHour = 17;
-                            const latestSlotEndTimeMinute = 0;
-                            let shouldDisableToday = false;
+                            // Get current UTC time
+                            const nowUtc = new Date(Date.UTC(
+                                today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(),
+                                today.getUTCHours(), today.getUTCMinutes(), today.getUTCSeconds()
+                            ));
 
-                            if (effectiveNow.getHours() > latestSlotEndTimeHour || (effectiveNow.getHours() === latestSlotEndTimeHour && effectiveNow.getMinutes() > latestSlotEndTimeMinute)) {
+                            // Calculate effective venue 'now' by applying global offset
+                            const effectiveVenueNow = new Date(nowUtc.getTime() + globalTimeOffsetHours * 60 * 60 * 1000);
+
+                            // Calculate the cutoff time at the venue
+                            const venueCutoffTime = new Date(effectiveVenueNow.getTime() - pastBookingAdjustmentHours * 60 * 60 * 1000);
+
+                            const latestSlotEndTimeHour = 17; // Assuming venue local time
+                            const latestSlotEndTimeMinute = 0;
+
+                            // Create a datetime object for the end of the latest slot on the current day (venue local time)
+                            const latestSlotEndTodayVenueLocal = new Date(
+                                effectiveVenueNow.getFullYear(), // Use year/month/day from effectiveVenueNow to handle date correctly
+                                effectiveVenueNow.getMonth(),
+                                effectiveVenueNow.getDate(),
+                                latestSlotEndTimeHour,
+                                latestSlotEndTimeMinute
+                            );
+
+                            let shouldDisableToday = false;
+                            // If the venue's cutoff time is at or after the end of the latest standard slot for that day
+                            if (venueCutoffTime.getTime() >= latestSlotEndTodayVenueLocal.getTime()) {
                                 shouldDisableToday = true;
                             }
 
-                            console.log('[Debug] Flatpickr disable check for TODAY (' + dateStr + '): Actual time: ' + actualNow.getHours() + ':' + String(actualNow.getMinutes()).padStart(2, '0') + ', Effective time: ' + effectiveNow.getHours() + ':' + String(effectiveNow.getMinutes()).padStart(2, '0') + ' (Adjustment: ' + pastBookingAdjustmentHours + 'h). Disabling? ' + shouldDisableToday);
+                            console.log(`[Debug] Flatpickr disable check for TODAY (${dateStr}):
+` +
+                                `  Client Local Now: ${today.toISOString()}
+` +
+                                `  UTC Now: ${nowUtc.toISOString()}
+` +
+                                `  Global Offset: ${globalTimeOffsetHours}h
+` +
+                                `  Effective Venue Now: ${effectiveVenueNow.toISOString()}
+` +
+                                `  Past Adjustment: ${pastBookingAdjustmentHours}h
+` +
+                                `  Venue Cutoff Time: ${venueCutoffTime.toISOString()}
+` +
+                                `  Latest Slot End (Venue Local): ${latestSlotEndTodayVenueLocal.toISOString()}
+` +
+                                `  Disabling Today?: ${shouldDisableToday}`);
+
                             if (shouldDisableToday) {
-                                return true;
+                                return true; // Disable the entire day
                             }
                         }
                         const isDisabledByUnavailableList = unavailableDatesList.includes(dateStr);
@@ -879,11 +927,26 @@ document.addEventListener('DOMContentLoaded', function () {
                                         const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
                                         if (dateStr === todayStr) {
-                                            const effectiveNow = getEffectiveClientNow(pastBookingAdjustmentHours);
-                                            const latestSlotEndTimeHour = 17;
+                                            // Get current UTC time
+                                            const nowUtc = new Date(Date.UTC(
+                                                today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(),
+                                                today.getUTCHours(), today.getUTCMinutes(), today.getUTCSeconds()
+                                            ));
+                                            // Calculate effective venue 'now' by applying global offset
+                                            const effectiveVenueNow = new Date(nowUtc.getTime() + globalTimeOffsetHours * 60 * 60 * 1000);
+                                            // Calculate the cutoff time at the venue
+                                            const venueCutoffTime = new Date(effectiveVenueNow.getTime() - pastBookingAdjustmentHours * 60 * 60 * 1000);
+                                            const latestSlotEndTimeHour = 17; // Assuming venue local time
                                             const latestSlotEndTimeMinute = 0;
-                                            if (effectiveNow.getHours() > latestSlotEndTimeHour || (effectiveNow.getHours() === latestSlotEndTimeHour && effectiveNow.getMinutes() > latestSlotEndTimeMinute)) {
-                                                return true;
+                                            const latestSlotEndTodayVenueLocal = new Date(
+                                                effectiveVenueNow.getFullYear(),
+                                                effectiveVenueNow.getMonth(),
+                                                effectiveVenueNow.getDate(),
+                                                latestSlotEndTimeHour,
+                                                latestSlotEndTimeMinute
+                                            );
+                                            if (venueCutoffTime.getTime() >= latestSlotEndTodayVenueLocal.getTime()) {
+                                                return true; // Disable the entire day
                                             }
                                         }
                                         return newUnavailableDates.includes(dateStr);
