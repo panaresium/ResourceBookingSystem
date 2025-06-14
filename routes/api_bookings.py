@@ -267,6 +267,7 @@ def create_booking():
     # Define lists of active statuses (lowercase)
     # These statuses are considered "active" for conflict checks or quota counting.
     active_conflict_statuses = ['approved', 'pending', 'checked_in', 'confirmed']
+    released_statuses = ['cancelled', 'system_cancelled_no_checkin', 'cancelled_by_admin', 'rejected', 'cancelled_admin_acknowledged']
     active_quota_statuses = ['approved', 'pending', 'checked_in', 'confirmed']
 
     data = request.get_json()
@@ -421,86 +422,119 @@ def create_booking():
                 current_app.logger.info(f"User {user_name_for_record} booking conflict (first slot) with booking ID: {first_slot_user_conflict.id}, Status: '{first_slot_user_conflict.status}' for resource '{conflicting_resource_name}' due to allow_multiple_resources_same_time=False.")
                 return jsonify({'error': f"You already have a booking for resource '{conflicting_resource_name}' from {first_slot_user_conflict.start_time.strftime('%H:%M')} to {first_slot_user_conflict.end_time.strftime('%H:%M')} that overlaps with the requested time slot on {first_occ_start.strftime('%Y-%m-%d')}."}), 409
 
-    for occ_start, occ_end in occurrences:
-        conflicting = Booking.query.filter(
-            Booking.resource_id == resource_id,
-            Booking.start_time < occ_end,
-            Booking.end_time > occ_start,
-            sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_conflict_statuses)
-        ).first()
-        if conflicting:
-            current_app.logger.info(f"Booking conflict for resource {resource_id} on slot {occ_start}-{occ_end} with existing booking ID: {conflicting.id}, Status: '{conflicting.status}'.")
-            # Waitlist logic (condensed for brevity, assuming it's still desired)
-            if WaitlistEntry.query.filter_by(resource_id=resource_id).count() < current_app.config.get('MAX_WAITLIST_PER_RESOURCE', 2): # Example: make max waitlist configurable
-                existing_entry = WaitlistEntry.query.filter_by(resource_id=resource_id, user_id=current_user.id).first()
-                if not existing_entry:
-                    waitlist_entry = WaitlistEntry(resource_id=resource_id, user_id=current_user.id, timestamp=datetime.utcnow())
-                    db.session.add(waitlist_entry)
-                    # db.session.commit() # Commit waitlist entry separately or with main booking transaction
-                    current_app.logger.info(f"Added user {current_user.id} to waitlist for resource {resource_id} due to conflict with booking {conflicting.id}")
-            return jsonify({'error': f"This time slot ({occ_start.strftime('%Y-%m-%d %H:%M')} to {occ_end.strftime('%Y-%m-%d %H:%M')}) on resource '{resource.name}' is already booked or conflicts. You may have been added to the waitlist if available."}), 409
+    created_bookings = []
+    try: # Moved try block to encompass the loop for potential reused bookings
+        for occ_start, occ_end in occurrences: # Renamed occ_start_local, occ_end_local to occ_start, occ_end for clarity
 
-        if not allow_multiple_resources_same_time_effective:
-            user_conflicting_recurring = Booking.query.filter(
-                Booking.user_name == user_name_for_record,
-                Booking.resource_id != resource_id, # Check on other resources
+            exact_match_booking = Booking.query.filter_by(
+                resource_id=resource_id,
+                start_time=occ_start, # occ_start is naive local
+                end_time=occ_end      # occ_end is naive local
+            ).first()
+
+            if exact_match_booking and exact_match_booking.status and exact_match_booking.status.strip().lower() in released_statuses:
+                current_app.logger.info(f"Reusing existing released booking ID {exact_match_booking.id} for resource {resource_id} by user {user_name_for_record} for slot {occ_start}-{occ_end}.")
+                exact_match_booking.user_name = user_name_for_record
+                exact_match_booking.title = title
+                exact_match_booking.status = 'approved'
+                exact_match_booking.checked_in_at = None
+                exact_match_booking.checked_out_at = None
+                exact_match_booking.admin_deleted_message = None
+                exact_match_booking.checkin_reminder_sent_at = None # Reset reminder status
+                exact_match_booking.last_modified = datetime.utcnow() # Naive UTC
+
+                # Regenerate check-in token and expiry
+                exact_match_booking.check_in_token = secrets.token_urlsafe(32)
+                token_validity_hours = current_app.config.get('CHECK_IN_TOKEN_VALIDITY_HOURS', 48)
+
+                # Convert exact_match_booking.end_time (naive local) to naive UTC for token expiry calculation
+                utc_end_time = (exact_match_booking.end_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc)
+                exact_match_booking.check_in_token_expires_at = (utc_end_time + timedelta(hours=token_validity_hours)).replace(tzinfo=None)
+
+                exact_match_booking.booking_display_start_time = occ_start.time()
+                exact_match_booking.booking_display_end_time = occ_end.time()
+
+                created_bookings.append(exact_match_booking)
+                # db.session.flush([exact_match_booking]) # Flush changes for this reused booking
+                continue # Skip to next occurrence
+
+            # If no exact match, or exact match is not in a released status, proceed with conflict checks and new booking creation.
+            conflicting = Booking.query.filter(
+                Booking.resource_id == resource_id,
                 Booking.start_time < occ_end,
                 Booking.end_time > occ_start,
                 sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_conflict_statuses)
             ).first()
 
-            if user_conflicting_recurring:
-                conflicting_resource_name = user_conflicting_recurring.resource_booked.name if user_conflicting_recurring.resource_booked else "an unknown resource"
-                current_app.logger.info(f"User {user_name_for_record} booking conflict (recurring slot) with booking ID: {user_conflicting_recurring.id}, Status: '{user_conflicting_recurring.status}' for resource '{conflicting_resource_name}' due to allow_multiple_resources_same_time=False.")
-                return jsonify({'error': f"You already have a booking for resource '{conflicting_resource_name}' from {user_conflicting_recurring.start_time.strftime('%H:%M')} to {user_conflicting_recurring.end_time.strftime('%H:%M')} that overlaps with the requested occurrence on {occ_start.strftime('%Y-%m-%d')}."}), 409
+            if conflicting:
+                current_app.logger.info(f"Booking conflict for resource {resource_id} on slot {occ_start}-{occ_end} with existing booking ID: {conflicting.id}, Status: '{conflicting.status}'.")
+                if WaitlistEntry.query.filter_by(resource_id=resource_id).count() < current_app.config.get('MAX_WAITLIST_PER_RESOURCE', 2):
+                    existing_entry = WaitlistEntry.query.filter_by(resource_id=resource_id, user_id=current_user.id).first()
+                    if not existing_entry:
+                        waitlist_entry = WaitlistEntry(resource_id=resource_id, user_id=current_user.id, timestamp=datetime.utcnow())
+                        db.session.add(waitlist_entry)
+                        current_app.logger.info(f"Added user {current_user.id} to waitlist for resource {resource_id} due to conflict with booking {conflicting.id}")
+                return jsonify({'error': f"This time slot ({occ_start.strftime('%Y-%m-%d %H:%M')} to {occ_end.strftime('%Y-%m-%d %H:%M')}) on resource '{resource.name}' is already booked or conflicts. You may have been added to the waitlist if available."}), 409
 
-    try:
-        created_bookings = []
-        for occ_start_local, occ_end_local in occurrences: # occ_start_local, occ_end_local are from user's perspective (effective local time)
-            # occ_start_local and occ_end_local are already naive datetime objects representing venue time
-            # No conversion to UTC needed here as we want to store them directly.
+            if not allow_multiple_resources_same_time_effective:
+                user_conflicting_recurring = Booking.query.filter(
+                    Booking.user_name == user_name_for_record,
+                    Booking.resource_id != resource_id,
+                    Booking.start_time < occ_end,
+                    Booking.end_time > occ_start,
+                    sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_conflict_statuses)
+                ).first()
+                if user_conflicting_recurring:
+                    conflicting_resource_name = user_conflicting_recurring.resource_booked.name if user_conflicting_recurring.resource_booked else "an unknown resource"
+                    current_app.logger.info(f"User {user_name_for_record} booking conflict (recurring slot) with booking ID: {user_conflicting_recurring.id}, Status: '{user_conflicting_recurring.status}' for resource '{conflicting_resource_name}' due to allow_multiple_resources_same_time=False.")
+                    return jsonify({'error': f"You already have a booking for resource '{conflicting_resource_name}' from {user_conflicting_recurring.start_time.strftime('%H:%M')} to {user_conflicting_recurring.end_time.strftime('%H:%M')} that overlaps with the requested occurrence on {occ_start.strftime('%Y-%m-%d')}."}), 409
 
+            # Create new booking instance if no reusable one was found and no conflicts
             new_booking = Booking(
                 resource_id=resource_id,
-                start_time=occ_start_local, # Store venue local time directly
-                end_time=occ_end_local,   # Store venue local time directly
+                start_time=occ_start, # Store venue local time directly
+                end_time=occ_end,   # Store venue local time directly
                 title=title,
                 user_name=user_name_for_record,
                 recurrence_rule=recurrence_rule_str,
-                booking_display_start_time=occ_start_local.time(),
-                booking_display_end_time=occ_end_local.time()
+                booking_display_start_time=occ_start.time(),
+                booking_display_end_time=occ_end.time()
             )
+            # For newly created bookings, token generation will happen after commit
             db.session.add(new_booking)
             created_bookings.append(new_booking)
-            # Defer commit until all bookings in a recurring series are validated and added, or handle rollback for series
-        db.session.commit() # Commit all bookings in the series at once
 
-        # Generate check-in tokens and set expiry
-        for new_booking in created_bookings:
-            new_booking.check_in_token = secrets.token_urlsafe(32)
-            token_validity_hours = current_app.config.get('CHECK_IN_TOKEN_VALIDITY_HOURS', 48)
-            # Ensure end_time is timezone-aware before adding timedelta.
-            # Assuming new_booking.end_time is naive UTC as stored in DB.
-            # If it were already aware, this replace might not be necessary or could be harmful.
-            # However, datetime.combine results in naive datetime.
-            aware_end_time = new_booking.end_time.replace(tzinfo=timezone.utc)
-            new_booking.check_in_token_expires_at = aware_end_time + timedelta(hours=token_validity_hours)
-            # Convert back to naive UTC if DB stores naive times
-            new_booking.check_in_token_expires_at = new_booking.check_in_token_expires_at.replace(tzinfo=None)
+        # Commit all new bookings and updates to reused bookings
+        db.session.commit()
 
-        db.session.commit() # Commit updates for tokens and expiry times
+        # Generate/regenerate check-in tokens and set expiry for newly created bookings
+        # Reused bookings already had their tokens updated and committed effectively by the main commit.
+        # However, if we only want one commit for tokens, this loop needs to handle both.
+        # For simplicity now, let's assume reused bookings are fine, and focus on new ones.
+        # A better approach might be to collect all bookings (new and reused) that need token updates.
+        for booking_obj in created_bookings:
+            if not booking_obj.check_in_token: # Only generate if not already set (i.e., for new bookings)
+                                               # Reused bookings have tokens set above.
+                booking_obj.check_in_token = secrets.token_urlsafe(32)
+                token_validity_hours = current_app.config.get('CHECK_IN_TOKEN_VALIDITY_HOURS', 48)
 
-        # Prepare and log email data for each booking
-        for new_booking in created_bookings:
+                # Convert booking_obj.end_time (naive local) to naive UTC for token expiry calculation
+                utc_booking_end_time = (booking_obj.end_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc)
+                booking_obj.check_in_token_expires_at = (utc_booking_end_time + timedelta(hours=token_validity_hours)).replace(tzinfo=None)
+
+        db.session.commit() # Commit token updates for new bookings
+
+        # Prepare and log email data for each booking (new or reused)
+        for booking_obj in created_bookings: # Changed variable name to booking_obj
             try:
-                user = User.query.filter_by(username=new_booking.user_name).first()
+                user = User.query.filter_by(username=booking_obj.user_name).first()
                 if not user or not user.email:
-                    current_app.logger.warning(f"User {new_booking.user_name} not found or has no email. Skipping confirmation email data preparation for booking {new_booking.id}.")
+                    current_app.logger.warning(f"User {booking_obj.user_name} not found or has no email. Skipping confirmation email data preparation for booking {booking_obj.id}.")
                     continue
 
-                resource_for_email = Resource.query.get(new_booking.resource_id) # Renamed to avoid conflict with outer scope 'resource'
+                resource_for_email = Resource.query.get(booking_obj.resource_id)
                 if not resource_for_email:
-                    current_app.logger.warning(f"Resource {new_booking.resource_id} not found. Skipping confirmation email data preparation for booking {new_booking.id}.")
+                    current_app.logger.warning(f"Resource {booking_obj.resource_id} not found. Skipping confirmation email data preparation for booking {booking_obj.id}.")
                     continue
 
                 floor_map_location = "N/A"
@@ -511,21 +545,21 @@ def create_booking():
                         floor_map_location = floor_map.location
                         floor_map_floor = floor_map.floor
                     else:
-                        current_app.logger.warning(f"FloorMap {resource_for_email.floor_map_id} not found for resource {resource_for_email.id}. Using N/A for location/floor for booking {new_booking.id}.")
+                        current_app.logger.warning(f"FloorMap {resource_for_email.floor_map_id} not found for resource {resource_for_email.id}. Using N/A for location/floor for booking {booking_obj.id}.")
 
                 check_in_url = None # Default to None
-                if new_booking.check_in_token:
-                     check_in_url = url_for('api_bookings.qr_check_in', token=new_booking.check_in_token, _external=True)
+                if booking_obj.check_in_token:
+                     check_in_url = url_for('api_bookings.qr_check_in', token=booking_obj.check_in_token, _external=True)
                 else:
-                    current_app.logger.warning(f"No check_in_token found for booking {new_booking.id}. Check-in URL will be None.")
+                    current_app.logger.warning(f"No check_in_token found for booking {booking_obj.id}. Check-in URL will be None.")
 
                 email_data = {
-                    'user_name': new_booking.user_name,
+                    'user_name': booking_obj.user_name,
                     'user_email': user.email,
-                    'booking_title': new_booking.title,
+                    'booking_title': booking_obj.title,
                     'resource_name': resource_for_email.name,
-                    'start_time': new_booking.start_time.strftime('%Y-%m-%d %H:%M'),
-                    'end_time': new_booking.end_time.strftime('%Y-%m-%d %H:%M'),
+                    'start_time': booking_obj.start_time.strftime('%Y-%m-%d %H:%M'),
+                    'end_time': booking_obj.end_time.strftime('%Y-%m-%d %H:%M'),
                     'location': floor_map_location,
                     'floor': floor_map_floor,
                     'resource_image_filename': resource_for_email.image_filename,
@@ -533,27 +567,20 @@ def create_booking():
                     'check_in_url': check_in_url,
                     'booking_confirmation_message': f"Your booking for {resource_for_email.name} has been confirmed."
                 }
-                # current_app.logger.info(f"Email data for booking {new_booking.id}: {email_data}") # Old log line
 
-                # Generate image with resource area marked
-                processed_image_path = None # Initialize
+                processed_image_path = None
                 if resource_for_email and resource_for_email.map_coordinates and resource_for_email.floor_map_id:
-                    # generate_booking_image now sources its own logger via current_app
                     processed_image_path = generate_booking_image(
-                        resource_for_email.id, # Pass resource ID
-                        resource_for_email.map_coordinates, # Pass map_coordinates string
-                        resource_for_email.name # Pass resource name
+                        resource_for_email.id,
+                        resource_for_email.map_coordinates,
+                        resource_for_email.name
                     )
-                elif resource_for_email.image_filename: # Check resource_for_email directly
-                    current_app.logger.info(f"Booking {new_booking.id}: Resource image filename present but no map coordinates for resource {resource_for_email.id}. No attachment image will be generated.")
+                elif resource_for_email.image_filename:
+                    current_app.logger.info(f"Booking {booking_obj.id}: Resource image filename present but no map coordinates for resource {resource_for_email.id}. No attachment image will be generated.")
                 else:
-                    current_app.logger.info(f"Booking {new_booking.id}: No resource image filename. No image will be generated or attached.")
+                    current_app.logger.info(f"Booking {booking_obj.id}: No resource image filename. No image will be generated or attached.")
 
-                # Render HTML email body
-                # Ensure render_template is imported: from flask import render_template
                 html_email_body = render_template('email/booking_confirmation.html', **email_data)
-
-                # Plain text body (fallback)
                 plain_text_body = (
                     f"Dear {email_data['user_name']},\n\n"
                     f"{email_data['booking_confirmation_message']}\n\n"
@@ -561,64 +588,53 @@ def create_booking():
                     f"- Resource: {email_data['resource_name']}\n"
                     f"- Title: {email_data['booking_title']}\n"
                     f"- Date & Time: {email_data['start_time']} - {email_data['end_time']}\n"
-                    f"- Location: {email_data['location']}\n" # Adjusted to match template
-                    f"- Floor: {email_data['floor']}\n\n"     # Adjusted to match template
+                    f"- Location: {email_data['location']}\n"
+                    f"- Floor: {email_data['floor']}\n\n"
                     f"Check-in URL: {email_data['check_in_url']}\n\n"
                     f"Thank you!"
                 )
-
                 send_email(
                     to_address=email_data['user_email'],
                     subject=f"Booking Confirmed: {email_data['resource_name']} - {email_data['booking_title']}",
                     body=plain_text_body,
                     html_body=html_email_body,
-                    attachment_path=processed_image_path # This will be None if image generation failed or wasn't applicable
+                    attachment_path=processed_image_path
                 )
-                current_app.logger.info(f"Booking confirmation email initiated for booking {new_booking.id} to {email_data['user_email']}.")
+                current_app.logger.info(f"Booking confirmation email initiated for booking {booking_obj.id} to {email_data['user_email']}.")
+            except Exception as e_email:
+                current_app.logger.error(f"Error processing or sending confirmation email for booking {booking_obj.id}: {e_email}", exc_info=True)
 
-            except Exception as e_email: # Changed variable name from 'e' to 'e_email'
-                current_app.logger.error(f"Error processing or sending confirmation email for booking {new_booking.id}: {e_email}", exc_info=True)
-
-        # Audit logging loop
-        for audit_booking in created_bookings: # Use a different loop variable
+        for audit_booking in created_bookings:
             resource_for_audit = Resource.query.get(audit_booking.resource_id)
             resource_name_for_audit = resource_for_audit.name if resource_for_audit else "Unknown Resource"
-            # Ensure user_name_for_record and title are correctly scoped or fetched if necessary.
-            # Using audit_booking.user_name and audit_booking.title for consistency with the booking object.
-            add_audit_log(action="CREATE_BOOKING", details=f"Booking ID {audit_booking.id} for resource ID {audit_booking.resource_id} ('{resource_name_for_audit}') created by user '{audit_booking.user_name}'. Title: '{audit_booking.title}'. Token generated.")
-            socketio.emit('booking_updated', {'action': 'created', 'booking_id': audit_booking.id, 'resource_id': audit_booking.resource_id})
+            action_taken = "REUSED_BOOKING" if audit_booking.last_modified > audit_booking.start_time else "CREATE_BOOKING" # Heuristic for reused
+            # More robust: check if it was in exact_match_booking and status changed
+            add_audit_log(action=action_taken, details=f"Booking ID {audit_booking.id} for resource ID {audit_booking.resource_id} ('{resource_name_for_audit}') processed for user '{audit_booking.user_name}'. Title: '{audit_booking.title}'. Token updated/generated.")
+            socketio.emit('booking_updated', {'action': 'created', 'booking_id': audit_booking.id, 'resource_id': audit_booking.resource_id}) # Client might need to handle 'reused' differently
 
         created_data = [{
-            'id': b.id,
-            'resource_id': b.resource_id,
-            'title': b.title,
-            'user_name': b.user_name,
-                'start_time': b.start_time.isoformat(),
-                'end_time': b.end_time.isoformat(),
-                'status': b.status,
-                'recurrence_rule': b.recurrence_rule,
-                'booking_display_start_time': b.booking_display_start_time.strftime('%H:%M') if b.booking_display_start_time else None,
-                'booking_display_end_time': b.booking_display_end_time.strftime('%H:%M') if b.booking_display_end_time else None
+            'id': b.id, 'resource_id': b.resource_id, 'title': b.title, 'user_name': b.user_name,
+            'start_time': b.start_time.isoformat(), 'end_time': b.end_time.isoformat(),
+            'status': b.status, 'recurrence_rule': b.recurrence_rule,
+            'booking_display_start_time': b.booking_display_start_time.strftime('%H:%M') if b.booking_display_start_time else None,
+            'booking_display_end_time': b.booking_display_end_time.strftime('%H:%M') if b.booking_display_end_time else None
         } for b in created_bookings]
         return jsonify({'bookings': created_data}), 201
 
-    except IntegrityError as ie: # Catch specific IntegrityError
+    except IntegrityError as ie:
         db.session.rollback()
-        current_app.logger.warning(f"IntegrityError during booking creation by {current_user.username} for resource {resource_id}: {ie}")
-        # Construct a user-friendly representation of the first attempted slot for the audit log
-        # Note: occurrences, date_str, start_time_str, end_time_str are from the outer scope of create_booking
+        current_app.logger.warning(f"IntegrityError during booking creation process (potentially during commit of reused or new bookings) by {current_user.username} for resource {resource_id}: {ie}")
         first_occ_start_local, _ = occurrences[0] if occurrences else (None, None)
-        slot_time_for_log = f"{date_str} {start_time_str}-{end_time_str}" # Original request data
-        if first_occ_start_local: # If occurrences were generated, use the first actual slot time
+        slot_time_for_log = f"{date_str} {start_time_str}-{end_time_str}"
+        if first_occ_start_local:
              slot_time_for_log = f"{first_occ_start_local.strftime('%Y-%m-%d %H:%M')}-{occurrences[0][1].strftime('%H:%M')}"
+        add_audit_log(action="CREATE_BOOKING_FAILED_DUPLICATE_OR_ERROR", details=f"User '{current_user.username}' failed to book/reuse slot for resource ID {resource_id}. Slot: {slot_time_for_log}. Error: {ie}")
+        return jsonify({'error': 'This time slot appears to have just been booked or conflicts with an existing booking. Please try a different slot or refresh.'}), 409
 
-        add_audit_log(action="CREATE_BOOKING_FAILED_DUPLICATE", details=f"User '{current_user.username}' attempted to book a duplicate slot for resource ID {resource_id}. Slot: {slot_time_for_log}.")
-        return jsonify({'error': 'This time slot appears to have just been booked or conflicts with an existing booking. Please try a different slot or refresh.'}), 409 # 409 Conflict
-
-    except Exception as e: # Catch other general exceptions
+    except Exception as e:
         db.session.rollback()
-        current_app.logger.exception(f"Error creating booking series for resource {resource_id} by {current_user.username}: {e}")
-        add_audit_log(action="CREATE_BOOKING_FAILED", details=f"Failed to create booking series for resource ID {resource_id} by user '{current_user.username}'. Error: {str(e)}")
+        current_app.logger.exception(f"Error creating/reusing booking series for resource {resource_id} by {current_user.username}: {e}")
+        add_audit_log(action="CREATE_BOOKING_FAILED_GENERAL_ERROR", details=f"Failed to create/reuse booking series for resource ID {resource_id} by user '{current_user.username}'. Error: {str(e)}")
         return jsonify({'error': 'Failed to create booking series due to a server error.'}), 500
 
 @api_bookings_bp.route('/bookings/my_bookings', methods=['GET'])
