@@ -436,28 +436,32 @@ def get_unavailable_dates():
                              logger.debug(f"[UNAVAIL_DATES][TODAY]     Allow Multiple Resources Same Time? {booking_settings.allow_multiple_resources_same_time}. Checking user conflicts.")
                         for user_booking in user_bookings_on_this_date:
                             if user_booking.resource_id != resource_to_check.id:
-                                user_booking_start_aware_utc = user_booking.start_time.replace(tzinfo=timezone.utc)
-                                user_booking_end_aware_utc = user_booking.end_time.replace(tzinfo=timezone.utc)
+                                # Correctly convert naive local booking times to aware UTC by applying global_time_offset_hours
+                                user_booking_start_aware_utc = (user_booking.start_time - timedelta(hours=global_time_offset_hours)).replace(tzinfo=timezone.utc)
+                                user_booking_end_aware_utc = (user_booking.end_time - timedelta(hours=global_time_offset_hours)).replace(tzinfo=timezone.utc)
 
                                 if user_booking_start_aware_utc < slot_end_for_comparison_utc and \
                                    user_booking_end_aware_utc > slot_start_for_comparison_utc:
                                     user_schedule_conflicts = True
-                                    conflicting_user_booking = user_booking
+                                    conflicting_user_booking = user_booking # Keep this for general info if needed
                                     if is_server_today: # Detailed conflict log only for today
                                         logger.debug(
                                             f"[UNAVAIL_DATES][TODAY]       User conflict FOUND with their booking ID: {user_booking.id} "
-                                            f"({user_booking.start_time.strftime('%H:%M')}-{user_booking.end_time.strftime('%H:%M')} on resource {user_booking.resource_id}). "
+                                            f"(Original local times: {user_booking.start_time.strftime('%H:%M')}-{user_booking.end_time.strftime('%H:%M')} on resource {user_booking.resource_id}). "
+                                            f"Converted to UTC for comparison: {user_booking_start_aware_utc.isoformat()} - {user_booking_end_aware_utc.isoformat()}. "
                                             f"Comparing with slot (UTC): {slot_start_for_comparison_utc.strftime('%H:%M')}-{slot_end_for_comparison_utc.strftime('%H:%M')} on resource {resource_to_check.id}."
                                         )
+                                    # The specific diagnostic log below will use these corrected UTC times.
                                     break
                     elif is_server_today : # allow_multiple_resources_same_time is TRUE
                         logger.debug(f"[UNAVAIL_DATES][TODAY]     Allow Multiple Resources Same Time? {booking_settings.allow_multiple_resources_same_time}. Skipping user conflict check.")
                     logger.debug(f"[VERBOSE_UNAVAIL]   User Conflict (allow_multiple={booking_settings.allow_multiple_resources_same_time})?: {user_schedule_conflicts}")
 
                     if LOG_DIAGNOSTIC:
-                        if user_schedule_conflicts:
-                            logger.debug(f"[DIAGNOSE_UNAVAILABLE_19_JUN]       User Schedule Conflict: True. Conflicting User Booking ID: {conflicting_user_booking.id}, Resource ID: {conflicting_user_booking.resource_id}, Start: {conflicting_user_booking.start_time}, End: {conflicting_user_booking.end_time}")
-                        else:
+                        if user_schedule_conflicts and conflicting_user_booking: # Ensure conflicting_user_booking is not None
+                            # Log uses the corrected user_booking_start_aware_utc and user_booking_end_aware_utc for the diagnostic
+                            logger.debug(f"[DIAGNOSE_UNAVAILABLE_19_JUN]       User Schedule Conflict: True. Conflicting User Booking ID: {conflicting_user_booking.id}, Resource ID: {conflicting_user_booking.resource_id}, Conflict Start UTC: {user_booking_start_aware_utc.isoformat()}, Conflict End UTC: {user_booking_end_aware_utc.isoformat()}")
+                        elif not user_schedule_conflicts:
                             logger.debug(f"[DIAGNOSE_UNAVAILABLE_19_JUN]       User Schedule Conflict: False (allow_multiple_resources_same_time={booking_settings.allow_multiple_resources_same_time}).")
 
                     if is_server_today:
