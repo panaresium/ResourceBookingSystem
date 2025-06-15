@@ -402,20 +402,21 @@ def get_unavailable_dates():
                             logger.debug(f"[UNAVAIL_DATES][TODAY]     SLOT SKIPPED (time passed).")
                         continue # Skip this slot if it's passed
 
-                    # Booking.start_time and Booking.end_time are stored as naive UTC.
-                    # So, compare with slot times also as naive UTC.
-                    conflicting_general_booking = Booking.query.filter(
+                    # Corrected: Compare naive local Booking times with naive local slot times
+                    # slot_start_local_naive and slot_end_local_naive are already defined
+                    general_bookings_query = Booking.query.filter(
                         Booking.resource_id == resource_to_check.id,
-                        Booking.start_time < slot_end_for_comparison_utc.replace(tzinfo=None), # Compare naive UTC with naive UTC slot end
-                        Booking.end_time > slot_start_for_comparison_utc.replace(tzinfo=None),   # Compare naive UTC with naive UTC slot start
+                        Booking.start_time < slot_end_local_naive,  # Compare naive local Booking.start_time with naive local slot_end
+                        Booking.end_time > slot_start_local_naive,    # Compare naive local Booking.end_time with naive local slot_start
                         Booking.status.in_(['approved', 'pending', 'checked_in', 'confirmed'])
-                    ).first()
+                    )
+                    conflicting_general_booking = general_bookings_query.first()
                     is_generally_booked = conflicting_general_booking is not None
                     logger.debug(f"[VERBOSE_UNAVAIL]   Generally Booked?: {is_generally_booked}")
 
                     if LOG_DIAGNOSTIC:
-                        if is_generally_booked:
-                            logger.debug(f"[DIAGNOSE_UNAVAILABLE_19_JUN]       Generally Booked: True. Conflicting Booking ID: {conflicting_general_booking.id}, Resource ID: {conflicting_general_booking.resource_id}, Start: {conflicting_general_booking.start_time}, End: {conflicting_general_booking.end_time}")
+                        if is_generally_booked and conflicting_general_booking:
+                            logger.debug(f"[DIAGNOSE_UNAVAILABLE_19_JUN]       Generally Booked: True. Conflicting Booking ID: {conflicting_general_booking.id}, Resource ID: {conflicting_general_booking.resource_id}, Start: {conflicting_general_booking.start_time.isoformat()}, End: {conflicting_general_booking.end_time.isoformat()}, Status: {conflicting_general_booking.status}")
                         else:
                             logger.debug(f"[DIAGNOSE_UNAVAILABLE_19_JUN]       Generally Booked: False.")
 
