@@ -191,6 +191,7 @@ def get_resource_available_slots(resource_id):
 def get_unavailable_dates():
     logger = current_app.logger
     user_id_str = request.args.get("user_id")
+    logger.info(f"--- get_unavailable_dates called for user_id {user_id_str} ---")
     if not user_id_str:
         logger.warning("get_unavailable_dates: user_id missing")
         return jsonify({"error": "user_id is required"}), 400
@@ -264,7 +265,7 @@ def get_unavailable_dates():
             date_is_past = current_processing_date < now.date() # 'now' is datetime.now(timezone.utc)
 
             # Ensure booking_settings is fetched and has defaults
-            if not booking_settings:
+            if not booking_settings: # This check might be redundant if booking_settings is guaranteed to be loaded before the loop
                 logger.warning("get_unavailable_dates: BookingSettings not found when expected in loop. Using default adjustment hours.")
                 past_adjustment_hours = 0
                 global_time_offset_hours = 0
@@ -290,7 +291,7 @@ def get_unavailable_dates():
 
             # If allow_past_bookings is true, the original logic for checking slots on past dates will still run.
             # If date_is_past is true AND allow_past_bookings is true, we log and proceed.
-            if date_is_past and booking_settings and booking_settings.allow_past_bookings:
+            if date_is_past and booking_settings and booking_settings.allow_past_bookings: # Ensure booking_settings is checked here too
                  logger.debug(f"Date {current_processing_date} is past and allow_past_bookings is true. Proceeding to check slot availability for this date.")
 
             # b. User's Existing Bookings for the Day (for conflict checking against other resources)
@@ -309,6 +310,7 @@ def get_unavailable_dates():
                 if not (res_loop_item.is_under_maintenance and (res_loop_item.maintenance_until is None or current_processing_date <= res_loop_item.maintenance_until.date())):
                     active_resources_for_date.append(res_loop_item)
 
+            logger.info(f"--- Starting loop through {len(active_resources_for_date)} active resources for date {current_processing_date} ---")
             if not active_resources_for_date:
                 if total_published_resources > 0 : # Use the defined total_published_resources
                     unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
@@ -329,11 +331,15 @@ def get_unavailable_dates():
                 # Ensure target_user is defined in this function's scope (it is, as a parameter)
                 # Ensure logger is defined (it is, as current_app.logger)
 
+                if resource_to_check.id == 51: # Or another specific ID you are seeing issues with
+                    logger.info(f"--- (get_unavailable_dates) About to call check_booking_permission for resource ID 51 on date {current_processing_date} ---")
                 can_book_this_resource, _ = check_booking_permission(
                     user=target_user,
                     resource=resource_to_check,
                     logger_instance=logger
                 )
+                if resource_to_check.id == 51:
+                    logger.info(f"--- (get_unavailable_dates) Returned from check_booking_permission for resource ID 51 (can_book: {can_book_this_resource}) on date {current_processing_date} ---")
                 logger.debug(f"[VERBOSE_UNAVAIL] Date: {current_processing_date}, Resource: {resource_to_check.id} ('{resource_to_check.name}'), Permitted: {can_book_this_resource}")
 
                 if not can_book_this_resource:
@@ -452,6 +458,7 @@ def get_unavailable_dates():
 
         logger.info(f"Returning {len(unavailable_dates_set)} unavailable dates for user {user_id}.")
         logger.debug(f"[VERBOSE_UNAVAIL] Final unavailable_dates_set for user {target_user.id}: {sorted(list(unavailable_dates_set))}")
+        logger.info(f"--- get_unavailable_dates finished for user_id {user_id_str} ---")
         return jsonify(sorted(list(unavailable_dates_set)))
 
     except Exception as e:
