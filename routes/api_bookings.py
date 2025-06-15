@@ -317,9 +317,7 @@ def create_booking():
         current_offset_hours = booking_settings.global_time_offset_hours
 
     # Permission Enforcement Logic
-    current_app.logger.info("--- About to call check_booking_permission ---")
     can_book, permission_error_message = check_booking_permission(current_user, resource, current_app.logger)
-    current_app.logger.info(f"--- Returned from check_booking_permission (can_book: {can_book}) ---")
     if not can_book:
         # The logger calls are now inside check_booking_permission
         return jsonify({'error': permission_error_message}), 403

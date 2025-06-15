@@ -203,8 +203,19 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     app_effective_log_level = log_level_map.get(app_log_level_config, logging.INFO)
     app.logger.setLevel(app_effective_log_level)
     logging.info(f"Flask app.logger level set to {app_log_level_config} (effective: {app.logger.level}).")
+
+    # Clear existing handlers and add a new explicit one
+    app.logger.handlers.clear()
+    logging.info("Cleared existing handlers from app.logger.")
+
+    stream_handler_app = logging.StreamHandler()
+    formatter_app = logging.Formatter('[%(asctime)s] %(levelname)s in %(module)s: %(message)s')
+    stream_handler_app.setFormatter(formatter_app)
+    app.logger.addHandler(stream_handler_app)
+    logging.info("Added new explicit StreamHandler to app.logger.")
+
     app.logger.propagate = False
-    logging.info("Disabled propagation for app.logger to prevent duplicate console logs.")
+    logging.info("Ensured app.logger.propagate is False.")
 
     # Ensure DEBUG level is comprehensively set if configured
     if app.config.get('LOG_LEVEL') == 'DEBUG':
