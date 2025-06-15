@@ -79,7 +79,8 @@
             <section id="restore-section">
                 <h5>{{ _('One Click Restore') }}</h5>
                 <p>{{ _('Restore the system from a previously created full backup. This will overwrite current data.') }}</p>
-                <button id="list-backups-btn" class="btn btn-info mb-3"><i class="fas fa-sync-alt"></i> {{ _('Refresh Available Backups') }}</button>
+                <button id="list-backups-btn" class="btn btn-info mb-3 me-2"><i class="fas fa-sync-alt"></i> {{ _('Refresh Available Backups') }}</button>
+                <button id="bulk-delete-backups-btn" class="btn btn-danger mb-3" style="display: none;"><i class="fas fa-trash-alt"></i> {{ _('Delete Selected Backups') }}</button>
                 <div id="restore-status-message" class="mt-2 mb-3"></div>
                 <table id="available-backups-table" class="table table-striped">
                     <thead>
@@ -90,12 +91,23 @@
                     </thead>
                     <tbody id="available-backups-tbody"></tbody>
                 </table>
-                <nav aria-label="Backup pagination" id="backup-pagination-nav" style="display: none;">
-                    <ul class="pagination justify-content-center">
-                        <li class="page-item" id="backup-prev-page"><a class="page-link" href="#">{{ _('Previous') }}</a></li>
-                        <li class="page-item" id="backup-next-page"><a class="page-link" href="#">{{ _('Next') }}</a></li>
-                    </ul>
-                    <p class="text-center" id="backup-page-info"></p>
+                <nav aria-label="Backup pagination" id="backup-pagination-nav" class="mt-3" style="display: none;">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <label for="system-backups-per-page-select" class="me-2">{{ _('Items per page:') }}</label>
+                            <select id="system-backups-per-page-select" class="form-select form-select-sm" style="width: auto; display: inline-block;">
+                                <option value="5" selected>5</option>
+                                <option value="10">10</option>
+                                <option value="25">25</option>
+                                <option value="50">50</option>
+                            </select>
+                        </div>
+                        <ul class="pagination mb-0">
+                            <li class="page-item" id="backup-prev-page"><a class="page-link" href="#">{{ _('Previous') }}</a></li>
+                            <li class="page-item" id="backup-next-page"><a class="page-link" href="#">{{ _('Next') }}</a></li>
+                        </ul>
+                    </div>
+                    <p class="text-center mt-2" id="backup-page-info"></p>
                 </nav>
             </section>
         </div>
@@ -202,6 +214,8 @@
             const restoreLogAreaEl = document.getElementById('restore-log-area');
             const availableBackupsTbody = document.getElementById('available-backups-tbody');
             const availableBackupsTable = document.getElementById('available-backups-table');
+            const bulkDeleteButton = document.getElementById('bulk-delete-backups-btn'); // Added
+            const masterBackupCheckbox = document.getElementById('master-backup-checkbox'); // Added
             const paginationNav = document.getElementById('backup-pagination-nav');
             const pageInfoEl = document.getElementById('backup-page-info');
             const prevPageBtn = document.getElementById('backup-prev-page');
@@ -227,13 +241,18 @@
             let currentRestoreTaskId = null;
             let currentVerifyTaskId = null;
             let currentDeleteTaskId = null;
+            let currentBulkDeleteTaskId = null; // Added
             let isAwaitingDeleteTaskIdFromServer = false;
             let isAwaitingBackupTaskIdFromServer = false;
 
-            // Pagination Variables
-            let currentPage = 1;
-            const backupsPerPage = 5;
-            let allBackups = [];
+            // Pagination Variables for System Backups
+            let currentSystemBackupsPage = 1;
+            let systemBackupsPerPage = 5; // Default, can be changed by selector
+            let totalSystemBackupItems = 0;
+            let totalSystemBackupPages = 0;
+            let hasSystemBackupPrev = false;
+            let hasSystemBackupNext = false;
+            const systemBackupsPerPageSelect = document.getElementById('system-backups-per-page-select'); // Added
 
             // SocketIO Event Listeners (specific to system operations)
             // (socket is defined in admin_backup_common.js)
@@ -265,7 +284,7 @@
                         currentBackupTaskId = null;
 
                         if (isBackupReallyCompletedSuccessfully) {
-                            loadAvailableBackups(true);
+                            loadAvailableBackups(currentSystemBackupsPage, systemBackupsPerPage, true); // Refresh current page
                         }
                     } else {
                         // Optional: Log intermediate messages if needed, but not strictly required for this debug
@@ -354,7 +373,29 @@
                             (lowerStatus.includes("backup set deletion process finished") && lowerDetail.includes("overall success: true"));
 
                         if (wasDeleteSuccessful) {
-                            loadAvailableBackups(true);
+                            loadAvailableBackups(currentSystemBackupsPage, systemBackupsPerPage, true); // Refresh current page
+                        }
+                    }
+                });
+
+                socket.on('bulk_backup_delete_progress', function(data) {
+                    console.log('Bulk backup delete progress event:', data);
+                    if (data.task_id !== currentBulkDeleteTaskId) {
+                        return;
+                    }
+
+                    let messageType = data.level ? data.level.toLowerCase() : (data.detail && data.detail.toLowerCase().includes('error') ? 'error' : 'info');
+                    appendLog('restore-log-area', data.status, data.detail, messageType, restoreStatusMessageEl);
+
+                    const lowerDetail = data.detail ? data.detail.toLowerCase() : "";
+
+                    if (lowerDetail === 'completed' || lowerDetail === 'completed_with_errors' || lowerDetail === 'error') {
+                        enablePageInteractions();
+                        currentBulkDeleteTaskId = null;
+                        // Refresh list if any change might have occurred, response from API call might also trigger this.
+                        // Check data.results to see if any succeeded.
+                        if (data.results && Object.values(data.results).some(res => res === 'success')) {
+                            loadAvailableBackups(currentSystemBackupsPage, systemBackupsPerPage, true); // Refresh current page
                         }
                     }
                 });
@@ -443,40 +484,57 @@
                 });
             }
 
-            function loadAvailableBackups(isQuickRefresh = false) {
+            function loadAvailableBackups(page = 1, perPage = systemBackupsPerPage, isQuickRefresh = false) {
+                currentSystemBackupsPage = page;
+                systemBackupsPerPage = perPage;
+
                 if (!isQuickRefresh) {
                     disablePageInteractions();
                 }
-                appendLog('restore-log-area', "{{ _('Fetching available full system backups...') }}", '', 'info', restoreStatusMessageEl);
-                if(availableBackupsTbody) availableBackupsTbody.innerHTML = '<tr><td colspan="2">{{ _("Loading...") }}</td></tr>';
+                appendLog('restore-log-area', `{{ _('Fetching available full system backups (Page: ${page}, Per Page: ${perPage})...') }}`, '', 'info', restoreStatusMessageEl);
+                const colCount = availableBackupsTable.querySelector('thead tr') ? availableBackupsTable.querySelector('thead tr').cells.length : 3; // Default to 3 if header not ready
+                if(availableBackupsTbody) availableBackupsTbody.innerHTML = `<tr><td colspan="${colCount}">{{ _("Loading...") }}</td></tr>`;
                 if(paginationNav) paginationNav.style.display = 'none';
 
-                fetch('/api/admin/list_backups', {
+                fetch(`/api/admin/list_backups?page=${currentSystemBackupsPage}&per_page=${systemBackupsPerPage}`, {
                     method: 'GET',
                     headers: { 'Accept': 'application/json' }
                 })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success && data.backups) {
-                        allBackups = data.backups;
-                        currentPage = 1;
-                        displayBackupsPage();
-                        if (allBackups.length > 0) {
-                            appendLog('restore-log-area', "{{ _('Available full system backups loaded.') }}", '', 'success', restoreStatusMessageEl);
+                        // Store pagination details from server
+                        currentSystemBackupsPage = data.page;
+                        systemBackupsPerPage = data.per_page;
+                        totalSystemBackupItems = data.total_items;
+                        totalSystemBackupPages = data.total_pages;
+                        hasSystemBackupPrev = data.has_prev;
+                        hasSystemBackupNext = data.has_next;
+
+                        displayBackupsPage(data.backups); // Pass only the current page's backups
+
+                        if (totalSystemBackupItems > 0) {
+                            appendLog('restore-log-area', "{{ _('Available full system backups loaded.') }}", `Total: ${totalSystemBackupItems}`, 'success', restoreStatusMessageEl);
                         } else {
                              appendLog('restore-log-area', "{{ _('No full system backups found.') }}", '', 'info', restoreStatusMessageEl);
                         }
                     } else {
-                        allBackups = [];
-                        if(availableBackupsTbody) availableBackupsTbody.innerHTML = '<tr><td colspan="2">{{ _("Failed to load backups.") }}</td></tr>';
+                        totalSystemBackupItems = 0;
+                        totalSystemBackupPages = 0;
+                        hasSystemBackupPrev = false;
+                        hasSystemBackupNext = false;
+                        if(availableBackupsTbody) availableBackupsTbody.innerHTML = `<tr><td colspan="${colCount}">{{ _("Failed to load backups.") }}</td></tr>`;
                         appendLog('restore-log-area', "{{ _('Failed to load full system backups:') }}", data.message || "{{ _('Unknown error.') }}", 'error', restoreStatusMessageEl);
                         if(paginationNav) paginationNav.style.display = 'none';
                     }
                 })
                 .catch(error => {
-                    allBackups = [];
+                    totalSystemBackupItems = 0;
+                    totalSystemBackupPages = 0;
+                    hasSystemBackupPrev = false;
+                    hasSystemBackupNext = false;
                     console.error('List backups error:', error);
-                    if(availableBackupsTbody) availableBackupsTbody.innerHTML = '<tr><td colspan="2">{{ _("Error loading backups.") }}</td></tr>';
+                    if(availableBackupsTbody) availableBackupsTbody.innerHTML = `<tr><td colspan="${colCount}">{{ _("Error loading backups.") }}</td></tr>`;
                     appendLog('restore-log-area', "{{ _('Error fetching full system backups:') }}", error.toString(), 'error', restoreStatusMessageEl);
                     if(paginationNav) paginationNav.style.display = 'none';
                 })
@@ -487,22 +545,39 @@
                 });
             }
 
-            function displayBackupsPage() {
+            function displayBackupsPage(pageBackups) { // pageBackups is now the array for the current page
                 if (!availableBackupsTbody) return;
                 availableBackupsTbody.innerHTML = '';
-
-                if (allBackups.length === 0) {
-                    availableBackupsTbody.innerHTML = '<tr><td colspan="2">{{ _("No backups available.") }}</td></tr>';
-                    if(paginationNav) paginationNav.style.display = 'none';
-                    return;
+                const tableHeaderRow = availableBackupsTable.querySelector('thead tr');
+                if (tableHeaderRow && tableHeaderRow.cells.length === 2) { // Add master checkbox header if not present
+                    const thMaster = document.createElement('th');
+                    thMaster.innerHTML = '<input type="checkbox" id="master-backup-checkbox" title="{{ _("Select/Deselect All") }}">';
+                    tableHeaderRow.insertBefore(thMaster, tableHeaderRow.firstChild);
                 }
+                const colCount = availableBackupsTable.querySelector('thead tr') ? availableBackupsTable.querySelector('thead tr').cells.length : 3;
 
-                const startIndex = (currentPage - 1) * backupsPerPage;
-                const endIndex = startIndex + backupsPerPage;
-                const pageBackups = allBackups.slice(startIndex, endIndex);
+
+                if (!pageBackups || pageBackups.length === 0) {
+                    availableBackupsTbody.innerHTML = `<tr><td colspan="${colCount}">{{ _("No backups available for this page.") }}</td></tr>`;
+                    if(paginationNav) paginationNav.style.display = totalSystemBackupPages > 0 ? 'block' : 'none'; // Show nav if there are other pages
+                    if(bulkDeleteButton) bulkDeleteButton.style.display = totalSystemBackupItems > 0 ? 'inline-block' : 'none';
+                    if(masterBackupCheckbox) masterBackupCheckbox.checked = false; masterBackupCheckbox.disabled = true;
+                    if (totalSystemBackupItems === 0 && bulkDeleteButton) bulkDeleteButton.style.display = 'none'; // Specifically hide if no backups at all
+                } else {
+                     if(bulkDeleteButton) bulkDeleteButton.style.display = 'inline-block';
+                     if(masterBackupCheckbox) masterBackupCheckbox.disabled = false;
+                }
 
                 pageBackups.forEach(timestamp => {
                     const row = availableBackupsTbody.insertRow();
+
+                    const cellCheckbox = row.insertCell();
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.className = 'backup-checkbox';
+                    checkbox.setAttribute('data-timestamp', timestamp);
+                    cellCheckbox.appendChild(checkbox);
+
                     const cellTimestamp = row.insertCell();
                     const cellAction = row.insertCell();
                     let displayTimestamp = timestamp;
@@ -542,26 +617,79 @@
                     cellAction.appendChild(deleteBtn);
                 });
 
-                const totalPages = Math.ceil(allBackups.length / backupsPerPage);
-                if (totalPages > 1) {
+                // Update pagination controls based on global pagination variables
+                if (totalSystemBackupPages > 0) { // Show pagination if there's at least one page
                     if(paginationNav) paginationNav.style.display = 'block';
-                    if(pageInfoEl) pageInfoEl.textContent = `{{ _('Page') }} ${currentPage} {{ _('of') }} ${totalPages}`;
-                    if(prevPageBtn) prevPageBtn.classList.toggle('disabled', currentPage === 1);
-                    if(nextPageBtn) nextPageBtn.classList.toggle('disabled', endIndex >= allBackups.length);
+                    if(pageInfoEl) pageInfoEl.textContent = `{{ _('Page') }} ${currentSystemBackupsPage} {{ _('of') }} ${totalSystemBackupPages}`;
+                    if(prevPageBtn) prevPageBtn.classList.toggle('disabled', !hasSystemBackupPrev);
+                    if(nextPageBtn) nextPageBtn.classList.toggle('disabled', !hasSystemBackupNext);
                 } else {
                     if(paginationNav) paginationNav.style.display = 'none';
                 }
+                updateMasterCheckboxState(); // Update master checkbox based on currently displayed items
             }
 
-            if(listBackupsButton) listBackupsButton.addEventListener('click', function() { loadAvailableBackups(false); });
+            function updateMasterCheckboxState() {
+                if (!masterBackupCheckbox) return;
+                const visibleCheckboxes = Array.from(availableBackupsTbody.querySelectorAll('.backup-checkbox'));
+                if (visibleCheckboxes.length === 0) {
+                    masterBackupCheckbox.checked = false;
+                    masterBackupCheckbox.indeterminate = false;
+                    masterBackupCheckbox.disabled = true;
+                    if(bulkDeleteButton) bulkDeleteButton.disabled = true;
+                    return;
+                }
+                masterBackupCheckbox.disabled = false;
+                const allChecked = visibleCheckboxes.every(cb => cb.checked);
+                const someChecked = visibleCheckboxes.some(cb => cb.checked);
+                masterBackupCheckbox.checked = allChecked;
+                masterBackupCheckbox.indeterminate = !allChecked && someChecked;
+                if(bulkDeleteButton) bulkDeleteButton.disabled = !someChecked; // Disable if no checkboxes are checked
+            }
+
+            if (masterBackupCheckbox) {
+                masterBackupCheckbox.addEventListener('change', function() {
+                    const isChecked = this.checked;
+                    availableBackupsTbody.querySelectorAll('.backup-checkbox').forEach(cb => {
+                        cb.checked = isChecked;
+                    });
+                    updateMasterCheckboxState();
+                });
+            }
+
+            if (availableBackupsTbody) {
+                availableBackupsTbody.addEventListener('change', function(event) {
+                    if (event.target.classList.contains('backup-checkbox')) {
+                        updateMasterCheckboxState();
+                    }
+                });
+            }
+
+
+            if(listBackupsButton) listBackupsButton.addEventListener('click', function() { loadAvailableBackups(1, systemBackupsPerPage, false); }); // Load page 1 with current/default perPage
             if(prevPageBtn) prevPageBtn.addEventListener('click', function(e) {
                 e.preventDefault();
-                if (currentPage > 1) { currentPage--; displayBackupsPage(); }
+                if (hasSystemBackupPrev) {
+                    loadAvailableBackups(currentSystemBackupsPage - 1, systemBackupsPerPage);
+                }
             });
             if(nextPageBtn) nextPageBtn.addEventListener('click', function(e) {
                 e.preventDefault();
-                if ((currentPage * backupsPerPage) < allBackups.length) { currentPage++; displayBackupsPage(); }
+                if (hasSystemBackupNext) {
+                    loadAvailableBackups(currentSystemBackupsPage + 1, systemBackupsPerPage);
+                }
             });
+
+            if (systemBackupsPerPageSelect) {
+                systemBackupsPerPageSelect.value = systemBackupsPerPage; // Set initial value
+                systemBackupsPerPageSelect.addEventListener('change', function() {
+                    const newPerPage = parseInt(this.value, 10);
+                    if (!isNaN(newPerPage) && newPerPage > 0) {
+                        systemBackupsPerPage = newPerPage;
+                        loadAvailableBackups(1, systemBackupsPerPage); // Load first page with new perPage setting
+                    }
+                });
+            }
 
             if(availableBackupsTable) {
                 availableBackupsTable.addEventListener('click', function (event) {
@@ -697,8 +825,69 @@
                 toggleDayOfWeekVisibility(); // Initial call
             }
 
+            if (bulkDeleteButton) {
+                bulkDeleteButton.addEventListener('click', function() {
+                    const selectedTimestamps = Array.from(availableBackupsTbody.querySelectorAll('.backup-checkbox:checked'))
+                                                 .map(cb => cb.getAttribute('data-timestamp'));
+
+                    if (selectedTimestamps.length === 0) {
+                        alert("{{ _('Please select at least one backup to delete.') }}");
+                        return;
+                    }
+
+                    if (!confirm(`{{ _('Are you sure you want to delete the selected ${selectedTimestamps.length} backup(s)? This action cannot be undone.') }}`)) {
+                        return;
+                    }
+
+                    currentBulkDeleteTaskId = null;
+                    if(restoreLogAreaEl) { restoreLogAreaEl.innerHTML = ''; restoreLogAreaEl.style.display = 'block'; }
+                    if(backupLogAreaEl) { backupLogAreaEl.style.display = 'none'; }
+                    appendLog('restore-log-area', `{{ _('Initiating bulk deletion for ${selectedTimestamps.length} backup(s)...') }}`, '', 'info', restoreStatusMessageEl);
+                    disablePageInteractions();
+
+                    fetch('/api/admin/bulk_delete_system_backups', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': csrfToken,
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify({ timestamps: selectedTimestamps })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        currentBulkDeleteTaskId = data.task_id;
+                        const messageType = data.success ? 'info' : 'error';
+                        appendLog('restore-log-area', data.message || (data.success ? `{{ _('Bulk deletion process started.') }}` : `{{ _('Failed to start bulk deletion process.') }}`), `Task ID: ${data.task_id || 'N/A'}`, messageType, restoreStatusMessageEl);
+
+                        if (data.results) {
+                            let resultsSummary = ["{{ _('Deletion results:') }}"];
+                            for (const [ts, res] of Object.entries(data.results)) {
+                                resultsSummary.push(`  - ${ts}: ${res}`);
+                            }
+                            appendLog('restore-log-area', resultsSummary.join('\n'), '', data.success ? 'info' : 'warning', restoreStatusMessageEl);
+                        }
+
+                        if (!data.success && (!data.task_id || data.task_id !== currentBulkDeleteTaskId)) { // If overall POST failed and no task took over
+                            enablePageInteractions();
+                        }
+                        // If task ID was assigned, socket handler will re-enable interactions on completion/error
+                        // Refresh if the call itself reported some success, otherwise wait for socket.
+                        if (data.success) { // This implies the request was accepted and processed.
+                             loadAvailableBackups(currentSystemBackupsPage, systemBackupsPerPage, true); // Refresh current page optimistically
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Bulk delete error:', error);
+                        appendLog('restore-log-area', "{{ _('Bulk delete request failed:') }}", error.message, 'error', restoreStatusMessageEl);
+                        enablePageInteractions();
+                    });
+                });
+            }
+
             // Initial Calls
-            if(typeof loadAvailableBackups === "function") loadAvailableBackups();
+            if(typeof loadAvailableBackups === "function") loadAvailableBackups(1, systemBackupsPerPage); // Load initial page
+            updateMasterCheckboxState(); // Initial state for master checkbox and bulk delete button
         });
     </script>
 {% endblock %}

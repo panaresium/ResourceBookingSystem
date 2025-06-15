@@ -1,6 +1,7 @@
 import os
 import uuid
 import json
+import math # Added for math.ceil
 from datetime import datetime, timezone, timedelta, time
 
 from flask import Blueprint, jsonify, request, current_app, url_for
@@ -193,17 +194,57 @@ def api_one_click_backup():
 @login_required
 @permission_required('manage_system')
 def api_list_backups():
-    current_app.logger.info(f"User {current_user.username} requested list of available backups.")
-    if not list_available_backups:
-        current_app.logger.error("Azure backup module not available for listing backups.")
-        return jsonify({'success': False, 'message': 'Backup module is not configured or available.', 'backups': []}), 500
     try:
-        backups = list_available_backups()
-        current_app.logger.info(f"Found {len(backups)} available backups.")
-        return jsonify({'success': True, 'backups': backups}), 200
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 5, type=int) # Default per_page to 5
+
+        if page < 1:
+            page = 1
+        if per_page < 1:
+            per_page = 5 # Ensure per_page is at least 1, default to 5
+
+        current_app.logger.info(f"User {current_user.username} requested list of available backups (page: {page}, per_page: {per_page}).")
+
+        if not list_available_backups:
+            current_app.logger.error("Azure backup module not available for listing backups.")
+            return jsonify({'success': False, 'message': 'Backup module is not configured or available.', 'backups': [], 'page': page, 'per_page': per_page, 'total_items': 0, 'total_pages': 0, 'has_next': False, 'has_prev': False}), 500
+
+        all_backups = list_available_backups()
+        total_items = len(all_backups)
+        total_pages = math.ceil(total_items / per_page) if per_page > 0 else 0
+
+        start_index = (page - 1) * per_page
+        end_index = start_index + per_page
+        paginated_backups = all_backups[start_index:end_index]
+
+        has_next = page < total_pages
+        has_prev = page > 1
+
+        current_app.logger.info(f"Found {total_items} available backups. Returning {len(paginated_backups)} for page {page}.")
+        return jsonify({
+            'success': True,
+            'backups': paginated_backups,
+            'page': page,
+            'per_page': per_page,
+            'total_items': total_items,
+            'total_pages': total_pages,
+            'has_next': has_next,
+            'has_prev': has_prev
+        }), 200
     except Exception as e:
         current_app.logger.exception(f"Exception listing available backups for user {current_user.username}:")
-        return jsonify({'success': False, 'message': f'An error occurred while listing backups: {str(e)}', 'backups': []}), 500
+        # Attempt to return pagination fields even on error, with zero/false values
+        return jsonify({
+            'success': False,
+            'message': f'An error occurred while listing backups: {str(e)}',
+            'backups': [],
+            'page': request.args.get('page', 1, type=int), # Try to get requested page
+            'per_page': request.args.get('per_page', 5, type=int), # Try to get requested per_page
+            'total_items': 0,
+            'total_pages': 0,
+            'has_next': False,
+            'has_prev': False
+        }), 500
 
 @api_system_bp.route('/api/admin/one_click_restore', methods=['POST'])
 @login_required
@@ -730,6 +771,102 @@ def api_delete_backup_set(backup_timestamp):
         add_audit_log(action="DELETE_BACKUP_SET_ERROR", details=f"Task {task_id}: {error_message} User: {current_user.username}.", user_id=current_user.id)
         if socketio: socketio.emit('backup_delete_progress', {'task_id': task_id, 'status': error_message, 'detail': 'CRITICAL_ERROR'})
         return jsonify({'success': False, 'message': error_message, 'task_id': task_id}), 500
+
+@api_system_bp.route('/api/admin/bulk_delete_system_backups', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_bulk_delete_system_backups():
+    main_task_id = uuid.uuid4().hex
+    current_app.logger.info(f"[Task {main_task_id}] User {current_user.username} initiated BULK DELETE SYSTEM BACKUPS.")
+
+    data = request.get_json()
+    if not data or 'timestamps' not in data or not isinstance(data['timestamps'], list):
+        current_app.logger.warning(f"[Task {main_task_id}] Invalid payload received for bulk delete: {data}")
+        return jsonify({'success': False, 'message': 'Invalid payload. "timestamps" list is required.', 'task_id': main_task_id}), 400
+
+    timestamps_to_delete = data['timestamps']
+    if not timestamps_to_delete:
+        return jsonify({'success': True, 'message': 'No timestamps provided for deletion.', 'results': {}, 'task_id': main_task_id}), 200
+
+    if not delete_backup_set:
+        error_message = "Backup deletion function is not available. Check system configuration."
+        current_app.logger.error(f"[Task {main_task_id}] {error_message}")
+        add_audit_log(action="BULK_DELETE_BACKUPS_UNAVAILABLE", details=f"Task {main_task_id}: Bulk delete attempt, function missing.", user_id=current_user.id)
+        if socketio: socketio.emit('bulk_backup_delete_progress', {'task_id': main_task_id, 'status': error_message, 'detail': 'ERROR', 'results': {}})
+        return jsonify({'success': False, 'message': error_message, 'task_id': main_task_id}), 500
+
+    results = {}
+    overall_success = True
+
+    if socketio:
+        socketio.emit('bulk_backup_delete_progress', {
+            'task_id': main_task_id,
+            'status': f'Starting bulk deletion of {len(timestamps_to_delete)} backup sets...',
+            'detail': 'INITIATED',
+            'total_timestamps': len(timestamps_to_delete),
+            'processed_count': 0,
+            'current_timestamp': None
+        })
+
+    for index, timestamp in enumerate(timestamps_to_delete):
+        individual_task_id = f"{main_task_id}_{index}" # More specific task ID for logging if needed, but main_task_id tracks the overall operation
+        current_app.logger.info(f"[Task {main_task_id}] Processing timestamp '{timestamp}' for bulk deletion (item {index + 1}/{len(timestamps_to_delete)}). Individual task ref: {individual_task_id}")
+        if socketio:
+            socketio.emit('bulk_backup_delete_progress', {
+                'task_id': main_task_id,
+                'status': f'Deleting backup set {timestamp}...',
+                'detail': 'IN_PROGRESS',
+                'total_timestamps': len(timestamps_to_delete),
+                'processed_count': index,
+                'current_timestamp': timestamp
+            })
+        try:
+            success = delete_backup_set(timestamp, socketio_instance=socketio, task_id=main_task_id) # Pass main_task_id for socket progress
+            if success:
+                results[timestamp] = "success"
+                current_app.logger.info(f"[Task {main_task_id}] Successfully deleted backup set '{timestamp}'.")
+                add_audit_log(action="DELETE_BACKUP_SET_SUCCESS_BULK", details=f"Task {main_task_id}: Backup {timestamp} deleted as part of bulk operation. User: {current_user.username}.", user_id=current_user.id)
+            else:
+                results[timestamp] = "failed"
+                overall_success = False
+                current_app.logger.warning(f"[Task {main_task_id}] Failed to delete backup set '{timestamp}' during bulk operation.")
+                add_audit_log(action="DELETE_BACKUP_SET_FAILED_BULK", details=f"Task {main_task_id}: Failed to delete backup {timestamp} during bulk operation. User: {current_user.username}.", user_id=current_user.id)
+        except Exception as e:
+            results[timestamp] = "error"
+            overall_success = False
+            error_message = f"Unexpected error deleting backup set '{timestamp}' during bulk operation: {str(e)}"
+            current_app.logger.exception(f"[Task {main_task_id}] {error_message}")
+            add_audit_log(action="DELETE_BACKUP_SET_ERROR_BULK", details=f"Task {main_task_id}: {error_message} User: {current_user.username}.", user_id=current_user.id)
+            # Emit individual error to socket if desired, but main progress indicates overall status
+            if socketio:
+                socketio.emit('bulk_backup_delete_progress', {
+                    'task_id': main_task_id,
+                    'status': f'Error deleting backup set {timestamp}: {str(e)}',
+                    'detail': 'ERROR_ITEM',
+                    'total_timestamps': len(timestamps_to_delete),
+                    'processed_count': index + 1,
+                    'current_timestamp': timestamp,
+                    'error_details': str(e)
+                })
+
+    final_message = f"Bulk deletion process completed for {len(timestamps_to_delete)} timestamps."
+    if not overall_success:
+        final_message += " Some deletions may have failed or encountered errors."
+
+    current_app.logger.info(f"[Task {main_task_id}] {final_message} Results: {results}")
+    add_audit_log(action="BULK_DELETE_SYSTEM_BACKUPS_COMPLETED", details=f"Task {main_task_id}: {final_message} Results: {json.dumps(results)}", user_id=current_user.id)
+
+    if socketio:
+        socketio.emit('bulk_backup_delete_progress', {
+            'task_id': main_task_id,
+            'status': final_message,
+            'detail': 'COMPLETED' if overall_success else 'COMPLETED_WITH_ERRORS',
+            'total_timestamps': len(timestamps_to_delete),
+            'processed_count': len(timestamps_to_delete),
+            'results': results
+        })
+
+    return jsonify({'success': overall_success, 'message': final_message, 'results': results, 'task_id': main_task_id}), 200 if overall_success else 207 # 207 Multi-Status
 
 def init_api_system_routes(app):
     app.register_blueprint(api_system_bp)
