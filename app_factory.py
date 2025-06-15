@@ -203,6 +203,8 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     app_effective_log_level = log_level_map.get(app_log_level_config, logging.INFO)
     app.logger.setLevel(app_effective_log_level)
     logging.info(f"Flask app.logger level set to {app_log_level_config} (effective: {app.logger.level}).")
+    app.logger.propagate = False
+    logging.info("Disabled propagation for app.logger to prevent duplicate console logs.")
 
     # Ensure DEBUG level is comprehensively set if configured
     if app.config.get('LOG_LEVEL') == 'DEBUG':
