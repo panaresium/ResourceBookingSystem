@@ -251,13 +251,13 @@ def create_app(config_object=config, testing=False): # Added testing parameter
                     # Import resource configurations first
                     resource_configs_path = downloaded_configs.get('resource_configs_path')
                     if resource_configs_path and os.path.exists(resource_configs_path):
-                        app.logger.info(f"Importing resource configurations from {resource_configs_path} on startup.")
+                        app.logger.debug(f"Importing resource configurations from {resource_configs_path} on startup.")
                         try:
                             with open(resource_configs_path, 'r', encoding='utf-8') as f:
                                 resource_data_to_import = json.load(f)
                             # db object is globally available from extensions.py and functions are called within app_context
                             res_created, res_updated, res_errors = _import_resource_configurations_data(resource_data_to_import)
-                            app.logger.info(f"Startup import of resource configs: {res_created} created, {res_updated} updated. Errors: {len(res_errors)}")
+                            app.logger.debug(f"Startup import of resource configs: {res_created} created, {res_updated} updated. Errors: {len(res_errors)}")
                             if res_errors: app.logger.error(f"Startup resource import errors: {res_errors}")
                             # add_audit_log needs user context or to handle being called by system
                             add_audit_log(action="STARTUP_RESTORE_IMPORT", details=f"Resource configs imported: {res_created}c, {res_updated}u. Errors: {len(res_errors)}")
@@ -270,12 +270,12 @@ def create_app(config_object=config, testing=False): # Added testing parameter
                     # Import map configurations
                     map_config_path = downloaded_configs.get('map_config_path')
                     if map_config_path and os.path.exists(map_config_path):
-                        app.logger.info(f"Importing map configuration from {map_config_path} on startup.")
+                        app.logger.debug(f"Importing map configuration from {map_config_path} on startup.")
                         try:
                             with open(map_config_path, 'r', encoding='utf-8') as f:
                                 map_data_to_import = json.load(f)
                             import_summary, import_status_code = _import_map_configuration_data(map_data_to_import)
-                            app.logger.info(f"Startup import of map config status {import_status_code}. Summary: {json.dumps(import_summary)}")
+                            app.logger.debug(f"Startup import of map config status {import_status_code}. Summary: {json.dumps(import_summary)}")
                             add_audit_log(action="STARTUP_RESTORE_IMPORT", details=f"Map config imported. Status: {import_status_code}. Summary: {json.dumps(import_summary)}")
                         except Exception as import_err:
                             app.logger.exception(f"Error importing map configuration on startup from {map_config_path}: {import_err}")
@@ -286,13 +286,13 @@ def create_app(config_object=config, testing=False): # Added testing parameter
                     # Import user configurations
                     user_configs_path = downloaded_configs.get('user_configs_path')
                     if user_configs_path and os.path.exists(user_configs_path):
-                        app.logger.info(f"Importing user/role configurations from {user_configs_path} on startup.")
+                        app.logger.debug(f"Importing user/role configurations from {user_configs_path} on startup.")
                         try:
                             with open(user_configs_path, 'r', encoding='utf-8') as f:
                                 user_data_to_import = json.load(f)
                             # db object is globally available from extensions.py and functions are called within app_context
                             r_created, r_updated, u_created, u_updated, u_errors = _import_user_configurations_data(user_data_to_import)
-                            app.logger.info(f"Startup import of user/role configs: Roles({r_created}c, {r_updated}u), Users({u_created}c, {u_updated}u). Errors: {len(u_errors)}")
+                            app.logger.debug(f"Startup import of user/role configs: Roles({r_created}c, {r_updated}u), Users({u_created}c, {u_updated}u). Errors: {len(u_errors)}")
                             if u_errors: app.logger.error(f"Startup user/role import errors: {u_errors}")
                             add_audit_log(action="STARTUP_RESTORE_IMPORT", details=f"User/role configs imported. Roles({r_created}c, {r_updated}u), Users({u_created}c, {u_updated}u). Errors: {len(u_errors)}")
                         except Exception as import_err:
