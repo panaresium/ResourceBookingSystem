@@ -267,6 +267,7 @@ def get_unavailable_dates():
         current_iter_date = start_range_date
         while current_iter_date <= end_range_date:
             current_processing_date = current_iter_date
+            logger.debug(f"--- Processing date: {current_processing_date} ---")
             logger.debug(f"[VERBOSE_UNAVAIL] Processing Date: {current_processing_date}")
 
             # a. Past Date Check
@@ -335,15 +336,13 @@ def get_unavailable_dates():
                 # Ensure target_user is defined in this function's scope (it is, as a parameter)
                 # Ensure logger is defined (it is, as current_app.logger)
 
-                if resource_to_check.id == 51: # Or another specific ID you are seeing issues with
-                    logger.debug(f"--- (get_unavailable_dates) About to call check_booking_permission for resource ID 51 on date {current_processing_date} ---")
+                logger.debug(f"--- (get_unavailable_dates) About to call check_booking_permission for resource ID {resource_to_check.id} ('{resource_to_check.name}') on date {current_processing_date} ---")
                 can_book_this_resource, _ = check_booking_permission(
                     user=target_user,
                     resource=resource_to_check,
                     logger_instance=logger
                 )
-                if resource_to_check.id == 51:
-                    logger.debug(f"--- (get_unavailable_dates) Returned from check_booking_permission for resource ID 51 (can_book: {can_book_this_resource}) on date {current_processing_date} ---")
+                logger.debug(f"--- (get_unavailable_dates) Returned from check_booking_permission for resource ID {resource_to_check.id} ('{resource_to_check.name}') (can_book: {can_book_this_resource}) on date {current_processing_date} ---")
                 logger.debug(f"[VERBOSE_UNAVAIL] Date: {current_processing_date}, Resource: {resource_to_check.id} ('{resource_to_check.name}'), Permitted: {can_book_this_resource}")
 
                 if not can_book_this_resource:
