@@ -132,25 +132,46 @@
                     <select id="full_backup_schedule_type" name="full_backup_schedule_type" class="form-control form-select">
                         <option value="daily" {% if full_backup_settings.schedule_type == 'daily' %}selected{% endif %}>{{ _('Daily') }}</option>
                         <option value="weekly" {% if full_backup_settings.schedule_type == 'weekly' %}selected{% endif %}>{{ _('Weekly') }}</option>
+                        <option value="interval" {% if full_backup_settings.schedule_type == 'interval' %}selected{% endif %}>{{ _('Interval') }}</option>
                     </select>
                 </div>
-                <div class="form-group mb-2" id="day-of-week-group" {% if full_backup_settings.schedule_type != 'weekly' %}style="display: none;"{% endif %}>
-                    <label for="full_backup_day_of_week">{{ _('Day of Week') }}</label>
-                    <select id="full_backup_day_of_week" name="full_backup_day_of_week" class="form-control form-select">
-                        <option value="0" {% if full_backup_settings.day_of_week == 0 %}selected{% endif %}>{{ _('Monday') }}</option>
-                        <option value="1" {% if full_backup_settings.day_of_week == 1 %}selected{% endif %}>{{ _('Tuesday') }}</option>
-                        <option value="2" {% if full_backup_settings.day_of_week == 2 %}selected{% endif %}>{{ _('Wednesday') }}</option>
-                        <option value="3" {% if full_backup_settings.day_of_week == 3 %}selected{% endif %}>{{ _('Thursday') }}</option>
-                        <option value="4" {% if full_backup_settings.day_of_week == 4 %}selected{% endif %}>{{ _('Friday') }}</option>
-                        <option value="5" {% if full_backup_settings.day_of_week == 5 %}selected{% endif %}>{{ _('Saturday') }}</option>
-                        <option value="6" {% if full_backup_settings.day_of_week == 6 %}selected{% endif %}>{{ _('Sunday') }}</option>
-                    </select>
+
+                <!-- Fields for Daily/Weekly -->
+                <div id="cron-based-schedule-fields">
+                    <div class="form-group mb-2" id="day-of-week-group" {% if full_backup_settings.schedule_type != 'weekly' %}style="display: none;"{% endif %}>
+                        <label for="full_backup_day_of_week">{{ _('Day of Week') }}</label>
+                        <select id="full_backup_day_of_week" name="full_backup_day_of_week" class="form-control form-select">
+                            <option value="0" {% if full_backup_settings.day_of_week == 0 %}selected{% endif %}>{{ _('Monday') }}</option>
+                            <option value="1" {% if full_backup_settings.day_of_week == 1 %}selected{% endif %}>{{ _('Tuesday') }}</option>
+                            <option value="2" {% if full_backup_settings.day_of_week == 2 %}selected{% endif %}>{{ _('Wednesday') }}</option>
+                            <option value="3" {% if full_backup_settings.day_of_week == 3 %}selected{% endif %}>{{ _('Thursday') }}</option>
+                            <option value="4" {% if full_backup_settings.day_of_week == 4 %}selected{% endif %}>{{ _('Friday') }}</option>
+                            <option value="5" {% if full_backup_settings.day_of_week == 5 %}selected{% endif %}>{{ _('Saturday') }}</option>
+                            <option value="6" {% if full_backup_settings.day_of_week == 6 %}selected{% endif %}>{{ _('Sunday') }}</option>
+                        </select>
+                    </div>
+                    <div class="form-group mb-2" id="time-of-day-group">
+                        <label for="full_backup_time_of_day">{{ _('Time of Day (UTC)') }}</label>
+                        <input type="time" id="full_backup_time_of_day" name="full_backup_time_of_day" class="form-control" value="{{ full_backup_settings.time_of_day | default('02:00') }}">
+                    </div>
                 </div>
-                <div class="form-group mb-2">
-                    <label for="full_backup_time_of_day">{{ _('Time of Day (UTC)') }}</label>
-                    <input type="time" id="full_backup_time_of_day" name="full_backup_time_of_day" class="form-control" value="{{ full_backup_settings.time_of_day | default('02:00') }}" required>
+
+                <!-- Fields for Interval -->
+                <div id="interval-based-schedule-fields" {% if full_backup_settings.schedule_type != 'interval' %}style="display: none;"{% endif %}>
+                    <div class="form-group mb-2" id="interval-value-group">
+                        <label for="full_backup_interval_value">{{ _('Interval Value') }}</label>
+                        <input type="number" id="full_backup_interval_value" name="full_backup_interval_value" class="form-control" value="{{ full_backup_settings.interval_value | default(60) }}" min="1">
+                        <small class="form-text text-muted">{{ _('Enter a positive integer (e.g., 30 for 30 minutes/hours).') }}</small>
+                    </div>
+                    <div class="form-group mb-2" id="interval-unit-group">
+                        <label for="full_backup_interval_unit">{{ _('Interval Unit') }}</label>
+                        <select id="full_backup_interval_unit" name="full_backup_interval_unit" class="form-control form-select">
+                            <option value="minutes" {% if full_backup_settings.interval_unit == 'minutes' %}selected{% endif %}>{{ _('Minutes') }}</option>
+                            <option value="hours" {% if full_backup_settings.interval_unit == 'hours' %}selected{% endif %}>{{ _('Hours') }}</option>
+                        </select>
+                    </div>
                 </div>
-                <button type="submit" class="btn btn-success"><i class="fas fa-save"></i> {{ _('Save Full Backup Schedule') }}</button>
+                <button type="submit" class="btn btn-success mt-3"><i class="fas fa-save"></i> {{ _('Save Full Backup Schedule') }}</button>
             </form>
         </div>
     </div>
@@ -815,14 +836,36 @@
             });
 
             // Scheduled Full Backup form
-            function toggleDayOfWeekVisibility() {
-                if (fullBackupScheduleTypeSelect && dayOfWeekGroup) {
-                    dayOfWeekGroup.style.display = (fullBackupScheduleTypeSelect.value === 'weekly') ? 'block' : 'none';
+            const timeOfDayGroup = document.getElementById('time-of-day-group');
+            const intervalValueGroup = document.getElementById('interval-value-group'); // Assuming you add this ID
+            const intervalUnitGroup = document.getElementById('interval-unit-group'); // Assuming you add this ID
+            const cronFieldsContainer = document.getElementById('cron-based-schedule-fields');
+            const intervalFieldsContainer = document.getElementById('interval-based-schedule-fields');
+
+
+            function updateScheduleFieldVisibility() {
+                const scheduleType = fullBackupScheduleTypeSelect.value;
+
+                if (cronFieldsContainer) cronFieldsContainer.style.display = (scheduleType === 'daily' || scheduleType === 'weekly') ? 'block' : 'none';
+                if (intervalFieldsContainer) intervalFieldsContainer.style.display = (scheduleType === 'interval') ? 'block' : 'none';
+
+                if (dayOfWeekGroup) dayOfWeekGroup.style.display = (scheduleType === 'weekly') ? 'block' : 'none';
+
+                // Manage 'required' attribute for time_of_day
+                const timeInput = document.getElementById('full_backup_time_of_day');
+                if (timeInput) {
+                    timeInput.required = (scheduleType === 'daily' || scheduleType === 'weekly');
+                }
+                // Manage 'required' attribute for interval_value
+                const intervalValueInput = document.getElementById('full_backup_interval_value');
+                if(intervalValueInput) {
+                    intervalValueInput.required = (scheduleType === 'interval');
                 }
             }
+
             if (fullBackupScheduleTypeSelect) {
-                fullBackupScheduleTypeSelect.addEventListener('change', toggleDayOfWeekVisibility);
-                toggleDayOfWeekVisibility(); // Initial call
+                fullBackupScheduleTypeSelect.addEventListener('change', updateScheduleFieldVisibility);
+                updateScheduleFieldVisibility(); // Initial call to set visibility based on loaded settings
             }
 
             if (bulkDeleteButton) {

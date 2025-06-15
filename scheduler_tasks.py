@@ -3,7 +3,7 @@ from flask import current_app, render_template, url_for
 from extensions import db
 from models import Booking, User, Resource, FloorMap, BookingSettings
 from utils import add_audit_log, send_email, _get_map_configuration_data, _get_resource_configurations_data, _get_user_configurations_data, get_current_effective_time
-from azure_backup import backup_bookings_csv, create_full_backup
+from azure_backup import backup_bookings_csv, create_full_backup, backup_incremental_bookings
 # Ensure current_app is available if not passed directly
 # from flask import current_app # current_app is already imported by the other functions
 
@@ -642,3 +642,29 @@ def send_checkin_reminders(app):
             logger.error(f"Scheduler: Error in send_checkin_reminders task's main try block: {e_task}", exc_info=True)
         finally:
             logger.info("Scheduler: Task 'send_checkin_reminders' finished.")
+
+
+def run_scheduled_incremental_booking_backup(app):
+    """
+    Scheduled task entry point to run an incremental backup of booking data.
+    """
+    with app.app_context():
+        logger = app.logger
+        logger.info("Scheduler: Starting run_scheduled_incremental_booking_backup task...")
+        try:
+            # Call the actual backup function from azure_backup.py
+            # socketio_instance and task_id are None for a non-interactive scheduled job
+            # The backup_incremental_bookings function needs to be designed to handle app context
+            # and potentially log its own progress/errors.
+            success = backup_incremental_bookings(
+                app=app,
+                socketio_instance=None, # No specific user socket for scheduled task
+                task_id=None # No specific task ID from user action
+            )
+            if success: # Assuming backup_incremental_bookings returns a boolean or similar success indicator
+                logger.info("Scheduler: Incremental booking backup task executed successfully.")
+            else:
+                logger.warning("Scheduler: Incremental booking backup task executed but reported issues (e.g., returned False or no explicit success). Check azure_backup logs for details.")
+        except Exception as e:
+            logger.error(f"Scheduler: Exception during run_scheduled_incremental_booking_backup execution: {e}", exc_info=True)
+        logger.info("Scheduler: run_scheduled_incremental_booking_backup task finished.")
