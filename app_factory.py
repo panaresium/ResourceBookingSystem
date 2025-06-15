@@ -190,14 +190,14 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     effective_log_level = log_level_map.get(log_level_str, logging.INFO)
     root_logger = logging.getLogger()
     root_logger.setLevel(effective_log_level)
-    if not root_logger.hasHandlers():
-        stream_handler = logging.StreamHandler()
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        stream_handler.setFormatter(formatter)
-        root_logger.addHandler(stream_handler)
-        logging.info(f"Root logger configured with level {log_level_str} and a default StreamHandler.")
-    else:
-        logging.info(f"Root logger level set to {log_level_str}. Existing handlers detected.")
+    # if not root_logger.hasHandlers():
+    #     stream_handler = logging.StreamHandler()
+    #     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    #     stream_handler.setFormatter(formatter)
+    #     root_logger.addHandler(stream_handler)
+    #     logging.info(f"Root logger configured with level {log_level_str} and a default StreamHandler.")
+    # else:
+    #     logging.info(f"Root logger level set to {log_level_str}. Existing handlers detected.")
 
     app_log_level_config = app.config.get('LOG_LEVEL', default_log_level_str).upper()
     app_effective_log_level = log_level_map.get(app_log_level_config, logging.INFO)
