@@ -1780,6 +1780,8 @@ class TestUnavailableDatesAPI(AppTests):
 
         mock_now_utc = datetime_original(2025, 7, 15, 10, 0, 0, tzinfo=timezone_original.utc) # 10:00 UTC
         mock_datetime_in_api.now = MagicMock(return_value=mock_now_utc)
+        # This ensures that when api_resources.py calls datetime.now(timezone.utc), it gets our mock_now_utc
+        # And that other calls to datetime.datetime(...) still work
         mock_datetime_in_api.combine = datetime_original.combine
         mock_datetime_in_api.strptime = datetime_original.strptime
         mock_datetime_in_api.fromisoformat = datetime_original.fromisoformat
@@ -1791,15 +1793,17 @@ class TestUnavailableDatesAPI(AppTests):
         unavailable_dates_list = response.get_json()
 
         # --- Assertions ---
+        # Today's date string
         today_str = mock_now_utc.date().isoformat() # "2025-07-15"
 
-        print(f"Test: Positive Offset (New Logic - Universal Cutoff). Today: {today_str}. Unavailable Dates: {unavailable_dates_list}")
-        # Expected (New Logic - Universal Cutoff): Cutoff 11:00 UTC (Venue Time).
-        # Morning slot (08:00-12:00 VT) -> Start 06:00 UTC. Cutoff 11:00 UTC >= Slot Start 06:00 UTC -> Morning PASSED.
-        # Afternoon slot (13:00-17:00 VT) -> Start 11:00 UTC. Cutoff 11:00 UTC >= Slot Start 11:00 UTC -> Afternoon PASSED.
-        # Both standard slots are passed, so today should BE in the unavailable list.
+        # Debugging output
+        print(f"Test: Positive Offset (New Logic). Today: {today_str}. Unavailable Dates: {unavailable_dates_list}")
+        # Expected (New Logic): Cutoff 11:00 UTC (Venue Time).
+        # Morning slot (08:00-12:00 VT) -> Start 06:00 UTC. 11:00 >= 06:00 -> Morning PASSED.
+        # Afternoon slot (13:00-17:00 VT) -> Start 11:00 UTC. 11:00 >= 11:00 -> Afternoon PASSED.
+        # Both slots passed, so today should BE in the unavailable list.
         self.assertIn(today_str, unavailable_dates_list,
-                      f"Today ({today_str}) SHOULD BE unavailable as the cutoff (11:00 Venue Time) makes both standard slots passed (starts 08:00 and 13:00 Venue Time).")
+                      f"Today ({today_str}) SHOULD be unavailable as the cutoff (11:00 Venue Time) makes both morning (starts 08:00 VT / 06:00 UTC) and afternoon (starts 13:00 VT / 11:00 UTC) slots passed.")
 
     @patch('routes.api_resources.datetime')
     def test_unavailable_all_day_today_due_to_cutoff(self, mock_datetime_in_api):
