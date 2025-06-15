@@ -29,7 +29,7 @@ from routes.gmail_auth import init_gmail_auth_routes # Added for Gmail OAuth flo
 
 # For scheduler
 from apscheduler.schedulers.background import BackgroundScheduler
-from scheduler_tasks import cancel_unchecked_bookings, apply_scheduled_resource_status_changes, run_scheduled_backup_job, run_scheduled_booking_csv_backup, auto_checkout_overdue_bookings, auto_release_unclaimed_bookings, send_checkin_reminders
+from scheduler_tasks import cancel_unchecked_bookings, apply_scheduled_resource_status_changes, run_scheduled_backup_job, run_scheduled_booking_csv_backup, run_scheduled_incremental_booking_backup, auto_checkout_overdue_bookings, auto_release_unclaimed_bookings, send_checkin_reminders
 # Conditional import for azure_backup
 try:
     from azure_backup import restore_latest_backup_set_on_startup, backup_if_changed as azure_backup_if_changed, restore_incremental_bookings
@@ -43,6 +43,7 @@ except ImportError:
 # Imports for processing downloaded configs during startup restore
 from utils import (
     load_scheduler_settings, # Added for new setting
+    DEFAULT_FULL_BACKUP_SCHEDULE, # Added for full backup job scheduling
     _import_map_configuration_data,
     _import_resource_configurations_data,
     _import_user_configurations_data,
@@ -451,20 +452,100 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
         if apscheduler_available_check:
             scheduler = BackgroundScheduler(daemon=True)
+            all_scheduler_settings = load_scheduler_settings() # Load once for all jobs
 
             # Add jobs from scheduler_tasks.py
             if cancel_unchecked_bookings: # Check if function exists before adding
                 scheduler.add_job(cancel_unchecked_bookings, 'interval', minutes=app.config.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', 5), args=[app])
             if apply_scheduled_resource_status_changes: # Check if function exists
                 scheduler.add_job(apply_scheduled_resource_status_changes, 'interval', minutes=1, args=[app])
-            if run_scheduled_backup_job: # Check if function exists
-                scheduler.add_job(run_scheduled_backup_job, 'interval', minutes=app.config.get('SCHEDULER_BACKUP_JOB_INTERVAL_MINUTES', 60), args=[app])
+
+            # Dynamic scheduling for Full System Backup
+            if run_scheduled_backup_job:
+                # all_scheduler_settings loaded above
+                full_backup_config = all_scheduler_settings.get('full_backup', DEFAULT_FULL_BACKUP_SCHEDULE.copy())
+
+                if full_backup_config.get('is_enabled'):
+                    job_id = 'scheduled_full_system_backup_job'
+                    trigger_args = {}
+                    trigger_type = None
+                    schedule_type = full_backup_config.get('schedule_type', 'daily') # Default to daily
+
+                    try:
+                        if schedule_type == 'interval':
+                            trigger_type = 'interval'
+                            unit = full_backup_config.get('interval_unit', 'hours')
+                            value = int(full_backup_config.get('interval_value', 24)) # Default to 24 if missing
+                            if value <= 0: # Basic validation
+                                app.logger.error(f"Invalid interval value ({value}) for full system backup. Must be positive. Job not scheduled.")
+                                trigger_type = None # Prevent scheduling
+                            elif unit == 'minutes':
+                                trigger_args['minutes'] = value
+                            elif unit == 'hours':
+                                trigger_args['hours'] = value
+                            else: # Unknown unit
+                                app.logger.error(f"Invalid interval unit ({unit}) for full system backup. Must be 'minutes' or 'hours'. Job not scheduled.")
+                                trigger_type = None # Prevent scheduling
+
+                            if trigger_type:
+                                app.logger.info(f"Scheduling full system backup job ({job_id}) to run every {value} {unit}.")
+
+                        elif schedule_type == 'daily':
+                            trigger_type = 'cron'
+                            time_of_day = full_backup_config.get('time_of_day', '02:00') # Default if missing
+                            time_parts = time_of_day.split(':')
+                            trigger_args['hour'] = int(time_parts[0])
+                            trigger_args['minute'] = int(time_parts[1])
+                            app.logger.info(f"Scheduling full system backup job ({job_id}) to run daily at {trigger_args['hour']:02d}:{trigger_args['minute']:02d}.")
+
+                        elif schedule_type == 'weekly':
+                            trigger_type = 'cron'
+                            time_of_day = full_backup_config.get('time_of_day', '02:00') # Default if missing
+                            day_of_week = full_backup_config.get('day_of_week', 0) # Default to Monday if missing
+                            time_parts = time_of_day.split(':')
+                            trigger_args['day_of_week'] = str(day_of_week)
+                            trigger_args['hour'] = int(time_parts[0])
+                            trigger_args['minute'] = int(time_parts[1])
+                            app.logger.info(f"Scheduling full system backup job ({job_id}) to run weekly on day {trigger_args['day_of_week']} at {trigger_args['hour']:02d}:{trigger_args['minute']:02d}.")
+
+                        else:
+                            app.logger.warning(f"Unknown schedule_type '{schedule_type}' for full system backup job ({job_id}). Job not scheduled.")
+
+                        if trigger_type:
+                            scheduler.add_job(
+                                func=run_scheduled_backup_job,
+                                trigger=trigger_type,
+                                id=job_id,
+                                replace_existing=True,
+                                args=[app],
+                                **trigger_args
+                            )
+                        else:
+                            app.logger.warning(f"Full system backup job ({job_id}) not scheduled due to invalid configuration or trigger_type being None.")
+
+                    except ValueError as e:
+                        app.logger.error(f"Error parsing schedule parameters for full system backup job ({job_id}): {e}. Job not scheduled.", exc_info=True)
+                    except Exception as e:
+                        app.logger.error(f"An unexpected error occurred while configuring full system backup job ({job_id}): {e}. Job not scheduled.", exc_info=True)
+                else:
+                    app.logger.info(f"Scheduled full system backup job ({DEFAULT_FULL_BACKUP_SCHEDULE.get('id','scheduled_full_system_backup_job')}) is disabled in settings.")
+            else:
+                app.logger.warning("run_scheduled_backup_job function not found in scheduler_tasks. Full system backup job not added.")
 
             if run_scheduled_booking_csv_backup: # Check if the function exists
-                booking_schedule_settings = app.config['BOOKING_CSV_SCHEDULE_SETTINGS']
-                if booking_schedule_settings.get('enabled'):
-                    interval_value = booking_schedule_settings.get('interval_value', 24) # Default from helper if somehow missing
-                    interval_unit = booking_schedule_settings.get('interval_unit', 'hours') # Default from helper
+                # app.config['BOOKING_CSV_SCHEDULE_SETTINGS'] is loaded from a separate file, not scheduler_settings.json
+                # For consistency, let's assume booking_csv_backup settings are also in scheduler_settings.json
+                # However, the current code loads it into app.config. For this change, we will keep that,
+                # but if it were to be unified, it would use all_scheduler_settings.get('booking_csv_backup', ...)
+                booking_csv_schedule_settings_from_config = app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS', {}) # From app.config
+
+                # If we were to use scheduler_settings.json for CSV backups too (ideal future state):
+                # booking_csv_schedule_settings = all_scheduler_settings.get('booking_csv_backup', DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy())
+
+                # Using the existing mechanism for CSV:
+                if booking_csv_schedule_settings_from_config.get('enabled'):
+                    interval_value = booking_csv_schedule_settings_from_config.get('interval_value', 24)
+                    interval_unit = booking_csv_schedule_settings_from_config.get('interval_unit', 'hours')
 
                     job_kwargs = {}
                     if interval_unit == 'minutes':
@@ -484,11 +565,43 @@ def create_app(config_object=config, testing=False): # Added testing parameter
                         **job_kwargs,
                         args=[app]
                     )
-                    app.logger.info(f"Scheduled booking CSV backup job added: Interval {interval_value} {interval_unit}, Range: {booking_schedule_settings.get('range_type')}.")
+                    app.logger.info(f"Scheduled booking CSV backup job added: Interval {interval_value} {interval_unit}, Range: {booking_csv_schedule_settings_from_config.get('range_type')}.")
                 else:
-                    app.logger.info("Scheduled booking CSV backup is disabled in settings. Job not added.")
+                    app.logger.info("Scheduled booking CSV backup is disabled in settings (from app.config). Job not added.")
 
-            # Add the new auto_checkout_overdue_bookings job
+            # Scheduling for Incremental JSON Booking Backup
+            if run_scheduled_incremental_booking_backup:
+                # all_scheduler_settings loaded above
+                # Define default locally as it might not be in utils.py or to ensure it's always available here
+                DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE = {'is_enabled': False, 'interval_minutes': 30}
+                incr_json_config = all_scheduler_settings.get('booking_incremental_json_schedule', DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE.copy())
+
+                if incr_json_config.get('is_enabled'):
+                    try:
+                        interval_minutes = int(incr_json_config.get('interval_minutes', 30))
+                        if interval_minutes <= 0:
+                            app.logger.error(f"Invalid interval_minutes ({interval_minutes}) for incremental JSON booking backup. Must be positive. Job not scheduled.")
+                        else:
+                            scheduler.add_job(
+                                func=run_scheduled_incremental_booking_backup,
+                                trigger='interval',
+                                minutes=interval_minutes,
+                                id='scheduled_incremental_booking_backup_job', # Match ID from routes/admin_ui.py
+                                replace_existing=True,
+                                args=[app]
+                            )
+                            app.logger.info(f"Scheduled incremental JSON booking backup job to run every {interval_minutes} minutes.")
+                    except ValueError as e:
+                        app.logger.error(f"Error parsing interval_minutes for incremental JSON booking backup: {e}. Job not scheduled.", exc_info=True)
+                    except Exception as e_job_add: # Catch broader exceptions during job add
+                        app.logger.error(f"Error adding incremental JSON booking backup job to scheduler: {e_job_add}. Job not scheduled.", exc_info=True)
+
+                else:
+                    app.logger.info("Scheduled incremental JSON booking backup is disabled in settings. Job not added.")
+            else:
+                app.logger.warning("run_scheduled_incremental_booking_backup function not found in scheduler_tasks. Incremental JSON booking backup job not added.")
+
+
             # Add the new auto_checkout_overdue_bookings job
             if auto_checkout_overdue_bookings:
                 # Using a default interval of 15 minutes as per prompt example.

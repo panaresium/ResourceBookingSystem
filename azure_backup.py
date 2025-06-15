@@ -59,6 +59,7 @@ BOOKING_INCREMENTAL_BACKUPS_DIR = 'booking_incremental_backups'
 DB_BACKUPS_DIR = 'db_backups'
 CONFIG_BACKUPS_DIR = 'config_backups'
 BOOKING_CSV_BACKUPS_DIR = 'booking_csv_backups' # New constant for booking CSVs
+BOOKING_FULL_JSON_EXPORTS_DIR = 'booking_full_json_exports' # For full JSON booking exports
 MEDIA_BACKUPS_DIR_BASE = 'media_backups'
 MAP_CONFIG_FILENAME_PREFIX = 'map_config_'
 DB_FILENAME_PREFIX = 'site_'
@@ -3113,19 +3114,292 @@ def restore_bookings_from_full_db_backup(app, timestamp_str: str, socketio_insta
                 if 'errors' in actions_summary and isinstance(actions_summary['errors'], list):
                      actions_summary['errors'].append(f"Cleanup error: Failed to delete temp directory {temp_backup_dir}: {e_remove}")
 
+
     return actions_summary
-# The new function download_scheduler_settings_component should be placed before restore_full_backup
-# or at least before if __name__ == '__main__' if it exists.
-# For simplicity, appending here. If __main__ block is present, it should be manually moved before it.
-# Better: find a specific line or function to insert before/after.
-# Let's find the line `def list_available_backups():` and insert before it.
-# This is safer than appending blindly.
-# The previous read_files output confirms this function exists.
 
-# New function definition will be inserted before `def list_available_backups():`
-# This is managed by the calling logic (me, the LLM).
 
-# The content that was in `existing_content` is now the string above.
-# I will now define the new function string.
-# Then I will search for `def list_available_backups():` and insert the new function before it.
-# This is now done by the next tool call using replace_with_git_merge_diff.
+def backup_full_bookings_json(app, socketio_instance=None, task_id=None) -> bool:
+    """
+    Creates a full export of all booking records to a JSON file and uploads it to Azure File Share.
+    """
+    event_name = 'full_booking_export_progress' # Specific event name for this operation
+    _emit_progress(socketio_instance, task_id, event_name, 'Starting full booking JSON export...', level='INFO')
+    logger.info(f"[Task {task_id}] Starting full booking JSON export process.")
+
+    try:
+        with app.app_context():
+            all_bookings = Booking.query.all()
+
+        if not all_bookings:
+            logger.info(f"[Task {task_id}] No bookings found in the database. Export not needed.")
+            _emit_progress(socketio_instance, task_id, event_name, "No bookings found to export.", level='INFO')
+            return True # Success, as there's nothing to backup
+
+        _emit_progress(socketio_instance, task_id, event_name, f"Found {len(all_bookings)} bookings. Serializing...", level='INFO')
+        logger.info(f"[Task {task_id}] Found {len(all_bookings)} bookings. Starting serialization.")
+
+        serialized_bookings = []
+        for booking in all_bookings:
+            # Ensure all datetime fields are handled and converted to ISO format string
+            # Handle None values appropriately by not calling isoformat() on them.
+            created_at_iso = booking.created_at.isoformat() if booking.created_at else None
+            last_modified_iso = booking.last_modified.isoformat() if booking.last_modified else None
+            start_time_iso = booking.start_time.isoformat() if booking.start_time else None
+            end_time_iso = booking.end_time.isoformat() if booking.end_time else None
+            checked_in_at_iso = booking.checked_in_at.isoformat() if booking.checked_in_at else None
+            checked_out_at_iso = booking.checked_out_at.isoformat() if booking.checked_out_at else None
+            token_expires_iso = booking.check_in_token_expires_at.isoformat() if booking.check_in_token_expires_at else None
+
+            serialized_bookings.append({
+                'id': booking.id,
+                'resource_id': booking.resource_id,
+                'user_name': booking.user_name,
+                'start_time': start_time_iso,
+                'end_time': end_time_iso,
+                'title': booking.title,
+                'status': booking.status,
+                'created_at': created_at_iso,
+                'last_modified': last_modified_iso,
+                'is_recurring': booking.is_recurring,
+                'recurrence_id': booking.recurrence_id,
+                'is_cancelled': booking.is_cancelled,
+                'checked_in_at': checked_in_at_iso,
+                'checked_out_at': checked_out_at_iso,
+                'admin_deleted_message': booking.admin_deleted_message,
+                'check_in_token': booking.check_in_token,
+                'check_in_token_expires_at': token_expires_iso,
+                'pin': booking.pin # Assuming 'pin' is a direct attribute
+            })
+
+        logger.info(f"[Task {task_id}] Serialized {len(serialized_bookings)} bookings.")
+        _emit_progress(socketio_instance, task_id, event_name, f"Serialization complete for {len(serialized_bookings)} bookings. Preparing upload...", level='INFO')
+
+        # Prepare for Azure Upload
+        service_client = _get_service_client()
+        share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups') # Using config share for consistency
+        share_client = service_client.get_share_client(share_name)
+
+        if not _client_exists(share_client):
+            logger.info(f"[Task {task_id}] Creating share '{share_name}' for full booking JSON exports.")
+            _emit_progress(socketio_instance, task_id, event_name, f"Creating share '{share_name}'...", level='INFO')
+            _create_share_with_retry(share_client, share_name) # This function handles retries and logs
+
+        _ensure_directory_exists(share_client, BOOKING_FULL_JSON_EXPORTS_DIR) # New directory constant
+
+        timestamp_for_filename = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+        filename = f"full_bookings_export_{timestamp_for_filename}.json"
+        remote_path_on_azure = f"{BOOKING_FULL_JSON_EXPORTS_DIR}/{filename}"
+
+        json_data_bytes = json.dumps(serialized_bookings, indent=4).encode('utf-8')
+
+        file_client = share_client.get_file_client(remote_path_on_azure)
+        _emit_progress(socketio_instance, task_id, event_name, f"Uploading {filename} to {share_name}...", level='INFO')
+        logger.info(f"[Task {task_id}] Attempting to upload full booking JSON export: {share_name}/{remote_path_on_azure}")
+
+        file_client.upload_file(data=json_data_bytes, overwrite=True)
+
+        logger.info(f"[Task {task_id}] Successfully exported all bookings to JSON: '{share_name}/{remote_path_on_azure}'.")
+        _emit_progress(socketio_instance, task_id, event_name, 'Full booking JSON export uploaded successfully.', detail=f'{share_name}/{remote_path_on_azure}', level='SUCCESS')
+        return True
+
+    except Exception as e:
+        logger.error(f"[Task {task_id}] Failed to export all bookings to JSON: {e}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, 'Full booking JSON export failed.', detail=str(e), level='ERROR')
+        return False
+
+def list_available_full_booking_json_exports():
+    """
+    Lists available full booking JSON export files from Azure File Share.
+    Returns a sorted list of dictionaries, each with 'filename', 'timestamp', and 'display_name'.
+    """
+    logger.info("Attempting to list available full booking JSON exports.")
+    backup_items = []
+    try:
+        service_client = _get_service_client()
+        share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups') # Using config share
+        share_client = service_client.get_share_client(share_name)
+
+        if not _client_exists(share_client):
+            logger.warning(f"Full booking JSON export share '{share_name}' does not exist. No exports to list.")
+            return []
+
+        export_dir_client = share_client.get_directory_client(BOOKING_FULL_JSON_EXPORTS_DIR)
+        if not _client_exists(export_dir_client):
+            logger.info(f"Full booking JSON export directory '{BOOKING_FULL_JSON_EXPORTS_DIR}' does not exist on share '{share_name}'. No exports to list.")
+            return []
+
+        # Filename format: full_bookings_export_{timestamp}.json
+        pattern = re.compile(r"^full_bookings_export_(?P<timestamp>\d{8}_\d{6})\.json$")
+
+        for item in export_dir_client.list_directories_and_files():
+            if item['is_directory']:
+                continue
+
+            filename = item['name']
+            match = pattern.match(filename)
+            if not match:
+                logger.warning(f"Skipping file with unexpected name format: {filename} in full JSON exports.")
+                continue
+
+            timestamp_str = match.group('timestamp')
+            try:
+                ts_datetime = datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
+                display_timestamp = ts_datetime.strftime('%Y-%m-%d %H:%M:%S UTC')
+                backup_items.append({
+                    'filename': filename,
+                    'timestamp': timestamp_str,
+                    'display_name': f"Full Export - {display_timestamp}"
+                })
+            except ValueError:
+                logger.warning(f"Skipping file with invalid timestamp in name: {filename}")
+                continue
+
+        backup_items.sort(key=lambda x: x['timestamp'], reverse=True) # Newest first
+        logger.info(f"Found {len(backup_items)} available full booking JSON export files.")
+        return backup_items
+
+    except Exception as e:
+        logger.error(f"Error listing available full booking JSON exports: {e}", exc_info=True)
+        return []
+
+def restore_bookings_from_full_json_export(app, filename: str, socketio_instance=None, task_id=None) -> dict:
+    """
+    Restores bookings from a full JSON export file from Azure.
+    This will clear all existing bookings before importing.
+    """
+    event_name = 'full_booking_json_restore_progress'
+    summary = {
+        'status': 'started',
+        'message': f'Starting restore from full JSON export: {filename}.',
+        'bookings_restored': 0,
+        'errors': []
+    }
+    _emit_progress(socketio_instance, task_id, event_name, summary['message'], level='INFO')
+    logger.info(f"[Task {task_id}] {summary['message']}")
+
+    temp_downloaded_file_path = None
+    try:
+        # 1. Download Phase
+        service_client = _get_service_client()
+        share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
+        share_client = service_client.get_share_client(share_name)
+
+        if not _client_exists(share_client):
+            msg = f"Azure share '{share_name}' not found for JSON export restore."
+            summary.update({'status': 'failure', 'message': msg, 'errors': [msg]})
+            logger.error(f"[Task {task_id}] {msg}")
+            _emit_progress(socketio_instance, task_id, event_name, msg, level='ERROR')
+            return summary
+
+        remote_file_path = f"{BOOKING_FULL_JSON_EXPORTS_DIR}/{filename}"
+        file_client = share_client.get_file_client(remote_file_path)
+
+        if not _client_exists(file_client):
+            msg = f"Full JSON export file '{filename}' not found on share '{share_name}' at path '{remote_file_path}'."
+            summary.update({'status': 'failure', 'message': msg, 'errors': [msg]})
+            logger.error(f"[Task {task_id}] {msg}")
+            _emit_progress(socketio_instance, task_id, event_name, msg, detail=remote_file_path, level='ERROR')
+            return summary
+
+        _emit_progress(socketio_instance, task_id, event_name, f"Downloading JSON export: {filename}", level='INFO')
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as tmp_file:
+            temp_downloaded_file_path = tmp_file.name
+
+        download_success = download_file(share_client, remote_file_path, temp_downloaded_file_path)
+        if not download_success:
+            msg = f"Failed to download JSON export file '{filename}' from Azure."
+            summary.update({'status': 'failure', 'message': msg, 'errors': [msg]})
+            logger.error(f"[Task {task_id}] {msg}")
+            _emit_progress(socketio_instance, task_id, event_name, msg, detail=remote_file_path, level='ERROR')
+            return summary
+
+        logger.info(f"[Task {task_id}] JSON export file '{filename}' downloaded to '{temp_downloaded_file_path}'.")
+        _emit_progress(socketio_instance, task_id, event_name, "Download complete. Starting import process...", level='INFO')
+
+        # 2. Import Phase
+        with app.app_context():
+            logger.info(f"[Task {task_id}] Clearing existing bookings from the database.")
+            _emit_progress(socketio_instance, task_id, event_name, "Clearing existing bookings...", level='INFO')
+            db.session.query(Booking).delete()
+            db.session.commit() # Commit the deletion
+            logger.info(f"[Task {task_id}] Existing bookings cleared.")
+            _emit_progress(socketio_instance, task_id, event_name, "Existing bookings cleared. Importing from JSON...", level='INFO')
+
+            with open(temp_downloaded_file_path, 'r', encoding='utf-8') as f:
+                bookings_data = json.load(f)
+
+            count_restored = 0
+            for booking_json in bookings_data:
+                try:
+                    # Convert datetime strings to datetime objects
+                    for dt_field in ['start_time', 'end_time', 'created_at', 'last_modified',
+                                     'checked_in_at', 'checked_out_at', 'check_in_token_expires_at']:
+                        if booking_json.get(dt_field):
+                            booking_json[dt_field] = datetime.fromisoformat(booking_json[dt_field])
+                        else:
+                            booking_json[dt_field] = None # Ensure it's None if missing or empty string from JSON
+
+                    new_booking = Booking(
+                        # id is intentionally not set to allow auto-generation
+                        resource_id=booking_json.get('resource_id'),
+                        user_name=booking_json.get('user_name'),
+                        start_time=booking_json.get('start_time'),
+                        end_time=booking_json.get('end_time'),
+                        title=booking_json.get('title'),
+                        status=booking_json.get('status', 'approved'), # Default if not present
+                        created_at=booking_json.get('created_at'), # Will be auto-set if None and model has default
+                        last_modified=booking_json.get('last_modified'), # Will be auto-set if None and model has default/onupdate
+                        is_recurring=booking_json.get('is_recurring', False),
+                        recurrence_id=booking_json.get('recurrence_id'),
+                        is_cancelled=booking_json.get('is_cancelled', False),
+                        checked_in_at=booking_json.get('checked_in_at'),
+                        checked_out_at=booking_json.get('checked_out_at'),
+                        admin_deleted_message=booking_json.get('admin_deleted_message'),
+                        check_in_token=booking_json.get('check_in_token'),
+                        check_in_token_expires_at=booking_json.get('check_in_token_expires_at'),
+                        pin=booking_json.get('pin')
+                    )
+                    db.session.add(new_booking)
+                    count_restored += 1
+                except Exception as e_item:
+                    db.session.rollback() # Rollback this item
+                    err_msg_item = f"Error processing booking item from JSON: {booking_json.get('id', 'Unknown ID')}. Error: {str(e_item)}"
+                    logger.error(f"[Task {task_id}] {err_msg_item}", exc_info=True)
+                    summary['errors'].append(err_msg_item)
+                    _emit_progress(socketio_instance, task_id, event_name, "Error processing a booking item.", detail=err_msg_item, level='WARNING')
+
+            if not summary['errors']: # Only commit if no errors during item processing loop
+                db.session.commit()
+                summary['bookings_restored'] = count_restored
+                summary['status'] = 'success'
+                summary['message'] = f"Successfully restored {count_restored} bookings from JSON export '{filename}'."
+                logger.info(f"[Task {task_id}] {summary['message']}")
+                _emit_progress(socketio_instance, task_id, event_name, summary['message'], level='SUCCESS')
+            else:
+                db.session.rollback() # Rollback all if any item had error
+                summary['status'] = 'failure'
+                summary['message'] = f"Restore from JSON export '{filename}' completed with errors. No bookings were committed."
+                logger.error(f"[Task {task_id}] {summary['message']}")
+                _emit_progress(socketio_instance, task_id, event_name, summary['message'], detail=f"{len(summary['errors'])} items failed.", level='ERROR')
+
+    except Exception as e:
+        if hasattr(db, 'session') and db.session.is_active:
+            db.session.rollback()
+        msg = f"Critical error during restore from full JSON export '{filename}': {str(e)}"
+        summary.update({'status': 'failure', 'message': msg})
+        if str(e) not in summary['errors']: summary['errors'].append(str(e))
+        logger.error(f"[Task {task_id}] {msg}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, event_name, msg, detail=str(e), level='CRITICAL_ERROR')
+    finally:
+        if temp_downloaded_file_path and os.path.exists(temp_downloaded_file_path):
+            try:
+                os.remove(temp_downloaded_file_path)
+                logger.info(f"[Task {task_id}] Temporary downloaded JSON file '{temp_downloaded_file_path}' deleted.")
+            except Exception as e_remove:
+                err_remove = f"Failed to delete temporary JSON file '{temp_downloaded_file_path}': {e_remove}"
+                logger.error(f"[Task {task_id}] {err_remove}", exc_info=True)
+                if 'errors' in summary and isinstance(summary['errors'], list):
+                     summary['errors'].append(err_remove)
+
+    return summary

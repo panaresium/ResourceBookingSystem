@@ -35,7 +35,7 @@ from azure_backup import (
 import os
 import json
 from apscheduler.jobstores.base import JobLookupError
-from scheduler_tasks import run_scheduled_booking_csv_backup # For re-adding job
+from scheduler_tasks import run_scheduled_booking_csv_backup, run_scheduled_incremental_booking_backup # Added run_scheduled_incremental_booking_backup
 from translations import _ # For flash messages and other translatable strings
 
 admin_ui_bp = Blueprint('admin_ui', __name__, url_prefix='/admin', template_folder='../templates')
@@ -242,6 +242,17 @@ def serve_backup_system_page():
     scheduler_settings = load_scheduler_settings()
     full_backup_settings = scheduler_settings.get('full_backup', DEFAULT_FULL_BACKUP_SCHEDULE.copy())
 
+    # Ensure new interval keys are present for the template, with defaults
+    full_backup_settings.setdefault('interval_value', 60) # Default to 60
+    full_backup_settings.setdefault('interval_unit', 'minutes') # Default to minutes
+    # Ensure schedule_type is present, defaulting if necessary (e.g. from an older config)
+    full_backup_settings.setdefault('schedule_type', 'daily') # Default to daily if not set
+    # Ensure time_of_day is present for daily/weekly
+    full_backup_settings.setdefault('time_of_day', '02:00')
+    # Ensure day_of_week is present for weekly (can be None if not weekly)
+    full_backup_settings.setdefault('day_of_week', None if full_backup_settings['schedule_type'] != 'weekly' else 0)
+
+
     # Get global_time_offset_hours
     time_offset_value = 0 # Default
     try:
@@ -268,6 +279,18 @@ def serve_backup_booking_data_page():
     current_app.logger.info(f"User {current_user.username} accessed Booking Data Management page.")
     scheduler_settings = load_scheduler_settings()
     booking_csv_backup_settings = scheduler_settings.get('booking_csv_backup', DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy())
+
+    # Load settings for scheduled incremental JSON backups
+    # Assume DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE = {'is_enabled': False, 'interval_minutes': 30} would be in utils.py
+    # For now, handling default directly:
+    DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE = {'is_enabled': False, 'interval_minutes': 30}
+    booking_incremental_json_schedule_settings = scheduler_settings.get(
+        'booking_incremental_json_schedule',
+        DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE.copy()
+    )
+    booking_incremental_json_schedule_settings.setdefault('is_enabled', DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE['is_enabled'])
+    booking_incremental_json_schedule_settings.setdefault('interval_minutes', DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE['interval_minutes'])
+
 
     # Pagination logic for Booking CSV Backups (Flask-populated part)
     all_booking_csv_files = list_available_booking_csv_backups() if list_available_booking_csv_backups else []
@@ -304,6 +327,7 @@ def serve_backup_booking_data_page():
 
     return render_template('admin/backup_booking_data.html',
                            booking_csv_backup_settings=booking_csv_backup_settings,
+                           booking_incremental_json_schedule_settings=booking_incremental_json_schedule_settings, # Pass new settings
                            booking_csv_backups=paginated_booking_csv_backups,
                            booking_csv_page=page,
                            booking_csv_total_pages=total_pages,
@@ -593,18 +617,66 @@ def save_full_backup_schedule_settings():
             from utils import DEFAULT_FULL_BACKUP_SCHEDULE # Import default for safety
             all_settings['full_backup'] = DEFAULT_FULL_BACKUP_SCHEDULE.copy()
 
-        all_settings['full_backup']['is_enabled'] = request.form.get('full_backup_enabled') == 'true'
-        all_settings['full_backup']['schedule_type'] = request.form.get('full_backup_schedule_type', 'daily')
-        all_settings['full_backup']['time_of_day'] = request.form.get('full_backup_time_of_day', '02:00')
+        is_enabled = request.form.get('full_backup_enabled') == 'true'
+        schedule_type = request.form.get('full_backup_schedule_type', 'daily') # Default to 'daily' if not provided
 
-        day_of_week_str = request.form.get('full_backup_day_of_week')
-        if day_of_week_str is not None and day_of_week_str.isdigit():
-            all_settings['full_backup']['day_of_week'] = int(day_of_week_str)
-        elif all_settings['full_backup']['schedule_type'] == 'weekly':
-            all_settings['full_backup']['day_of_week'] = 0 # Default to Monday if weekly and not specified
+        all_settings['full_backup']['is_enabled'] = is_enabled
+        all_settings['full_backup']['schedule_type'] = schedule_type
+
+        if schedule_type == 'interval':
+            interval_value_str = request.form.get('full_backup_interval_value')
+            interval_unit = request.form.get('full_backup_interval_unit', 'minutes') # Default unit
+
+            try:
+                interval_value = int(interval_value_str)
+                if interval_value <= 0:
+                    flash(_('Interval value must be a positive integer.'), 'danger')
+                    return redirect(url_for('admin_ui.serve_backup_system_page'))
+            except (ValueError, TypeError): # Catch TypeError if interval_value_str is None
+                flash(_('Invalid interval value. Please enter a positive integer.'), 'danger')
+                return redirect(url_for('admin_ui.serve_backup_system_page'))
+
+            if interval_unit not in ['minutes', 'hours']:
+                flash(_('Invalid interval unit. Must be "minutes" or "hours".'), 'danger')
+                return redirect(url_for('admin_ui.serve_backup_system_page'))
+
+            all_settings['full_backup']['interval_value'] = interval_value
+            all_settings['full_backup']['interval_unit'] = interval_unit
+
+            # Nullify cron-specific fields
+            all_settings['full_backup'].pop('time_of_day', None)
+            all_settings['full_backup'].pop('day_of_week', None)
+
+        elif schedule_type in ['daily', 'weekly']:
+            time_of_day = request.form.get('full_backup_time_of_day', '02:00')
+            # Basic validation for time_of_day format HH:MM
+            try:
+                datetime.strptime(time_of_day, '%H:%M')
+            except ValueError:
+                flash(_('Invalid time format for Time of Day. Please use HH:MM.'), 'danger')
+                return redirect(url_for('admin_ui.serve_backup_system_page'))
+            all_settings['full_backup']['time_of_day'] = time_of_day
+
+            if schedule_type == 'weekly':
+                day_of_week_str = request.form.get('full_backup_day_of_week')
+                if day_of_week_str is not None and day_of_week_str.isdigit():
+                    day_of_week = int(day_of_week_str)
+                    if not (0 <= day_of_week <= 6): # Sunday=0 or 6, Monday=0 or 1, etc. APScheduler is 0-6 for Mon-Sun or Sun-Sat based on firstweekday
+                        flash(_('Invalid day of the week.'), 'danger') # Check APScheduler convention for day_of_week
+                        return redirect(url_for('admin_ui.serve_backup_system_page'))
+                    all_settings['full_backup']['day_of_week'] = day_of_week
+                else:
+                    flash(_('Day of the week is required for weekly schedule.'), 'danger')
+                    return redirect(url_for('admin_ui.serve_backup_system_page'))
+            else: # daily
+                all_settings['full_backup'].pop('day_of_week', None)
+
+            # Nullify interval-specific fields
+            all_settings['full_backup'].pop('interval_value', None)
+            all_settings['full_backup'].pop('interval_unit', None)
         else:
-            all_settings['full_backup']['day_of_week'] = None
-
+            flash(_('Invalid schedule type specified.'), 'danger')
+            return redirect(url_for('admin_ui.serve_backup_system_page'))
 
         save_scheduler_settings(all_settings)
         flash(_('Full backup schedule settings saved successfully.'), 'success')
@@ -658,11 +730,90 @@ def save_booking_data_schedule_settings(): # Renamed to reflect it's for booking
 
         # APScheduler update logic would go here - for now, changes apply on restart or next scheduled task load
         # based on scheduler_tasks.py logic.
+        # This route is now specific to CSV, so the APScheduler update logic for CSV should be here (or ensure it's in save_booking_csv_schedule_settings)
 
     except Exception as e:
-        current_app.logger.error(f"Error saving Booking Data backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
-        flash(_('An error occurred while saving the Booking Data backup schedule settings. Please check the logs.'), 'danger')
+        current_app.logger.error(f"Error saving Booking Data CSV backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
+        flash(_('An error occurred while saving the Booking Data CSV backup schedule settings. Please check the logs.'), 'danger')
     return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Redirect to booking data tab
+
+
+@admin_ui_bp.route('/settings/schedule/booking_incremental_json', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def save_booking_incremental_json_schedule_settings():
+    current_app.logger.info(f"User {current_user.username} attempting to save Incremental JSON Booking Backup schedule settings.")
+    try:
+        all_settings = load_scheduler_settings()
+
+        is_enabled = request.form.get('booking_incremental_json_enabled') == 'true'
+        interval_minutes_str = request.form.get('booking_incremental_json_interval_minutes', '30')
+
+        try:
+            interval_minutes = int(interval_minutes_str)
+            if interval_minutes < 1:
+                flash(_('Interval for Incremental JSON backup must be at least 1 minute.'), 'danger')
+                return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+        except ValueError:
+            flash(_('Invalid interval value for Incremental JSON backup. Please enter a number.'), 'danger')
+            return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+        # Ensure the key exists in all_settings
+        if 'booking_incremental_json_schedule' not in all_settings:
+            # from utils import DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE # Conceptually
+            DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE = {'is_enabled': False, 'interval_minutes': 30}
+            all_settings['booking_incremental_json_schedule'] = DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE.copy()
+
+        all_settings['booking_incremental_json_schedule']['is_enabled'] = is_enabled
+        all_settings['booking_incremental_json_schedule']['interval_minutes'] = interval_minutes
+
+        save_scheduler_settings(all_settings)
+        flash(_('Incremental JSON booking backup schedule settings saved successfully.'), 'success')
+        current_app.logger.info(f"Incremental JSON booking backup schedule settings saved by {current_user.username}: {all_settings['booking_incremental_json_schedule']}")
+
+        # Update APScheduler
+        scheduler = getattr(current_app, 'scheduler', None)
+        job_id = 'scheduled_incremental_booking_backup_job'
+
+        if scheduler and scheduler.running:
+            try:
+                existing_job = scheduler.get_job(job_id)
+                if existing_job:
+                    scheduler.remove_job(job_id)
+                    current_app.logger.info(f"Removed existing scheduler job '{job_id}' for incremental JSON backups.")
+            except JobLookupError:
+                current_app.logger.info(f"Scheduler job '{job_id}' for incremental JSON backups not found, no need to remove.")
+            except Exception as e_remove:
+                current_app.logger.error(f"Error removing existing scheduler job '{job_id}' for incremental JSON backups: {e_remove}", exc_info=True)
+                flash(_('Error removing old incremental JSON schedule job. New schedule might not apply until restart.'), 'warning')
+
+            if is_enabled:
+                try:
+                    # Ensure run_scheduled_incremental_booking_backup is imported
+                    scheduler.add_job(
+                        id=job_id,
+                        func=run_scheduled_incremental_booking_backup,
+                        trigger='interval',
+                        minutes=interval_minutes,
+                        args=[current_app._get_current_object()], # Pass app instance
+                        replace_existing=True # Should be redundant due to prior removal, but good practice
+                    )
+                    flash(_('Incremental JSON backup schedule updated. New settings will apply.'), 'info')
+                    current_app.logger.info(f"Added/Updated scheduler job '{job_id}' for incremental JSON backups with interval {interval_minutes} minutes.")
+                except Exception as e_add_job:
+                    current_app.logger.error(f"Failed to add/update scheduler job '{job_id}' for incremental JSON backups: {e_add_job}", exc_info=True)
+                    flash(_('Failed to apply new incremental JSON schedule settings to the scheduler. Check logs.'), 'danger')
+            else:
+                flash(_('Incremental JSON backup schedule is now disabled. Job removed if it existed.'), 'info')
+                current_app.logger.info(f"Scheduled incremental JSON backup is now disabled. Job '{job_id}' removed (if it existed).")
+        elif not scheduler or not scheduler.running:
+            current_app.logger.warning("Scheduler not found or not running. Incremental JSON schedule changes will apply on next app start.")
+            flash(_('Incremental JSON schedule settings saved, but scheduler is not running. Changes will apply on restart.'), 'warning')
+
+    except Exception as e:
+        current_app.logger.error(f"Error saving Incremental JSON booking backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
+        flash(_('An error occurred while saving the Incremental JSON backup schedule settings. Please check the logs.'), 'danger')
+    return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
 
 
 @admin_ui_bp.route('/settings/startup/auto_restore_bookings', methods=['POST'])
@@ -1338,6 +1489,163 @@ def import_bookings_csv():
             flash(_(f'An error occurred while importing bookings from {filename}. Error: {str(e)}'), 'danger')
     else:
         flash(_('Invalid file type. Please upload a CSV file.'), 'danger')
+
+    return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+@admin_ui_bp.route('/export_all_bookings_json')
+@login_required
+@permission_required('manage_system')
+def export_all_bookings_json():
+    current_app.logger.info(f"User {current_user.username} initiated export of all bookings to JSON.")
+    try:
+        all_bookings = Booking.query.all()
+
+        serialized_bookings = []
+        for booking in all_bookings:
+            serialized_bookings.append({
+                'id': booking.id,
+                'resource_id': booking.resource_id,
+                'user_name': booking.user_name,
+                'start_time': booking.start_time.isoformat() if booking.start_time else None,
+                'end_time': booking.end_time.isoformat() if booking.end_time else None,
+                'title': booking.title,
+                'status': booking.status,
+                'created_at': booking.created_at.isoformat() if booking.created_at else None,
+                'last_modified': booking.last_modified.isoformat() if booking.last_modified else None,
+                'is_recurring': booking.is_recurring,
+                'recurrence_id': booking.recurrence_id,
+                'is_cancelled': booking.is_cancelled,
+                'checked_in_at': booking.checked_in_at.isoformat() if booking.checked_in_at else None,
+                'checked_out_at': booking.checked_out_at.isoformat() if booking.checked_out_at else None,
+                'admin_deleted_message': booking.admin_deleted_message,
+                'check_in_token': booking.check_in_token,
+                'check_in_token_expires_at': booking.check_in_token_expires_at.isoformat() if booking.check_in_token_expires_at else None,
+                'pin': booking.pin
+            })
+
+        json_data_string = json.dumps(serialized_bookings, indent=4)
+
+        timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+        filename = f"all_bookings_export_{timestamp}.json"
+
+        add_audit_log(action="EXPORT_ALL_BOOKINGS_JSON", details=f"User {current_user.username} exported {len(serialized_bookings)} bookings to JSON file {filename}.", user_id=current_user.id)
+
+        return Response(
+            json_data_string,
+            mimetype="application/json",
+            headers={"Content-Disposition": f"attachment;filename={filename}"}
+        )
+
+    except Exception as e:
+        current_app.logger.error(f"Error exporting all bookings to JSON for user {current_user.username}: {e}", exc_info=True)
+        flash(_('An error occurred while exporting all bookings to JSON. Please check the logs.'), 'danger')
+        # Redirect back to the page where the button was clicked
+        return redirect(request.referrer or url_for('admin_ui.serve_backup_booking_data_page'))
+
+@admin_ui_bp.route('/import_bookings_json', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def import_bookings_json():
+    current_app.logger.info(f"User {current_user.username} initiated import of bookings from local JSON file.")
+
+    if 'file' not in request.files:
+        flash(_('No file part in the request. Please select a JSON file to import.'), 'danger')
+        return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+    file = request.files['file']
+    if file.filename == '':
+        flash(_('No file selected. Please select a JSON file to import.'), 'danger')
+        return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+    if not file.filename.endswith('.json'):
+        flash(_('Invalid file type. Please upload a .json file.'), 'danger')
+        return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+    filename = secure_filename(file.filename)
+    current_app.logger.info(f"Processing uploaded JSON file for booking import: {filename}")
+
+    try:
+        file_content = file.stream.read().decode("UTF-8")
+        bookings_data_from_json = json.loads(file_content)
+
+        if not isinstance(bookings_data_from_json, list):
+            flash(_('Invalid JSON format. Expected a list of booking objects.'), 'danger')
+            return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+        # Clear existing bookings - THIS IS A DESTRUCTIVE ACTION
+        current_app.logger.warning(f"User {current_user.username} is clearing ALL existing bookings due to JSON import from file {filename}.")
+        _emit_progress(None, None, 'booking_json_import_progress', "Clearing all existing bookings...", level='WARNING') # Generic progress
+
+        try:
+            num_deleted = db.session.query(Booking).delete()
+            db.session.commit()
+            current_app.logger.info(f"Successfully cleared {num_deleted} existing bookings before JSON import.")
+            _emit_progress(None, None, 'booking_json_import_progress', f"{num_deleted} existing bookings cleared.", level='INFO')
+        except Exception as e_delete:
+            db.session.rollback()
+            current_app.logger.error(f"Error clearing existing bookings during JSON import: {e_delete}", exc_info=True)
+            flash(_('Error clearing existing bookings. Import aborted. Please check logs.'), 'danger')
+            return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+        bookings_imported_count = 0
+        for booking_data in bookings_data_from_json:
+            if not isinstance(booking_data, dict):
+                current_app.logger.warning(f"Skipping non-dictionary item in JSON data: {booking_data}")
+                continue
+            try:
+                # Convert datetime strings to datetime objects
+                for dt_field in ['start_time', 'end_time', 'created_at', 'last_modified',
+                                 'checked_in_at', 'checked_out_at', 'check_in_token_expires_at']:
+                    if booking_data.get(dt_field) and isinstance(booking_data[dt_field], str):
+                        try:
+                            booking_data[dt_field] = datetime.fromisoformat(booking_data[dt_field])
+                        except ValueError: # Handle cases where fromisoformat might fail (e.g. non-standard ISO string)
+                            current_app.logger.warning(f"Could not parse datetime string '{booking_data[dt_field]}' for field '{dt_field}' in booking data: {booking_data.get('id', 'Unknown ID')}. Setting to None.")
+                            booking_data[dt_field] = None
+                    elif booking_data.get(dt_field) is not None: # It's not a string and not None, ensure it's None if not parsable
+                         booking_data[dt_field] = None
+
+
+                new_booking = Booking(
+                    # id is not set, allowing auto-generation
+                    resource_id=booking_data.get('resource_id'),
+                    user_name=booking_data.get('user_name'),
+                    start_time=booking_data.get('start_time'),
+                    end_time=booking_data.get('end_time'),
+                    title=booking_data.get('title'),
+                    status=booking_data.get('status', 'approved'),
+                    created_at=booking_data.get('created_at'), # Let DB handle default if None
+                    last_modified=booking_data.get('last_modified'), # Let DB handle default/onupdate if None
+                    is_recurring=booking_data.get('is_recurring', False),
+                    recurrence_id=booking_data.get('recurrence_id'),
+                    is_cancelled=booking_data.get('is_cancelled', False),
+                    checked_in_at=booking_data.get('checked_in_at'),
+                    checked_out_at=booking_data.get('checked_out_at'),
+                    admin_deleted_message=booking_data.get('admin_deleted_message'),
+                    check_in_token=booking_data.get('check_in_token'),
+                    check_in_token_expires_at=booking_data.get('check_in_token_expires_at'),
+                    pin=booking_data.get('pin')
+                )
+                db.session.add(new_booking)
+                bookings_imported_count += 1
+            except Exception as e_item:
+                db.session.rollback() # Rollback for this item, or potentially for the whole import
+                current_app.logger.error(f"Error processing booking item from JSON file {filename}: {booking_data.get('id', 'Unknown ID')}. Error: {e_item}", exc_info=True)
+                flash(_('Error processing a booking item from the JSON file. Import aborted. Some bookings may have been cleared. Error: %(error)s', error=str(e_item)), 'danger')
+                return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+        db.session.commit()
+        flash(_('Successfully imported %(count)s bookings from JSON file "%(filename)s". All previous bookings were deleted.', count=bookings_imported_count, filename=filename), 'success')
+        add_audit_log(action="IMPORT_BOOKINGS_JSON", details=f"Imported {bookings_imported_count} bookings from local JSON file '{filename}'. All previous bookings deleted.", user_id=current_user.id)
+        _emit_progress(None, None, 'booking_json_import_progress', f"Imported {bookings_imported_count} bookings from {filename}.", level='SUCCESS')
+
+    except json.JSONDecodeError as jde:
+        current_app.logger.error(f"Invalid JSON file uploaded by {current_user.username}: {filename}. Error: {jde}", exc_info=True)
+        flash(_('Invalid JSON file. Please ensure the file is correctly formatted. Error: %(error)s', error=str(jde)), 'danger')
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error importing bookings from JSON file {filename} by user {current_user.username}: {e}", exc_info=True)
+        flash(_('An error occurred while importing bookings from JSON file "%(filename)s". Error: %(error)s', filename=filename, error=str(e)), 'danger')
 
     return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
 

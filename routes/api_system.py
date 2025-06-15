@@ -45,7 +45,12 @@ try:
         restore_bookings_from_csv_backup,
         list_available_incremental_booking_backups,
         restore_incremental_bookings,
-        restore_bookings_from_full_db_backup
+        restore_bookings_from_full_db_backup,
+        backup_incremental_bookings, # Added for manual incremental backup
+        backup_full_bookings_json, # Added for manual full JSON booking export
+        list_available_full_booking_json_exports, # For listing full JSON exports
+        restore_bookings_from_full_json_export, # For restoring from full JSON export
+        delete_incremental_booking_backup # For deleting incremental JSON backups
     )
     import azure_backup # To access module-level constants if needed by moved functions
 except ImportError:
@@ -67,6 +72,11 @@ except ImportError:
     list_available_incremental_booking_backups = None
     restore_incremental_bookings = None
     restore_bookings_from_full_db_backup = None
+    backup_incremental_bookings = None
+    backup_full_bookings_json = None
+    list_available_full_booking_json_exports = None
+    restore_bookings_from_full_json_export = None
+    delete_incremental_booking_backup = None
     azure_backup = None
 
 api_system_bp = Blueprint('api_system', __name__)
@@ -643,6 +653,178 @@ def api_restore_bookings_from_full_db():
         add_audit_log(action="RESTORE_BOOKINGS_FULL_DB_ERROR", details=f"Task {task_id}, Timestamp {backup_timestamp}, Error: {str(e)}", user_id=current_user.id)
         return jsonify({'success': False, 'message': str(e), 'task_id': task_id}), 500
 
+@api_system_bp.route('/api/admin/booking_restore/list_full_json_exports', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def api_list_full_booking_json_exports():
+    current_app.logger.info(f"User {current_user.username} requested list of full booking JSON exports.")
+    if not list_available_full_booking_json_exports:
+        return jsonify({'success': False, 'message': 'Functionality to list full JSON exports is not available.', 'backups': []}), 501
+    try:
+        backups = list_available_full_booking_json_exports()
+        return jsonify({'success': True, 'backups': backups}), 200
+    except Exception as e:
+        current_app.logger.exception("Exception listing full booking JSON exports:")
+        return jsonify({'success': False, 'message': f'Error: {str(e)}', 'backups': []}), 500
+
+@api_system_bp.route('/api/admin/booking_restore/from_full_json_export', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_restore_bookings_from_full_json_export():
+    task_id = uuid.uuid4().hex
+    data = request.get_json()
+    if not data or 'filename' not in data:
+        return jsonify({'success': False, 'message': 'Filename of the full JSON export is required.', 'task_id': task_id}), 400
+
+    filename = data['filename']
+    current_app.logger.info(f"User {current_user.username} initiated booking restore from full JSON export (Task {task_id}): {filename}")
+
+    if not restore_bookings_from_full_json_export:
+        return jsonify({'success': False, 'message': 'Restore function from full JSON export not available.', 'task_id': task_id}), 501
+
+    try:
+        summary = restore_bookings_from_full_json_export(
+            app=current_app._get_current_object(),
+            filename=filename,
+            socketio_instance=socketio,
+            task_id=task_id
+        )
+        add_audit_log(action="RESTORE_BOOKINGS_FULL_JSON", details=f"Task {task_id}, Filename {filename}. Summary: {json.dumps(summary)}", user_id=current_user.id)
+        # The summary itself contains 'status', 'message', 'bookings_restored', 'errors'
+        # Return success:True if the operation itself was handled, check summary.status for functional outcome
+        return jsonify({'success': True, 'summary': summary, 'task_id': task_id}), 200
+    except Exception as e:
+        current_app.logger.exception(f"Exception during booking restore from full JSON export (Task {task_id}):")
+        add_audit_log(action="RESTORE_BOOKINGS_FULL_JSON_ERROR", details=f"Task {task_id}, Filename {filename}, Error: {str(e)}", user_id=current_user.id)
+        return jsonify({'success': False, 'message': str(e), 'task_id': task_id, 'summary': {'status': 'failure', 'message': str(e), 'errors': [str(e)]}}), 500
+
+@api_system_bp.route('/api/admin/manual_incremental_booking_backup', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_manual_incremental_booking_backup():
+    task_id = uuid.uuid4().hex
+    current_app.logger.info(f"User {current_user.username} initiated manual incremental booking backup (Task ID: {task_id}).")
+
+    if not backup_incremental_bookings: # Check if function was successfully imported
+        current_app.logger.error("azure_backup.backup_incremental_bookings function not available.")
+        # Emitting SocketIO event directly as the task function won't be called
+        if socketio:
+            socketio.emit('incremental_booking_backup_progress', { # Ensure this event name is handled by JS
+                'task_id': task_id,
+                'status': 'Error: Backup function not available on server.',
+                'detail': 'CRITICAL_ERROR',
+                'error_details': 'The server is not configured for this type of backup.'
+            })
+        return jsonify({
+            'success': False,
+            'message': 'Manual incremental booking backup function is not available on the server.',
+            'task_id': task_id
+        }), 500
+
+    try:
+        # Pass the actual app instance and socketio instance
+        # backup_incremental_bookings is expected to handle its own detailed SocketIO emissions
+        success = backup_incremental_bookings(
+            app=current_app._get_current_object(),
+            socketio_instance=socketio, # from extensions
+            task_id=task_id
+        )
+
+        if success: # Assuming backup_incremental_bookings returns a boolean or similar success indicator
+            current_app.logger.info(f"Manual incremental booking backup process (Task ID: {task_id}) started successfully.")
+            add_audit_log(action="MANUAL_INCREMENTAL_BACKUP_STARTED", details=f"Task ID: {task_id}", user_id=current_user.id)
+            return jsonify({
+                'success': True,
+                'message': 'Manual incremental booking backup process started successfully.',
+                'task_id': task_id
+            }), 200
+        else:
+            # This case implies backup_incremental_bookings was called but returned False or an equivalent non-success state.
+            # The function itself should emit relevant SocketIO messages about why it failed internally.
+            current_app.logger.error(f"Failed to start manual incremental booking backup process (Task ID: {task_id}). backup_incremental_bookings returned non-success.")
+            add_audit_log(action="MANUAL_INCREMENTAL_BACKUP_FAILED_START", details=f"Task ID: {task_id}. Function indicated failure.", user_id=current_user.id)
+            return jsonify({
+                'success': False,
+                'message': 'Failed to start manual incremental booking backup process. Check server logs and live operation logs for details.',
+                'task_id': task_id
+            }), 500
+    except Exception as e:
+        current_app.logger.exception(f"Exception during manual incremental booking backup initiation (Task ID: {task_id}):")
+        add_audit_log(action="MANUAL_INCREMENTAL_BACKUP_ERROR", details=f"Task ID: {task_id}. Exception: {str(e)}", user_id=current_user.id)
+        # Emitting SocketIO event directly as the task function might not have
+        if socketio:
+            socketio.emit('incremental_booking_backup_progress', { # Ensure this event name is handled by JS
+                'task_id': task_id,
+                'status': f'Error: {str(e)}',
+                'detail': 'EXCEPTION',
+                'error_details': str(e)
+            })
+        return jsonify({
+            'success': False,
+            'message': f'An unexpected error occurred: {str(e)}',
+            'task_id': task_id
+        }), 500
+
+@api_system_bp.route('/api/admin/manual_full_booking_export_json', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_manual_full_booking_export_json():
+    task_id = uuid.uuid4().hex
+    current_app.logger.info(f"User {current_user.username} initiated manual full booking JSON export (Task ID: {task_id}).")
+
+    if not backup_full_bookings_json:
+        current_app.logger.error("azure_backup.backup_full_bookings_json function not available.")
+        if socketio:
+            socketio.emit('full_booking_export_progress', { # Ensure this event name is handled by JS
+                'task_id': task_id,
+                'status': 'Error: Full export function not available on server.',
+                'detail': 'CRITICAL_ERROR',
+                'error_details': 'The server is not configured for this type of backup.'
+            })
+        return jsonify({
+            'success': False,
+            'message': 'Manual full booking JSON export function is not available on the server.',
+            'task_id': task_id
+        }), 500
+
+    try:
+        success = backup_full_bookings_json(
+            app=current_app._get_current_object(),
+            socketio_instance=socketio,
+            task_id=task_id
+        )
+
+        if success:
+            current_app.logger.info(f"Manual full booking JSON export process (Task ID: {task_id}) started successfully.")
+            add_audit_log(action="MANUAL_FULL_BOOKING_EXPORT_STARTED", details=f"Task ID: {task_id}", user_id=current_user.id)
+            return jsonify({
+                'success': True,
+                'message': 'Manual full booking JSON export process started successfully.',
+                'task_id': task_id
+            }), 200
+        else:
+            current_app.logger.error(f"Failed to start manual full booking JSON export process (Task ID: {task_id}). backup_full_bookings_json returned non-success.")
+            add_audit_log(action="MANUAL_FULL_BOOKING_EXPORT_FAILED_START", details=f"Task ID: {task_id}. Function indicated failure.", user_id=current_user.id)
+            return jsonify({
+                'success': False,
+                'message': 'Failed to start manual full booking JSON export process. Check server logs and live operation logs for details.',
+                'task_id': task_id
+            }), 500
+    except Exception as e:
+        current_app.logger.exception(f"Exception during manual full booking JSON export initiation (Task ID: {task_id}):")
+        add_audit_log(action="MANUAL_FULL_BOOKING_EXPORT_ERROR", details=f"Task ID: {task_id}. Exception: {str(e)}", user_id=current_user.id)
+        if socketio:
+            socketio.emit('full_booking_export_progress', { # Ensure this event name is handled by JS
+                'task_id': task_id,
+                'status': f'Error: {str(e)}',
+                'detail': 'EXCEPTION',
+                'error_details': str(e)
+            })
+        return jsonify({
+            'success': False,
+            'message': f'An unexpected error occurred: {str(e)}',
+            'task_id': task_id
+        }), 500
 
 @api_system_bp.route('/api/admin/verify_backup', methods=['POST'])
 @login_required
@@ -961,11 +1143,11 @@ def api_admin_view_db_raw_top100():
                         row_dict = row._asdict()
                         for column_name, val in row_dict.items():
                             if isinstance(val, datetime):
-                                record_dict[column_name] = val.isoformat()
+                                record_dict[column.name] = val.isoformat()
                             elif isinstance(val, uuid.UUID):
-                                record_dict[column_name] = str(val)
+                                record_dict[column.name] = str(val)
                             else:
-                                record_dict[column_name] = val
+                                record_dict[column.name] = val
                         serialized_records.append(record_dict)
 
                 raw_data[table_name] = serialized_records
@@ -1310,3 +1492,5 @@ def get_booking_config_status():
         current_app.logger.error(f"Error fetching booking_config_status for user {current_user.username}: {e}", exc_info=True)
         # In case of error, still return the default value to prevent frontend issues
         return jsonify({'allow_multiple_resources_same_time': False, 'error': 'Failed to fetch setting due to a server error.'}), 500
+
+[end of routes/api_system.py]
