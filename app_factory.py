@@ -217,6 +217,24 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     app.logger.propagate = False
     logging.info("Ensured app.logger.propagate is False.")
 
+    # Control verbosity of Azure SDK loggers based on app's log level
+    azure_logger_names = [
+        'azure.core.pipeline.policies.http_logging_policy',
+        'azure.storage.fileshare',
+        'azure_backup'  # Assuming azure_backup.py uses logging.getLogger(__name__)
+    ]
+
+    # app_effective_log_level holds the logging.LEVEL value for app.logger
+    if app_effective_log_level == logging.INFO:
+        logging.info("Application log level is INFO. Setting verbose Azure SDK loggers to WARNING.")
+        for logger_name in azure_logger_names:
+            logging.getLogger(logger_name).setLevel(logging.WARNING)
+    elif app_effective_log_level == logging.DEBUG:
+        logging.info("Application log level is DEBUG. Azure SDK loggers will retain their default/debug verbosity.")
+        # Optionally, explicitly set them to DEBUG or INFO if needed
+        # for logger_name in azure_logger_names:
+        #     logging.getLogger(logger_name).setLevel(logging.DEBUG)
+
     # Ensure DEBUG level is comprehensively set if configured
     if app.config.get('LOG_LEVEL') == 'DEBUG':
         app.logger.info("LOG_LEVEL is DEBUG, ensuring Flask app and root logger levels are set to DEBUG.")
