@@ -1576,7 +1576,7 @@ def check_booking_permission(user: User, resource: Resource, logger_instance) ->
         f"GeneralResourceRoleIDs: {[role.id for role in resource.roles] if resource.roles else 'N/A'}, "
         f"CanBookOverall: {can_book_overall}"
     )
-    logger_instance.info(log_details_permission_check)
+    logger_instance.debug(log_details_permission_check)
 
     if not can_book_overall:
         logger_instance.warning(f"Final booking permission check DENIED for user '{user.username}' on resource {resource.id} ('{resource.name}'). Reason: {error_message}")

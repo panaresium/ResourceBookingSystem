@@ -191,7 +191,7 @@ def get_resource_available_slots(resource_id):
 def get_unavailable_dates():
     logger = current_app.logger
     user_id_str = request.args.get("user_id")
-    logger.info(f"--- get_unavailable_dates called for user_id {user_id_str} ---")
+    logger.debug(f"--- get_unavailable_dates called for user_id {user_id_str} ---")
     if not user_id_str:
         logger.warning("get_unavailable_dates: user_id missing")
         return jsonify({"error": "user_id is required"}), 400
@@ -224,7 +224,9 @@ def get_unavailable_dates():
         if not booking_settings:
             # Use default settings if none are configured
             booking_settings = BookingSettings(allow_past_bookings=False, past_booking_time_adjustment_hours=0)
-            logger.info("get_unavailable_dates: No BookingSettings found, using defaults.")
+            # logger.info("get_unavailable_dates: No BookingSettings found, using defaults.") # Keep this as info or change to warning if critical
+        # global_time_offset_hours needs to be defined before being used in the new logger.info lines
+        global_time_offset_hours = booking_settings.global_time_offset_hours if booking_settings and hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
 
 
         # Generate Date Range
@@ -255,6 +257,12 @@ def get_unavailable_dates():
         # Define Standard Slots
         STANDARD_SLOTS = [{'start': time(8,0), 'end': time(12,0)}, {'start': time(13,0), 'end': time(17,0)}]
 
+        logger.info(f"get_unavailable_dates: Processing for user {user_id_str}. Effective server date for logic: {now.date()}. Date range: {start_range_date} to {end_range_date}.")
+        if booking_settings:
+            logger.info(f"Relevant settings: AllowPastBookings={booking_settings.allow_past_bookings}, PastBookingHoursAdjustment={booking_settings.past_booking_time_adjustment_hours}, GlobalTimeOffset={global_time_offset_hours} hrs.")
+        else:
+            logger.info("Relevant settings: Default (BookingSettings not found / using hardcoded defaults).")
+
         # Loop through the generated date range
         current_iter_date = start_range_date
         while current_iter_date <= end_range_date:
@@ -265,13 +273,9 @@ def get_unavailable_dates():
             date_is_past = current_processing_date < now.date() # 'now' is datetime.now(timezone.utc)
 
             # Ensure booking_settings is fetched and has defaults
-            if not booking_settings: # This check might be redundant if booking_settings is guaranteed to be loaded before the loop
-                logger.warning("get_unavailable_dates: BookingSettings not found when expected in loop. Using default adjustment hours.")
-                past_adjustment_hours = 0
-                global_time_offset_hours = 0
-            else:
-                past_adjustment_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings.past_booking_time_adjustment_hours is not None else 0
-                global_time_offset_hours = booking_settings.global_time_offset_hours if hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
+            # Note: global_time_offset_hours is already defined before this loop from booking_settings
+            past_adjustment_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings and booking_settings.past_booking_time_adjustment_hours is not None else 0
+            # global_time_offset_hours is defined above
 
             # Calculate effective_venue_now_utc by applying global offset
             effective_venue_now_utc = now + timedelta(hours=global_time_offset_hours)
@@ -310,7 +314,7 @@ def get_unavailable_dates():
                 if not (res_loop_item.is_under_maintenance and (res_loop_item.maintenance_until is None or current_processing_date <= res_loop_item.maintenance_until.date())):
                     active_resources_for_date.append(res_loop_item)
 
-            logger.info(f"--- Starting loop through {len(active_resources_for_date)} active resources for date {current_processing_date} ---")
+            logger.debug(f"--- Starting loop through {len(active_resources_for_date)} active resources for date {current_processing_date} ---")
             if not active_resources_for_date:
                 if total_published_resources > 0 : # Use the defined total_published_resources
                     unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
@@ -332,14 +336,14 @@ def get_unavailable_dates():
                 # Ensure logger is defined (it is, as current_app.logger)
 
                 if resource_to_check.id == 51: # Or another specific ID you are seeing issues with
-                    logger.info(f"--- (get_unavailable_dates) About to call check_booking_permission for resource ID 51 on date {current_processing_date} ---")
+                    logger.debug(f"--- (get_unavailable_dates) About to call check_booking_permission for resource ID 51 on date {current_processing_date} ---")
                 can_book_this_resource, _ = check_booking_permission(
                     user=target_user,
                     resource=resource_to_check,
                     logger_instance=logger
                 )
                 if resource_to_check.id == 51:
-                    logger.info(f"--- (get_unavailable_dates) Returned from check_booking_permission for resource ID 51 (can_book: {can_book_this_resource}) on date {current_processing_date} ---")
+                    logger.debug(f"--- (get_unavailable_dates) Returned from check_booking_permission for resource ID 51 (can_book: {can_book_this_resource}) on date {current_processing_date} ---")
                 logger.debug(f"[VERBOSE_UNAVAIL] Date: {current_processing_date}, Resource: {resource_to_check.id} ('{resource_to_check.name}'), Permitted: {can_book_this_resource}")
 
                 if not can_book_this_resource:
@@ -456,9 +460,10 @@ def get_unavailable_dates():
 
         # The old 5 PM server logic block is now removed.
 
-        logger.info(f"Returning {len(unavailable_dates_set)} unavailable dates for user {user_id}.")
+        logger.info(f"get_unavailable_dates: Finished for user {user_id_str}. Found {len(unavailable_dates_set)} unavailable dates within the processed range.")
+        logger.debug(f"Returning {len(unavailable_dates_set)} unavailable dates for user {user_id}.") # Changed from info to debug
         logger.debug(f"[VERBOSE_UNAVAIL] Final unavailable_dates_set for user {target_user.id}: {sorted(list(unavailable_dates_set))}")
-        logger.info(f"--- get_unavailable_dates finished for user_id {user_id_str} ---")
+        logger.debug(f"--- get_unavailable_dates finished for user_id {user_id_str} ---") # Changed from info to debug
         return jsonify(sorted(list(unavailable_dates_set)))
 
     except Exception as e:
