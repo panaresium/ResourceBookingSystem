@@ -1495,12 +1495,12 @@ def check_booking_permission(user: User, resource: Resource, logger_instance) ->
     can_book_overall = False
     error_message = "You are not authorized to book this resource."  # Default error
 
-    logger_instance.info(f"Checking booking permissions for user '{user.username}' (ID: {user.id}, IsAdmin: {user.is_admin}) on resource ID {resource.id} ('{resource.name}').")
+    logger_instance.debug(f"Checking booking permissions for user '{user.username}' (ID: {user.id}, IsAdmin: {user.is_admin}) on resource ID {resource.id} ('{resource.name}').")
     logger_instance.debug(f"Resource details: booking_restriction='{resource.booking_restriction}', allowed_user_ids='{resource.allowed_user_ids}', resource_roles={[role.name for role in resource.roles]}, map_coordinates='{resource.map_coordinates}'")
 
     if user.is_admin:
         can_book_overall = True
-        logger_instance.info(f"Permission granted for resource {resource.id}: User '{user.username}' is admin.")
+        logger_instance.debug(f"Permission granted for resource {resource.id}: User '{user.username}' is admin.")
     elif resource.booking_restriction == 'admin_only':
         error_message = "This resource can only be booked by administrators."
         logger_instance.warning(f"Booking denied for resource {resource.id}: Non-admin user '{user.username}' attempted to book admin-only resource.")
@@ -1520,47 +1520,47 @@ def check_booking_permission(user: User, resource: Resource, logger_instance) ->
                     area_allowed_role_ids = [int(r_id) for r_id in map_coords_data['allowed_role_ids'] if isinstance(r_id, int)] # Ensure list of ints
                     if area_allowed_role_ids: # Only set defined to true if list is not empty after validation
                         area_roles_defined = True
-                        logger_instance.info(f"Resource {resource.id} has area-specific roles defined in map_coordinates: {area_allowed_role_ids}")
+                        logger_instance.debug(f"Resource {resource.id} has area-specific roles defined in map_coordinates: {area_allowed_role_ids}")
             except json.JSONDecodeError:
                 logger_instance.warning(f"Could not parse map_coordinates JSON for resource {resource.id}: '{resource.map_coordinates}'. Skipping area role check.")
             except (TypeError, ValueError):
                 logger_instance.warning(f"Invalid data type for role IDs in map_coordinates for resource {resource.id}. Expected list of integers. Skipping area role check.")
 
         if area_roles_defined:
-            logger_instance.info(f"Evaluating permissions against area roles for resource {resource.id}.")
+            logger_instance.debug(f"Evaluating permissions against area roles for resource {resource.id}.")
             user_is_specifically_allowed_on_resource = user.id in parsed_resource_allowed_ids
 
             if user_is_specifically_allowed_on_resource:
                 can_book_overall = True
-                logger_instance.info(f"Permission granted for resource {resource.id}: User '{user.username}' (ID: {user.id}) is in resource.allowed_user_ids, bypassing area role check.")
+                logger_instance.debug(f"Permission granted for resource {resource.id}: User '{user.username}' (ID: {user.id}) is in resource.allowed_user_ids, bypassing area role check.")
             else:
                 user_role_ids = {role.id for role in user.roles}
                 if not user_role_ids.isdisjoint(set(area_allowed_role_ids)):
                     can_book_overall = True
-                    logger_instance.info(f"Permission granted for resource {resource.id}: User '{user.username}' has a matching role for area-specific roles. User roles: {user_role_ids}, Area roles: {area_allowed_role_ids}.")
+                    logger_instance.debug(f"Permission granted for resource {resource.id}: User '{user.username}' has a matching role for area-specific roles. User roles: {user_role_ids}, Area roles: {area_allowed_role_ids}.")
                 else:
                     error_message = f"You do not have the required role to book this resource via its map area (Resource: {resource.name})."
                     logger_instance.warning(f"Booking denied for resource {resource.id}: User '{user.username}' lacks required area-specific role. User roles: {user_role_ids}, Area roles: {area_allowed_role_ids}.")
                     # can_book_overall remains False
         else:
             # No area-specific roles defined, or they were empty/invalid. Fall back to general resource permissions.
-            logger_instance.info(f"No valid area-specific roles for resource {resource.id}. Evaluating general resource permissions.")
+            logger_instance.debug(f"No valid area-specific roles for resource {resource.id}. Evaluating general resource permissions.")
             if user.id in parsed_resource_allowed_ids:
                 can_book_overall = True
-                logger_instance.info(f"Permission granted for resource {resource.id}: User '{user.username}' (ID: {user.id}) is in resource.allowed_user_ids.")
+                logger_instance.debug(f"Permission granted for resource {resource.id}: User '{user.username}' (ID: {user.id}) is in resource.allowed_user_ids.")
 
             if not can_book_overall and resource.roles:
                 user_role_ids = {role.id for role in user.roles}
                 resource_allowed_role_ids = {role.id for role in resource.roles}
                 if not user_role_ids.isdisjoint(resource_allowed_role_ids):
                     can_book_overall = True
-                    logger_instance.info(f"Permission granted for resource {resource.id}: User '{user.username}' has a matching general role for the resource. User roles: {user_role_ids}, Resource roles: {resource_allowed_role_ids}.")
+                    logger_instance.debug(f"Permission granted for resource {resource.id}: User '{user.username}' has a matching general role for the resource. User roles: {user_role_ids}, Resource roles: {resource_allowed_role_ids}.")
 
             if not can_book_overall and not parsed_resource_allowed_ids and not resource.roles:
                 # This means the resource itself has no specific user ID restrictions and no role restrictions.
                 # booking_restriction != 'admin_only' is already handled.
                 can_book_overall = True
-                logger_instance.info(f"Permission granted for resource {resource.id}: Resource is open to all authenticated users (no specific user/role restrictions).")
+                logger_instance.debug(f"Permission granted for resource {resource.id}: Resource is open to all authenticated users (no specific user/role restrictions).")
 
     # Final authorization log
     # Note: Some local variables from the original context (like 'parsed_resource_allowed_ids' specific to non-admin path)

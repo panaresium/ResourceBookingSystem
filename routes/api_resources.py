@@ -258,10 +258,10 @@ def get_unavailable_dates():
         STANDARD_SLOTS = [{'start': time(8,0), 'end': time(12,0)}, {'start': time(13,0), 'end': time(17,0)}]
 
         logger.info(f"get_unavailable_dates: Processing for user {user_id_str}. Effective server date for logic: {now.date()}. Date range: {start_range_date} to {end_range_date}.")
-        if booking_settings:
+        if booking_settings: # Check if booking_settings is not None before accessing attributes
             logger.info(f"Relevant settings: AllowPastBookings={booking_settings.allow_past_bookings}, PastBookingHoursAdjustment={booking_settings.past_booking_time_adjustment_hours}, GlobalTimeOffset={global_time_offset_hours} hrs.")
-        else:
-            logger.info("Relevant settings: Default (BookingSettings not found / using hardcoded defaults).")
+        else: # This case implies booking_settings was None (or became None if logic changes)
+            logger.info("Relevant settings: Using default values as BookingSettings were not found or applicable (global_time_offset_hours defaults to 0).")
 
         # Loop through the generated date range
         current_iter_date = start_range_date
@@ -460,7 +460,11 @@ def get_unavailable_dates():
 
         # The old 5 PM server logic block is now removed.
 
-        logger.info(f"get_unavailable_dates: Finished for user {user_id_str}. Found {len(unavailable_dates_set)} unavailable dates within the processed range.")
+        if not unavailable_dates_set:
+            logger.info(f"get_unavailable_dates: Finished for user {user_id_str}. No unavailable dates found within the processed range ({start_range_date} to {end_range_date}). All dates appear to have some availability.")
+        else:
+            unavailable_dates_str = ", ".join(sorted(list(unavailable_dates_set)))
+            logger.info(f"get_unavailable_dates: Finished for user {user_id_str}. Found {len(unavailable_dates_set)} unavailable date(s) within the processed range ({start_range_date} to {end_range_date}): {unavailable_dates_str}.")
         logger.debug(f"Returning {len(unavailable_dates_set)} unavailable dates for user {user_id}.") # Changed from info to debug
         logger.debug(f"[VERBOSE_UNAVAIL] Final unavailable_dates_set for user {target_user.id}: {sorted(list(unavailable_dates_set))}")
         logger.debug(f"--- get_unavailable_dates finished for user_id {user_id_str} ---") # Changed from info to debug
