@@ -503,7 +503,7 @@
     function loadCsvBackupsForRestore() { // For the dropdown
         showProgressModal("{{ _('Loading legacy CSV backups list for dropdown...') }}");
         // This might use a different endpoint or filter from loadLegacyCsvBackups if it's just for the select
-        fetch("{{ url_for('api_system.list_legacy_booking_csv_backups_api') }}?page=1&per_page=1000") // Fetch many for dropdown
+        fetch("{{ url_for('api_system.api_list_booking_csv_backups') }}?page=1&per_page=1000") // Fetch many for dropdown
             .then(response => response.json())
             .then(data => {
                 hideProgressModal();
@@ -546,7 +546,7 @@
 
     function loadLegacyCsvBackups(page) { // For the table with pagination
         showProgressModal("{{ _('Loading legacy CSV backups list for table...') }}");
-        fetch(`{{ url_for('api_system.list_legacy_booking_csv_backups_api') }}?page=${page}&per_page=5`)
+        fetch(`{{ url_for('api_system.api_list_booking_csv_backups') }}?page=${page}&per_page=5`)
             .then(response => response.json())
             .then(data => {
                 hideProgressModal();
