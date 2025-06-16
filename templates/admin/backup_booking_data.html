@@ -94,6 +94,7 @@
                     <!-- Scheduled Booking CSV Backups -->
                     <h6>{{ _("Scheduled Booking CSV Backups (Legacy)") }}</h6>
                     <p>{{ _("Configure automated daily CSV backups of booking data to Azure. This is a legacy method.") }}</p>
+                    {#
                     <form method="POST" action="{{ url_for('admin_ui.configure_scheduled_csv_backup') }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="form-group">
@@ -106,6 +107,7 @@
                         </div>
                         <button type="submit" class="btn btn-secondary">{{ _("Save CSV Schedule") }}</button>
                     </form>
+                    #}
                     <hr>
                     <!-- Placeholder for Scheduled Incremental JSON Backups (Old System, if any) -->
                     <h6>{{ _("Scheduled Incremental JSON Backups (Legacy System)") }}</h6>
@@ -140,8 +142,9 @@
                     <h6>{{ _("Manual Booking CSV Operations (Legacy)") }}</h6>
                     <p>{{ _("Manage legacy CSV files. Primarily for data export/import rather than robust backup.") }}</p>
                     <button class="btn btn-outline-secondary mb-2" onclick="backupBookingData('csv')">{{ _("Create New CSV Backup on Azure (Legacy)") }}</button>
-                    <a href="{{ url_for('admin_ui.export_bookings_csv') }}" class="btn btn-outline-secondary mb-2">{{ _("Download All Bookings as CSV") }}</a>
+                    {# <a href="{{ url_for('admin_ui.export_bookings_csv') }}" class="btn btn-outline-secondary mb-2">{{ _("Download All Bookings as CSV") }}</a> #}
 
+                    {#
                     <form method="POST" action="{{ url_for('admin_ui.import_bookings_csv') }}" enctype="multipart/form-data" class="mt-2">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="form-group">
@@ -150,6 +153,7 @@
                         </div>
                         <button type="submit" class="btn btn-warning">{{ _("Import from CSV") }}</button>
                     </form>
+                    #}
                     <hr>
 
                     <!-- Destructive Actions -->
@@ -413,6 +417,7 @@
         if (type === 'csv') {
             if (!confirm("{{ _('Are you sure you want to create a new manual CSV backup on Azure? This is a legacy method.') }}")) return;
             showProgressModal("{{ _('Starting manual CSV backup...') }}");
+            /*
             fetch("{{ url_for('admin_ui.manual_backup_bookings_csv_route') }}", { // Check route
                 method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token() }}' }
             })
@@ -432,6 +437,9 @@
                 alert("{{ _('Error during CSV backup:') }} " + error);
                 console.error(error);
             });
+            */
+            alert("{{ _('This feature is temporarily disabled.') }}");
+            hideProgressModal();
         }
     }
 
@@ -601,6 +609,7 @@
     function directRestoreFromCsv(filename) {
         if (!confirm("{{ _('Restore bookings from CSV backup') }} '" + filename + "'? {{ _('This is a legacy method. Data will be overwritten. Cannot be undone.') }}")) return;
         showProgressModal("{{ _('Restoring from CSV backup...') }}");
+        /*
         fetch("{{ url_for('admin_ui.restore_booking_csv_route') }}", { // Check route
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
@@ -620,11 +629,15 @@
             alert("{{ _('Error during CSV restore.') }}");
             console.error(error);
         });
+        */
+        alert("{{ _('This feature is temporarily disabled.') }}");
+        hideProgressModal();
     }
 
     function directDeleteCsv(filename) {
         if (!confirm("{{ _('Are you sure you want to delete the CSV backup') }} '" + filename + "' {{ _('from Azure? This action cannot be undone.') }}")) return;
         showProgressModal("{{ _('Deleting CSV backup...') }}");
+        /*
         fetch("{{ url_for('admin_ui.delete_booking_csv_backup_route') }}", { // Check route
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
@@ -646,6 +659,9 @@
             alert("{{ _('Error deleting CSV backup.') }}");
             console.error(error);
         });
+        */
+        alert("{{ _('This feature is temporarily disabled.') }}");
+        hideProgressModal();
     }
 
     function confirmClearAllBookingData() {
