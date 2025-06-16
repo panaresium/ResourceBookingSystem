@@ -8,8 +8,8 @@ import requests
 from datetime import datetime, date, timedelta, time, timezone # Ensure all are here
 from flask import url_for, jsonify, current_app
 from flask_login import current_user
-import csv
-import io
+# import csv # Removed as no longer used after CSV function deletions
+# import io # Removed as no longer used after CSV function deletions
 import base64
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -382,10 +382,7 @@ def _emit_import_progress(socketio_instance, task_id, message, detail='', level=
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.info(f"SOCKETIO_EMIT (Import Task: {task_id}): {context_prefix}{message} - {detail} ({level})")
 
-def import_bookings_from_csv_file(csv_file_path, app_instance, clear_existing: bool = False, socketio_instance=None, task_id=None, import_context_message_prefix: str = ""):
-    logger = app_instance.logger if app_instance else logging.getLogger(__name__)
-    logger.info(f"{import_context_message_prefix}import_bookings_from_csv_file for {csv_file_path} - STUB. Clear: {clear_existing}")
-    return {'processed': 0, 'created': 0, 'updated': 0, 'skipped_duplicates': 0, 'skipped_fk_violation': 0, 'skipped_other_errors': 0, 'errors': ["Stub implementation"], 'status': 'stub_executed'}
+# Removed import_bookings_from_csv_file function
 
 def _get_map_configuration_data() -> dict:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
@@ -477,3 +474,119 @@ def _save_schedule_to_json(data_to_save): # Example
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.debug(f"_save_schedule_to_json STUB with data: {data_to_save}")
     return True, "Stub save successful"
+
+def load_unified_backup_schedule_settings():
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
+    config_file = current_app.config['UNIFIED_SCHEDULE_CONFIG_FILE']
+    default_settings = current_app.config['DEFAULT_UNIFIED_SCHEDULE_DATA']
+
+    if not os.path.exists(config_file):
+        logger.warning(f"Unified backup schedule file '{config_file}' not found. Returning default settings.")
+        return default_settings.copy()
+
+    try:
+        with open(config_file, 'r', encoding='utf-8') as f:
+            loaded_settings = json.load(f)
+    except (IOError, json.JSONDecodeError, TypeError) as e:
+        logger.error(f"Error loading or parsing unified backup schedule file '{config_file}': {e}. Returning default settings.")
+        return default_settings.copy()
+
+    # Ensure all keys from default are present
+    updated_settings = default_settings.copy()
+    for key, value in loaded_settings.items():
+        if key in updated_settings:
+            if isinstance(updated_settings[key], dict) and isinstance(value, dict):
+                updated_settings[key].update(value)
+            else:
+                updated_settings[key] = value
+        else: # Preserve unknown keys from loaded file if any - though usually we want to prune them
+            updated_settings[key] = value
+
+    # Ensure all sub-keys from default are present
+    for main_key, main_value_dict in default_settings.items():
+        if main_key not in updated_settings: # Should not happen if we copy first
+            updated_settings[main_key] = main_value_dict.copy()
+        elif not isinstance(updated_settings[main_key], dict): # Loaded value is not a dict where default is
+             updated_settings[main_key] = main_value_dict.copy()
+        else: # Both are dicts, ensure all sub_keys from default are there
+            for sub_key, sub_value in main_value_dict.items():
+                if sub_key not in updated_settings[main_key]:
+                    updated_settings[main_key][sub_key] = sub_value
+
+    return updated_settings
+
+def save_unified_backup_schedule_settings(data):
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
+    config_file = current_app.config['UNIFIED_SCHEDULE_CONFIG_FILE']
+    default_settings = current_app.config['DEFAULT_UNIFIED_SCHEDULE_DATA']
+
+    # Basic validation: data should be a dict
+    if not isinstance(data, dict):
+        return False, "Invalid data format: settings must be a dictionary."
+
+    validated_data = {}
+
+    # Validate unified_full_backup settings
+    full_backup_data = data.get("unified_full_backup", {})
+    default_full_backup = default_settings["unified_full_backup"]
+    validated_data["unified_full_backup"] = {}
+
+    if not isinstance(full_backup_data.get("is_enabled"), bool):
+        return False, "Invalid 'is_enabled' for full backup: must be true or false."
+    validated_data["unified_full_backup"]["is_enabled"] = full_backup_data["is_enabled"]
+
+    schedule_type = full_backup_data.get("schedule_type", default_full_backup["schedule_type"])
+    if schedule_type not in ["daily", "weekly", "monthly"]:
+        return False, "Invalid 'schedule_type' for full backup: must be 'daily', 'weekly', or 'monthly'."
+    validated_data["unified_full_backup"]["schedule_type"] = schedule_type
+
+    time_of_day = full_backup_data.get("time_of_day", default_full_backup["time_of_day"])
+    if not re.match(r"^\d{2}:\d{2}$", time_of_day):
+        return False, "Invalid 'time_of_day' for full backup: must be HH:MM format."
+    validated_data["unified_full_backup"]["time_of_day"] = time_of_day
+
+    day_of_week = full_backup_data.get("day_of_week") # Allow None
+    if schedule_type == "weekly":
+        if not (isinstance(day_of_week, int) and 0 <= day_of_week <= 6):
+            return False, "Invalid 'day_of_week' for weekly full backup: must be an integer between 0 and 6."
+    else:
+        day_of_week = None # Ensure it's None if not weekly
+    validated_data["unified_full_backup"]["day_of_week"] = day_of_week
+
+    day_of_month = full_backup_data.get("day_of_month") # Allow None
+    if schedule_type == "monthly":
+        if not (isinstance(day_of_month, int) and 1 <= day_of_month <= 31):
+            return False, "Invalid 'day_of_month' for monthly full backup: must be an integer between 1 and 31."
+    else:
+        day_of_month = None # Ensure it's None if not monthly
+    validated_data["unified_full_backup"]["day_of_month"] = day_of_month
+
+    # Validate unified_incremental_backup settings
+    incremental_backup_data = data.get("unified_incremental_backup", {})
+    default_incremental_backup = default_settings["unified_incremental_backup"]
+    validated_data["unified_incremental_backup"] = {}
+
+    if not isinstance(incremental_backup_data.get("is_enabled"), bool):
+        return False, "Invalid 'is_enabled' for incremental backup: must be true or false."
+    validated_data["unified_incremental_backup"]["is_enabled"] = incremental_backup_data["is_enabled"]
+
+    interval_minutes = incremental_backup_data.get("interval_minutes", default_incremental_backup["interval_minutes"])
+    if not (isinstance(interval_minutes, int) and interval_minutes > 0): # Basic check, could add upper bound
+        return False, "Invalid 'interval_minutes' for incremental backup: must be a positive integer."
+    validated_data["unified_incremental_backup"]["interval_minutes"] = interval_minutes
+
+    # Ensure no extra keys are saved, by building from default structure
+    final_data_to_save = default_settings.copy()
+    final_data_to_save["unified_full_backup"].update(validated_data["unified_full_backup"])
+    final_data_to_save["unified_incremental_backup"].update(validated_data["unified_incremental_backup"])
+
+
+    try:
+        os.makedirs(os.path.dirname(config_file), exist_ok=True)
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(final_data_to_save, f, indent=4)
+        logger.info(f"Unified backup schedule settings saved to '{config_file}'.")
+        return True, "Settings saved successfully."
+    except IOError as e:
+        logger.error(f"Error saving unified backup schedule settings to '{config_file}': {e}")
+        return False, f"Failed to write settings to file: {e}"

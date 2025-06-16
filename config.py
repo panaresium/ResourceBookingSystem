@@ -68,6 +68,22 @@ DEFAULT_SCHEDULE_DATA = {
     "time_of_day": "02:00"     # HH:MM format (24-hour)
 }
 
+# Path to the JSON file storing unified backup schedule settings
+UNIFIED_SCHEDULE_CONFIG_FILE = DATA_DIR / 'unified_booking_backup_schedule.json'
+DEFAULT_UNIFIED_SCHEDULE_DATA = {
+    "unified_full_backup": {
+        "is_enabled": False,
+        "schedule_type": "daily",  # 'daily', 'weekly', 'monthly'
+        "time_of_day": "02:00",   # HH:MM
+        "day_of_week": None,      # 0-6 (Monday-Sunday) for weekly
+        "day_of_month": None      # 1-31 for monthly
+    },
+    "unified_incremental_backup": {
+        "is_enabled": False,
+        "interval_minutes": 30
+    }
+}
+
 # --- UI Controlled Settings ---
 # Path to the JSON file storing UI-configurable map settings
 MAP_OPACITY_CONFIG_FILE = DATA_DIR / 'map_settings.json'
@@ -126,8 +142,7 @@ AZURE_CONTAINER_NAME = os.environ.get('AZURE_CONTAINER_NAME', 'roombookingbackup
 AZURE_DB_SHARE = os.environ.get('AZURE_DB_SHARE', 'db-backups')
 AZURE_CONFIG_SHARE = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
 AZURE_MEDIA_SHARE = os.environ.get('AZURE_MEDIA_SHARE', 'media')
-# Interval for the scheduled booking CSV backup job
-BOOKINGS_CSV_BACKUP_INTERVAL_MINUTES = int(os.environ.get('BOOKINGS_CSV_BACKUP_INTERVAL_MINUTES', '60')) # Default to 60 minutes
+# BOOKINGS_CSV_BACKUP_INTERVAL_MINUTES has been removed as it's related to legacy CSV backups.
 
 
 # --- Notification Webhooks ---

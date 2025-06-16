@@ -148,8 +148,8 @@ def serve_backup_booking_data_page():
 
     # Legacy CSV list is no longer server-populated. Client-side JS will handle fetching if needed.
     # Default/empty values are passed to the template for any remaining placeholders.
-    paginated_booking_csv_backups = []
-    page, total_pages, has_prev, has_next = 1, 0, False, False
+    # paginated_booking_csv_backups = [] # Removed
+    # page, total_pages, has_prev, has_next = 1, 0, False, False # Removed
 
     time_offset_value = 0
     try:
@@ -161,12 +161,6 @@ def serve_backup_booking_data_page():
 
     return render_template('admin/backup_booking_data.html',
                            booking_data_protection_schedule=booking_data_protection_schedule,
-                           # Legacy CSV variables removed from here:
-                           # booking_csv_backups=paginated_booking_csv_backups,
-                           # booking_csv_page=page,
-                           # booking_csv_total_pages=total_pages,
-                           # booking_csv_has_prev=has_prev,
-                           # booking_csv_has_next=has_next,
                            global_time_offset_hours=time_offset_value)
 
 @admin_ui_bp.route('/backup/settings', methods=['GET'])
@@ -188,104 +182,7 @@ def serve_backup_settings_page():
     return render_template('admin/backup_settings.html', auto_restore_booking_records_on_startup=auto_restore_booking_records_on_startup, global_time_offset_hours=global_time_offset_hours)
 
 # LEGACY - Azure CSV Restore Route - Body fully commented out.
-# @admin_ui_bp.route('/admin/restore_booking_csv/<timestamp_str>', methods=['POST'])
-# @login_required
-# @permission_required('manage_system')
-# def restore_booking_csv_route(timestamp_str):
-    # # current_app.logger.info(f"User {current_user.username} initiated restore for booking CSV backup: {timestamp_str}")
-    # # task_id = uuid.uuid4().hex
-    # #
-    # # # Use current_app._get_current_object() to pass the actual app instance
-    # # # Pass socketio instance if available and configured, else None
-    # # socketio_instance = None
-    # # if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
-    # #     socketio_instance = current_app.extensions['socketio']
-    # # elif 'socketio' in globals() and socketio:
-    # #     socketio_instance = socketio
-    # #
-    # # summary = restore_bookings_from_csv_backup(
-    # #     current_app._get_current_object(),
-    # #     timestamp_str,
-    # #     socketio_instance=socketio_instance,
-    # #     task_id=task_id
-    # # )
-    # #
-    # # if summary['status'] == 'completed_successfully' or (summary['status'] == 'completed_with_errors' and not summary.get('errors')):
-    # #     flash_msg = f"Booking CSV restore for {timestamp_str} completed. Processed: {summary.get('processed',0)}, Created: {summary.get('created',0)}, Skipped Duplicates: {summary.get('skipped_duplicates',0)}."
-    # #     if summary.get('errors'):
-    # #          flash_msg += f" Warnings: {'; '.join(summary['errors'])}"
-    # #     flash(flash_msg, 'success')
-    # # elif summary['status'] == 'completed_with_errors' and summary.get('errors'):
-    # #     error_details = '; '.join(summary['errors'])
-    # #     flash(f"Booking CSV restore for {timestamp_str} completed with errors. Errors: {error_details}. Processed: {summary.get('processed',0)}, Created: {summary.get('created',0)}, Skipped: {summary.get('skipped_duplicates',0)}.", 'danger')
-    # # else:
-    # #     error_details = '; '.join(summary.get('errors', ['Unknown error']))
-    # #     flash(f"Booking CSV restore for {timestamp_str} failed. Status: {summary.get('status','unknown')}. Message: {summary.get('message','N/A')}. Details: {error_details}", 'danger')
-    # #
-    # # # return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
-
-# LEGACY - Azure CSV Manual Backup Route - Body fully commented out.
-# @admin_ui_bp.route('/admin/manual_backup_bookings_csv', methods=['POST'])
-# @login_required
-# @permission_required('manage_system')
-# def manual_backup_bookings_csv_route():
-    # # task_id = uuid.uuid4().hex
-    # # socketio_instance = None
-    # # if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
-    # #     socketio_instance = current_app.extensions['socketio']
-    # # elif 'socketio' in globals() and socketio:
-    # #     socketio_instance = socketio
-    # # app_instance = current_app._get_current_object()
-    # # range_type = request.form.get('backup_range_type', 'all')
-    # # start_date_dt = None; end_date_dt = None; range_label = range_type
-    # # utcnow = datetime.utcnow()
-    # # if range_type != "all": end_date_dt = datetime(utcnow.year, utcnow.month, utcnow.day) + timedelta(days=1)
-    # # if range_type == "1day": start_date_dt = end_date_dt - timedelta(days=1)
-    # # elif range_type == "3days": start_date_dt = end_date_dt - timedelta(days=3)
-    # # elif range_type == "7days": start_date_dt = end_date_dt - timedelta(days=7)
-    # # elif range_type == "all": start_date_dt = None; end_date_dt = None; range_label = "all"
-    # # log_detail = f"range: {range_label}"
-    # # if start_date_dt: log_detail += f", from: {start_date_dt.strftime('%Y-%m-%d')}"
-    # # if end_date_dt: log_detail += f", to: {end_date_dt.strftime('%Y-%m-%d')}"
-    # # app_instance.logger.info(f"Manual booking CSV backup ({log_detail}) triggered by user {current_user.username if current_user else 'Unknown User'} with task ID {task_id}.")
-    # # try:
-    # #     success = backup_bookings_csv(app=app_instance, socketio_instance=socketio_instance, task_id=task_id, start_date_dt=start_date_dt, end_date_dt=end_date_dt, range_label=range_label)
-    # #     if success: flash(_('Manual booking CSV backup for range "%(range)s" initiated successfully. Check logs or SocketIO messages for progress/completion.') % {'range': range_label}, 'success')
-    # #     else: flash(_('Manual booking CSV backup for range "%(range)s" failed to complete successfully. Please check server logs.') % {'range': range_label}, 'warning')
-    # # except Exception as e:
-    # #     app_instance.logger.error(f"Exception during manual booking CSV backup (range: {range_label}) initiation by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
-    # #     flash(_('An unexpected error occurred while starting the manual booking CSV backup for range "%(range)s". Check server logs.') % {'range': range_label}, 'danger')
-    # # # return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
-
-# LEGACY - Azure CSV Delete Route - Body fully commented out.
-# @admin_ui_bp.route('/admin/delete_booking_csv/<timestamp_str>', methods=['POST'])
-# @login_required
-# @permission_required('manage_system')
-# def delete_booking_csv_backup_route(timestamp_str):
-    # # task_id = uuid.uuid4().hex
-    # # socketio_instance = None
-    # # if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
-    # #     socketio_instance = current_app.extensions['socketio']
-    # # elif 'socketio' in globals() and socketio:
-    # #     socketio_instance = socketio
-    # # app_instance = current_app._get_current_object()
-    # # app_instance.logger.info(f"Deletion of booking CSV backup {timestamp_str} triggered by user {current_user.username if current_user else 'Unknown User'} with task ID {task_id}.")
-    # # try:
-    # #     success = delete_booking_csv_backup(timestamp_str, socketio_instance=socketio_instance, task_id=task_id)
-    # #     if success: flash(_('Booking CSV backup for %(timestamp)s successfully deleted (or was not found).') % {'timestamp': timestamp_str}, 'success')
-    # #     else: flash(_('Failed to delete booking CSV backup for %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
-    # # except Exception as e:
-    # #     app_instance.logger.error(f"Exception during booking CSV backup deletion for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
-    # #     flash(_('An unexpected error occurred while deleting the booking CSV backup for %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
-    # # # return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
-
-# LEGACY - Azure CSV Schedule Save Route - Body fully commented out.
-# @admin_ui_bp.route('/save_booking_csv_schedule', methods=['POST'])
-# @login_required
-# @permission_required('manage_system')
-# def save_booking_csv_schedule_settings():
-    # # ... (entire body commented out) ...
-    # # return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+# LEGACY CSV Routes are fully removed.
 
 @admin_ui_bp.route('/settings/schedule/full_backup', methods=['POST'])
 @login_required
@@ -334,10 +231,6 @@ def save_backup_time_offset_route():
 # @login_required
 # @permission_required('manage_system')
 # def verify_booking_csv_backup_route(timestamp_str):
-    # # ... (entire body commented out) ...
-    # # # return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
-
-
 @admin_ui_bp.route('/verify_full_backup/<timestamp_str>', methods=['POST'])
 @login_required
 @permission_required('manage_system')

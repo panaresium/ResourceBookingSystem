@@ -4,7 +4,6 @@ from extensions import db
 from models import Booking, User, Resource, FloorMap, BookingSettings
 from utils import add_audit_log, send_email, _get_map_configuration_data, _get_resource_configurations_data, _get_user_configurations_data, get_current_effective_time
 from azure_backup import (
-    # backup_bookings_csv, # LEGACY - Functionality commented out
     create_full_backup,
     # backup_incremental_bookings, # This is legacy incremental, may also be removed. # Ensure this line is removed or commented out if part of a multi-line import
     backup_scheduled_incremental_booking_data, # New unified incremental
@@ -143,36 +142,6 @@ def auto_checkout_overdue_bookings(app): # app is now a required argument
                 )
 
         logger.info("Scheduler: Auto_checkout_overdue_bookings task finished.")
-
-# LEGACY - Scheduled Azure CSV Backup - Kept for reference / To be removed
-# def run_scheduled_booking_csv_backup(app=None):
-#     """
-#     Scheduled task entry point to run the booking CSV backup.
-#     Uses the provided app context or gets it from current_app.
-#     """
-#     with app.app_context():
-#         logger = app.logger
-#         logger.info("Scheduler: Starting run_scheduled_booking_csv_backup task...")
-#         try:
-#             # The backup_bookings_csv function itself needs an app instance.
-#             # It will internally determine the range based on its schedule settings.
-#             # For a scheduled task, socketio_instance and task_id are typically None.
-#             success = backup_bookings_csv(
-#                 app=app,
-#                 socketio_instance=None,
-#                 task_id=None,
-#                 start_date_dt=None,
-#                 end_date_dt=None,
-#                 range_label="scheduled_auto"
-#             )
-#             if success:
-#                 logger.info("Scheduler: run_scheduled_booking_csv_backup (backup_bookings_csv call) reported success.")
-#             else:
-#                 logger.warning("Scheduler: run_scheduled_booking_csv_backup (backup_bookings_csv call) reported issues (returned False). See azure_backup logs for details.")
-#         except Exception as e:
-#             logger.error(f"Scheduler: Exception during run_scheduled_booking_csv_backup execution: {e}", exc_info=True)
-#
-#         logger.info("Scheduler: run_scheduled_booking_csv_backup task finished.")
 
 def cancel_unchecked_bookings(app):
     """

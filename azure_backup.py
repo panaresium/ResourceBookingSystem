@@ -47,9 +47,6 @@ MEDIA_BACKUPS_DIR_BASE = 'media_backups'
 DB_FILENAME_PREFIX = 'site_'
 MAP_CONFIG_FILENAME_PREFIX = 'map_config_'
 
-BOOKING_CSV_BACKUPS_DIR = 'booking_csv_backups'
-BOOKING_CSV_FILENAME_PREFIX = 'bookings_'
-
 BOOKING_FULL_JSON_EXPORTS_DIR = 'booking_full_json_exports'
 
 # --- Unified Booking Data Protection Constants ---
@@ -195,54 +192,6 @@ def list_available_backups():
 #     #     effective_range_label = "all"
 #     # # ... rest of the function body commented out ...
 #     # logger.info(f"Starting LEGACY booking CSV backup process ({log_msg_detail}). Task ID: {task_id}")
-#     # # ...
-#     # return False
-
-
-# --- LEGACY - Azure CSV Functionality - Kept for reference / To be removed ---
-# def list_available_booking_csv_backups():
-#     """
-#     DEPRECATED / LEGACY
-#     Lists available booking CSV backups from Azure File Share, extracting metadata from filenames.
-#     Returns a list of dictionaries, each representing a backup item, sorted by timestamp descending.
-#     """
-#     # logger.info("Attempting to list available LEGACY booking CSV backups with range labels.")
-#     # backup_items = []
-#     # # ... rest of the function body commented out ...
-#     # return backup_items
-
-
-# --- LEGACY - Azure CSV Functionality - Kept for reference / To be removed ---
-# def restore_bookings_from_csv_backup(app, filename: str, socketio_instance=None, task_id=None):
-#     """
-#     DEPRECATED / LEGACY
-#     Restores bookings from a specific CSV backup file stored on Azure.
-#     """
-#     # event_name = 'booking_csv_restore_progress'
-#     # # ... rest of the function body commented out ...
-#     # return actions_summary
-
-# --- LEGACY - Azure CSV Functionality - Kept for reference / To be removed ---
-# def verify_booking_csv_backup(filename: str, socketio_instance=None, task_id=None):
-#     """
-#     DEPRECATED / LEGACY
-#     Verifies if a specific booking CSV backup file exists on Azure.
-#     """
-#     # event_name = 'booking_csv_verify_progress'
-#     # # ... rest of the function body commented out ...
-#     # return result
-
-# --- LEGACY - Azure CSV Functionality - Kept for reference / To be removed ---
-# def delete_booking_csv_backup(filename: str, socketio_instance=None, task_id=None):
-#     """
-#     DEPRECATED / LEGACY
-#     Deletes a specific booking CSV backup file from Azure.
-#     """
-#     # event_name = 'booking_csv_delete_progress'
-#     # # ... rest of the function body commented out ...
-#     # return False
-
-
 # --- Unified Booking Data Protection Functions (Full, Incremental Backup, List, Delete) ---
 def backup_full_booking_data_json_azure(app, socketio_instance=None, task_id=None) -> bool:
     event_name = 'full_booking_data_backup_progress'
@@ -736,3 +685,73 @@ def backup_database():
     logger.info("Simulating backup_database")
     # This is a placeholder. The actual logic for backing up the database should be here.
     return "mock_db_backup.db" # Simulate returning a filename
+
+def download_booking_data_json_backup(filename: str, backup_type: str):
+    """
+    Downloads a specific unified booking data JSON backup file (full or incremental) from Azure File Share.
+
+    Args:
+        filename (str): The name of the backup file to download.
+        backup_type (str): The type of backup ('full' or 'incremental').
+
+    Returns:
+        bytes: The content of the downloaded file if successful, None otherwise.
+    """
+    logger.info(f"Attempting to download unified booking data backup: Type='{backup_type}', Filename='{filename}'.")
+    try:
+        service_client = _get_service_client()
+        share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups') # Uses the same share as other configs
+        share_client = service_client.get_share_client(share_name)
+
+        if not _client_exists(share_client):
+            logger.error(f"Azure share '{share_name}' not found for downloading backup '{filename}'.")
+            return None
+
+        if backup_type == 'full':
+            sub_dir_suffix = BOOKING_DATA_FULL_DIR_SUFFIX
+        elif backup_type == 'incremental':
+            sub_dir_suffix = BOOKING_DATA_INCREMENTAL_DIR_SUFFIX
+        else:
+            logger.error(f"Invalid backup_type '{backup_type}' specified for download. Must be 'full' or 'incremental'.")
+            return None
+
+        # Construct the remote file path on Azure
+        # Base directory for unified backups + type-specific suffix + filename
+        remote_file_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{sub_dir_suffix}/{filename}"
+
+        file_client = share_client.get_file_client(remote_file_path)
+
+        if not _client_exists(file_client):
+            # Attempt to check legacy path for full backups for backward compatibility
+            if backup_type == 'full' and (filename.startswith("booking_data_backup_") or filename.startswith("booking_data_full_")):
+                legacy_path_attempt = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{filename}"
+                logger.warning(f"File '{filename}' not found at primary path '{remote_file_path}'. Attempting legacy path: '{legacy_path_attempt}'")
+                legacy_file_client = share_client.get_file_client(legacy_path_attempt)
+                if _client_exists(legacy_file_client):
+                    file_client = legacy_file_client # Use the legacy client if file found there
+                    logger.info(f"File found at legacy path: {legacy_path_attempt}")
+                else:
+                    logger.error(f"Unified backup file '{filename}' not found at primary path '{remote_file_path}' or legacy path '{legacy_path_attempt}'.")
+                    return None
+            else:
+                logger.error(f"Unified backup file '{filename}' not found at path '{remote_file_path}'.")
+                return None
+
+        logger.info(f"Downloading file '{filename}' from '{file_client.share_name}/{file_client.file_path}'...")
+        download_stream = file_client.download_file()
+        file_content = download_stream.readall()
+        logger.info(f"Successfully downloaded {len(file_content)} bytes for backup '{filename}'.")
+        return file_content
+
+    except ResourceNotFoundError:
+        logger.error(f"ResourceNotFoundError: Unified backup file '{filename}' (type: {backup_type}) not found on Azure share '{share_name}'. Path attempted: '{remote_file_path}' (and legacy if applicable).")
+        return None
+    except HttpResponseError as hre:
+        logger.error(f"HttpResponseError downloading backup '{filename}': {hre.message}", exc_info=True)
+        return None
+    except ServiceRequestError as sre:
+        logger.error(f"ServiceRequestError (network issue?) downloading backup '{filename}': {sre.message}", exc_info=True)
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error downloading unified backup '{filename}': {e}", exc_info=True)
+        return None
