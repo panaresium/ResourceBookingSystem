@@ -447,6 +447,27 @@ def _import_resource_configurations_data(resources_data_list: list) -> tuple[int
     errors.append("This function is a stub and did not process any data.")
     return created_count, updated_count, errors
 
+def _get_user_configurations_data() -> dict:
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
+    logger.warning("_get_user_configurations_data is currently a STUB. Exporting user configurations will not provide actual data.")
+    # Expected to return a dict, e.g., {'users': [], 'roles': []}
+    return {
+        'users': [],
+        'roles': [],
+        'message': "Stub implementation: No actual user configuration data exported."
+    }
+
+def _import_user_configurations_data(user_config_data: dict) -> tuple[int, int, int, int, list]:
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
+    logger.warning("_import_user_configurations_data is currently a STUB. Importing user configurations will not actually process data.")
+    # Expected: tuple[roles_created, roles_updated, users_created, users_updated, errors_list]
+    roles_created = 0
+    roles_updated = 0
+    users_created = 0
+    users_updated = 0
+    errors = ["Stub implementation: No actual user configuration data imported."]
+    return roles_created, roles_updated, users_created, users_updated, errors
+
 def _load_schedule_from_json(): # Example, might need current_app context
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.debug("_load_schedule_from_json STUB")
