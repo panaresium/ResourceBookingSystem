@@ -16,7 +16,6 @@ from datetime import datetime, timedelta, timezone # Add datetime imports
 from utils import load_scheduler_settings, save_scheduler_settings, DEFAULT_FULL_BACKUP_SCHEDULE, DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE, add_audit_log # Ensure add_audit_log is imported
 
 # Import backup/restore functions
-from azure_backup import verify_backup_set
 # Other legacy imports (list_available_booking_csv_backups, list_available_backups, etc.) removed
 # as they are not directly used by active routes in this file after cleanup.
 # Interactions with those functions are now primarily through API endpoints defined in api_system.py,
