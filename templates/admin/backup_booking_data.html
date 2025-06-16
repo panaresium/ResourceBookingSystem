@@ -418,7 +418,7 @@
             if (!confirm("{{ _('Are you sure you want to create a new manual CSV backup on Azure? This is a legacy method.') }}")) return;
             showProgressModal("{{ _('Starting manual CSV backup...') }}");
             /*
-            fetch("{{ url_for('admin_ui.manual_backup_bookings_csv_route') }}", { // Check route
+            fetch("{# url_for('admin_ui.manual_backup_bookings_csv_route') #}", { // Check route
                 method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token() }}' }
             })
             .then(response => response.json())
@@ -438,8 +438,8 @@
                 console.error(error);
             });
             */
-            alert("{{ _('This feature is temporarily disabled.') }}");
-            hideProgressModal();
+            alert("{{ _('This feature (Manual CSV Backup) is temporarily disabled.') }}"); // Added alert
+            hideProgressModal(); // Ensure modal is hidden if we skip the fetch
         }
     }
 
@@ -610,7 +610,7 @@
         if (!confirm("{{ _('Restore bookings from CSV backup') }} '" + filename + "'? {{ _('This is a legacy method. Data will be overwritten. Cannot be undone.') }}")) return;
         showProgressModal("{{ _('Restoring from CSV backup...') }}");
         /*
-        fetch("{{ url_for('admin_ui.restore_booking_csv_route') }}", { // Check route
+        fetch("{# url_for('admin_ui.restore_booking_csv_route') #}", { // Check route
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
             body: JSON.stringify({ backup_filename: filename })
@@ -638,7 +638,7 @@
         if (!confirm("{{ _('Are you sure you want to delete the CSV backup') }} '" + filename + "' {{ _('from Azure? This action cannot be undone.') }}")) return;
         showProgressModal("{{ _('Deleting CSV backup...') }}");
         /*
-        fetch("{{ url_for('admin_ui.delete_booking_csv_backup_route') }}", { // Check route
+        fetch("{# url_for('admin_ui.delete_booking_csv_backup_route') #}", { // Check route
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
             body: JSON.stringify({ backup_filename: filename })
