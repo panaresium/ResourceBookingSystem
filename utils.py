@@ -1076,75 +1076,75 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
     add_audit_log(action="IMPORT_MAP_CONFIGURATION_COMPLETED", details=f"User {username_for_audit_final} completed map config import. Summary: {str(summary)}")
     return summary, status_code
 
-
-def export_bookings_to_csv_string(app, start_date=None, end_date=None) -> str:
-    """
-    Exports Booking model objects to a CSV formatted string, optionally filtered by date range.
-
-    Args:
-        app: The Flask application object.
-        start_date (datetime.datetime, optional): Filter for bookings starting on or after this date.
-        end_date (datetime.datetime, optional): Filter for bookings starting strictly before this date.
-
-    Returns:
-        A string containing the CSV data.
-    """
-    logger = app.logger
-    header = [
-        'id', 'resource_id', 'user_name', 'start_time', 'end_time',
-        'title', 'checked_in_at', 'checked_out_at', 'status', 'recurrence_rule'
-    ]
-
-    bookings_to_export = []
-    current_offset_hours = 0
-    with app.app_context():
-        try:
-            booking_settings = BookingSettings.query.first()
-            if booking_settings and hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None:
-                current_offset_hours = booking_settings.global_time_offset_hours
-            else:
-                logger.warning("BookingSettings not found or global_time_offset_hours not set for CSV export, using 0 offset. Times in CSV will be treated as naive local if they were stored as such.")
-        except Exception as e_settings:
-            logger.error(f"Error fetching BookingSettings for CSV export: {e_settings}. Using 0 offset.")
-            # current_offset_hours remains 0
-
-        query = Booking.query
-        if start_date:
-            # Assuming start_date is naive local, convert to UTC if DB times are UTC for query
-            # However, Booking.start_time is now naive local, so direct comparison is fine
-            query = query.filter(Booking.start_time >= start_date)
-        if end_date:
-            query = query.filter(Booking.start_time < end_date)
-        bookings_to_export = query.order_by(Booking.start_time).all()
-
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(header)
-
-    if not bookings_to_export:
-        # Return CSV with only header if no bookings match
-        csv_data = output.getvalue()
-        output.close()
-        return csv_data
-
-    for booking in bookings_to_export:
-        row = [
-            booking.id,
-            booking.resource_id,
-            booking.user_name,
-            (booking.start_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat() if booking.start_time else '',
-            (booking.end_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat() if booking.end_time else '',
-            booking.title,
-            (booking.checked_in_at - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else '', # Assuming checked_in_at is naive local
-            (booking.checked_out_at - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else '', # Assuming checked_out_at is naive local
-            booking.status,
-            booking.recurrence_rule if booking.recurrence_rule is not None else ''
-        ]
-        writer.writerow(row)
-
-    csv_data = output.getvalue()
-    output.close()
-    return csv_data
+# LEGACY - Local CSV Export - Kept for reference / To be removed if no other part of app uses it.
+# def export_bookings_to_csv_string(app, start_date=None, end_date=None) -> str:
+#     """
+#     Exports Booking model objects to a CSV formatted string, optionally filtered by date range.
+#
+#     Args:
+#         app: The Flask application object.
+#         start_date (datetime.datetime, optional): Filter for bookings starting on or after this date.
+#         end_date (datetime.datetime, optional): Filter for bookings starting strictly before this date.
+#
+#     Returns:
+#         A string containing the CSV data.
+#     """
+#     logger = app.logger
+#     header = [
+#         'id', 'resource_id', 'user_name', 'start_time', 'end_time',
+#         'title', 'checked_in_at', 'checked_out_at', 'status', 'recurrence_rule'
+#     ]
+#
+#     bookings_to_export = []
+#     current_offset_hours = 0
+#     with app.app_context():
+#         try:
+#             booking_settings = BookingSettings.query.first()
+#             if booking_settings and hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None:
+#                 current_offset_hours = booking_settings.global_time_offset_hours
+#             else:
+#                 logger.warning("BookingSettings not found or global_time_offset_hours not set for CSV export, using 0 offset. Times in CSV will be treated as naive local if they were stored as such.")
+#         except Exception as e_settings:
+#             logger.error(f"Error fetching BookingSettings for CSV export: {e_settings}. Using 0 offset.")
+#             # current_offset_hours remains 0
+#
+#         query = Booking.query
+#         if start_date:
+#             # Assuming start_date is naive local, convert to UTC if DB times are UTC for query
+#             # However, Booking.start_time is now naive local, so direct comparison is fine
+#             query = query.filter(Booking.start_time >= start_date)
+#         if end_date:
+#             query = query.filter(Booking.start_time < end_date)
+#         bookings_to_export = query.order_by(Booking.start_time).all()
+#
+#     output = io.StringIO()
+#     writer = csv.writer(output)
+#     writer.writerow(header)
+#
+#     if not bookings_to_export:
+#         # Return CSV with only header if no bookings match
+#         csv_data = output.getvalue()
+#         output.close()
+#         return csv_data
+#
+#     for booking in bookings_to_export:
+#         row = [
+#             booking.id,
+#             booking.resource_id,
+#             booking.user_name,
+#             (booking.start_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat() if booking.start_time else '',
+#             (booking.end_time - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat() if booking.end_time else '',
+#             booking.title,
+#             (booking.checked_in_at - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat() if booking.checked_in_at else '', # Assuming checked_in_at is naive local
+#             (booking.checked_out_at - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc).isoformat() if booking.checked_out_at else '', # Assuming checked_out_at is naive local
+#             booking.status,
+#             booking.recurrence_rule if booking.recurrence_rule is not None else ''
+#         ]
+#         writer.writerow(row)
+#
+#     csv_data = output.getvalue()
+#     output.close()
+#     return csv_data
 
 # Helper function for parsing ISO datetime strings
 def _parse_iso_datetime(dt_str):

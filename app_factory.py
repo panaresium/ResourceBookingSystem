@@ -29,7 +29,18 @@ from routes.gmail_auth import init_gmail_auth_routes # Added for Gmail OAuth flo
 
 # For scheduler
 from apscheduler.schedulers.background import BackgroundScheduler
-from scheduler_tasks import cancel_unchecked_bookings, apply_scheduled_resource_status_changes, run_scheduled_backup_job, run_scheduled_booking_csv_backup, run_scheduled_incremental_booking_backup, auto_checkout_overdue_bookings, auto_release_unclaimed_bookings, send_checkin_reminders
+from scheduler_tasks import (
+    cancel_unchecked_bookings,
+    apply_scheduled_resource_status_changes,
+    run_scheduled_backup_job,
+    # run_scheduled_booking_csv_backup, # LEGACY - Superseded by unified JSON backups
+    run_scheduled_incremental_booking_backup, # This is legacy incremental, may also be removed.
+    auto_checkout_overdue_bookings,
+    auto_release_unclaimed_bookings,
+    send_checkin_reminders,
+    run_scheduled_incremental_booking_data_task, # New task for unified incrementals
+    run_periodic_full_booking_data_task # New task for unified periodic fulls
+)
 # Conditional import for azure_backup
 try:
     from azure_backup import restore_latest_backup_set_on_startup, backup_if_changed as azure_backup_if_changed, restore_incremental_bookings
@@ -532,42 +543,46 @@ def create_app(config_object=config, testing=False): # Added testing parameter
             else:
                 app.logger.warning("run_scheduled_backup_job function not found in scheduler_tasks. Full system backup job not added.")
 
-            if run_scheduled_booking_csv_backup: # Check if the function exists
-                # app.config['BOOKING_CSV_SCHEDULE_SETTINGS'] is loaded from a separate file, not scheduler_settings.json
-                # For consistency, let's assume booking_csv_backup settings are also in scheduler_settings.json
-                # However, the current code loads it into app.config. For this change, we will keep that,
-                # but if it were to be unified, it would use all_scheduler_settings.get('booking_csv_backup', ...)
-                booking_csv_schedule_settings_from_config = app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS', {}) # From app.config
+            # LEGACY - Scheduled Azure CSV Backup - Job addition commented out as task is removed/commented.
+            # if run_scheduled_booking_csv_backup: # Check if the function exists
+            #     # app.config['BOOKING_CSV_SCHEDULE_SETTINGS'] is loaded from a separate file, not scheduler_settings.json
+            #     # For consistency, let's assume booking_csv_backup settings are also in scheduler_settings.json
+            #     # However, the current code loads it into app.config. For this change, we will keep that,
+            #     # but if it were to be unified, it would use all_scheduler_settings.get('booking_csv_backup', ...)
+            #     booking_csv_schedule_settings_from_config = app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS', {}) # From app.config
+            #
+            #     # If we were to use scheduler_settings.json for CSV backups too (ideal future state):
+            #     # booking_csv_schedule_settings = all_scheduler_settings.get('booking_csv_backup', DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy())
+            #
+            #     # Using the existing mechanism for CSV:
+            #     if booking_csv_schedule_settings_from_config.get('enabled'):
+            #         interval_value = booking_csv_schedule_settings_from_config.get('interval_value', 24)
+            #         interval_unit = booking_csv_schedule_settings_from_config.get('interval_unit', 'hours')
+            #
+            #         job_kwargs = {}
+            #         if interval_unit == 'minutes':
+            #             job_kwargs['minutes'] = interval_value
+            #         elif interval_unit == 'hours':
+            #             job_kwargs['hours'] = interval_value
+            #         elif interval_unit == 'days':
+            #             job_kwargs['days'] = interval_value
+            #         else:
+            #             app.logger.warning(f"Invalid interval unit '{interval_unit}' from settings. Defaulting to 24 hours.")
+            #             job_kwargs['hours'] = 24
+            #
+            #         scheduler.add_job(
+            #             run_scheduled_booking_csv_backup,
+            #             'interval',
+            #             id='scheduled_booking_csv_backup_job', # Add an ID for later modification/removal
+            #             **job_kwargs,
+            #             args=[app]
+            #         )
+            #         app.logger.info(f"Scheduled booking CSV backup job added: Interval {interval_value} {interval_unit}, Range: {booking_csv_schedule_settings_from_config.get('range_type')}.")
+            #     else:
+            #         app.logger.info("Scheduled booking CSV backup is disabled in settings (from app.config). Job not added.")
+            # # else: # LEGACY - run_scheduled_booking_csv_backup was commented out
+            # #     app.logger.warning("run_scheduled_booking_csv_backup function not found or commented out in scheduler_tasks. Legacy CSV backup job not added.")
 
-                # If we were to use scheduler_settings.json for CSV backups too (ideal future state):
-                # booking_csv_schedule_settings = all_scheduler_settings.get('booking_csv_backup', DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy())
-
-                # Using the existing mechanism for CSV:
-                if booking_csv_schedule_settings_from_config.get('enabled'):
-                    interval_value = booking_csv_schedule_settings_from_config.get('interval_value', 24)
-                    interval_unit = booking_csv_schedule_settings_from_config.get('interval_unit', 'hours')
-
-                    job_kwargs = {}
-                    if interval_unit == 'minutes':
-                        job_kwargs['minutes'] = interval_value
-                    elif interval_unit == 'hours':
-                        job_kwargs['hours'] = interval_value
-                    elif interval_unit == 'days':
-                        job_kwargs['days'] = interval_value
-                    else:
-                        app.logger.warning(f"Invalid interval unit '{interval_unit}' from settings. Defaulting to 24 hours.")
-                        job_kwargs['hours'] = 24
-
-                    scheduler.add_job(
-                        run_scheduled_booking_csv_backup,
-                        'interval',
-                        id='scheduled_booking_csv_backup_job', # Add an ID for later modification/removal
-                        **job_kwargs,
-                        args=[app]
-                    )
-                    app.logger.info(f"Scheduled booking CSV backup job added: Interval {interval_value} {interval_unit}, Range: {booking_csv_schedule_settings_from_config.get('range_type')}.")
-                else:
-                    app.logger.info("Scheduled booking CSV backup is disabled in settings (from app.config). Job not added.")
 
             # Scheduling for Incremental JSON Booking Backup
             if run_scheduled_incremental_booking_backup:
@@ -601,6 +616,58 @@ def create_app(config_object=config, testing=False): # Added testing parameter
             else:
                 app.logger.warning("run_scheduled_incremental_booking_backup function not found in scheduler_tasks. Incremental JSON booking backup job not added.")
 
+            # Scheduling for Unified Booking Data Protection Backup (Now Minutely Incrementals)
+            if run_scheduled_incremental_booking_data_task: # Changed to the new incremental task function
+                DEFAULT_BOOKING_DATA_PROTECTION_SCHEDULE = {'is_enabled': False, 'interval_minutes': 1440}
+                # Note: The default of 1440 (daily) might be too infrequent for incrementals if user enables without changing interval.
+                # UI default should guide towards more frequent, e.g. 5-15 mins.
+                # For now, using existing setting key 'booking_data_protection_schedule'.
+                unified_booking_backup_config = all_scheduler_settings.get('booking_data_protection_schedule', DEFAULT_BOOKING_DATA_PROTECTION_SCHEDULE.copy())
+
+                if unified_booking_backup_config.get('is_enabled'):
+                    try:
+                        interval_minutes = int(unified_booking_backup_config.get('interval_minutes', 15)) # Defaulting to 15 mins if not set, more suitable for incrementals
+                        if interval_minutes <= 0:
+                            app.logger.error(f"Invalid interval_minutes ({interval_minutes}) for unified incremental booking data backup. Must be positive. Job not scheduled.")
+                        else:
+                            scheduler.add_job(
+                                func=run_scheduled_incremental_booking_data_task, # Changed to new incremental task
+                                trigger='interval',
+                                minutes=interval_minutes,
+                                id='scheduled_booking_data_protection_job', # Keep ID for existing settings compatibility
+                                replace_existing=True,
+                                args=[app]
+                            )
+                            app.logger.info(f"Scheduled unified INCREMENTAL booking data protection backup job to run every {interval_minutes} minutes.")
+                    except ValueError as e:
+                        app.logger.error(f"Error parsing interval_minutes for unified incremental booking data backup: {e}. Job not scheduled.", exc_info=True)
+                    except Exception as e_job_add:
+                        app.logger.error(f"Error adding unified incremental booking data backup job to scheduler: {e_job_add}. Job not scheduled.", exc_info=True)
+                else:
+                    app.logger.info("Scheduled unified incremental booking data protection backup is disabled in settings (booking_data_protection_schedule). Job not added.")
+            else:
+                app.logger.warning("run_scheduled_incremental_booking_data_task function not found. Unified incremental booking backup job not added.")
+
+            # New: Scheduling for Periodic Full Unified Booking Data Backup (Daily)
+            if run_periodic_full_booking_data_task:
+                # This job is system-driven for robustness, not directly from scheduler_settings.json for now.
+                # Could add a master enable/disable in scheduler_settings.json in future if needed.
+                # For now, it runs if scheduler is enabled.
+                try:
+                    scheduler.add_job(
+                        func=run_periodic_full_booking_data_task,
+                        trigger='cron',
+                        hour='3', # Example: 3 AM UTC
+                        minute='0',
+                        id='periodic_full_booking_data_job',
+                        replace_existing=True,
+                        args=[app]
+                    )
+                    app.logger.info("Scheduled periodic FULL unified booking data backup job to run daily at 03:00 UTC.")
+                except Exception as e_job_add:
+                    app.logger.error(f"Error adding periodic full unified booking data backup job to scheduler: {e_job_add}. Job not scheduled.", exc_info=True)
+            else:
+                app.logger.warning("run_periodic_full_booking_data_task function not found. Periodic full booking data backup job not added.")
 
             # Add the new auto_checkout_overdue_bookings job
             if auto_checkout_overdue_bookings:
