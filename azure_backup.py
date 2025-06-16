@@ -669,3 +669,4 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
 def backup_database():
     logger.info("Simulating backup_database")
     return "mock_db_backup.db"
+
