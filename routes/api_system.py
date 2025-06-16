@@ -50,7 +50,13 @@ try:
         backup_full_bookings_json, # Added for manual full JSON booking export
         list_available_full_booking_json_exports, # For listing full JSON exports
         restore_bookings_from_full_json_export, # For restoring from full JSON export
-        delete_incremental_booking_backup # For deleting incremental JSON backups
+        delete_incremental_booking_backup, # For deleting incremental JSON backups
+        # New Unified Booking Data Protection functions
+        backup_booking_data_json_to_azure, # For manual full backup trigger
+        list_booking_data_json_backups,    # For listing unified backups
+        # restore_booking_data_from_json_backup, # This is now primarily for full restore, called by orchestrator
+        delete_booking_data_json_backup,   # For deleting specific unified backups
+        restore_booking_data_to_point_in_time # New orchestrator for PIT restore
     )
     import azure_backup # To access module-level constants if needed by moved functions
 except ImportError:
@@ -77,6 +83,11 @@ except ImportError:
     list_available_full_booking_json_exports = None
     restore_bookings_from_full_json_export = None
     delete_incremental_booking_backup = None
+    # Placeholders for new unified functions if import fails
+    backup_booking_data_json_to_azure = None
+    list_booking_data_json_backups = None
+    restore_booking_data_from_json_backup = None
+    delete_booking_data_json_backup = None
     azure_backup = None
 
 api_system_bp = Blueprint('api_system', __name__)
@@ -159,6 +170,168 @@ def debug_list_routes():
     return html_output, 200
 
 # --- Backup and Restore API Routes ---
+
+# --- Unified Booking Data Protection API Routes (New) ---
+
+@api_system_bp.route('/api/admin/booking_data_protection/manual_backup', methods=['POST'])
+@login_required
+@permission_required('manage_system') # Assuming same permission as other backup operations
+def api_manual_booking_data_backup_json():
+    task_id = uuid.uuid4().hex
+    current_app.logger.info(f"User {current_user.username} initiated manual unified booking data backup (Task ID: {task_id}).")
+
+    if not backup_booking_data_json_to_azure:
+        current_app.logger.error("azure_backup.backup_booking_data_json_to_azure function not available.")
+        if socketio:
+            socketio.emit('booking_data_protection_backup_progress', {
+                'task_id': task_id,
+                'status': 'Error: Unified backup function not available on server.',
+                'detail': 'CRITICAL_ERROR',
+                'level': 'ERROR'
+            })
+        return jsonify({
+            'success': False,
+            'message': 'Manual unified booking data backup function is not available on the server.',
+            'task_id': task_id
+        }), 500
+
+    try:
+        success = backup_booking_data_json_to_azure(
+            app=current_app._get_current_object(),
+            socketio_instance=socketio,
+            task_id=task_id
+        )
+
+        if success:
+            current_app.logger.info(f"Manual unified booking data backup process (Task ID: {task_id}) started successfully.")
+            add_audit_log(action="MANUAL_UNIFIED_BOOKING_BACKUP_STARTED", details=f"Task ID: {task_id}", user_id=current_user.id)
+            return jsonify({
+                'success': True,
+                'message': 'Manual unified booking data backup process started successfully.',
+                'task_id': task_id
+            }), 200
+        else:
+            current_app.logger.error(f"Failed to start manual unified booking data backup (Task ID: {task_id}). Function returned non-success.")
+            add_audit_log(action="MANUAL_UNIFIED_BOOKING_BACKUP_FAILED_START", details=f"Task ID: {task_id}. Function indicated failure.", user_id=current_user.id)
+            return jsonify({
+                'success': False,
+                'message': 'Failed to start manual unified booking data backup. Check server logs for details.',
+                'task_id': task_id
+            }), 500
+    except Exception as e:
+        current_app.logger.exception(f"Exception during manual unified booking data backup initiation (Task ID: {task_id}):")
+        add_audit_log(action="MANUAL_UNIFIED_BOOKING_BACKUP_ERROR", details=f"Task ID: {task_id}. Exception: {str(e)}", user_id=current_user.id)
+        if socketio:
+            socketio.emit('booking_data_protection_backup_progress', {
+                'task_id': task_id,
+                'status': f'Error: {str(e)}',
+                'detail': 'EXCEPTION',
+                'level': 'ERROR'
+            })
+        return jsonify({
+            'success': False,
+            'message': f'An unexpected error occurred: {str(e)}',
+            'task_id': task_id
+        }), 500
+
+@api_system_bp.route('/api/admin/booking_data_protection/list_backups', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def api_list_booking_data_backups():
+    current_app.logger.info(f"User {current_user.username} requested list of unified booking data backups.")
+    if not list_booking_data_json_backups:
+        return jsonify({'success': False, 'message': 'Functionality to list unified backups is not available.', 'backups': []}), 501
+    try:
+        backups = list_booking_data_json_backups() # This should return 'filename', 'type', 'timestamp_str' (ISO)
+        return jsonify({'success': True, 'backups': backups}), 200
+    except Exception as e:
+        current_app.logger.exception("Exception listing unified booking data backups:")
+        return jsonify({'success': False, 'message': f'Error: {str(e)}', 'backups': []}), 500
+
+@api_system_bp.route('/api/admin/booking_data_protection/restore', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_unified_booking_data_point_in_time_restore(): # Renamed for clarity
+    task_id = uuid.uuid4().hex
+    data = request.get_json()
+
+    filename = data.get('filename')
+    backup_type = data.get('backup_type')
+    backup_timestamp_iso = data.get('backup_timestamp_iso')
+
+    if not all([filename, backup_type, backup_timestamp_iso]):
+        return jsonify({'success': False, 'message': 'Missing required parameters: filename, backup_type, and backup_timestamp_iso are required.', 'task_id': task_id}), 400
+
+    current_app.logger.info(f"User {current_user.username} initiated Point-in-Time booking data restore (Task {task_id}): File='{filename}', Type='{backup_type}', Timestamp='{backup_timestamp_iso}'")
+
+    if not restore_booking_data_to_point_in_time:
+        current_app.logger.error("azure_backup.restore_booking_data_to_point_in_time function not available.")
+        return jsonify({'success': False, 'message': 'Point-in-time restore function not available on server.', 'task_id': task_id}), 501
+
+    try:
+        summary = restore_booking_data_to_point_in_time(
+            app=current_app._get_current_object(),
+            selected_filename=filename,
+            selected_type=backup_type,
+            selected_timestamp_iso=backup_timestamp_iso,
+            socketio_instance=socketio,
+            task_id=task_id
+        )
+        # The summary from restore_booking_data_to_point_in_time should contain overall status and messages.
+        add_audit_log(
+            action="POINT_IN_TIME_RESTORE_BOOKING_DATA",
+            details=f"Task {task_id}, File {filename}, Type {backup_type}, Timestamp {backup_timestamp_iso}. Summary: {json.dumps(summary)}",
+            user_id=current_user.id
+        )
+        # Return success:True because the API call itself was handled. The functional success is in summary.status.
+        return jsonify({'success': True, 'summary': summary, 'task_id': task_id}), 200
+    except Exception as e:
+        current_app.logger.exception(f"Exception during point-in-time booking data restore (Task {task_id}):")
+        add_audit_log(
+            action="POINT_IN_TIME_RESTORE_BOOKING_DATA_ERROR",
+            details=f"Task {task_id}, File {filename}, Type {backup_type}, Timestamp {backup_timestamp_iso}. Error: {str(e)}",
+            user_id=current_user.id
+        )
+        # Construct a summary-like object for consistency in error reporting on client-side
+        error_summary = {'status': 'failure', 'message': f'An unexpected error occurred: {str(e)}', 'errors': [str(e)]}
+        return jsonify({'success': False, 'message': str(e), 'task_id': task_id, 'summary': error_summary}), 500
+
+@api_system_bp.route('/api/admin/booking_data_protection/delete', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_delete_booking_data_backup():
+    task_id = uuid.uuid4().hex # For potential future SocketIO use, though delete is often quick
+    data = request.get_json()
+    if not data or 'backup_filename' not in data or 'backup_type' not in data: # Added backup_type
+        return jsonify({'success': False, 'message': 'Backup filename and type are required.', 'task_id': task_id}), 400
+
+    filename = data['backup_filename']
+    backup_type = data['backup_type'] # Get backup_type from request
+    current_app.logger.info(f"User {current_user.username} initiated deletion of unified booking data backup (Task {task_id}): {filename}, Type: {backup_type}")
+
+    if not delete_booking_data_json_backup:
+        return jsonify({'success': False, 'message': 'Delete function for unified backups not available.', 'task_id': task_id}), 501
+
+    try:
+        success = delete_booking_data_json_backup(
+            filename=filename,
+            backup_type=backup_type, # Pass backup_type to backend
+            socketio_instance=socketio,
+            task_id=task_id
+        )
+        if success:
+            add_audit_log(action="DELETE_UNIFIED_BOOKING_BACKUP_SUCCESS", details=f"Task {task_id}, Filename {filename}, Type {backup_type}.", user_id=current_user.id)
+            return jsonify({'success': True, 'message': f"Unified backup '{filename}' (type: {backup_type}) deleted successfully.", 'task_id': task_id}), 200
+        else:
+            add_audit_log(action="DELETE_UNIFIED_BOOKING_BACKUP_FAILED", details=f"Task {task_id}, Filename {filename}, Type {backup_type}. Deletion function indicated failure.", user_id=current_user.id)
+            return jsonify({'success': False, 'message': f"Failed to delete unified backup '{filename}' (type: {backup_type}). See server logs.", 'task_id': task_id}), 500
+    except Exception as e:
+        current_app.logger.exception(f"Exception during deletion of unified booking data backup (Task {task_id}):")
+        add_audit_log(action="DELETE_UNIFIED_BOOKING_BACKUP_ERROR", details=f"Task {task_id}, Filename {filename}, Type {backup_type}, Error: {str(e)}", user_id=current_user.id)
+        return jsonify({'success': False, 'message': str(e), 'task_id': task_id}), 500
+
+# --- END Unified Booking Data Protection API Routes ---
+
 
 @api_system_bp.route('/api/admin/one_click_backup', methods=['POST'])
 @login_required
