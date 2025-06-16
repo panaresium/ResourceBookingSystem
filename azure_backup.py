@@ -1,3 +1,4 @@
+print("DEBUG azure_backup.py: TOP OF FILE - Module import started.")
 import os
 import hashlib
 import logging
@@ -59,6 +60,7 @@ BOOKING_DATA_INCREMENTAL_DIR_SUFFIX = "incrementals"
 LAST_UNIFIED_BOOKING_INCREMENTAL_TIMESTAMP_FILE = os.path.join(DATA_DIR, 'last_unified_booking_incremental_timestamp.txt')
 LAST_BOOKING_DATA_PROTECTION_INCREMENTAL_TIMESTAMP_FILE = os.path.join(DATA_DIR, 'last_booking_data_protection_incremental_timestamp.txt')
 
+print(f"DEBUG azure_backup.py: Path constants defined. BASE_DIR is {BASE_DIR}, DATA_DIR is {DATA_DIR}, STATIC_DIR is {STATIC_DIR}")
 
 def _get_service_client():
     print(f"DEBUG azure_backup.py _get_service_client(): Called")
