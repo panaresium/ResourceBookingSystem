@@ -34,7 +34,6 @@ from scheduler_tasks import (
     apply_scheduled_resource_status_changes,
     run_scheduled_backup_job,
     # run_scheduled_booking_csv_backup, # LEGACY - Superseded by unified JSON backups
-    run_scheduled_incremental_booking_backup, # This is legacy incremental, may also be removed.
     auto_checkout_overdue_bookings,
     auto_release_unclaimed_bookings,
     send_checkin_reminders,
@@ -582,39 +581,6 @@ def create_app(config_object=config, testing=False): # Added testing parameter
             #         app.logger.info("Scheduled booking CSV backup is disabled in settings (from app.config). Job not added.")
             # # else: # LEGACY - run_scheduled_booking_csv_backup was commented out
             # #     app.logger.warning("run_scheduled_booking_csv_backup function not found or commented out in scheduler_tasks. Legacy CSV backup job not added.")
-
-
-            # Scheduling for Incremental JSON Booking Backup
-            if run_scheduled_incremental_booking_backup:
-                # all_scheduler_settings loaded above
-                # Define default locally as it might not be in utils.py or to ensure it's always available here
-                DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE = {'is_enabled': False, 'interval_minutes': 30}
-                incr_json_config = all_scheduler_settings.get('booking_incremental_json_schedule', DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE.copy())
-
-                if incr_json_config.get('is_enabled'):
-                    try:
-                        interval_minutes = int(incr_json_config.get('interval_minutes', 30))
-                        if interval_minutes <= 0:
-                            app.logger.error(f"Invalid interval_minutes ({interval_minutes}) for incremental JSON booking backup. Must be positive. Job not scheduled.")
-                        else:
-                            scheduler.add_job(
-                                func=run_scheduled_incremental_booking_backup,
-                                trigger='interval',
-                                minutes=interval_minutes,
-                                id='scheduled_incremental_booking_backup_job', # Match ID from routes/admin_ui.py
-                                replace_existing=True,
-                                args=[app]
-                            )
-                            app.logger.info(f"Scheduled incremental JSON booking backup job to run every {interval_minutes} minutes.")
-                    except ValueError as e:
-                        app.logger.error(f"Error parsing interval_minutes for incremental JSON booking backup: {e}. Job not scheduled.", exc_info=True)
-                    except Exception as e_job_add: # Catch broader exceptions during job add
-                        app.logger.error(f"Error adding incremental JSON booking backup job to scheduler: {e_job_add}. Job not scheduled.", exc_info=True)
-
-                else:
-                    app.logger.info("Scheduled incremental JSON booking backup is disabled in settings. Job not added.")
-            else:
-                app.logger.warning("run_scheduled_incremental_booking_backup function not found in scheduler_tasks. Incremental JSON booking backup job not added.")
 
             # Scheduling for Unified Booking Data Protection Backup (Now Minutely Incrementals)
             if run_scheduled_incremental_booking_data_task: # Changed to the new incremental task function
