@@ -4,9 +4,9 @@ from extensions import db
 from models import Booking, User, Resource, FloorMap, BookingSettings
 from utils import add_audit_log, send_email, _get_map_configuration_data, _get_resource_configurations_data, _get_user_configurations_data, get_current_effective_time
 from azure_backup import (
-    backup_bookings_csv,
+    # backup_bookings_csv, # LEGACY - Functionality commented out
     create_full_backup,
-    backup_incremental_bookings, # This is legacy incremental, might be removed later if not used
+    backup_incremental_bookings, # This is legacy incremental, may also be removed.
     backup_scheduled_incremental_booking_data, # New unified incremental
     backup_full_booking_data_json_azure # New unified full
 )
