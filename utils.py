@@ -598,7 +598,7 @@ def save_unified_backup_schedule_settings(data):
 # - logging (app_instance.logger)
 # - current_app (implicitly by load_unified_backup_schedule_settings)
 
-from .scheduler_tasks import run_scheduled_incremental_booking_data_task, run_periodic_full_booking_data_task
+from scheduler_tasks import run_scheduled_incremental_booking_data_task, run_periodic_full_booking_data_task
 # from flask import current_app # Already imported
 
 def reschedule_unified_backup_jobs(app_instance):
