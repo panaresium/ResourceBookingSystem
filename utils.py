@@ -387,6 +387,20 @@ def import_bookings_from_csv_file(csv_file_path, app_instance, clear_existing: b
     logger.info(f"{import_context_message_prefix}import_bookings_from_csv_file for {csv_file_path} - STUB. Clear: {clear_existing}")
     return {'processed': 0, 'created': 0, 'updated': 0, 'skipped_duplicates': 0, 'skipped_fk_violation': 0, 'skipped_other_errors': 0, 'errors': ["Stub implementation"], 'status': 'stub_executed'}
 
+def _get_map_configuration_data() -> dict:
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
+    logger.warning("_get_map_configuration_data is currently a STUB. Exporting map configurations will not provide actual data.")
+    # Expected to return a dictionary structure, e.g.:
+    # {
+    #   'maps': [map_data_dict1, map_data_dict2, ...],
+    #   'resources_map_info': [resource_map_info_dict1, ...]
+    # }
+    return {
+        'maps': [],
+        'resources_map_info': [],
+        'message': "Stub implementation: No actual map configuration data exported."
+    }
+
 def _import_resource_configurations_data(resources_data_list: list) -> tuple[int, int, list]:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.warning("_import_resource_configurations_data is currently a STUB. Import will not function correctly.")
