@@ -586,8 +586,14 @@ def create_app(config_object=config, testing=False): # Added testing parameter
                 app.logger.warning("run_scheduled_incremental_booking_data_task function not found. Unified incremental backup job not added.")
 
             # Remove Old Hardcoded Job for Full Unified Backup (ID: periodic_full_booking_data_job)
-            app.logger.info("Attempting to remove old hardcoded full backup job (ID: periodic_full_booking_data_job) if it exists.")
-            scheduler.remove_job('periodic_full_booking_data_job', ignore_errors=True)
+            app.logger.info("Attempting to remove old hardcoded full backup job (ID: periodic_full_booking_data_job) if it exists.") # Added log line for clarity
+            try:
+                scheduler.remove_job('periodic_full_booking_data_job')
+                app.logger.info("Successfully removed old hardcoded job 'periodic_full_booking_data_job' at startup.")
+            except JobLookupError:
+                app.logger.info("Old hardcoded job 'periodic_full_booking_data_job' not found at startup, skipping removal.")
+            except Exception as e:
+                app.logger.error(f"Error removing old hardcoded job 'periodic_full_booking_data_job' at startup: {e}")
 
             # Configure Unified Full Backup Job
             if run_periodic_full_booking_data_task:
