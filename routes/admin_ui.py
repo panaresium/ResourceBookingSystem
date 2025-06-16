@@ -382,37 +382,37 @@ def serve_backup_settings_page():
 # @login_required
 # @permission_required('manage_system')
 # def restore_booking_csv_route(timestamp_str):
-    # current_app.logger.info(f"User {current_user.username} initiated restore for booking CSV backup: {timestamp_str}")
-    # task_id = uuid.uuid4().hex
-
-    # Use current_app._get_current_object() to pass the actual app instance
-    # Pass socketio instance if available and configured, else None
-    socketio_instance = None
-    if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
-        socketio_instance = current_app.extensions['socketio']
-    elif 'socketio' in globals() and socketio: # Check imported socketio from extensions
-        socketio_instance = socketio
-
-    summary = restore_bookings_from_csv_backup(
-        current_app._get_current_object(),
-        timestamp_str,
-        socketio_instance=socketio_instance,
-        task_id=task_id
-    )
-
-    if summary['status'] == 'completed_successfully' or (summary['status'] == 'completed_with_errors' and not summary.get('errors')):
-        flash_msg = f"Booking CSV restore for {timestamp_str} completed. Processed: {summary.get('processed',0)}, Created: {summary.get('created',0)}, Skipped Duplicates: {summary.get('skipped_duplicates',0)}."
-        if summary.get('errors'): # Should not happen if status is completed_successfully, but good check
-             flash_msg += f" Warnings: {'; '.join(summary['errors'])}"
-        flash(flash_msg, 'success')
-    elif summary['status'] == 'completed_with_errors' and summary.get('errors'):
-        error_details = '; '.join(summary['errors'])
-        flash(f"Booking CSV restore for {timestamp_str} completed with errors. Errors: {error_details}. Processed: {summary.get('processed',0)}, Created: {summary.get('created',0)}, Skipped: {summary.get('skipped_duplicates',0)}.", 'danger')
-    else: # 'failed' or any other status
-        error_details = '; '.join(summary.get('errors', ['Unknown error']))
-        flash(f"Booking CSV restore for {timestamp_str} failed. Status: {summary.get('status','unknown')}. Message: {summary.get('message','N/A')}. Details: {error_details}", 'danger')
-
-    # return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Redirect to the booking data tab
+    # # current_app.logger.info(f"User {current_user.username} initiated restore for booking CSV backup: {timestamp_str}")
+    # # task_id = uuid.uuid4().hex
+    #
+    # # Use current_app._get_current_object() to pass the actual app instance
+    # # Pass socketio instance if available and configured, else None
+    # socketio_instance = None
+    # if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
+    #     socketio_instance = current_app.extensions['socketio']
+    # elif 'socketio' in globals() and socketio: # Check imported socketio from extensions
+    #     socketio_instance = socketio
+    #
+    # summary = restore_bookings_from_csv_backup(
+    #     current_app._get_current_object(),
+    #     timestamp_str,
+    #     socketio_instance=socketio_instance,
+    #     task_id=task_id
+    # )
+    #
+    # if summary['status'] == 'completed_successfully' or (summary['status'] == 'completed_with_errors' and not summary.get('errors')):
+    #     flash_msg = f"Booking CSV restore for {timestamp_str} completed. Processed: {summary.get('processed',0)}, Created: {summary.get('created',0)}, Skipped Duplicates: {summary.get('skipped_duplicates',0)}."
+    #     if summary.get('errors'): # Should not happen if status is completed_successfully, but good check
+    #          flash_msg += f" Warnings: {'; '.join(summary['errors'])}"
+    #     flash(flash_msg, 'success')
+    # elif summary['status'] == 'completed_with_errors' and summary.get('errors'):
+    #     error_details = '; '.join(summary['errors'])
+    #     flash(f"Booking CSV restore for {timestamp_str} completed with errors. Errors: {error_details}. Processed: {summary.get('processed',0)}, Created: {summary.get('created',0)}, Skipped: {summary.get('skipped_duplicates',0)}.", 'danger')
+    # else: # 'failed' or any other status
+    #     error_details = '; '.join(summary.get('errors', ['Unknown error']))
+    #     flash(f"Booking CSV restore for {timestamp_str} failed. Status: {summary.get('status','unknown')}. Message: {summary.get('message','N/A')}. Details: {error_details}", 'danger')
+    #
+    # # return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Redirect to the booking data tab
 
 # @admin_ui_bp.route('/admin/manual_backup_bookings_csv', methods=['POST']) # This URL might need to be adjusted
 # @login_required
