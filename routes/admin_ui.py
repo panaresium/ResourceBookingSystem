@@ -373,7 +373,7 @@ def serve_backup_settings_page():
         current_app.logger.warning("global_time_offset_hours was None, defaulted to 0.")
 
 
-    return render_template('admin/backup_settings.html',
+        return render_template('admin/backup_settings.html',
                            auto_restore_booking_records_on_startup=auto_restore_booking_records_on_startup,
                            global_time_offset_hours=global_time_offset_hours)
 
