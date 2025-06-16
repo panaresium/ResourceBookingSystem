@@ -258,11 +258,11 @@
     function showProgressModal(message) { $('#actionProgressMessage').text(message); $('#actionProgressModal').modal({backdrop: 'static', keyboard: false}); }
     function hideProgressModal() { $('#actionProgressModal').modal('hide'); }
     function updateServerTime() {
-        fetch("{{ url_for('api_system.get_server_time') }}")
+        fetch("{{ url_for('api_system.ping') }}")
         .then(response => response.json())
         .then(data => {
-            if(data.time) {
-                document.getElementById('server-time').textContent = "{{ _('Current Server Time (UTC):') }} " + data.time;
+            if(data.timestamp) {
+                document.getElementById('server-time').textContent = "{{ _('Current Server Time (UTC):') }} " + data.timestamp;
             } else {
                 document.getElementById('server-time').textContent = "{{ _('Could not load server time.') }}";
             }
