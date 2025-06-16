@@ -434,5 +434,3 @@ def import_bookings_json():
 def clear_all_bookings_data():
     # ... (implementation as provided) ...
     return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
-
-[end of routes/admin_ui.py]
