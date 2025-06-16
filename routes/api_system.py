@@ -32,6 +32,7 @@ from utils import (
 # Conditional imports for Azure Backup functionality
 # Ensure download_booking_data_json_backup is imported
 try:
+    print(f"DEBUG api_system.py: Attempting to import from azure_backup (again)...") # New debug
     from azure_backup import (
         create_full_backup,
         list_available_backups,
@@ -65,7 +66,14 @@ try:
         download_booking_data_json_backup # For downloading unified backups
     )
     import azure_backup # To access module-level constants if needed by moved functions
-except ImportError:
+    print(f"DEBUG api_system.py: Successfully imported from azure_backup (again). create_full_backup type: {type(create_full_backup)}") # New debug
+except ImportError as e_detailed_azure_import: # Capture the exception instance
+    print(f"CRITICAL_DEBUG api_system.py: Caught ImportError when importing from azure_backup. Exception type: {type(e_detailed_azure_import)}, Error: {e_detailed_azure_import}")
+    import traceback # Import traceback module
+    print("CRITICAL_DEBUG api_system.py: Full traceback of the import error:")
+    traceback.print_exc() # Print the full traceback for the caught error
+
+    # Assign None to all expected imports
     create_full_backup = None
     list_available_backups = None
     restore_full_backup = None
