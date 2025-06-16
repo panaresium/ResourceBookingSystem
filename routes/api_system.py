@@ -4,7 +4,7 @@ import json
 import math # Added for math.ceil
 from datetime import datetime, timezone, timedelta, time
 
-from flask import Blueprint, jsonify, request, current_app, url_for
+from flask import Blueprint, jsonify, request, current_app, url_for, Response
 from flask_login import login_required, current_user
 from sqlalchemy import func # For count query
 # from sqlalchemy import or_ # For more complex queries if needed in get_audit_logs
@@ -23,9 +23,13 @@ from utils import (
     _import_user_configurations_data,    # For restore
     _load_schedule_from_json,
     _save_schedule_to_json,
+    load_unified_backup_schedule_settings,
+    save_unified_backup_schedule_settings,
 )
+from app_factory import reschedule_unified_backup_jobs # Added for rescheduling
 
 # Conditional imports for Azure Backup functionality
+# Ensure download_booking_data_json_backup is imported
 try:
     from azure_backup import (
         create_full_backup,
@@ -41,10 +45,10 @@ try:
         download_map_config_component, # For selective restore
         restore_media_component, # For selective restore
         # Imports for new booking restore functionalities
-        list_available_booking_csv_backups,
-        restore_bookings_from_csv_backup,
-        list_available_incremental_booking_backups,
-        restore_incremental_bookings,
+        # list_available_booking_csv_backups, # Removed
+        # restore_bookings_from_csv_backup, # Removed
+        list_available_incremental_booking_backups, # Keeping non-CSV legacy for now
+        restore_incremental_bookings, # Keeping non-CSV legacy for now
         restore_bookings_from_full_db_backup,
         backup_incremental_bookings, # Added for manual incremental backup
         backup_full_bookings_json, # Added for manual full JSON booking export
@@ -56,11 +60,13 @@ try:
         list_booking_data_json_backups,    # For listing unified backups
         # restore_booking_data_from_json_backup, # This is now primarily for full restore, called by orchestrator
         delete_booking_data_json_backup,   # For deleting specific unified backups
-        restore_booking_data_to_point_in_time # New orchestrator for PIT restore
+        restore_booking_data_to_point_in_time, # New orchestrator for PIT restore
+        download_booking_data_json_backup # For downloading unified backups
     )
     import azure_backup # To access module-level constants if needed by moved functions
 except ImportError:
     create_full_backup = None
+    download_booking_data_json_backup = None # Add placeholder
     list_available_backups = None
     restore_full_backup = None
     verify_backup_set = None
@@ -73,10 +79,10 @@ except ImportError:
     download_map_config_component = None
     restore_media_component = None
     # Placeholders for new booking restore functionalities
-    list_available_booking_csv_backups = None
-    restore_bookings_from_csv_backup = None
-    list_available_incremental_booking_backups = None
-    restore_incremental_bookings = None
+    # list_available_booking_csv_backups = None # Removed
+    # restore_bookings_from_csv_backup = None # Removed
+    list_available_incremental_booking_backups = None # Keeping non-CSV legacy for now
+    restore_incremental_bookings = None # Keeping non-CSV legacy for now
     restore_bookings_from_full_db_backup = None
     backup_incremental_bookings = None
     backup_full_bookings_json = None
@@ -86,9 +92,10 @@ except ImportError:
     # Placeholders for new unified functions if import fails
     backup_booking_data_json_to_azure = None
     list_booking_data_json_backups = None
-    restore_booking_data_from_json_backup = None
+    # restore_booking_data_from_json_backup = None # Already handled by PIT restore or direct full restore
     delete_booking_data_json_backup = None
     azure_backup = None
+    # download_booking_data_json_backup is already handled above
 
 api_system_bp = Blueprint('api_system', __name__)
 
@@ -332,6 +339,92 @@ def api_delete_booking_data_backup():
 
 # --- END Unified Booking Data Protection API Routes ---
 
+@api_system_bp.route('/api/admin/booking_data_protection/download/<string:backup_type>/<path:filename>', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def api_download_booking_data_backup(backup_type, filename):
+    current_app.logger.info(f"User {current_user.username} requested download of unified backup: Type='{backup_type}', Filename='{filename}'.")
+
+    if not download_booking_data_json_backup:
+        current_app.logger.error("Download function (download_booking_data_json_backup) not available.")
+        add_audit_log(action="DOWNLOAD_UNIFIED_BACKUP_ERROR", details=f"Attempt by {current_user.username} for {filename} ({backup_type}). Function not available.", user_id=current_user.id)
+        return jsonify({'success': False, 'message': 'Download functionality is not available on the server.'}), 501
+
+    try:
+        file_content = download_booking_data_json_backup(filename=filename, backup_type=backup_type)
+
+        if file_content is not None:
+            current_app.logger.info(f"Successfully prepared download for '{filename}' ({backup_type}). Size: {len(file_content)} bytes.")
+            # Note: Audit log for success might be too verbose for every download. Consider if needed.
+            # add_audit_log(action="DOWNLOAD_UNIFIED_BACKUP_SUCCESS", details=f"User {current_user.username} downloaded {filename} ({backup_type}).", user_id=current_user.id)
+            return Response(
+                file_content,
+                mimetype='application/json',
+                headers={"Content-Disposition": f"attachment;filename={filename}"}
+            )
+        else:
+            current_app.logger.warning(f"File content not found or error during download for '{filename}' ({backup_type}).")
+            add_audit_log(action="DOWNLOAD_UNIFIED_BACKUP_NOT_FOUND", details=f"Attempt by {current_user.username} for {filename} ({backup_type}). File not found or download failed.", user_id=current_user.id)
+            return jsonify({'success': False, 'message': 'File not found or failed to download.'}), 404
+    except Exception as e:
+        current_app.logger.exception(f"Unexpected error during download of unified backup '{filename}' ({backup_type}):")
+        add_audit_log(action="DOWNLOAD_UNIFIED_BACKUP_EXCEPTION", details=f"Attempt by {current_user.username} for {filename} ({backup_type}). Exception: {str(e)}", user_id=current_user.id)
+        return jsonify({'success': False, 'message': f'An unexpected error occurred: {str(e)}'}), 500
+
+# --- Unified Backup Schedule Settings API Routes ---
+@api_system_bp.route('/api/admin/settings/unified_backup_schedule', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def get_unified_backup_schedule():
+    current_app.logger.info(f"User {current_user.username} fetching unified backup schedule settings.")
+    try:
+        settings = load_unified_backup_schedule_settings()
+        return jsonify(settings), 200
+    except Exception as e:
+        current_app.logger.exception("Error fetching unified backup schedule settings:")
+        # Fallback to default might be too complex here if current_app.config isn't fully available
+        # Best to signal error clearly.
+        return jsonify({'error': f'Failed to load unified backup schedule settings: {str(e)}'}), 500
+
+@api_system_bp.route('/api/admin/settings/unified_backup_schedule', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def update_unified_backup_schedule():
+    current_app.logger.info(f"User {current_user.username} attempting to update unified backup schedule.")
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'message': 'Invalid input. JSON data expected.'}), 400
+
+    try:
+        success, message = save_unified_backup_schedule_settings(data)
+        if success:
+            current_app.logger.info(f"Unified backup schedule updated by {current_user.username}. New settings: {data}")
+            add_audit_log(action="UPDATE_UNIFIED_BACKUP_SCHEDULE",
+                          details=f"User {current_user.username} updated unified backup schedule. New settings: {json.dumps(data)}",
+                          user_id=current_user.id)
+            try:
+                reschedule_unified_backup_jobs(current_app._get_current_object())
+                current_app.logger.info("Unified backup jobs rescheduled successfully after settings update.")
+                message += " Scheduler jobs updated." # Append to original success message
+            except Exception as e_reschedule:
+                current_app.logger.exception("Error rescheduling unified backup jobs after settings update:")
+                # Log the error, but don't fail the entire operation if saving settings worked.
+                # The message to the user will indicate settings were saved, but rescheduling might have an issue.
+                message += " However, an error occurred while attempting to update the scheduler jobs. Check server logs."
+            return jsonify({'success': True, 'message': message}), 200
+        else:
+            add_audit_log(action="UPDATE_UNIFIED_BACKUP_SCHEDULE_FAILED",
+                          details=f"Error: {message}. Attempted data: {json.dumps(data)}",
+                          user_id=current_user.id)
+            return jsonify({'success': False, 'message': message}), 400 # 400 for validation errors
+    except Exception as e:
+        current_app.logger.exception("Error updating unified backup schedule settings:")
+        add_audit_log(action="UPDATE_UNIFIED_BACKUP_SCHEDULE_ERROR",
+                      details=f"Exception: {str(e)}. Attempted data: {json.dumps(data)}",
+                      user_id=current_user.id)
+        return jsonify({'success': False, 'message': f'Error updating unified backup schedule: {str(e)}'}), 500
+
+# --- END Unified Backup Schedule Settings API Routes ---
 
 @api_system_bp.route('/api/admin/one_click_backup', methods=['POST'])
 @login_required
@@ -700,19 +793,7 @@ def api_selective_restore():
 
 # --- Selective Booking Restore API Routes ---
 
-@api_system_bp.route('/api/admin/booking_restore/list_csv', methods=['GET'])
-@login_required
-@permission_required('manage_system')
-def api_list_booking_csv_backups():
-    current_app.logger.info(f"User {current_user.username} requested list of CSV booking backups.")
-    if not list_available_booking_csv_backups:
-        return jsonify({'success': False, 'message': 'Backup module not configured.', 'backups': []}), 500
-    try:
-        backups = list_available_booking_csv_backups()
-        return jsonify({'success': True, 'backups': backups}), 200
-    except Exception as e:
-        current_app.logger.exception("Exception listing CSV booking backups:")
-        return jsonify({'success': False, 'message': f'Error: {str(e)}', 'backups': []}), 500
+# CSV related routes api_list_booking_csv_backups and api_restore_bookings_from_csv removed.
 
 @api_system_bp.route('/api/admin/booking_restore/list_incremental', methods=['GET'])
 @login_required
@@ -757,22 +838,25 @@ def api_restore_bookings_from_csv():
     backup_timestamp = data['backup_timestamp']
     current_app.logger.info(f"User {current_user.username} initiated booking restore from CSV (Task {task_id}): {backup_timestamp}")
 
-    if not restore_bookings_from_csv_backup:
-        return jsonify({'success': False, 'message': 'Restore function not available.', 'task_id': task_id}), 500
+    # This functionality is being removed.
+    # if not restore_bookings_from_csv_backup:
+    #     return jsonify({'success': False, 'message': 'Restore function not available.', 'task_id': task_id}), 500
+    # try:
+    #     summary = restore_bookings_from_csv_backup(
+    #         app=current_app._get_current_object(),
+    #         timestamp_str=backup_timestamp,
+    #         socketio_instance=socketio,
+    #         task_id=task_id
+    #     )
+    #     add_audit_log(action="RESTORE_BOOKINGS_CSV", details=f"Task {task_id}, Timestamp {backup_timestamp}. Summary: {json.dumps(summary)}", user_id=current_user.id)
+    #     return jsonify({'success': True, 'summary': summary, 'task_id': task_id}), 200
+    # except Exception as e:
+    #     current_app.logger.exception(f"Exception during booking restore from CSV (Task {task_id}):")
+    #     add_audit_log(action="RESTORE_BOOKINGS_CSV_ERROR", details=f"Task {task_id}, Timestamp {backup_timestamp}, Error: {str(e)}", user_id=current_user.id)
+    #     return jsonify({'success': False, 'message': str(e), 'task_id': task_id}), 500
+    current_app.logger.warning(f"Attempt to use removed CSV restore endpoint by {current_user.username}.")
+    return jsonify({'success': False, 'message': 'CSV restore functionality has been removed.'}), 410
 
-    try:
-        summary = restore_bookings_from_csv_backup(
-            app=current_app._get_current_object(),
-            timestamp_str=backup_timestamp,
-            socketio_instance=socketio,
-            task_id=task_id
-        )
-        add_audit_log(action="RESTORE_BOOKINGS_CSV", details=f"Task {task_id}, Timestamp {backup_timestamp}. Summary: {json.dumps(summary)}", user_id=current_user.id)
-        return jsonify({'success': True, 'summary': summary, 'task_id': task_id}), 200
-    except Exception as e:
-        current_app.logger.exception(f"Exception during booking restore from CSV (Task {task_id}):")
-        add_audit_log(action="RESTORE_BOOKINGS_CSV_ERROR", details=f"Task {task_id}, Timestamp {backup_timestamp}, Error: {str(e)}", user_id=current_user.id)
-        return jsonify({'success': False, 'message': str(e), 'task_id': task_id}), 500
 
 @api_system_bp.route('/api/admin/booking_restore/from_incremental', methods=['POST'])
 @login_required
