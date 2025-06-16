@@ -437,7 +437,7 @@ def api_one_click_backup():
 
     if not create_full_backup:
         current_app.logger.error("Azure backup module not available for one-click backup.")
-        return jsonify({'success': False, 'message': 'Backup module is not configured or available.', 'task_id': task_id}), 500
+        return jsonify({'success': False, 'message': "Azure backup module is not available. Please ensure the 'azure-storage-file-share' package is installed and the 'AZURE_STORAGE_CONNECTION_STRING' environment variable is correctly configured.", 'task_id': task_id}), 501
     try:
         timestamp_str = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
         map_config_data = _get_map_configuration_data() # Uses models directly, ensure they are imported

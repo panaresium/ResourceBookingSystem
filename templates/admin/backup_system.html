@@ -72,6 +72,9 @@
             <section id="backup-section" class="mb-4">
                 <h5>{{ _('One Click Backup') }}</h5>
                 <p>{{ _('Perform a full backup of the database, map configurations, and uploaded media files.') }}</p>
+                <div class="alert alert-info alert-sm" role="alert">
+                    <small><i class="fas fa-info-circle"></i> {{ _('Note: The One Click Backup feature requires Azure Storage to be configured. This includes installing the necessary Python package (azure-storage-file-share) and setting the AZURE_STORAGE_CONNECTION_STRING environment variable.') }}</small>
+                </div>
                 <button id="one-click-backup-btn" class="btn btn-primary"><i class="fas fa-cloud-upload-alt"></i> {{ _('Perform Full Backup Now') }}</button>
                 <div id="backup-status-message" class="mt-2"></div>
             </section>
