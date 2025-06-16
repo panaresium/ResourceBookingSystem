@@ -445,7 +445,7 @@
 
     function loadFullBackupsForRestore() {
         showProgressModal("{{ _('Loading full system backups list...') }}");
-        fetch("{{ url_for('api_system.list_available_system_backups_api') }}") // Ensure this API endpoint is correct
+        fetch("{{ url_for('api_system.api_list_backups') }}") // Ensure this API endpoint is correct
             .then(response => response.json())
             .then(data => {
                 hideProgressModal();
