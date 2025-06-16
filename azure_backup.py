@@ -26,6 +26,9 @@ except ImportError:  # pragma: no cover - azure sdk optional
     if 'HttpResponseError' not in globals():
         HttpResponseError = Exception
 
+print(f"DEBUG azure_backup.py: ShareServiceClient is {ShareServiceClient}")
+print(f"DEBUG azure_backup.py: ResourceNotFoundError is {ResourceNotFoundError}")
+print(f"DEBUG azure_backup.py: HttpResponseError is {HttpResponseError}")
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -58,7 +61,9 @@ LAST_BOOKING_DATA_PROTECTION_INCREMENTAL_TIMESTAMP_FILE = os.path.join(DATA_DIR,
 
 
 def _get_service_client():
+    print(f"DEBUG azure_backup.py _get_service_client(): Called")
     connection_string = os.environ.get('AZURE_STORAGE_CONNECTION_STRING')
+    print(f"DEBUG azure_backup.py _get_service_client(): AZURE_STORAGE_CONNECTION_STRING is '{connection_string}' (type: {type(connection_string)})")
     if not connection_string:
         raise RuntimeError('AZURE_STORAGE_CONNECTION_STRING environment variable is required')
     if ShareServiceClient is None:
