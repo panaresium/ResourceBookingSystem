@@ -58,7 +58,7 @@ try:
         restore_bookings_from_full_json_export, # For restoring from full JSON export
         delete_incremental_booking_backup, # For deleting incremental JSON backups
         # New Unified Booking Data Protection functions
-        backup_booking_data_json_to_azure, # For manual full backup trigger
+        backup_full_booking_data_json_azure, # For manual full backup trigger
         list_booking_data_json_backups,    # For listing unified backups
         # restore_booking_data_from_json_backup, # This is now primarily for full restore, called by orchestrator
         delete_booking_data_json_backup,   # For deleting specific unified backups
@@ -94,7 +94,7 @@ except ImportError as e_detailed_azure_import: # Capture the exception instance
     list_available_full_booking_json_exports = None
     restore_bookings_from_full_json_export = None
     delete_incremental_booking_backup = None
-    backup_booking_data_json_to_azure = None
+    backup_full_booking_data_json_azure = None
     list_booking_data_json_backups = None
     delete_booking_data_json_backup = None
     restore_booking_data_to_point_in_time = None
@@ -191,8 +191,8 @@ def api_manual_booking_data_backup_json():
     task_id = uuid.uuid4().hex
     current_app.logger.info(f"User {current_user.username} initiated manual unified booking data backup (Task ID: {task_id}).")
 
-    if not backup_booking_data_json_to_azure:
-        current_app.logger.error("azure_backup.backup_booking_data_json_to_azure function not available.")
+    if not backup_full_booking_data_json_azure:
+        current_app.logger.error("azure_backup.backup_full_booking_data_json_azure function not available.")
         if socketio:
             socketio.emit('booking_data_protection_backup_progress', {
                 'task_id': task_id,
@@ -207,7 +207,7 @@ def api_manual_booking_data_backup_json():
         }), 500
 
     try:
-        success = backup_booking_data_json_to_azure(
+        success = backup_full_booking_data_json_azure(
             app=current_app._get_current_object(),
             socketio_instance=socketio,
             task_id=task_id
