@@ -671,7 +671,7 @@
     function executeClearAllBookingData() {
         $('#confirmClearAllModal').modal('hide');
         showProgressModal("{{ _('Clearing all booking data...') }}");
-        fetch("{{ url_for('api_system.clear_all_booking_data_api') }}", { // Ensure this API endpoint is correct
+        fetch("{{ url_for('admin_ui.clear_all_bookings_data') }}", { // Ensure this API endpoint is correct
             method: 'POST',
             headers: { 'X-CSRFToken': '{{ csrf_token() }}' }
         })
