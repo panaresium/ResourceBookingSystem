@@ -1904,3 +1904,5 @@ def get_current_effective_time():
     utc_now = datetime.now(timezone.utc)
     effective_time = utc_now + timedelta(hours=offset_hours)
     return effective_time
+
+[end of utils.py]
