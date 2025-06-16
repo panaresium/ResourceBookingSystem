@@ -62,8 +62,19 @@ LAST_BOOKING_DATA_PROTECTION_INCREMENTAL_TIMESTAMP_FILE = os.path.join(DATA_DIR,
 
 def _get_service_client():
     print(f"DEBUG azure_backup.py _get_service_client(): Called")
-    connection_string = os.environ.get('AZURE_STORAGE_CONNECTION_STRING')
-    print(f"DEBUG azure_backup.py _get_service_client(): AZURE_STORAGE_CONNECTION_STRING is '{connection_string}' (type: {type(connection_string)})")
+    # Enhanced debug for AZURE_STORAGE_CONNECTION_STRING
+    raw_connection_string = os.environ.get('AZURE_STORAGE_CONNECTION_STRING')
+    is_present_in_environ = 'AZURE_STORAGE_CONNECTION_STRING' in os.environ
+    print(f"DEBUG azure_backup.py _get_service_client(): 'AZURE_STORAGE_CONNECTION_STRING' in os.environ: {is_present_in_environ}")
+    if is_present_in_environ:
+        # Only print length and type if it exists, to avoid error if None and to not print the secret.
+        print(f"DEBUG azure_backup.py _get_service_client(): Env var AZURE_STORAGE_CONNECTION_STRING - Type: {type(raw_connection_string)}, Length: {len(raw_connection_string) if raw_connection_string is not None else 'None'}")
+    else:
+        print(f"DEBUG azure_backup.py _get_service_client(): Env var AZURE_STORAGE_CONNECTION_STRING was NOT FOUND in os.environ.")
+
+    # The original logic uses 'connection_string', so we ensure it's assigned from raw_connection_string for consistency with previous debug.
+    connection_string = raw_connection_string
+    print(f"DEBUG azure_backup.py _get_service_client(): Value used for connection_string (first 5 chars if set): '{connection_string[:5] if connection_string else 'None'}'")
     if not connection_string:
         raise RuntimeError('AZURE_STORAGE_CONNECTION_STRING environment variable is required')
     if ShareServiceClient is None:
