@@ -599,6 +599,7 @@ def save_unified_backup_schedule_settings(data):
 # - current_app (implicitly by load_unified_backup_schedule_settings)
 
 from scheduler_tasks import run_scheduled_incremental_booking_data_task, run_periodic_full_booking_data_task
+from apscheduler.jobstores.base import JobLookupError
 # from flask import current_app # Already imported
 
 def reschedule_unified_backup_jobs(app_instance):
@@ -621,8 +622,14 @@ def reschedule_unified_backup_jobs(app_instance):
 
     # Reschedule Incremental Backup Job
     try:
-        app_instance.logger.info("Removing existing unified incremental backup job (if any).")
-        scheduler.remove_job('unified_incremental_booking_backup_job', ignore_errors=True)
+        app_instance.logger.info("Attempting to remove job 'unified_incremental_booking_backup_job' during reschedule.")
+        try:
+            scheduler.remove_job('unified_incremental_booking_backup_job')
+            app_instance.logger.info("Job 'unified_incremental_booking_backup_job' removed successfully during reschedule.")
+        except JobLookupError:
+            app_instance.logger.info("Job 'unified_incremental_booking_backup_job' not found during reschedule, skipping removal.")
+        except Exception as e:
+            app_instance.logger.error(f"Error removing job 'unified_incremental_booking_backup_job' during reschedule: {e}")
 
         incremental_config = unified_schedule_settings.get('unified_incremental_backup', {})
         if incremental_config.get('is_enabled'):
@@ -646,8 +653,14 @@ def reschedule_unified_backup_jobs(app_instance):
 
     # Reschedule Full Backup Job
     try:
-        app_instance.logger.info("Removing existing unified full backup job (if any).")
-        scheduler.remove_job('unified_full_booking_backup_job', ignore_errors=True)
+        app_instance.logger.info("Attempting to remove job 'unified_full_booking_backup_job' during reschedule.")
+        try:
+            scheduler.remove_job('unified_full_booking_backup_job')
+            app_instance.logger.info("Job 'unified_full_booking_backup_job' removed successfully during reschedule.")
+        except JobLookupError:
+            app_instance.logger.info("Job 'unified_full_booking_backup_job' not found during reschedule, skipping removal.")
+        except Exception as e:
+            app_instance.logger.error(f"Error removing job 'unified_full_booking_backup_job' during reschedule: {e}")
 
         full_config = unified_schedule_settings.get('unified_full_backup', {})
         if full_config.get('is_enabled'):

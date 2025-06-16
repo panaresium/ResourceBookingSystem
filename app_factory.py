@@ -29,6 +29,7 @@ from routes.gmail_auth import init_gmail_auth_routes # Added for Gmail OAuth flo
 
 # For scheduler
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.jobstores.base import JobLookupError # Added import
 from scheduler_tasks import (
     cancel_unchecked_bookings,
     apply_scheduled_resource_status_changes,
@@ -548,7 +549,13 @@ def create_app(config_object=config, testing=False): # Added testing parameter
             # The new logic below will re-add it with a new ID if enabled.
             # If the old ID was different, adjust here. The old code block for this job is removed.
             app.logger.info("Attempting to remove old incremental backup job (ID: scheduled_booking_data_protection_job) if it exists.")
-            scheduler.remove_job('scheduled_booking_data_protection_job', ignore_errors=True)
+            try:
+                scheduler.remove_job('scheduled_booking_data_protection_job')
+                app.logger.info("Successfully removed old job 'scheduled_booking_data_protection_job' at startup.")
+            except JobLookupError:
+                app.logger.info("Old job 'scheduled_booking_data_protection_job' not found at startup, skipping removal.")
+            except Exception as e:
+                app.logger.error(f"Error removing old job 'scheduled_booking_data_protection_job' at startup: {e}")
 
 
             # Configure Unified Incremental Backup Job
