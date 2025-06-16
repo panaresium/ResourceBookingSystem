@@ -438,6 +438,7 @@ def api_one_click_backup():
     task_id = uuid.uuid4().hex
     current_app.logger.info(f"Generated task_id {task_id} for one-click backup.")
 
+    print(f"DEBUG api_one_click_backup: Value of 'create_full_backup' at function entry: {str(create_full_backup)}, Type: {type(create_full_backup)}")
     if not create_full_backup:
         current_app.logger.error("Azure backup module not available for one-click backup.")
         return jsonify({'success': False, 'message': "Azure backup module is not available. Please ensure the 'azure-storage-file-share' package is installed and the 'AZURE_STORAGE_CONNECTION_STRING' environment variable is correctly configured.", 'task_id': task_id}), 501
