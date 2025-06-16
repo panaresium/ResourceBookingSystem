@@ -392,7 +392,7 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     #         app.logger.error(f"Test email dispatch from factory FAILED due to an unexpected error: {e_factory_mail}", exc_info=True)
 
     csrf.init_app(app)
-    socketio.init_app(app, message_queue=app.config.get('SOCKETIO_MESSAGE_QUEUE')) # Add message_queue from config
+    socketio.init_app(app) # Add message_queue from config
     migrate.init_app(app, db)
 
     # login_manager and oauth are initialized within init_auth
