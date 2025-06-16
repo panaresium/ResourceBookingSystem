@@ -411,5 +411,3 @@ def backup_database(): # Example of another function that should be retained
     return "mock_db_backup.db"
 # (And so on for all other functions not explicitly targeted for commenting out)
 # The "simulated" messages are just placeholders from my previous step; the actual code is there.
-
-[end of azure_backup.py]
