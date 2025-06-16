@@ -1665,3 +1665,5 @@ def get_booking_config_status():
         current_app.logger.error(f"Error fetching booking_config_status for user {current_user.username}: {e}", exc_info=True)
         # In case of error, still return the default value to prevent frontend issues
         return jsonify({'allow_multiple_resources_same_time': False, 'error': 'Failed to fetch setting due to a server error.'}), 500
+
+[end of routes/api_system.py]

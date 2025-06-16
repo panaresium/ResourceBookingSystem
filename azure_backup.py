@@ -102,12 +102,12 @@ def _ensure_directory_exists(share_client, directory_path):
 
 def _create_share_with_retry(share_client, share_name, retries=3, delay=5, factor=2):
     logger.debug(f"_create_share_with_retry called for {share_name}")
-    # Simulate share creation for cleanup task
+    # Simulate share creation
     pass
 
 def upload_file(share_client, source_path, file_path):
     logger.debug(f"upload_file called for {source_path} to {file_path}")
-    # Simulate file upload for cleanup task
+    # Simulate file upload
     pass
 
 def download_file(share_client, file_path, dest_path):
@@ -117,6 +117,68 @@ def download_file(share_client, file_path, dest_path):
     # with open(dest_path, 'wb') as f: f.write(b"simulated download content")
     return True
 
+# --- System Backup Listing Function ---
+def list_available_backups():
+    """
+    Lists available backup timestamps based on the presence of database backup files
+    or backup manifest files.
+
+    Returns:
+        list: A sorted list of unique timestamp strings (YYYYMMDD_HHMMSS), most recent first.
+              Returns an empty list if no backups are found or if there's an error.
+    """
+    logger.info("Attempting to list available full system backups.")
+    try:
+        service_client = _get_service_client()
+        db_share_name = os.environ.get('AZURE_DB_SHARE', 'db-backups')
+        share_client = service_client.get_share_client(db_share_name)
+
+        if not _client_exists(share_client):
+            logger.warning(f"System backup share '{db_share_name}' does not exist. No backups to list.")
+            return []
+
+        db_backup_dir_client = share_client.get_directory_client(DB_BACKUPS_DIR)
+
+        if not _client_exists(db_backup_dir_client):
+            logger.warning(f"System database backup directory '{DB_BACKUPS_DIR}' does not exist on share '{db_share_name}'. No backups to list.")
+            return []
+
+        timestamps = set()
+        # Regex to find timestamps in manifest or DB backup filenames
+        # Manifest: backup_manifest_YYYYMMDD_HHMMSS.json
+        # DB: site_YYYYMMDD_HHMMSS.db
+        manifest_pattern = re.compile(r"^backup_manifest_(?P<timestamp>\d{8}_\d{6})\.json$")
+        db_pattern = re.compile(rf"^{re.escape(DB_FILENAME_PREFIX)}(?P<timestamp>\d{8}_\d{6})\.db$")
+
+        for item in db_backup_dir_client.list_directories_and_files():
+            if item['is_directory']:
+                continue
+
+            filename = item['name']
+            timestamp_str = None
+
+            manifest_match = manifest_pattern.match(filename)
+            if manifest_match:
+                timestamp_str = manifest_match.group('timestamp')
+            else:
+                db_match = db_pattern.match(filename)
+                if db_match:
+                    timestamp_str = db_match.group('timestamp')
+
+            if timestamp_str:
+                try:
+                    # Validate timestamp format
+                    datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
+                    timestamps.add(timestamp_str)
+                except ValueError:
+                    logger.warning(f"Skipping file with invalid timestamp format in system backup list: {filename}")
+
+        sorted_timestamps = sorted(list(timestamps), reverse=True)
+        logger.info(f"Found {len(sorted_timestamps)} available full system backup timestamps.")
+        return sorted_timestamps
+    except Exception as e:
+        logger.error(f"Error listing available full system backups: {e}", exc_info=True)
+        return []
 
 # --- LEGACY - Azure CSV Functionality - Kept for reference / To be removed ---
 # def backup_bookings_csv(app, socketio_instance=None, task_id=None, start_date_dt=None, end_date_dt=None, range_label=None):
@@ -664,9 +726,13 @@ def list_available_incremental_booking_backups():
 # --- Full System Backup Functions ---
 def create_full_backup(timestamp_str, map_config_data=None, resource_configs_data=None, user_configs_data=None, socketio_instance=None, task_id=None):
     logger.info(f"Creating full system backup for {timestamp_str} (simulated).")
-    return True
+    # This is a placeholder. The actual complex logic for creating a full system backup
+    # (including DB, configs, media) should be here.
+    # For the purpose of restoring `list_available_backups`, the content of this function
+    # is not directly relevant, other than that it *creates* backups that `list_available_backups` would find.
+    return True # Simulate success
 
 def backup_database():
     logger.info("Simulating backup_database")
-    return "mock_db_backup.db"
-
+    # This is a placeholder. The actual logic for backing up the database should be here.
+    return "mock_db_backup.db" # Simulate returning a filename
