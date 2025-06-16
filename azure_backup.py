@@ -773,3 +773,9 @@ def download_booking_data_json_backup(filename: str, backup_type: str):
     except Exception as e:
         logger.error(f"Unexpected error downloading unified backup '{filename}': {e}", exc_info=True)
         return None
+
+print(f"DEBUG azure_backup.py: END OF FILE. Type of create_full_backup is {type(create_full_backup)}")
+if callable(create_full_backup):
+    print("DEBUG azure_backup.py: create_full_backup is callable.")
+else:
+    print("DEBUG azure_backup.py: create_full_backup is NOT callable (or is None).")
