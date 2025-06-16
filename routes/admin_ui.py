@@ -356,7 +356,35 @@ def serve_troubleshooting_page():
 @login_required
 @permission_required('manage_system')
 def serve_booking_settings_page():
-    # ... (implementation as provided) ...
+    current_app.logger.info(f"User {current_user.username} accessed Booking Settings page.")
+    settings = BookingSettings.query.first()
+    if not settings:
+        current_app.logger.info("No BookingSettings found, creating default BookingSettings.")
+        settings = BookingSettings() # Assuming default values are handled by the model
+        db.session.add(settings)
+        try:
+            db.session.commit()
+            current_app.logger.info("Default BookingSettings committed.")
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"Error committing default BookingSettings: {e}", exc_info=True)
+            # If commit fails, the page will be rendered with potentially uncommitted settings object.
+            # Depending on the model, 'settings' might be None or an empty object if initialization failed
+            # or if an error occurred before this point.
+            # For this task, ensuring 'settings' is defined is the primary goal.
+            # A robust solution might involve flashing an error message or redirecting.
+            # If settings is None after a failed commit, ensure it's at least an empty object for the template,
+            # though BookingSettings() should provide an instance.
+
+    # Fallback in case settings is somehow None (e.g. commit failed and rolled back, and instance became None)
+    # This is more of a defensive check; BookingSettings() should return an instance.
+    if settings is None:
+        current_app.logger.error("BookingSettings is None even after attempting to fetch or create. Using a temporary empty object for rendering.")
+        # This situation indicates a deeper problem, but for template rendering, avoid NameError.
+        # A proper fix would depend on why 'settings' became None.
+        # For now, this matches the pattern of providing a default if things go very wrong.
+        settings = {} # Or BookingSettings() if that's guaranteed to not raise here
+
     return render_template('admin_booking_settings.html', settings=settings)
 
 @admin_ui_bp.route('/booking_settings/update', methods=['POST'])
