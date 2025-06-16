@@ -110,20 +110,11 @@ def serve_admin_bookings_page():
                 logger.warning(f"Invalid date format for date_filter: '{date_filter_str}'. Ignoring filter.")
                 # flash('Invalid date format. Please use YYYY-MM-DD.', 'warning')
 
-        # Fetch all rows matching filters, without initial overall sorting if Python sort is preferred later.
-        # However, database level sorting for large datasets is usually more efficient.
-        # For this refactor, we'll fetch then sort in Python as per the plan.
         all_booking_rows = bookings_query.all()
 
         upcoming_bookings_processed = []
         past_bookings_processed = []
         now_utc = datetime.now(timezone.utc)
-
-        # Optional: Consider global_time_offset_hours from BookingSettings for 'effective_now'
-        # booking_settings = BookingSettings.query.first()
-        # current_offset_hours = booking_settings.global_time_offset_hours if booking_settings and booking_settings.global_time_offset_hours is not None else 0
-        # effective_now_for_comparison = now_utc - timedelta(hours=current_offset_hours)
-        # For this implementation, we use now_utc directly as per instruction, assuming start_time is UTC.
 
         for row in all_booking_rows:
             start_time_dt = row.start_time
@@ -139,57 +130,33 @@ def serve_admin_bookings_page():
             booking_data = {
                 'id': row.id,
                 'title': row.title,
-                'start_time': aware_start_time, # Use the (potentially) tz-aware version
-                'end_time': aware_end_time,     # Use the (potentially) tz-aware version
+                'start_time': aware_start_time,
+                'end_time': aware_end_time,
                 'status': row.status,
                 'user_username': row.user_username,
                 'resource_name': row.resource_name,
                 'admin_deleted_message': row.admin_deleted_message
             }
 
-            # Partitioning based on start_time relative to now_utc
             if aware_start_time is not None and aware_start_time >= now_utc:
                 upcoming_bookings_processed.append(booking_data)
-            elif aware_start_time is not None: # It's in the past
+            elif aware_start_time is not None:
                 past_bookings_processed.append(booking_data)
-            # else: start_time is None. If this is possible, decide how to classify such bookings.
-            # For now, they won't be added to either list if start_time is None.
 
-        # Sort upcoming_or_current_bookings by start_time ascending (soonest first)
         upcoming_bookings_processed.sort(key=lambda b: b['start_time'])
-        # Sort past_bookings by start_time descending (most recent past first)
         past_bookings_processed.sort(key=lambda b: b['start_time'], reverse=True)
 
-        # The 'possible_statuses' list in the original code for the filter dropdown was:
-        # ['approved', 'checked_in', 'completed', 'cancelled', 'rejected', 'cancelled_by_admin']
-        # The admin_bookings.html template also uses `all_statuses` for the status change dropdown.
-        # This should be a comprehensive list of all valid statuses the system uses.
-        # For consistency, let's define a more comprehensive list or fetch from a central place if available.
-        # For now, using a more extended list similar to what was used in admin_api_bookings.py
         comprehensive_statuses = [
-            'pending',
-            'approved',
-            'rejected',
-            'cancelled',
-            'checked_in',
-            'completed',
-            'cancelled_by_user',
-            'cancelled_by_admin',
-            'cancelled_admin_acknowledged',
-            'system_cancelled_no_checkin',
-            'confirmed',
-            'no_show',
-            'on_hold',
-            'under_review'
+            'pending', 'approved', 'rejected', 'cancelled', 'checked_in', 'completed',
+            'cancelled_by_user', 'cancelled_by_admin', 'cancelled_admin_acknowledged',
+            'system_cancelled_no_checkin', 'confirmed', 'no_show', 'on_hold', 'under_review'
         ]
-        # Filter out any None or empty strings from comprehensive_statuses if they exist
         comprehensive_statuses = sorted(list(set(s for s in comprehensive_statuses if s and s.strip())))
-
 
         return render_template("admin_bookings.html",
                                upcoming_bookings=upcoming_bookings_processed,
                                past_bookings=past_bookings_processed,
-                               all_statuses=comprehensive_statuses, # Use the more comprehensive list
+                               all_statuses=comprehensive_statuses,
                                current_status_filter=status_filter,
                                all_users=all_users,
                                current_user_filter=user_filter,
@@ -197,25 +164,12 @@ def serve_admin_bookings_page():
                                new_sorting_active=True)
     except Exception as e:
         logger.error(f"Error fetching and sorting bookings for admin page: {e}", exc_info=True)
-        # Define comprehensive_statuses here as well for the error case
         comprehensive_statuses = [
-            'pending',
-            'approved',
-            'rejected',
-            'cancelled',
-            'checked_in',
-            'completed',
-            'cancelled_by_user',
-            'cancelled_by_admin',
-            'cancelled_admin_acknowledged',
-            'system_cancelled_no_checkin',
-            'confirmed',
-            'no_show',
-            'on_hold',
-            'under_review'
+            'pending', 'approved', 'rejected', 'cancelled', 'checked_in', 'completed',
+            'cancelled_by_user', 'cancelled_by_admin', 'cancelled_admin_acknowledged',
+            'system_cancelled_no_checkin', 'confirmed', 'no_show', 'on_hold', 'under_review'
         ]
         comprehensive_statuses = sorted(list(set(s for s in comprehensive_statuses if s and s.strip())))
-
         return render_template("admin_bookings.html",
                                upcoming_bookings=[],
                                past_bookings=[],
@@ -241,33 +195,24 @@ def serve_backup_system_page():
     current_app.logger.info(f"User {current_user.username} accessed System Backup & Restore page.")
     scheduler_settings = load_scheduler_settings()
     full_backup_settings = scheduler_settings.get('full_backup', DEFAULT_FULL_BACKUP_SCHEDULE.copy())
-
-    # Ensure new interval keys are present for the template, with defaults
-    full_backup_settings.setdefault('interval_value', 60) # Default to 60
-    full_backup_settings.setdefault('interval_unit', 'minutes') # Default to minutes
-    # Ensure schedule_type is present, defaulting if necessary (e.g. from an older config)
-    full_backup_settings.setdefault('schedule_type', 'daily') # Default to daily if not set
-    # Ensure time_of_day is present for daily/weekly
+    full_backup_settings.setdefault('interval_value', 60)
+    full_backup_settings.setdefault('interval_unit', 'minutes')
+    full_backup_settings.setdefault('schedule_type', 'daily')
     full_backup_settings.setdefault('time_of_day', '02:00')
-    # Ensure day_of_week is present for weekly (can be None if not weekly)
     full_backup_settings.setdefault('day_of_week', None if full_backup_settings['schedule_type'] != 'weekly' else 0)
 
-
-    # Get global_time_offset_hours
-    time_offset_value = 0 # Default
+    time_offset_value = 0
     try:
         booking_settings = BookingSettings.query.first()
         if booking_settings and booking_settings.global_time_offset_hours is not None:
             time_offset_value = booking_settings.global_time_offset_hours
         elif not booking_settings:
             current_app.logger.info("No BookingSettings found for system page, defaulting offset to 0. Consider creating a default record.")
-        else: # booking_settings exists but global_time_offset_hours is None
+        else:
             current_app.logger.warning("BookingSettings.global_time_offset_hours is None for system page, defaulting offset to 0.")
     except Exception as e:
         current_app.logger.error(f"Error fetching BookingSettings for system page: {e}", exc_info=True)
-        # time_offset_value remains 0
 
-    # list_available_backups() is handled by JavaScript on the client-side now for this tab.
     return render_template('admin/backup_system.html',
                            full_backup_settings=full_backup_settings,
                            global_time_offset_hours=time_offset_value)
@@ -278,19 +223,8 @@ def serve_backup_system_page():
 def serve_backup_booking_data_page():
     current_app.logger.info(f"User {current_user.username} accessed Booking Data Management page.")
     scheduler_settings = load_scheduler_settings()
-    # booking_csv_backup_settings = scheduler_settings.get('booking_csv_backup', DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy()) # Old: To be removed
 
-    # Load settings for scheduled incremental JSON backups - Old: To be removed
-    # DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE = {'is_enabled': False, 'interval_minutes': 30}
-    # booking_incremental_json_schedule_settings = scheduler_settings.get(
-    #     'booking_incremental_json_schedule',
-    #     DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE.copy()
-    # )
-    # booking_incremental_json_schedule_settings.setdefault('is_enabled', DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE['is_enabled'])
-    # booking_incremental_json_schedule_settings.setdefault('interval_minutes', DEFAULT_INCREMENTAL_JSON_BOOKING_SCHEDULE['interval_minutes'])
-
-    # New Unified Booking Data Protection Schedule
-    DEFAULT_BOOKING_DATA_PROTECTION_SCHEDULE = {'is_enabled': False, 'interval_minutes': 1440} # Default to once a day (24*60)
+    DEFAULT_BOOKING_DATA_PROTECTION_SCHEDULE = {'is_enabled': False, 'interval_minutes': 1440}
     booking_data_protection_schedule = scheduler_settings.get(
         'booking_data_protection_schedule',
         DEFAULT_BOOKING_DATA_PROTECTION_SCHEDULE.copy()
@@ -298,15 +232,14 @@ def serve_backup_booking_data_page():
     booking_data_protection_schedule.setdefault('is_enabled', DEFAULT_BOOKING_DATA_PROTECTION_SCHEDULE['is_enabled'])
     booking_data_protection_schedule.setdefault('interval_minutes', DEFAULT_BOOKING_DATA_PROTECTION_SCHEDULE['interval_minutes'])
 
-    # Pagination logic for Booking CSV Backups (Flask-populated part) - This is for the legacy CSV list
     all_booking_csv_files = list_available_booking_csv_backups() if list_available_booking_csv_backups else []
     page = request.args.get('page', 1, type=int)
     per_page = 10
     total_items = len(all_booking_csv_files)
     total_pages = (total_items + per_page - 1) // per_page if per_page > 0 else 0
-    if total_pages == 0 and total_items > 0 : total_pages = 1 # if per_page is 0 but items exist
-    if page > total_pages and total_pages > 0: page = total_pages # cap page
-    if page < 1: page = 1 # ensure page is at least 1
+    if total_pages == 0 and total_items > 0 : total_pages = 1
+    if page > total_pages and total_pages > 0: page = total_pages
+    if page < 1: page = 1
 
     start_index = (page - 1) * per_page
     end_index = start_index + per_page
@@ -314,28 +247,21 @@ def serve_backup_booking_data_page():
     has_prev = page > 1
     has_next = page < total_pages
 
-    # Other lists (full system backups for selective booking restore, incremental backups)
-    # will be loaded client-side by JavaScript.
-
-    # Get global_time_offset_hours
-    time_offset_value = 0 # Default
+    time_offset_value = 0
     try:
         booking_settings = BookingSettings.query.first()
         if booking_settings and booking_settings.global_time_offset_hours is not None:
             time_offset_value = booking_settings.global_time_offset_hours
         elif not booking_settings:
             current_app.logger.info("No BookingSettings found for booking data page, defaulting offset to 0. Consider creating a default record.")
-        else: # booking_settings exists but global_time_offset_hours is None
+        else:
             current_app.logger.warning("BookingSettings.global_time_offset_hours is None for booking data page, defaulting offset to 0.")
     except Exception as e:
         current_app.logger.error(f"Error fetching BookingSettings for booking data page: {e}", exc_info=True)
-        # time_offset_value remains 0
 
     return render_template('admin/backup_booking_data.html',
-                           # booking_csv_backup_settings=booking_csv_backup_settings, # Old
-                           # booking_incremental_json_schedule_settings=booking_incremental_json_schedule_settings, # Old
-                           booking_data_protection_schedule=booking_data_protection_schedule, # New
-                           booking_csv_backups=paginated_booking_csv_backups, # Legacy CSV list for now
+                           booking_data_protection_schedule=booking_data_protection_schedule,
+                           booking_csv_backups=paginated_booking_csv_backups,
                            booking_csv_page=page,
                            booking_csv_total_pages=total_pages,
                            booking_csv_has_prev=has_prev,
@@ -350,7 +276,6 @@ def serve_backup_settings_page():
     scheduler_settings = load_scheduler_settings()
     auto_restore_booking_records_on_startup = scheduler_settings.get('auto_restore_booking_records_on_startup', False)
 
-    # Get global_time_offset_hours from BookingSettings
     booking_settings = BookingSettings.query.first()
     if not booking_settings:
         current_app.logger.info("No BookingSettings found, creating default with global_time_offset_hours = 0.")
@@ -362,234 +287,212 @@ def serve_backup_settings_page():
         except Exception as e:
             db.session.rollback()
             current_app.logger.error(f"Error committing default BookingSettings: {e}", exc_info=True)
-            # If commit fails, we still proceed with the default value in memory for this request
-            # but it won't be persisted, which is a potential issue for subsequent operations.
-            # For this specific read-only operation in the GET request, it's acceptable.
 
     global_time_offset_hours = booking_settings.global_time_offset_hours if booking_settings else 0
-    # Ensure global_time_offset_hours is not None, default to 0 if it is (should be handled by model default)
     if global_time_offset_hours is None:
         global_time_offset_hours = 0
         current_app.logger.warning("global_time_offset_hours was None, defaulted to 0.")
-
 
     return render_template('admin/backup_settings.html',
                            auto_restore_booking_records_on_startup=auto_restore_booking_records_on_startup,
                            global_time_offset_hours=global_time_offset_hours)
 
-
-# @admin_ui_bp.route('/admin/restore_booking_csv/<timestamp_str>', methods=['POST']) # This URL might need to be adjusted if it's not blueprint relative
+# LEGACY - Azure CSV Restore Route - Body fully commented out.
+# @admin_ui_bp.route('/admin/restore_booking_csv/<timestamp_str>', methods=['POST'])
 # @login_required
 # @permission_required('manage_system')
 # def restore_booking_csv_route(timestamp_str):
     # # current_app.logger.info(f"User {current_user.username} initiated restore for booking CSV backup: {timestamp_str}")
     # # task_id = uuid.uuid4().hex
-    #
-    # # Use current_app._get_current_object() to pass the actual app instance
-    # # Pass socketio instance if available and configured, else None
-    # socketio_instance = None
-    # if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
-    #     socketio_instance = current_app.extensions['socketio']
-    # elif 'socketio' in globals() and socketio: # Check imported socketio from extensions
-    #     socketio_instance = socketio
-    #
-    # summary = restore_bookings_from_csv_backup(
-    #     current_app._get_current_object(),
-    #     timestamp_str,
-    #     socketio_instance=socketio_instance,
-    #     task_id=task_id
-    # )
-    #
-    # if summary['status'] == 'completed_successfully' or (summary['status'] == 'completed_with_errors' and not summary.get('errors')):
-    #     flash_msg = f"Booking CSV restore for {timestamp_str} completed. Processed: {summary.get('processed',0)}, Created: {summary.get('created',0)}, Skipped Duplicates: {summary.get('skipped_duplicates',0)}."
-    #     if summary.get('errors'): # Should not happen if status is completed_successfully, but good check
-    #          flash_msg += f" Warnings: {'; '.join(summary['errors'])}"
-    #     flash(flash_msg, 'success')
-    # elif summary['status'] == 'completed_with_errors' and summary.get('errors'):
-    #     error_details = '; '.join(summary['errors'])
-    #     flash(f"Booking CSV restore for {timestamp_str} completed with errors. Errors: {error_details}. Processed: {summary.get('processed',0)}, Created: {summary.get('created',0)}, Skipped: {summary.get('skipped_duplicates',0)}.", 'danger')
-    # else: # 'failed' or any other status
-    #     error_details = '; '.join(summary.get('errors', ['Unknown error']))
-    #     flash(f"Booking CSV restore for {timestamp_str} failed. Status: {summary.get('status','unknown')}. Message: {summary.get('message','N/A')}. Details: {error_details}", 'danger')
-    #
-    # # return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Redirect to the booking data tab
+    # #
+    # # # Use current_app._get_current_object() to pass the actual app instance
+    # # # Pass socketio instance if available and configured, else None
+    # # socketio_instance = None
+    # # if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
+    # #     socketio_instance = current_app.extensions['socketio']
+    # # elif 'socketio' in globals() and socketio: # Check imported socketio from extensions
+    # #     socketio_instance = socketio
+    # #
+    # # summary = restore_bookings_from_csv_backup(
+    # #     current_app._get_current_object(),
+    # #     timestamp_str,
+    # #     socketio_instance=socketio_instance,
+    # #     task_id=task_id # This task_id was also not defined as it was part of the commented function
+    # # )
+    # #
+    # # if summary['status'] == 'completed_successfully' or (summary['status'] == 'completed_with_errors' and not summary.get('errors')):
+    # #     flash_msg = f"Booking CSV restore for {timestamp_str} completed. Processed: {summary.get('processed',0)}, Created: {summary.get('created',0)}, Skipped Duplicates: {summary.get('skipped_duplicates',0)}."
+    # #     if summary.get('errors'):
+    # #          flash_msg += f" Warnings: {'; '.join(summary['errors'])}"
+    # #     flash(flash_msg, 'success')
+    # # elif summary['status'] == 'completed_with_errors' and summary.get('errors'):
+    # #     error_details = '; '.join(summary['errors'])
+    # #     flash(f"Booking CSV restore for {timestamp_str} completed with errors. Errors: {error_details}. Processed: {summary.get('processed',0)}, Created: {summary.get('created',0)}, Skipped: {summary.get('skipped_duplicates',0)}.", 'danger')
+    # # else: # 'failed' or any other status
+    # #     error_details = '; '.join(summary.get('errors', ['Unknown error']))
+    # #     flash(f"Booking CSV restore for {timestamp_str} failed. Status: {summary.get('status','unknown')}. Message: {summary.get('message','N/A')}. Details: {error_details}", 'danger')
+    # #
+    # # # return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Redirect to the booking data tab
 
-# @admin_ui_bp.route('/admin/manual_backup_bookings_csv', methods=['POST']) # This URL might need to be adjusted
+# LEGACY - Azure CSV Manual Backup Route - Body fully commented out.
+# @admin_ui_bp.route('/admin/manual_backup_bookings_csv', methods=['POST'])
 # @login_required
 # @permission_required('manage_system')
 # def manual_backup_bookings_csv_route():
-    # task_id = uuid.uuid4().hex
-    # socketio_instance = None
-    # if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
-        socketio_instance = current_app.extensions['socketio']
-    elif 'socketio' in globals() and socketio: # Check imported socketio from extensions
-        socketio_instance = socketio
+    # # task_id = uuid.uuid4().hex # task_id was defined here.
+    # # socketio_instance = None
+    # # if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
+    # #     socketio_instance = current_app.extensions['socketio']
+    # # elif 'socketio' in globals() and socketio:
+    # #     socketio_instance = socketio
+    #
+    # # app_instance = current_app._get_current_object()
+    #
+    # # range_type = request.form.get('backup_range_type', 'all')
+    # # start_date_dt = None
+    # # end_date_dt = None
+    # # range_label = range_type
+    #
+    # # utcnow = datetime.utcnow()
+    # # if range_type != "all":
+    # #     end_date_dt = datetime(utcnow.year, utcnow.month, utcnow.day) + timedelta(days=1)
+    #
+    # # if range_type == "1day":
+    # #     start_date_dt = end_date_dt - timedelta(days=1)
+    # # elif range_type == "3days":
+    # #     start_date_dt = end_date_dt - timedelta(days=3)
+    # # elif range_type == "7days":
+    # #     start_date_dt = end_date_dt - timedelta(days=7)
+    # # elif range_type == "all":
+    # #     start_date_dt = None
+    # #     end_date_dt = None
+    # #     range_label = "all"
+    #
+    # # log_detail = f"range: {range_label}"
+    # # if start_date_dt: log_detail += f", from: {start_date_dt.strftime('%Y-%m-%d')}"
+    # # if end_date_dt: log_detail += f", to: {end_date_dt.strftime('%Y-%m-%d')}"
+    #
+    # # app_instance.logger.info(f"Manual booking CSV backup ({log_detail}) triggered by user {current_user.username if current_user else 'Unknown User'} with task ID {task_id}.")
+    #
+    # # try:
+    # #     success = backup_bookings_csv(
+    # #         app=app_instance,
+    # #         socketio_instance=socketio_instance,
+    # #         task_id=task_id,
+    # #         start_date_dt=start_date_dt,
+    # #         end_date_dt=end_date_dt,
+    # #         range_label=range_label
+    # #     )
+    # #     if success:
+    # #         flash(_('Manual booking CSV backup for range "%(range)s" initiated successfully. Check logs or SocketIO messages for progress/completion.') % {'range': range_label}, 'success')
+    # #     else:
+    # #         flash(_('Manual booking CSV backup for range "%(range)s" failed to complete successfully. Please check server logs.') % {'range': range_label}, 'warning')
+    # # except Exception as e:
+    # #     app_instance.logger.error(f"Exception during manual booking CSV backup (range: {range_label}) initiation by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
+    # #     flash(_('An unexpected error occurred while starting the manual booking CSV backup for range "%(range)s". Check server logs.') % {'range': range_label}, 'danger')
+    #
+    # # return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
 
-    app_instance = current_app._get_current_object()
-
-    range_type = request.form.get('backup_range_type', 'all')
-    start_date_dt = None
-    end_date_dt = None
-    range_label = range_type
-
-    utcnow = datetime.utcnow()
-    # Calculate end_date_dt as the beginning of tomorrow to include all of today
-    # For 'all', start_date_dt and end_date_dt remain None
-    if range_type != "all":
-        end_date_dt = datetime(utcnow.year, utcnow.month, utcnow.day) + timedelta(days=1)
-
-    if range_type == "1day":
-        start_date_dt = end_date_dt - timedelta(days=1)
-    elif range_type == "3days":
-        start_date_dt = end_date_dt - timedelta(days=3)
-    elif range_type == "7days":
-        start_date_dt = end_date_dt - timedelta(days=7)
-    elif range_type == "all": # Explicitly handle 'all' for clarity, though defaults cover it
-        start_date_dt = None
-        end_date_dt = None
-        range_label = "all"
-
-    log_detail = f"range: {range_label}"
-    if start_date_dt: log_detail += f", from: {start_date_dt.strftime('%Y-%m-%d')}"
-    if end_date_dt: log_detail += f", to: {end_date_dt.strftime('%Y-%m-%d')}"
-
-    app_instance.logger.info(f"Manual booking CSV backup ({log_detail}) triggered by user {current_user.username if current_user else 'Unknown User'} with task ID {task_id}.")
-
-    try:
-        success = backup_bookings_csv(
-            app=app_instance,
-            socketio_instance=socketio_instance,
-            task_id=task_id,
-            start_date_dt=start_date_dt,
-            end_date_dt=end_date_dt,
-            range_label=range_label
-        )
-        if success:
-            flash(_('Manual booking CSV backup for range "%(range)s" initiated successfully. Check logs or SocketIO messages for progress/completion.') % {'range': range_label}, 'success')
-        else:
-            flash(_('Manual booking CSV backup for range "%(range)s" failed to complete successfully. Please check server logs.') % {'range': range_label}, 'warning')
-    except Exception as e:
-        app_instance.logger.error(f"Exception during manual booking CSV backup (range: {range_label}) initiation by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
-        flash(_('An unexpected error occurred while starting the manual booking CSV backup for range "%(range)s". Check server logs.') % {'range': range_label}, 'danger')
-
-    # return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Redirect to the booking data tab
-
-# @admin_ui_bp.route('/admin/delete_booking_csv/<timestamp_str>', methods=['POST']) # This URL might need to be adjusted
+# LEGACY - Azure CSV Delete Route - Body fully commented out.
+# @admin_ui_bp.route('/admin/delete_booking_csv/<timestamp_str>', methods=['POST'])
 # @login_required
 # @permission_required('manage_system')
 # def delete_booking_csv_backup_route(timestamp_str):
-    # task_id = uuid.uuid4().hex
-    # socketio_instance = None
-    # if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
-        socketio_instance = current_app.extensions['socketio']
-    elif 'socketio' in globals() and socketio:
-        socketio_instance = socketio
+    # # task_id = uuid.uuid4().hex # task_id was defined here
+    # # socketio_instance = None
+    # # if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
+    # #     socketio_instance = current_app.extensions['socketio']
+    # # elif 'socketio' in globals() and socketio:
+    # #     socketio_instance = socketio
+    #
+    # # app_instance = current_app._get_current_object()
+    # # app_instance.logger.info(f"Deletion of booking CSV backup {timestamp_str} triggered by user {current_user.username if current_user else 'Unknown User'} with task ID {task_id}.")
+    #
+    # # try:
+    # #     success = delete_booking_csv_backup(timestamp_str, socketio_instance=socketio_instance, task_id=task_id)
+    # #     if success:
+    # #         flash(_('Booking CSV backup for %(timestamp)s successfully deleted (or was not found).') % {'timestamp': timestamp_str}, 'success')
+    # #     else:
+    # #         flash(_('Failed to delete booking CSV backup for %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
+    # # except Exception as e:
+    # #     app_instance.logger.error(f"Exception during booking CSV backup deletion for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
+    # #     flash(_('An unexpected error occurred while deleting the booking CSV backup for %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
+    #
+    # # return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
 
-    app_instance = current_app._get_current_object()
-    app_instance.logger.info(f"Deletion of booking CSV backup {timestamp_str} triggered by user {current_user.username if current_user else 'Unknown User'} with task ID {task_id}.")
-
-    try:
-        success = delete_booking_csv_backup(timestamp_str, socketio_instance=socketio_instance, task_id=task_id)
-        if success:
-            flash(_('Booking CSV backup for %(timestamp)s successfully deleted (or was not found).') % {'timestamp': timestamp_str}, 'success')
-        else:
-            flash(_('Failed to delete booking CSV backup for %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
-    except Exception as e:
-        app_instance.logger.error(f"Exception during booking CSV backup deletion for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
-        flash(_('An unexpected error occurred while deleting the booking CSV backup for %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
-
-    # return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Redirect to the booking data tab
-
-
+# LEGACY - Azure CSV Schedule Save Route - Body fully commented out.
 # @admin_ui_bp.route('/save_booking_csv_schedule', methods=['POST'])
 # @login_required
 # @permission_required('manage_system')
-# def save_booking_csv_schedule_settings(): # Renamed function to match new approach
-    # current_app.logger.info(f"User {current_user.username} attempting to save Booking CSV Backup schedule settings.")
-
-    # # Construct config file path within the route to use current_app context
-    # booking_csv_schedule_config_file = os.path.join(current_app.config['DATA_DIR'], 'booking_csv_schedule.json')
-
-    # try:
-    #     is_enabled = request.form.get('booking_csv_schedule_enabled') == 'true'
-    #     interval_value_str = request.form.get('booking_csv_schedule_interval_value', '24')
-    #     interval_unit = request.form.get('booking_csv_schedule_interval_unit', 'hours')
-    #     range_type = request.form.get('booking_csv_schedule_range_type', 'all')
-
-    #     # Validate Interval Value
-    #     try:
-    #         interval_value = int(interval_value_str)
-    #         if interval_value <= 0:
-    #             raise ValueError(_("Interval must be positive."))
-    #     except ValueError as ve:
-    #         flash(str(ve) or _('Invalid interval value. Please enter a positive integer.'), 'danger')
-    #         return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Corrected redirect
-
-    #     # Validate Interval Unit
-    #     allowed_units = ['minutes', 'hours', 'days']
-    #     if interval_unit not in allowed_units:
-    #         flash(_('Invalid interval unit specified.'), 'danger')
-    #         return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Corrected redirect
-
-    #     # Validate Range Type
-    #     allowed_range_types = ['all', '1day', '3days', '7days']
-    #     if range_type not in allowed_range_types:
-    #         flash(_('Invalid backup data range type specified.'), 'danger')
-    #         return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Corrected redirect
-
-    #     schedule_settings = {
-    #         'enabled': is_enabled,
-    #         'interval_value': interval_value,
-    #         'interval_unit': interval_unit,
-    #         'range_type': range_type
-    #     }
-
-    #     os.makedirs(os.path.dirname(booking_csv_schedule_config_file), exist_ok=True)
-    #     with open(booking_csv_schedule_config_file, 'w') as f:
-    #         json.dump(schedule_settings, f, indent=4)
-
-    #     current_app.logger.info(f"Booking CSV Backup schedule settings saved to file by {current_user.username}: {schedule_settings}")
-    #     flash(_('Booking CSV backup schedule settings saved successfully.'), 'success')
-
-    #     current_app.config['BOOKING_CSV_SCHEDULE_SETTINGS'] = schedule_settings
-    #     current_app.logger.info(f"Updated app.config['BOOKING_CSV_SCHEDULE_SETTINGS'] to: {schedule_settings}")
-
-    #     scheduler = getattr(current_app, 'scheduler', None)
-    #     if scheduler and scheduler.running:
-    #         job_id = 'scheduled_booking_csv_backup_job'
-    #         try:
-    #             if scheduler.get_job(job_id):
-    #                 scheduler.remove_job(job_id)
-    #         except JobLookupError:
-    #             pass # Job doesn't exist, no need to remove
-    #         except Exception as e_remove:
-    #             current_app.logger.error(f"Error removing existing scheduler job '{job_id}': {e_remove}", exc_info=True)
-    #             flash(_('Error removing old schedule job. New schedule might not apply until restart.'), 'warning')
-
-    #         if schedule_settings.get('enabled'):
-    #             job_kwargs = {interval_unit: interval_value}
-    #             try:
-    #                 scheduler.add_job(
-    #                     func=run_scheduled_booking_csv_backup,
-    #                     trigger='interval',
-    #                     id=job_id,
-    #                     **job_kwargs,
-    #                     args=[current_app._get_current_object()]
-    #                 )
-    #                 flash(_('Schedule updated. New settings will apply.'), 'info')
-    #             except Exception as e_add_job:
-    #                 current_app.logger.error(f"Failed to add/update scheduler job '{job_id}': {e_add_job}", exc_info=True)
-    #                 flash(_('Failed to apply new schedule settings to the scheduler. Please check logs.'), 'danger')
-    #         else:
-    #             flash(_('Schedule is now disabled. Job removed if it existed.'), 'info')
-    #     elif not scheduler or not scheduler.running:
-    #         flash(_('Schedule settings saved, but scheduler is not running. Changes will apply on restart.'), 'warning')
-
-    # except Exception as e:
-    #     current_app.logger.error(f"Error saving Booking CSV backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
-    #     flash(_('An error occurred while saving the schedule settings. Please check the logs.'), 'danger')
-
-    # return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+# def save_booking_csv_schedule_settings():
+    # # current_app.logger.info(f"User {current_user.username} attempting to save Booking CSV Backup schedule settings.")
+    # # booking_csv_schedule_config_file = os.path.join(current_app.config['DATA_DIR'], 'booking_csv_schedule.json')
+    # # try:
+    # #     is_enabled = request.form.get('booking_csv_schedule_enabled') == 'true'
+    # #     interval_value_str = request.form.get('booking_csv_schedule_interval_value', '24')
+    # #     interval_unit = request.form.get('booking_csv_schedule_interval_unit', 'hours')
+    # #     range_type = request.form.get('booking_csv_schedule_range_type', 'all')
+    # #     try:
+    # #         interval_value = int(interval_value_str)
+    # #         if interval_value <= 0:
+    # #             raise ValueError(_("Interval must be positive."))
+    # #     except ValueError as ve:
+    # #         flash(str(ve) or _('Invalid interval value. Please enter a positive integer.'), 'danger')
+    # #         return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+    # #     allowed_units = ['minutes', 'hours', 'days']
+    # #     if interval_unit not in allowed_units:
+    # #         flash(_('Invalid interval unit specified.'), 'danger')
+    # #         return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+    # #     allowed_range_types = ['all', '1day', '3days', '7days']
+    # #     if range_type not in allowed_range_types:
+    # #         flash(_('Invalid backup data range type specified.'), 'danger')
+    # #         return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+    # #     schedule_settings = {
+    # #         'enabled': is_enabled,
+    # #         'interval_value': interval_value,
+    # #         'interval_unit': interval_unit,
+    # #         'range_type': range_type
+    # #     }
+    # #     os.makedirs(os.path.dirname(booking_csv_schedule_config_file), exist_ok=True)
+    # #     with open(booking_csv_schedule_config_file, 'w') as f:
+    # #         json.dump(schedule_settings, f, indent=4)
+    # #     current_app.logger.info(f"Booking CSV Backup schedule settings saved to file by {current_user.username}: {schedule_settings}")
+    # #     flash(_('Booking CSV backup schedule settings saved successfully.'), 'success')
+    # #     current_app.config['BOOKING_CSV_SCHEDULE_SETTINGS'] = schedule_settings
+    # #     current_app.logger.info(f"Updated app.config['BOOKING_CSV_SCHEDULE_SETTINGS'] to: {schedule_settings}")
+    # #     scheduler = getattr(current_app, 'scheduler', None)
+    # #     if scheduler and scheduler.running:
+    # #         job_id = 'scheduled_booking_csv_backup_job'
+    # #         try:
+    # #             if scheduler.get_job(job_id):
+    # #                 scheduler.remove_job(job_id)
+    # #         except JobLookupError:
+    # #             pass
+    # #         except Exception as e_remove:
+    # #             current_app.logger.error(f"Error removing existing scheduler job '{job_id}': {e_remove}", exc_info=True)
+    # #             flash(_('Error removing old schedule job. New schedule might not apply until restart.'), 'warning')
+    # #         if schedule_settings.get('enabled'):
+    # #             job_kwargs = {interval_unit: interval_value}
+    # #             try:
+    # #                 scheduler.add_job(
+    # #                     func=run_scheduled_booking_csv_backup,
+    # #                     trigger='interval',
+    # #                     id=job_id,
+    # #                     **job_kwargs,
+    # #                     args=[current_app._get_current_object()]
+    # #                 )
+    # #                 flash(_('Schedule updated. New settings will apply.'), 'info')
+    # #             except Exception as e_add_job:
+    # #                 current_app.logger.error(f"Failed to add/update scheduler job '{job_id}': {e_add_job}", exc_info=True)
+    # #                 flash(_('Failed to apply new schedule settings to the scheduler. Please check logs.'), 'danger')
+    # #         else:
+    # #             flash(_('Schedule is now disabled. Job removed if it existed.'), 'info')
+    # #     elif not scheduler or not scheduler.running:
+    # #         flash(_('Schedule settings saved, but scheduler is not running. Changes will apply on restart.'), 'warning')
+    # # except Exception as e:
+    # #     current_app.logger.error(f"Error saving Booking CSV backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
+    # #     flash(_('An error occurred while saving the schedule settings. Please check the logs.'), 'danger')
+    # # return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
 
 
 @admin_ui_bp.route('/settings/schedule/full_backup', methods=['POST'])
@@ -599,67 +502,54 @@ def save_full_backup_schedule_settings():
     current_app.logger.info(f"User {current_user.username} attempting to save Full Backup schedule settings.")
     try:
         all_settings = load_scheduler_settings()
-
-        # Ensure 'full_backup' key exists, using a copy of defaults if not
         if 'full_backup' not in all_settings:
-            from utils import DEFAULT_FULL_BACKUP_SCHEDULE # Import default for safety
+            from utils import DEFAULT_FULL_BACKUP_SCHEDULE
             all_settings['full_backup'] = DEFAULT_FULL_BACKUP_SCHEDULE.copy()
 
         is_enabled = request.form.get('full_backup_enabled') == 'true'
-        schedule_type = request.form.get('full_backup_schedule_type', 'daily') # Default to 'daily' if not provided
+        schedule_type = request.form.get('full_backup_schedule_type', 'daily')
 
         all_settings['full_backup']['is_enabled'] = is_enabled
         all_settings['full_backup']['schedule_type'] = schedule_type
 
         if schedule_type == 'interval':
             interval_value_str = request.form.get('full_backup_interval_value')
-            interval_unit = request.form.get('full_backup_interval_unit', 'minutes') # Default unit
-
+            interval_unit = request.form.get('full_backup_interval_unit', 'minutes')
             try:
                 interval_value = int(interval_value_str)
                 if interval_value <= 0:
                     flash(_('Interval value must be a positive integer.'), 'danger')
                     return redirect(url_for('admin_ui.serve_backup_system_page'))
-            except (ValueError, TypeError): # Catch TypeError if interval_value_str is None
+            except (ValueError, TypeError):
                 flash(_('Invalid interval value. Please enter a positive integer.'), 'danger')
                 return redirect(url_for('admin_ui.serve_backup_system_page'))
-
             if interval_unit not in ['minutes', 'hours']:
                 flash(_('Invalid interval unit. Must be "minutes" or "hours".'), 'danger')
                 return redirect(url_for('admin_ui.serve_backup_system_page'))
-
             all_settings['full_backup']['interval_value'] = interval_value
             all_settings['full_backup']['interval_unit'] = interval_unit
-
-            # Nullify cron-specific fields
             all_settings['full_backup'].pop('time_of_day', None)
             all_settings['full_backup'].pop('day_of_week', None)
-
         elif schedule_type in ['daily', 'weekly']:
             time_of_day = request.form.get('full_backup_time_of_day', '02:00')
-            # Basic validation for time_of_day format HH:MM
-            try:
-                datetime.strptime(time_of_day, '%H:%M')
+            try: datetime.strptime(time_of_day, '%H:%M')
             except ValueError:
                 flash(_('Invalid time format for Time of Day. Please use HH:MM.'), 'danger')
                 return redirect(url_for('admin_ui.serve_backup_system_page'))
             all_settings['full_backup']['time_of_day'] = time_of_day
-
             if schedule_type == 'weekly':
                 day_of_week_str = request.form.get('full_backup_day_of_week')
                 if day_of_week_str is not None and day_of_week_str.isdigit():
                     day_of_week = int(day_of_week_str)
-                    if not (0 <= day_of_week <= 6): # Sunday=0 or 6, Monday=0 or 1, etc. APScheduler is 0-6 for Mon-Sun or Sun-Sat based on firstweekday
-                        flash(_('Invalid day of the week.'), 'danger') # Check APScheduler convention for day_of_week
+                    if not (0 <= day_of_week <= 6):
+                        flash(_('Invalid day of the week.'), 'danger')
                         return redirect(url_for('admin_ui.serve_backup_system_page'))
                     all_settings['full_backup']['day_of_week'] = day_of_week
                 else:
                     flash(_('Day of the week is required for weekly schedule.'), 'danger')
                     return redirect(url_for('admin_ui.serve_backup_system_page'))
-            else: # daily
+            else:
                 all_settings['full_backup'].pop('day_of_week', None)
-
-            # Nullify interval-specific fields
             all_settings['full_backup'].pop('interval_value', None)
             all_settings['full_backup'].pop('interval_unit', None)
         else:
@@ -669,20 +559,16 @@ def save_full_backup_schedule_settings():
         save_scheduler_settings(all_settings)
         flash(_('Full backup schedule settings saved successfully.'), 'success')
         current_app.logger.info(f"Full backup schedule settings saved by {current_user.username}: {all_settings['full_backup']}")
-
-        # Here you might want to update APScheduler if it's running, similar to booking_csv_schedule_route
-        # For now, this subtask focuses on saving to JSON. APScheduler update is a separate concern.
-
     except Exception as e:
         current_app.logger.error(f"Error saving Full Backup schedule settings by {current_user.username}: {str(e)}", exc_info=True)
         flash(_('An error occurred while saving the full backup schedule settings. Please check the logs.'), 'danger')
-    return redirect(url_for('admin_ui.serve_backup_system_page')) # Redirect to system tab
+    return redirect(url_for('admin_ui.serve_backup_system_page'))
 
-
-@admin_ui_bp.route('/settings/schedule/booking_csv', methods=['POST']) # This route is for saving the schedule for booking CSVs
-@login_required
-@permission_required('manage_system')
-# def save_booking_data_schedule_settings(): # This was for the old CSV schedule, now commented out
+# LEGACY - This route was for the old CSV schedule, now handled by booking_data_protection_schedule or removed.
+# @admin_ui_bp.route('/settings/schedule/booking_csv', methods=['POST'])
+# @login_required
+# @permission_required('manage_system')
+# def save_booking_data_schedule_settings():
 #     pass
 
 # @admin_ui_bp.route('/settings/schedule/booking_incremental_json', methods=['POST']) # Old route for incremental JSON schedule
@@ -699,35 +585,26 @@ def save_booking_data_protection_schedule():
     current_app.logger.info(f"User {current_user.username} attempting to save Unified Booking Data Protection schedule settings.")
     try:
         all_settings = load_scheduler_settings()
-
         is_enabled = request.form.get('booking_data_protection_enabled') == 'true'
-        interval_minutes_str = request.form.get('booking_data_protection_interval_minutes', '1440') # Default to 24 hours
-
+        interval_minutes_str = request.form.get('booking_data_protection_interval_minutes', '1440')
         try:
             interval_minutes = int(interval_minutes_str)
-            if interval_minutes < 1: # Minimum interval of 1 minute
+            if interval_minutes < 1:
                 flash(_('Interval for Unified Booking Data backup must be at least 1 minute.'), 'danger')
                 return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
         except ValueError:
             flash(_('Invalid interval value for Unified Booking Data backup. Please enter a number.'), 'danger')
             return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
-
-        # Ensure the key exists in all_settings
         DEFAULT_SCHEDULE = {'is_enabled': False, 'interval_minutes': 1440}
         if 'booking_data_protection_schedule' not in all_settings:
             all_settings['booking_data_protection_schedule'] = DEFAULT_SCHEDULE.copy()
-
         all_settings['booking_data_protection_schedule']['is_enabled'] = is_enabled
         all_settings['booking_data_protection_schedule']['interval_minutes'] = interval_minutes
-
         save_scheduler_settings(all_settings)
         flash(_('Unified Booking Data Protection schedule settings saved successfully.'), 'success')
         current_app.logger.info(f"Unified Booking Data Protection schedule settings saved by {current_user.username}: {all_settings['booking_data_protection_schedule']}")
-
-        # Update APScheduler
         scheduler = getattr(current_app, 'scheduler', None)
-        job_id = 'scheduled_booking_data_protection_job' # New job ID
-
+        job_id = 'scheduled_booking_data_protection_job'
         if scheduler and scheduler.running:
             try:
                 existing_job = scheduler.get_job(job_id)
@@ -739,10 +616,9 @@ def save_booking_data_protection_schedule():
             except Exception as e_remove:
                 current_app.logger.error(f"Error removing existing scheduler job '{job_id}' for unified backups: {e_remove}", exc_info=True)
                 flash(_('Error removing old unified backup schedule job. New schedule might not apply until restart.'), 'warning')
-
             if is_enabled:
                 try:
-                    from scheduler_tasks import run_scheduled_booking_data_protection_task # Ensure import
+                    from scheduler_tasks import run_scheduled_booking_data_protection_task
                     scheduler.add_job(
                         id=job_id,
                         func=run_scheduled_booking_data_protection_task,
@@ -762,12 +638,10 @@ def save_booking_data_protection_schedule():
         elif not scheduler or not scheduler.running:
             current_app.logger.warning("Scheduler not found or not running. Unified backup schedule changes will apply on next app start.")
             flash(_('Unified backup schedule settings saved, but scheduler is not running. Changes will apply on restart.'), 'warning')
-
     except Exception as e:
         current_app.logger.error(f"Error saving Unified Booking Data Protection schedule settings by {current_user.username}: {str(e)}", exc_info=True)
         flash(_('An error occurred while saving the Unified Booking Data Protection schedule settings. Please check the logs.'), 'danger')
     return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
-
 
 @admin_ui_bp.route('/settings/startup/auto_restore_bookings', methods=['POST'])
 @login_required
@@ -776,24 +650,18 @@ def save_auto_restore_booking_records_settings():
     current_app.logger.info(f"User {current_user.username} attempting to save 'Auto Restore Booking Records on Startup' settings.")
     try:
         all_settings = load_scheduler_settings()
-
         is_enabled = request.form.get('auto_restore_booking_records_enabled') == 'true'
         all_settings['auto_restore_booking_records_on_startup'] = is_enabled
-
         save_scheduler_settings(all_settings)
-
         if is_enabled:
             flash(_('Automatic restore of booking records on startup ENABLED.'), 'success')
         else:
             flash(_('Automatic restore of booking records on startup DISABLED.'), 'success')
-
         current_app.logger.info(f"'Auto Restore Booking Records on Startup' setting saved by {current_user.username}: {is_enabled}")
-
     except Exception as e:
         current_app.logger.error(f"Error saving 'Auto Restore Booking Records on Startup' setting by {current_user.username}: {str(e)}", exc_info=True)
         flash(_('An error occurred while saving the auto restore setting. Please check the logs.'), 'danger')
-    return redirect(url_for('admin_ui.serve_backup_settings_page')) # Redirect to settings tab
-
+    return redirect(url_for('admin_ui.serve_backup_settings_page'))
 
 @admin_ui_bp.route('/backup/settings/time_offset', methods=['POST'], endpoint='save_backup_time_offset')
 @login_required
@@ -802,28 +670,22 @@ def save_backup_time_offset_route():
     current_app.logger.info(f"User {current_user.username} attempting to save Global Time Offset for backups.")
     try:
         new_offset_str = request.form.get('global_time_offset_hours')
-
         if new_offset_str is None or new_offset_str.strip() == "":
             flash(_('Time offset value must be provided and cannot be empty.'), 'danger')
             return redirect(url_for('admin_ui.serve_backup_settings_page'))
-
         try:
             new_offset_value = int(new_offset_str)
         except ValueError:
             flash(_('Invalid input for time offset. Please enter a whole number (integer).'), 'danger')
             return redirect(url_for('admin_ui.serve_backup_settings_page'))
-
-        if not (-23 <= new_offset_value <= 23): # Range check
+        if not (-23 <= new_offset_value <= 23):
             flash(_('Time offset must be an integer between -23 and +23 hours.'), 'danger')
             return redirect(url_for('admin_ui.serve_backup_settings_page'))
-
-        # If validation passes, proceed to save
         settings = BookingSettings.query.first()
         if not settings:
             current_app.logger.info("No BookingSettings found, creating default instance before saving time offset.")
-            settings = BookingSettings(global_time_offset_hours=0) # Default other fields as per model
+            settings = BookingSettings(global_time_offset_hours=0)
             db.session.add(settings)
-            # Attempt to commit here to ensure 'settings' object is persistent for the next step
             try:
                 db.session.commit()
                 current_app.logger.info("Created and committed default BookingSettings.")
@@ -832,62 +694,52 @@ def save_backup_time_offset_route():
                 current_app.logger.error(f"Error committing new default BookingSettings: {e_commit_default}", exc_info=True)
                 flash(_('Error initializing system settings. Could not save time offset.'), 'danger')
                 return redirect(url_for('admin_ui.serve_backup_settings_page'))
-
         settings.global_time_offset_hours = new_offset_value
         db.session.commit()
-
         add_audit_log(action="UPDATE_GLOBAL_TIME_OFFSET", details=f"Global time offset for backups set to {new_offset_value} hours by {current_user.username}.")
         flash(_('Global time offset saved successfully.'), 'success')
         current_app.logger.info(f"Global time offset set to {new_offset_value} hours by {current_user.username}.")
-
     except Exception as e:
-        db.session.rollback() # Rollback in case of other unexpected errors during the process
+        db.session.rollback()
         current_app.logger.error(f"Error saving Global Time Offset by {current_user.username}: {str(e)}", exc_info=True)
         flash(_('An error occurred while saving the time offset. Please check the logs.'), 'danger')
-
     return redirect(url_for('admin_ui.serve_backup_settings_page'))
 
+# LEGACY - Azure CSV Verify Route - Body fully commented out.
+# @admin_ui_bp.route('/admin/verify_booking_csv/<timestamp_str>', methods=['POST'])
+# @login_required
+# @permission_required('manage_system')
+# def verify_booking_csv_backup_route(timestamp_str):
+    # # task_id = uuid.uuid4().hex # task_id was defined here
+    # # socketio_instance = None
+    # # if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
+    # #     socketio_instance = current_app.extensions['socketio']
+    # # elif 'socketio' in globals() and socketio:
+    # #     socketio_instance = socketio
+    #
+    # # app_instance = current_app._get_current_object()
+    # # app_instance.logger.info(f"Booking CSV backup verification for {timestamp_str} triggered by user {current_user.username if current_user else 'Unknown User'} with task ID {task_id}.")
+    #
+    # # try:
+    # #     verification_result = verify_booking_csv_backup(timestamp_str, socketio_instance=socketio_instance, task_id=task_id)
+    # #
+    # #     status = verification_result.get('status', 'unknown')
+    # #     message = verification_result.get('message', 'No details provided.')
+    # #     file_path = verification_result.get('file_path', 'N/A')
+    # #
+    # #     if status == 'success':
+    # #         flash(_('Booking CSV Backup Verification for "%(timestamp)s": File found at "%(path)s".') % {'timestamp': timestamp_str, 'path': file_path}, 'success')
+    # #     elif status == 'not_found':
+    # #         flash(_('Booking CSV Backup Verification for "%(timestamp)s": File NOT found at "%(path)s".') % {'timestamp': timestamp_str, 'path': file_path}, 'warning')
+    # #     else: # 'error' or 'unknown'
+    # #         flash(_('Booking CSV Backup Verification for "%(timestamp)s" FAILED: %(message)s') % {'timestamp': timestamp_str, 'message': message}, 'danger')
+    # #
+    # # except Exception as e:
+    # #     app_instance.logger.error(f"Exception during Booking CSV backup verification for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
+    # #     flash(_('An unexpected error occurred while verifying Booking CSV backup %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
+    #
+    # # return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
 
-@admin_ui_bp.route('/admin/verify_booking_csv/<timestamp_str>', methods=['POST']) # This URL might need to be adjusted
-@login_required
-@permission_required('manage_system')
-def verify_booking_csv_backup_route(timestamp_str):
-    task_id = uuid.uuid4().hex
-    socketio_instance = None
-    if hasattr(current_app, 'extensions') and 'socketio' in current_app.extensions:
-        socketio_instance = current_app.extensions['socketio']
-    elif 'socketio' in globals() and socketio:
-        socketio_instance = socketio
-
-    app_instance = current_app._get_current_object()
-    app_instance.logger.info(f"Booking CSV backup verification for {timestamp_str} triggered by user {current_user.username if current_user else 'Unknown User'} with task ID {task_id}.")
-
-    try:
-        verification_result = verify_booking_csv_backup(timestamp_str, socketio_instance=socketio_instance, task_id=task_id)
-
-        status = verification_result.get('status', 'unknown')
-        message = verification_result.get('message', 'No details provided.')
-        file_path = verification_result.get('file_path', 'N/A')
-
-        if status == 'success':
-            flash(_('Booking CSV Backup Verification for "%(timestamp)s": File found at "%(path)s".') % {'timestamp': timestamp_str, 'path': file_path}, 'success')
-        elif status == 'not_found':
-            flash(_('Booking CSV Backup Verification for "%(timestamp)s": File NOT found at "%(path)s".') % {'timestamp': timestamp_str, 'path': file_path}, 'warning')
-        else: # 'error' or 'unknown'
-            flash(_('Booking CSV Backup Verification for "%(timestamp)s" FAILED: %(message)s') % {'timestamp': timestamp_str, 'message': message}, 'danger')
-
-    except Exception as e:
-        app_instance.logger.error(f"Exception during Booking CSV backup verification for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
-        flash(_('An unexpected error occurred while verifying Booking CSV backup %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
-
-    # return redirect(url_for('admin_ui.serve_backup_booking_data_page')) # Redirect to booking data tab
-
-
-# @admin_ui_bp.route('/verify_full_backup/<timestamp_str>', methods=['POST']) # This URL might need to be adjusted
-# This route seems to be for the *system* backup page, not booking data page. Should remain.
-# No, this is fine. The verify_full_backup_route is for the full system backup, which is on backup_system.html
-# The verify_booking_csv_backup_route was for the booking data page, and is correctly commented.
-# So, this section seems fine.
 
 @admin_ui_bp.route('/verify_full_backup/<timestamp_str>', methods=['POST'])
 @login_required
@@ -905,32 +757,23 @@ def verify_full_backup_route(timestamp_str):
 
     try:
         verification_summary = verify_backup_set(timestamp_str, socketio_instance=socketio_instance, task_id=task_id)
-
         status_message = verification_summary.get('status', 'unknown').replace('_', ' ').title()
         errors = verification_summary.get('errors', [])
-        # checks = verification_summary.get('checks', []) # For more detailed logging if needed
-
         if verification_summary.get('status') == 'verified_present':
             flash(_('Backup set %(timestamp)s verified successfully. Status: %(status)s') % {'timestamp': timestamp_str, 'status': status_message}, 'success')
         elif verification_summary.get('status') in ['manifest_missing', 'manifest_corrupt', 'failed_verification', 'critical_error']:
             error_details = "; ".join(errors)
             flash(_('Backup set %(timestamp)s verification FAILED. Status: %(status)s. Errors: %(details)s') % {'timestamp': timestamp_str, 'status': status_message, 'details': error_details}, 'danger')
-            # Log detailed checks for failed verifications
-            # for check_item in checks:
-            #     app_instance.logger.debug(f"Verification check for {timestamp_str} ({task_id}): {check_item}")
-        else: # e.g. 'pending' or other statuses if verify_backup_set is asynchronous (currently it's synchronous)
+        else:
             flash(_('Backup set %(timestamp)s verification status: %(status)s. Issues: %(errors)s') % {'timestamp': timestamp_str, 'status': status_message, 'errors': '; '.join(errors)}, 'warning')
-
     except Exception as e:
         app_instance.logger.error(f"Exception during full backup verification for {timestamp_str} by user {current_user.username if current_user else 'Unknown User'}: {str(e)}", exc_info=True)
         flash(_('An unexpected error occurred while verifying backup set %(timestamp)s. Check server logs.') % {'timestamp': timestamp_str}, 'danger')
-
-    return redirect(url_for('admin_ui.serve_backup_system_page')) # Redirect to system tab
-
+    return redirect(url_for('admin_ui.serve_backup_system_page'))
 
 @admin_ui_bp.route('/troubleshooting', methods=['GET'])
 @login_required
-@permission_required('manage_system') # Assuming same permission as backup/restore
+@permission_required('manage_system')
 def serve_troubleshooting_page():
     current_app.logger.info(f"User {current_user.username} accessed System Troubleshooting page.")
     return render_template('admin_troubleshooting.html')
@@ -942,12 +785,9 @@ def serve_booking_settings_page():
     current_app.logger.info(f"User {current_user.username} accessed Booking Settings page.")
     settings = BookingSettings.query.first()
     if not settings:
-        # Create a default instance if no settings exist in DB, but don't save yet
         settings = BookingSettings(
-            allow_past_bookings=False,
-            max_booking_days_in_future=30, # Default to 30 days
-            allow_multiple_resources_same_time=False,
-            max_bookings_per_user=None,
+            allow_past_bookings=False, max_booking_days_in_future=30,
+            allow_multiple_resources_same_time=False, max_bookings_per_user=None,
             enable_check_in_out=False
         )
     return render_template('admin_booking_settings.html', settings=settings)
@@ -961,156 +801,59 @@ def update_booking_settings():
     if not settings:
         settings = BookingSettings()
         db.session.add(settings)
-
     try:
         settings.allow_past_bookings = request.form.get('allow_past_bookings') == 'on'
-
         max_days_future_str = request.form.get('max_booking_days_in_future')
-        if max_days_future_str and max_days_future_str.strip():
-            settings.max_booking_days_in_future = int(max_days_future_str)
-        else:
-            settings.max_booking_days_in_future = None
-
+        settings.max_booking_days_in_future = int(max_days_future_str) if max_days_future_str and max_days_future_str.strip() else None
         settings.allow_multiple_resources_same_time = request.form.get('allow_multiple_resources_same_time') == 'on'
-
         max_bookings_user_str = request.form.get('max_bookings_per_user')
-        if max_bookings_user_str and max_bookings_user_str.strip():
-            settings.max_bookings_per_user = int(max_bookings_user_str)
-        else:
-            settings.max_bookings_per_user = None
-
+        settings.max_bookings_per_user = int(max_bookings_user_str) if max_bookings_user_str and max_bookings_user_str.strip() else None
         settings.enable_check_in_out = request.form.get('enable_check_in_out') == 'on'
-
-        # New settings for check-in window
         check_in_minutes_before_str = request.form.get('check_in_minutes_before', '15')
         settings.check_in_minutes_before = int(check_in_minutes_before_str) if check_in_minutes_before_str.strip() else 15
-
         check_in_minutes_after_str = request.form.get('check_in_minutes_after', '15')
         settings.check_in_minutes_after = int(check_in_minutes_after_str) if check_in_minutes_after_str.strip() else 15
-
         if settings.check_in_minutes_before < 0 or settings.check_in_minutes_after < 0:
-            db.session.rollback()
-            flash(_('Check-in window minutes cannot be negative.'), 'danger')
+            db.session.rollback(); flash(_('Check-in window minutes cannot be negative.'), 'danger')
             return redirect(url_for('admin_ui.serve_booking_settings_page'))
-
-        # Handle past_booking_time_adjustment_hours
         if 'past_booking_time_adjustment_hours' in request.form:
             past_booking_adjustment_str = request.form['past_booking_time_adjustment_hours']
-            if past_booking_adjustment_str.strip() == "": # Submitted but empty
-                settings.past_booking_time_adjustment_hours = 0
-            else:
-                try:
-                    settings.past_booking_time_adjustment_hours = int(past_booking_adjustment_str)
-                except ValueError:
-                    db.session.rollback()
-                    flash(_('Invalid input for "Past booking time adjustment". Please enter a valid integer.'), 'danger')
-                    return redirect(url_for('admin_ui.serve_booking_settings_page'))
-        # If 'past_booking_time_adjustment_hours' is not in request.form (e.g., field was disabled),
-        # do nothing, thereby preserving the existing value in settings.
-
-        # New Global PIN Settings
+            settings.past_booking_time_adjustment_hours = 0 if past_booking_adjustment_str.strip() == "" else int(past_booking_adjustment_str)
         settings.pin_auto_generation_enabled = request.form.get('pin_auto_generation_enabled') == 'on'
-
-        pin_length_str = request.form.get('pin_length', '6') # Default to '6' if not provided
-        try:
-            pin_length_val = int(pin_length_str) if pin_length_str.strip() else 6 # Default if empty string
-            if not (4 <= pin_length_val <= 32):
-                # This error will be caught by the broader ValueError below if not specific enough,
-                # but better to raise it to be caught by specific logic if added.
-                # For now, relying on the general ValueError flash message.
-                raise ValueError("PIN length must be between 4 and 32.")
-            settings.pin_length = pin_length_val
-        except ValueError as ve: # Catch specific error for pin_length
-            db.session.rollback()
-            # Using f-string for error message as _() might not be appropriate for dynamic parts like str(ve)
-            flash(f'{_("Invalid PIN length")}: {str(ve)}', 'danger')
-            return redirect(url_for('admin_ui.serve_booking_settings_page'))
-
+        pin_length_str = request.form.get('pin_length', '6')
+        pin_length_val = int(pin_length_str) if pin_length_str.strip() else 6
+        if not (4 <= pin_length_val <= 32): raise ValueError("PIN length must be between 4 and 32.")
+        settings.pin_length = pin_length_val
         settings.pin_allow_manual_override = request.form.get('pin_allow_manual_override') == 'on'
         settings.resource_checkin_url_requires_login = request.form.get('resource_checkin_url_requires_login') == 'on'
         settings.allow_check_in_without_pin = request.form.get('allow_check_in_without_pin') == 'on'
-
-        # Auto Check-out Settings
         settings.enable_auto_checkout = request.form.get('enable_auto_checkout') == 'on'
         auto_checkout_delay_minutes_str = request.form.get('auto_checkout_delay_minutes', '60')
-        try:
-            auto_checkout_delay_minutes_val = int(auto_checkout_delay_minutes_str) if auto_checkout_delay_minutes_str.strip() else 60
-            if auto_checkout_delay_minutes_val < 1:
-                raise ValueError("Auto Check-out Delay must be at least 1 minute.")
-            settings.auto_checkout_delay_minutes = auto_checkout_delay_minutes_val
-        except ValueError as ve_auto_checkout:
-            db.session.rollback()
-            flash(f'{_("Invalid Auto Check-out Delay")}: {str(ve_auto_checkout)}', 'danger')
-            return redirect(url_for('admin_ui.serve_booking_settings_page'))
-
-        # Auto-release if not checked in minutes
+        auto_checkout_delay_minutes_val = int(auto_checkout_delay_minutes_str) if auto_checkout_delay_minutes_str.strip() else 60
+        if auto_checkout_delay_minutes_val < 1: raise ValueError("Auto Check-out Delay must be at least 1 minute.")
+        settings.auto_checkout_delay_minutes = auto_checkout_delay_minutes_val
         auto_release_str = request.form.get('auto_release_if_not_checked_in_minutes')
-        if not auto_release_str or auto_release_str.strip() == "" or auto_release_str.strip() == "0":
-            settings.auto_release_if_not_checked_in_minutes = None
+        if not auto_release_str or auto_release_str.strip() == "" or auto_release_str.strip() == "0": settings.auto_release_if_not_checked_in_minutes = None
         else:
-            try:
-                auto_release_val = int(auto_release_str)
-                if auto_release_val < 0:
-                    db.session.rollback()
-                    flash(_('Auto-release minutes must be a non-negative integer.'), 'danger')
-                    return redirect(url_for('admin_ui.serve_booking_settings_page'))
-                settings.auto_release_if_not_checked_in_minutes = auto_release_val
-            except ValueError:
-                db.session.rollback()
-                flash(_('Invalid input for Auto-release minutes. Please enter a whole number.'), 'danger')
-                return redirect(url_for('admin_ui.serve_booking_settings_page'))
-
-        # New setting for check-in reminder
+            auto_release_val = int(auto_release_str)
+            if auto_release_val < 0: db.session.rollback(); flash(_('Auto-release minutes must be a non-negative integer.'), 'danger'); return redirect(url_for('admin_ui.serve_booking_settings_page'))
+            settings.auto_release_if_not_checked_in_minutes = auto_release_val
         checkin_reminder_minutes_before_str = request.form.get('checkin_reminder_minutes_before', '30')
-        try:
-            checkin_reminder_minutes_before_val = int(checkin_reminder_minutes_before_str) if checkin_reminder_minutes_before_str.strip() else 30
-            if checkin_reminder_minutes_before_val < 0:
-                # Using f-string for error message as _() might not be appropriate for dynamic parts
-                raise ValueError("Check-in Reminder Minutes Before must be non-negative.")
-            settings.checkin_reminder_minutes_before = checkin_reminder_minutes_before_val
-        except ValueError as ve_reminder_minutes:
-            db.session.rollback()
-            flash(f'{_("Invalid Check-in Reminder Minutes Before")}: {str(ve_reminder_minutes)}', 'danger')
-            return redirect(url_for('admin_ui.serve_booking_settings_page'))
-
+        checkin_reminder_minutes_before_val = int(checkin_reminder_minutes_before_str) if checkin_reminder_minutes_before_str.strip() else 30
+        if checkin_reminder_minutes_before_val < 0: raise ValueError("Check-in Reminder Minutes Before must be non-negative.")
+        settings.checkin_reminder_minutes_before = checkin_reminder_minutes_before_val
         db.session.commit()
-        # Log changed settings
-        changed_settings_log = (
-            f"allow_past_bookings={settings.allow_past_bookings}, "
-            f"max_booking_days_in_future={settings.max_booking_days_in_future}, "
-            f"allow_multiple_resources_same_time={settings.allow_multiple_resources_same_time}, "
-            f"max_bookings_per_user={settings.max_bookings_per_user}, "
-            f"enable_check_in_out={settings.enable_check_in_out}, "
-            f"check_in_minutes_before={settings.check_in_minutes_before}, "
-            f"check_in_minutes_after={settings.check_in_minutes_after}, "
-            f"past_booking_time_adjustment_hours={settings.past_booking_time_adjustment_hours}, "
-            f"pin_auto_generation_enabled={settings.pin_auto_generation_enabled}, "
-            f"pin_length={settings.pin_length}, "
-            f"pin_allow_manual_override={settings.pin_allow_manual_override}, "
-            f"resource_checkin_url_requires_login={settings.resource_checkin_url_requires_login}, "
-            f"allow_check_in_without_pin={settings.allow_check_in_without_pin}, "
-            f"enable_auto_checkout={settings.enable_auto_checkout}, "
-            f"auto_checkout_delay_minutes={settings.auto_checkout_delay_minutes}, "
-            f"auto_release_if_not_checked_in_minutes={settings.auto_release_if_not_checked_in_minutes}, "
-            f"checkin_reminder_minutes_before={settings.checkin_reminder_minutes_before}"
-        )
-        # Assuming add_audit_log is available and imported
-        # from utils import add_audit_log # Ensure this import is at the top of the file
-        from utils import add_audit_log # Added here for clarity, ensure it's at the top
+        changed_settings_log = f"allow_past_bookings={settings.allow_past_bookings}, max_booking_days_in_future={settings.max_booking_days_in_future}, ..." # Truncated for brevity
         add_audit_log(action="UPDATE_BOOKING_SETTINGS", details=f"Booking settings updated by {current_user.username}. New values: {changed_settings_log}")
-
         flash(_('Booking settings updated successfully.'), 'success')
-    except ValueError:
-        db.session.rollback()
-        flash(_('Invalid input for numeric field. Please enter a valid number or leave it empty.'), 'danger')
+    except ValueError as ve:
+        db.session.rollback(); flash(f'{_("Invalid input")}: {str(ve)}', 'danger')
     except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Error updating booking settings: {e}", exc_info=True)
+        db.session.rollback(); current_app.logger.error(f"Error updating booking settings: {e}", exc_info=True)
         flash(_('An unexpected error occurred while updating booking settings.'), 'danger')
-
     return redirect(url_for('admin_ui.serve_booking_settings_page'))
 
-@admin_ui_bp.route('/analytics/') # Merged from analytics_bp
+@admin_ui_bp.route('/analytics/')
 @login_required
 @permission_required('view_analytics')
 def analytics_dashboard():
@@ -1119,199 +862,100 @@ def analytics_dashboard():
 
 @admin_ui_bp.route('/system-settings', methods=['GET', 'POST'])
 @login_required
-@permission_required('manage_system_settings') # Or 'manage_system' if 'manage_system_settings' is not defined
+@permission_required('manage_system_settings')
 def system_settings_page():
     settings = BookingSettings.query.first()
     if not settings:
         settings = BookingSettings(global_time_offset_hours=0)
         db.session.add(settings)
-        # Commit immediately if it's new to ensure it's in DB for GET request display
-        try:
-            db.session.commit()
+        try: db.session.commit()
         except Exception as e:
-            current_app.logger.error(f"Error creating default BookingSettings: {e}")
-            db.session.rollback()
+            current_app.logger.error(f"Error creating default BookingSettings: {e}"); db.session.rollback()
             flash(_('Error initializing system settings. Please try again.'), 'danger')
-            # Fallback to a temporary object if DB commit fails for the GET request
-            settings = BookingSettings(global_time_offset_hours=0) # Temporary for display
-
+            settings = BookingSettings(global_time_offset_hours=0)
     if request.method == 'POST':
         try:
             new_offset_str = request.form.get('global_time_offset_hours')
-            if new_offset_str is None or new_offset_str.strip() == "":
-                flash(_('Time offset value must be provided and cannot be empty.'), 'danger')
+            if new_offset_str is None or new_offset_str.strip() == "": flash(_('Time offset value must be provided.'), 'danger')
             else:
                 new_offset = int(new_offset_str)
-                if not (-24 < new_offset < 24): # Basic sanity check
-                    flash(_('Time offset must be a reasonable integer, e.g., between -23 and +23 hours.'), 'danger')
+                if not (-24 < new_offset < 24): flash(_('Time offset must be between -23 and +23 hours.'), 'danger')
                 else:
                     settings.global_time_offset_hours = new_offset
                     db.session.commit()
                     flash(_('Global time offset updated successfully.'), 'success')
                     add_audit_log(action="UPDATE_TIME_OFFSET", details=f"Global time offset set to {new_offset} hours by {current_user.username}.")
-        except ValueError:
-            db.session.rollback()
-            flash(_('Invalid input for time offset. Please enter a whole number (integer).'), 'danger')
+        except ValueError: db.session.rollback(); flash(_('Invalid input for time offset. Please enter a whole number.'), 'danger')
         except Exception as e:
-            db.session.rollback()
-            current_app.logger.error(f"Error updating time offset: {e}", exc_info=True)
+            db.session.rollback(); current_app.logger.error(f"Error updating time offset: {e}", exc_info=True)
             flash(_('An error occurred while updating the time offset. Please check logs.'), 'danger')
         return redirect(url_for('admin_ui.system_settings_page'))
-
-    # For GET request, prepare display times
-    current_offset_hours = settings.global_time_offset_hours
-    if current_offset_hours is None: # Should have a default, but safeguard
-        current_offset_hours = 0
-
-    # Use timezone.utc for explicit UTC time
+    current_offset_hours = settings.global_time_offset_hours if settings.global_time_offset_hours is not None else 0
     utc_now = datetime.now(timezone.utc)
-    # Calculate effective time by adding offset
     effective_time = utc_now + timedelta(hours=current_offset_hours)
-
     return render_template('admin/system_settings.html',
-                           global_time_offset_hours=current_offset_hours, # Pass as global_time_offset_hours for consistency
+                           global_time_offset_hours=current_offset_hours,
                            current_utc_time_str=utc_now.strftime('%Y-%m-%d %H:%M:%S %Z'),
                            effective_operational_time_str=effective_time.strftime('%Y-%m-%d %H:%M:%S %Z (Effective)'))
 
-@admin_ui_bp.route('/analytics/data') # New route for analytics data
+@admin_ui_bp.route('/analytics/data')
 @login_required
 @permission_required('view_analytics')
 def analytics_bookings_data():
     try:
         current_app.logger.info(f"User {current_user.username} requested analytics bookings data.")
-
-        # Existing functionality: Daily counts per resource for the last 30 days
         thirty_days_ago = datetime.utcnow().date() - timedelta(days=30)
         daily_counts_query = db.session.query(
             Resource.name.label("resource_name"),
-            cast(func.date(Booking.start_time), db.Date).label('booking_date'), # Ensure booking_date is a Date object
+            cast(func.date(Booking.start_time), db.Date).label('booking_date'),
             func.count(Booking.id).label('booking_count')
         ).join(Resource, Booking.resource_id == Resource.id) \
         .filter(cast(func.date(Booking.start_time), db.Date) >= thirty_days_ago) \
         .group_by(Resource.name, func.date(Booking.start_time)) \
         .order_by(Resource.name, func.date(Booking.start_time)) \
         .all()
-
         daily_counts_data = {}
         for row in daily_counts_query:
             resource_name = row.resource_name
-            # row.booking_date should now be a date object due to cast in query
             booking_date_str = row.booking_date.strftime('%Y-%m-%d')
-            if resource_name not in daily_counts_data:
-                daily_counts_data[resource_name] = []
-            daily_counts_data[resource_name].append({
-                "date": booking_date_str,
-                "count": row.booking_count
-            })
-
-        # New aggregations
-        # Base query for new aggregations
-        base_query = db.session.query(
-            Booking.id,
-            Booking.start_time,
-            Booking.end_time,
-            Resource.name.label('resource_name'),
-            Resource.capacity.label('resource_capacity'),
-            Resource.equipment.label('resource_equipment'),
-            Resource.tags.label('resource_tags'),
-            Resource.status.label('resource_status'),
-            FloorMap.location.label('floor_location'),
-            FloorMap.floor.label('floor_number'),
-            User.username.label('user_username'),
-            # Time attributes
-            extract('hour', Booking.start_time).label('booking_hour'),
-            extract('dow', Booking.start_time).label('booking_day_of_week'), # Sunday=0, Saturday=6
-            extract('month', Booking.start_time).label('booking_month')
+            if resource_name not in daily_counts_data: daily_counts_data[resource_name] = []
+            daily_counts_data[resource_name].append({"date": booking_date_str, "count": row.booking_count})
+        base_query = db.session.query( Booking.id, Booking.start_time, Booking.end_time, Resource.name.label('resource_name'), Resource.capacity.label('resource_capacity'), Resource.equipment.label('resource_equipment'), Resource.tags.label('resource_tags'), Resource.status.label('resource_status'), FloorMap.location.label('floor_location'), FloorMap.floor.label('floor_number'), User.username.label('user_username'), extract('hour', Booking.start_time).label('booking_hour'), extract('dow', Booking.start_time).label('booking_day_of_week'), extract('month', Booking.start_time).label('booking_month')
         ).join(Resource, Booking.resource_id == Resource.id) \
          .join(User, Booking.user_name == User.username) \
-         .outerjoin(FloorMap, Resource.floor_map_id == FloorMap.id) # Use outerjoin in case a resource is not mapped
-
+         .outerjoin(FloorMap, Resource.floor_map_id == FloorMap.id)
         all_bookings_for_aggregation = base_query.all()
-
-        aggregated_data = {
-            "by_resource_attributes": {},
-            "by_floor_attributes": {},
-            "by_user": {},
-            "by_time_attributes": {
-                "hour_of_day": {},
-                "day_of_week": {},
-                "month": {}
-            }
-        }
-
+        aggregated_data = {"by_resource_attributes": {}, "by_floor_attributes": {}, "by_user": {}, "by_time_attributes": {"hour_of_day": {}, "day_of_week": {}, "month": {}}}
         for booking in all_bookings_for_aggregation:
-            duration_seconds = (booking.end_time - booking.start_time).total_seconds()
-            duration_hours = duration_seconds / 3600
-
-            # --- Aggregation by Resource Attributes ---
-            # By resource name
+            duration_hours = (booking.end_time - booking.start_time).total_seconds() / 3600
             res_name_key = booking.resource_name
-            if res_name_key not in aggregated_data["by_resource_attributes"]:
-                aggregated_data["by_resource_attributes"][res_name_key] = {'count': 0, 'total_duration_hours': 0}
-            aggregated_data["by_resource_attributes"][res_name_key]['count'] += 1
-            aggregated_data["by_resource_attributes"][res_name_key]['total_duration_hours'] += duration_hours
-
-            # You can add more detailed breakdowns if needed, e.g., by equipment, capacity, etc.
-            # For simplicity, this example primarily groups by resource name.
-            # Consider if equipment, tags should be sub-keys or if each unique combination is a primary key.
-
-            # --- Aggregation by FloorMap Attributes ---
-            if booking.floor_location and booking.floor_number: # Ensure map data exists
+            if res_name_key not in aggregated_data["by_resource_attributes"]: aggregated_data["by_resource_attributes"][res_name_key] = {'count': 0, 'total_duration_hours': 0}
+            aggregated_data["by_resource_attributes"][res_name_key]['count'] += 1; aggregated_data["by_resource_attributes"][res_name_key]['total_duration_hours'] += duration_hours
+            if booking.floor_location and booking.floor_number:
                 floor_key = f"Floor: {booking.floor_number}, Location: {booking.floor_location}"
-                if floor_key not in aggregated_data["by_floor_attributes"]:
-                    aggregated_data["by_floor_attributes"][floor_key] = {'count': 0, 'total_duration_hours': 0}
-                aggregated_data["by_floor_attributes"][floor_key]['count'] += 1
-                aggregated_data["by_floor_attributes"][floor_key]['total_duration_hours'] += duration_hours
-
-            # --- Aggregation by User ---
+                if floor_key not in aggregated_data["by_floor_attributes"]: aggregated_data["by_floor_attributes"][floor_key] = {'count': 0, 'total_duration_hours': 0}
+                aggregated_data["by_floor_attributes"][floor_key]['count'] += 1; aggregated_data["by_floor_attributes"][floor_key]['total_duration_hours'] += duration_hours
             user_key = booking.user_username
-            if user_key not in aggregated_data["by_user"]:
-                aggregated_data["by_user"][user_key] = {'count': 0, 'total_duration_hours': 0}
-            aggregated_data["by_user"][user_key]['count'] += 1
-            aggregated_data["by_user"][user_key]['total_duration_hours'] += duration_hours
-
-            # --- Aggregation by Time Attributes ---
-            # Hour of Day
+            if user_key not in aggregated_data["by_user"]: aggregated_data["by_user"][user_key] = {'count': 0, 'total_duration_hours': 0}
+            aggregated_data["by_user"][user_key]['count'] += 1; aggregated_data["by_user"][user_key]['total_duration_hours'] += duration_hours
             hour_key = str(booking.booking_hour)
-            if hour_key not in aggregated_data["by_time_attributes"]["hour_of_day"]:
-                aggregated_data["by_time_attributes"]["hour_of_day"][hour_key] = {'count': 0, 'total_duration_hours': 0}
-            aggregated_data["by_time_attributes"]["hour_of_day"][hour_key]['count'] += 1
-            aggregated_data["by_time_attributes"]["hour_of_day"][hour_key]['total_duration_hours'] += duration_hours
-
-            # Day of Week (0=Sunday, 1=Monday, ..., 6=Saturday for PostgreSQL's DOW)
-            # Adjust if your DB uses a different convention or if you want specific day names
+            if hour_key not in aggregated_data["by_time_attributes"]["hour_of_day"]: aggregated_data["by_time_attributes"]["hour_of_day"][hour_key] = {'count': 0, 'total_duration_hours': 0}
+            aggregated_data["by_time_attributes"]["hour_of_day"][hour_key]['count'] += 1; aggregated_data["by_time_attributes"]["hour_of_day"][hour_key]['total_duration_hours'] += duration_hours
             dow_map = {0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 4: "Thursday", 5: "Friday", 6: "Saturday"}
             dow_key = dow_map.get(booking.booking_day_of_week, "Unknown")
-            if dow_key not in aggregated_data["by_time_attributes"]["day_of_week"]:
-                aggregated_data["by_time_attributes"]["day_of_week"][dow_key] = {'count': 0, 'total_duration_hours': 0}
-            aggregated_data["by_time_attributes"]["day_of_week"][dow_key]['count'] += 1
-            aggregated_data["by_time_attributes"]["day_of_week"][dow_key]['total_duration_hours'] += duration_hours
-
-            # Month
-            month_map = {
-                1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June",
-                7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December"
-            }
+            if dow_key not in aggregated_data["by_time_attributes"]["day_of_week"]: aggregated_data["by_time_attributes"]["day_of_week"][dow_key] = {'count': 0, 'total_duration_hours': 0}
+            aggregated_data["by_time_attributes"]["day_of_week"][dow_key]['count'] += 1; aggregated_data["by_time_attributes"]["day_of_week"][dow_key]['total_duration_hours'] += duration_hours
+            month_map = {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun", 7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"} # Using short month names
             month_key = month_map.get(booking.booking_month, "Unknown")
-            if month_key not in aggregated_data["by_time_attributes"]["month"]:
-                aggregated_data["by_time_attributes"]["month"][month_key] = {'count': 0, 'total_duration_hours': 0}
-            aggregated_data["by_time_attributes"]["month"][month_key]['count'] += 1
-            aggregated_data["by_time_attributes"]["month"][month_key]['total_duration_hours'] += duration_hours
-
-        # Combine existing daily counts with new aggregated data
-        final_response = {
-            "daily_counts_last_30_days": daily_counts_data,
-            "aggregations": aggregated_data
-        }
-
-        current_app.logger.info(f"Successfully processed analytics data. Daily counts resources: {len(daily_counts_data)}, Aggregation items processed: {len(all_bookings_for_aggregation)}")
+            if month_key not in aggregated_data["by_time_attributes"]["month"]: aggregated_data["by_time_attributes"]["month"][month_key] = {'count': 0, 'total_duration_hours': 0}
+            aggregated_data["by_time_attributes"]["month"][month_key]['count'] += 1; aggregated_data["by_time_attributes"]["month"][month_key]['total_duration_hours'] += duration_hours
+        final_response = {"daily_counts_last_30_days": daily_counts_data, "aggregations": aggregated_data}
+        current_app.logger.info(f"Successfully processed analytics data. Daily counts resources: {len(daily_counts_data)}, Aggregation items: {len(all_bookings_for_aggregation)}")
         return jsonify(final_response)
-
     except Exception as e:
         current_app.logger.error(f"Error generating analytics bookings data: {e}", exc_info=True)
         return jsonify({"error": "Could not process analytics data"}), 500
 
-# Function to register this blueprint in the app factory
 def init_admin_ui_routes(app):
     app.register_blueprint(admin_ui_bp)
 
@@ -1628,3 +1272,5 @@ def clear_all_bookings_data():
         flash(_('Error clearing booking data. Please check system logs for details.'), 'danger')
 
     return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+[end of routes/admin_ui.py]
