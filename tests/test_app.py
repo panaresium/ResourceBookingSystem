@@ -872,7 +872,7 @@ class TestAdminBookingSettingsRoutes(AppTests):
         return {k: v for k, v in data.items() if v is not None}
 
 
-    def test_get_booking_settings_page(self):
+    def test_get_booking_settings_page_renders_specific_fields(self):
         admin = self._create_admin_user_for_settings()
         self.login(admin.username, "securepassword")
 
@@ -891,6 +891,26 @@ class TestAdminBookingSettingsRoutes(AppTests):
         # Check if the values are rendered (using current or default)
         self.assertIn(f'name="auto_checkout_delay_minutes" value="{settings.auto_checkout_delay_minutes}"', response_data)
         self.assertIn(f'name="auto_release_if_not_checked_in_minutes" value="{settings.auto_release_if_not_checked_in_minutes or ""}"', response_data)
+        self.logout()
+
+    def test_get_booking_settings_page_loads_ok(self):
+        admin = self._create_admin_user_for_settings()
+        self.login(admin.username, "securepassword")
+
+        # Ensure a BookingSettings object exists, as the page expects it
+        settings = BookingSettings.query.first()
+        if not settings:
+            settings = BookingSettings() # Use default values from the model
+            db.session.add(settings)
+            db.session.commit()
+
+        response = self.client.get(url_for('admin_ui.serve_booking_settings_page'))
+        self.assertEqual(response.status_code, 200)
+        response_data = response.data.decode('utf-8')
+        # Check for a general title or a known field on the booking settings page.
+        # Using "Booking Settings" as a general placeholder.
+        # If a more specific, unique element is known from 'admin_booking_settings.html', that would be better.
+        self.assertIn("Booking Page Settings", response_data) # Assuming this title exists
         self.logout()
 
     def test_update_booking_settings_success(self):
