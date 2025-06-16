@@ -585,7 +585,7 @@
                     availableBackupsTbody.innerHTML = `<tr><td colspan="${colCount}">{{ _("No backups available for this page.") }}</td></tr>`;
                     if(paginationNav) paginationNav.style.display = totalSystemBackupPages > 0 ? 'block' : 'none'; // Show nav if there are other pages
                     if(bulkDeleteButton) bulkDeleteButton.style.display = totalSystemBackupItems > 0 ? 'inline-block' : 'none';
-                    if(masterBackupCheckbox) masterBackupCheckbox.checked = false; masterBackupCheckbox.disabled = true;
+                    if(masterBackupCheckbox) { masterBackupCheckbox.checked = false; masterBackupCheckbox.disabled = true; }
                     if (totalSystemBackupItems === 0 && bulkDeleteButton) bulkDeleteButton.style.display = 'none'; // Specifically hide if no backups at all
                 } else {
                      if(bulkDeleteButton) bulkDeleteButton.style.display = 'inline-block';
