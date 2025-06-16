@@ -279,11 +279,11 @@
     // manualUnifiedBackup, restoreSelectedUnifiedBackup, deleteUnifiedBackup) remain unchanged from the previous version.
     // For brevity, their full code is not repeated here.
     function refreshUnifiedAzureBackupList() {
-        showProgressModal("{{ _('Loading Unified Azure JSON backups list...') }}");
+        // showProgressModal("{{ _('Loading Unified Azure JSON backups list...') }}"); // Removed
         fetch("{{ url_for('api_system.api_list_booking_data_backups') }}")
             .then(response => response.json())
             .then(data => {
-                hideProgressModal();
+                // hideProgressModal(); // Removed
                 if (data.success && data.backups) {
                     populateUnifiedBackupSelect(data.backups);
                     renderUnifiedBackupListForManagement(data.backups);
@@ -294,9 +294,13 @@
                 }
             })
             .catch(error => {
-                hideProgressModal(); console.error("{{ _('Error fetching Unified Azure JSON backups list:') }}", error);
+                // hideProgressModal(); // Removed
+                console.error("{{ _('Error fetching Unified Azure JSON backups list:') }}", error);
                 alert("{{ _('Error fetching Unified Azure JSON backups list.') }}");
                 populateUnifiedBackupSelect([]); renderUnifiedBackupListForManagement([]);
+            })
+            .finally(() => { // Simulating finally
+                loadFullBackupsForRestore();
             });
     }
 
@@ -444,11 +448,11 @@
     }
 
     function loadFullBackupsForRestore() {
-        showProgressModal("{{ _('Loading full system backups list...') }}");
+        // showProgressModal("{{ _('Loading full system backups list...') }}"); // Removed
         fetch("{{ url_for('api_system.api_list_backups') }}") // Ensure this API endpoint is correct
             .then(response => response.json())
             .then(data => {
-                hideProgressModal();
+                // hideProgressModal(); // Removed
                 const select = $('#full-backup-system-list');
                 select.empty();
                 if (data.backups && data.backups.length > 0) {
@@ -463,9 +467,12 @@
                 }
             })
             .catch(error => {
-                hideProgressModal();
+                // hideProgressModal(); // Removed
                 console.error("{{ _('Error fetching full system backups list:') }}", error);
                 alert("{{ _('Error fetching full system backups list.') }}");
+            })
+            .finally(() => { // Simulating finally
+                loadLegacyCsvBackups(1);
             });
     }
 
@@ -501,12 +508,12 @@
     }
 
     function loadCsvBackupsForRestore() { // For the dropdown
-        showProgressModal("{{ _('Loading legacy CSV backups list for dropdown...') }}");
+        // showProgressModal("{{ _('Loading legacy CSV backups list for dropdown...') }}"); // Removed
         // This might use a different endpoint or filter from loadLegacyCsvBackups if it's just for the select
         fetch("{{ url_for('api_system.api_list_booking_csv_backups') }}?page=1&per_page=1000") // Fetch many for dropdown
             .then(response => response.json())
             .then(data => {
-                hideProgressModal();
+                // hideProgressModal(); // Kept, this is the end of the chain
                 const select = $('#csv-backup-list');
                 select.empty();
                 if (data.backups && data.backups.length > 0) {
@@ -518,9 +525,12 @@
                 }
             })
             .catch(error => {
-                hideProgressModal();
+                // hideProgressModal(); // Kept, this is the end of the chain
                 console.error("{{ _('Error fetching CSV backups list for dropdown:') }}", error);
                 alert("{{ _('Error fetching CSV backups list for dropdown.') }}");
+            })
+            .finally(() => { // Simulating finally
+                 hideProgressModal(); // Ensure modal is hidden at the very end
             });
     }
 
@@ -545,11 +555,11 @@
     }
 
     function loadLegacyCsvBackups(page) { // For the table with pagination
-        showProgressModal("{{ _('Loading legacy CSV backups list for table...') }}");
+        // showProgressModal("{{ _('Loading legacy CSV backups list for table...') }}"); // Removed
         fetch(`{{ url_for('api_system.api_list_booking_csv_backups') }}?page=${page}&per_page=5`)
             .then(response => response.json())
             .then(data => {
-                hideProgressModal();
+                // hideProgressModal(); // Removed
                 const tableBody = $('#legacy-csv-table-body');
                 tableBody.empty();
                 if (data.backups && data.backups.length > 0) {
@@ -571,12 +581,15 @@
                     tableBody.append(`<tr><td colspan="4" class="text-center">{{ _("No legacy CSV backups found.") }}</td></tr>`);
                     $('#legacy-csv-pagination').empty();
                 }
-                loadCsvBackupsForRestore(); // Also refresh dropdown to keep it in sync
+                // loadCsvBackupsForRestore(); // Call is now at the end of the chain or in .finally
             })
             .catch(error => {
-                hideProgressModal();
+                // hideProgressModal(); // Removed
                 console.error("{{ _('Error fetching legacy CSV backups for table:') }}", error);
                 alert("{{ _('Error fetching legacy CSV backups for table.') }}");
+            })
+            .finally(() => { // Simulating finally
+                loadCsvBackupsForRestore();
             });
     }
 
@@ -694,13 +707,15 @@
     $(document).ready(function() {
         updateServerTime(); setInterval(updateServerTime, 60000);
 
-        // Unified Azure JSON Backups
+        showProgressModal("{{ _('Loading initial page data...') }}");
+
+        // Unified Azure JSON Backups - This will start the chain
         refreshUnifiedAzureBackupList();
 
         // Legacy / Other sections
-        loadFullBackupsForRestore();    // For "Restore Bookings from Full System Backup" dropdown
-        // loadCsvBackupsForRestore();  // This is called within loadLegacyCsvBackups now
-        loadLegacyCsvBackups(1);        // For "Available Booking CSV Backups (Legacy)" table & its dropdown
+        // loadFullBackupsForRestore();    // Called by refreshUnifiedAzureBackupList
+        // loadLegacyCsvBackups(1);        // Called by loadFullBackupsForRestore
+        // loadCsvBackupsForRestore();  // Called by loadLegacyCsvBackups
 
         // Check if socket event for manualUnifiedBackup needs correction.
         // It was 'booking_data_protection_backup_progress', changed to 'full_booking_data_backup_progress'.
