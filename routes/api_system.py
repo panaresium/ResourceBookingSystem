@@ -379,7 +379,7 @@ def api_download_booking_data_backup(backup_type, filename):
 def get_unified_backup_schedule():
     current_app.logger.info(f"User {current_user.username} fetching unified backup schedule settings.")
     try:
-        settings = load_unified_backup_schedule_settings()
+        settings = load_unified_backup_schedule_settings(current_app) # Pass current_app
         return jsonify(settings), 200
     except Exception as e:
         current_app.logger.exception("Error fetching unified backup schedule settings:")

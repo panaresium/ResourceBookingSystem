@@ -539,7 +539,8 @@ def create_app(config_object=config, testing=False): # Added testing parameter
             # or if the function itself is designed to fetch current_app.
             # If app_context is needed: with app.app_context(): unified_schedule_settings = load_unified_backup_schedule_settings()
             # However, load_unified_backup_schedule_settings uses current_app.config directly, which should be fine here.
-            unified_schedule_settings = load_unified_backup_schedule_settings()
+            # Updated: load_unified_backup_schedule_settings now requires 'app' argument.
+            unified_schedule_settings = load_unified_backup_schedule_settings(app)
             app.logger.info(f"Loaded unified backup schedule settings: {unified_schedule_settings}")
 
             # Remove Old Job Configuration for Incrementals (ID: scheduled_booking_data_protection_job)
