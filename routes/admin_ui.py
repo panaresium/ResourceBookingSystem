@@ -25,8 +25,7 @@ from utils import load_scheduler_settings, save_scheduler_settings, DEFAULT_FULL
 import os
 import json
 from apscheduler.jobstores.base import JobLookupError
-# from scheduler_tasks import run_scheduled_booking_csv_backup, run_scheduled_incremental_booking_backup # run_scheduled_booking_csv_backup is legacy
-from scheduler_tasks import run_scheduled_incremental_booking_backup # Added run_scheduled_incremental_booking_backup
+# from scheduler_tasks import run_scheduled_booking_csv_backup # run_scheduled_booking_csv_backup is legacy
 from translations import _ # For flash messages and other translatable strings
 
 admin_ui_bp = Blueprint('admin_ui', __name__, url_prefix='/admin', template_folder='../templates')
