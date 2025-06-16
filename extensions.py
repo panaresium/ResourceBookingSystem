@@ -11,5 +11,5 @@ login_manager = LoginManager()
 oauth = OAuth()
 # mail = Mail() # Removed
 csrf = CSRFProtect()
-socketio = SocketIO()
+socketio = SocketIO(logger=True, engineio_logger=True)
 migrate = Migrate()
