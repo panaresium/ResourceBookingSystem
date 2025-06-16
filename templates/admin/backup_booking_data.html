@@ -479,7 +479,7 @@
             return;
         }
         showProgressModal("{{ _('Restoring bookings from system backup...') }}");
-        fetch("{{ url_for('api_system.restore_bookings_from_full_system_backup_api') }}", { // Ensure this API endpoint is correct
+        fetch("{{ url_for('api_system.api_restore_bookings_from_full_db') }}", { // Ensure this API endpoint is correct
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
             body: JSON.stringify({ backup_filename: selectedBackup })
