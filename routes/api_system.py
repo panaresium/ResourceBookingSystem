@@ -25,8 +25,9 @@ from utils import (
     _save_schedule_to_json,
     load_unified_backup_schedule_settings,
     save_unified_backup_schedule_settings,
+    reschedule_unified_backup_jobs, # Moved from app_factory
 )
-from app_factory import reschedule_unified_backup_jobs # Added for rescheduling
+# from app_factory import reschedule_unified_backup_jobs # Removed
 
 # Conditional imports for Azure Backup functionality
 # Ensure download_booking_data_json_backup is imported
