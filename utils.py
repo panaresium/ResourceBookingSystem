@@ -418,6 +418,12 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
     status_code = 200 # Or 207 if errors were genuinely processed
     return summary, status_code
 
+def _get_resource_configurations_data() -> list:
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
+    logger.warning("_get_resource_configurations_data is currently a STUB. Exporting resource configurations will not provide actual data.")
+    # Expected to return a list of resource data dictionaries.
+    return []
+
 def _import_resource_configurations_data(resources_data_list: list) -> tuple[int, int, list]:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.warning("_import_resource_configurations_data is currently a STUB. Import will not function correctly.")
