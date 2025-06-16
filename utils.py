@@ -475,10 +475,10 @@ def _save_schedule_to_json(data_to_save): # Example
     logger.debug(f"_save_schedule_to_json STUB with data: {data_to_save}")
     return True, "Stub save successful"
 
-def load_unified_backup_schedule_settings():
-    logger = current_app.logger if current_app else logging.getLogger(__name__)
-    config_file = current_app.config['UNIFIED_SCHEDULE_CONFIG_FILE']
-    default_settings = current_app.config['DEFAULT_UNIFIED_SCHEDULE_DATA']
+def load_unified_backup_schedule_settings(app): # app instance passed as argument
+    logger = app.logger # Use app.logger
+    config_file = app.config['UNIFIED_SCHEDULE_CONFIG_FILE'] # Use app.config
+    default_settings = app.config['DEFAULT_UNIFIED_SCHEDULE_DATA'] # Use app.config
 
     if not os.path.exists(config_file):
         logger.warning(f"Unified backup schedule file '{config_file}' not found. Returning default settings.")
@@ -615,7 +615,8 @@ def reschedule_unified_backup_jobs(app_instance):
     # If called from a place without app context, app_instance.config should be used by
     # load_unified_backup_schedule_settings, or settings passed to it.
     # For now, assuming it's called from api_system.py route, so app_context is available.
-    unified_schedule_settings = load_unified_backup_schedule_settings()
+    # THIS IS NOW CHANGED: load_unified_backup_schedule_settings now takes 'app'
+    unified_schedule_settings = load_unified_backup_schedule_settings(app_instance)
     app_instance.logger.info(f"Loaded settings for rescheduling: {unified_schedule_settings}")
 
     # Reschedule Incremental Backup Job
