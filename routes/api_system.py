@@ -31,9 +31,7 @@ from utils import (
 
 # Conditional imports for Azure Backup functionality
 # Ensure download_booking_data_json_backup is imported
-azure_backup_import_error_details = None
 try:
-    print("DEBUG api_system.py: Attempting to import from azure_backup...")
     from azure_backup import (
         create_full_backup,
         list_available_backups,
@@ -67,10 +65,7 @@ try:
         download_booking_data_json_backup # For downloading unified backups
     )
     import azure_backup # To access module-level constants if needed by moved functions
-    print("DEBUG api_system.py: Successfully imported from azure_backup.")
-except ImportError as e_azure_import:
-    azure_backup_import_error_details = str(e_azure_import)
-    print(f"DEBUG api_system.py: Failed to import from azure_backup. Error: {e_azure_import}")
+except ImportError:
     create_full_backup = None
     list_available_backups = None
     restore_full_backup = None
@@ -190,21 +185,18 @@ def api_manual_booking_data_backup_json():
 
     if not backup_booking_data_json_to_azure:
         current_app.logger.error("azure_backup.backup_booking_data_json_to_azure function not available.")
-        error_message = "Manual unified booking data backup function is not available on the server."
-        if azure_backup_import_error_details:
-            error_message += f" (Import Error Detail: {azure_backup_import_error_details})"
         if socketio:
             socketio.emit('booking_data_protection_backup_progress', {
                 'task_id': task_id,
-                'status': error_message, # Use the potentially detailed message
+                'status': 'Error: Unified backup function not available on server.',
                 'detail': 'CRITICAL_ERROR',
                 'level': 'ERROR'
             })
         return jsonify({
             'success': False,
-            'message': error_message,
+            'message': 'Manual unified booking data backup function is not available on the server.',
             'task_id': task_id
-        }), 501 # Changed to 501
+        }), 500
 
     try:
         success = backup_booking_data_json_to_azure(
@@ -251,10 +243,7 @@ def api_manual_booking_data_backup_json():
 def api_list_booking_data_backups():
     current_app.logger.info(f"User {current_user.username} requested list of unified booking data backups.")
     if not list_booking_data_json_backups:
-        error_message = "Functionality to list unified backups is not available."
-        if azure_backup_import_error_details:
-            error_message += f" (Import Error Detail: {azure_backup_import_error_details})"
-        return jsonify({'success': False, 'message': error_message, 'backups': []}), 501
+        return jsonify({'success': False, 'message': 'Functionality to list unified backups is not available.', 'backups': []}), 501
     try:
         backups = list_booking_data_json_backups() # This should return 'filename', 'type', 'timestamp_str' (ISO)
         return jsonify({'success': True, 'backups': backups}), 200
@@ -280,10 +269,7 @@ def api_unified_booking_data_point_in_time_restore(): # Renamed for clarity
 
     if not restore_booking_data_to_point_in_time:
         current_app.logger.error("azure_backup.restore_booking_data_to_point_in_time function not available.")
-        error_message = "Point-in-time restore function not available on server."
-        if azure_backup_import_error_details:
-            error_message += f" (Import Error Detail: {azure_backup_import_error_details})"
-        return jsonify({'success': False, 'message': error_message, 'task_id': task_id}), 501
+        return jsonify({'success': False, 'message': 'Point-in-time restore function not available on server.', 'task_id': task_id}), 501
 
     try:
         summary = restore_booking_data_to_point_in_time(
@@ -327,10 +313,7 @@ def api_delete_booking_data_backup():
     current_app.logger.info(f"User {current_user.username} initiated deletion of unified booking data backup (Task {task_id}): {filename}, Type: {backup_type}")
 
     if not delete_booking_data_json_backup:
-        error_message = "Delete function for unified backups not available."
-        if azure_backup_import_error_details:
-            error_message += f" (Import Error Detail: {azure_backup_import_error_details})"
-        return jsonify({'success': False, 'message': error_message, 'task_id': task_id}), 501
+        return jsonify({'success': False, 'message': 'Delete function for unified backups not available.', 'task_id': task_id}), 501
 
     try:
         success = delete_booking_data_json_backup(
@@ -360,11 +343,8 @@ def api_download_booking_data_backup(backup_type, filename):
 
     if not download_booking_data_json_backup:
         current_app.logger.error("Download function (download_booking_data_json_backup) not available.")
-        error_message = "Download functionality is not available on the server."
-        if azure_backup_import_error_details:
-            error_message += f" (Import Error Detail: {azure_backup_import_error_details})"
-        add_audit_log(action="DOWNLOAD_UNIFIED_BACKUP_ERROR", details=f"Attempt by {current_user.username} for {filename} ({backup_type}). Function not available. Detail: {azure_backup_import_error_details or 'N/A'}", user_id=current_user.id)
-        return jsonify({'success': False, 'message': error_message}), 501
+        add_audit_log(action="DOWNLOAD_UNIFIED_BACKUP_ERROR", details=f"Attempt by {current_user.username} for {filename} ({backup_type}). Function not available.", user_id=current_user.id)
+        return jsonify({'success': False, 'message': 'Download functionality is not available on the server.'}), 501
 
     try:
         file_content = download_booking_data_json_backup(filename=filename, backup_type=backup_type)
@@ -452,14 +432,7 @@ def api_one_click_backup():
 
     if not create_full_backup:
         current_app.logger.error("Azure backup module not available for one-click backup.")
-        error_message = "Azure backup module is not available. Please ensure the 'azure-storage-file-share' package is installed and the 'AZURE_STORAGE_CONNECTION_STRING' environment variable is correctly configured."
-        if azure_backup_import_error_details:
-            error_message += f" (Import Error Detail: {azure_backup_import_error_details})"
-        return jsonify({
-            'success': False,
-            'message': error_message,
-            'task_id': task_id
-        }), 501
+        return jsonify({'success': False, 'message': "Azure backup module is not available. Please ensure the 'azure-storage-file-share' package is installed and the 'AZURE_STORAGE_CONNECTION_STRING' environment variable is correctly configured.", 'task_id': task_id}), 501
     try:
         timestamp_str = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
         map_config_data = _get_map_configuration_data() # Uses models directly, ensure they are imported
@@ -506,10 +479,7 @@ def api_list_backups():
 
         if not list_available_backups:
             current_app.logger.error("Azure backup module not available for listing backups.")
-            error_message = "Backup module is not configured or available for listing backups."
-            if azure_backup_import_error_details:
-                error_message += f" (Import Error Detail: {azure_backup_import_error_details})"
-            return jsonify({'success': False, 'message': error_message, 'backups': [], 'page': page, 'per_page': per_page, 'total_items': 0, 'total_pages': 0, 'has_next': False, 'has_prev': False}), 501 # Changed to 501
+            return jsonify({'success': False, 'message': 'Backup module is not configured or available.', 'backups': [], 'page': page, 'per_page': per_page, 'total_items': 0, 'total_pages': 0, 'has_next': False, 'has_prev': False}), 500
 
         all_backups = list_available_backups()
         total_items = len(all_backups)

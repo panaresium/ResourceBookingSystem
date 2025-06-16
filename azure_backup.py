@@ -1,4 +1,3 @@
-print("DEBUG azure_backup.py: TOP OF FILE - Module import started.")
 import os
 import hashlib
 import logging
@@ -26,10 +25,6 @@ except ImportError:  # pragma: no cover - azure sdk optional
         ResourceNotFoundError = Exception
     if 'HttpResponseError' not in globals():
         HttpResponseError = Exception
-
-print(f"DEBUG azure_backup.py: ShareServiceClient is {ShareServiceClient}")
-print(f"DEBUG azure_backup.py: ResourceNotFoundError is {ResourceNotFoundError}")
-print(f"DEBUG azure_backup.py: HttpResponseError is {HttpResponseError}")
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -60,23 +55,8 @@ BOOKING_DATA_INCREMENTAL_DIR_SUFFIX = "incrementals"
 LAST_UNIFIED_BOOKING_INCREMENTAL_TIMESTAMP_FILE = os.path.join(DATA_DIR, 'last_unified_booking_incremental_timestamp.txt')
 LAST_BOOKING_DATA_PROTECTION_INCREMENTAL_TIMESTAMP_FILE = os.path.join(DATA_DIR, 'last_booking_data_protection_incremental_timestamp.txt')
 
-print(f"DEBUG azure_backup.py: Path constants defined. BASE_DIR is {BASE_DIR}, DATA_DIR is {DATA_DIR}, STATIC_DIR is {STATIC_DIR}")
-
 def _get_service_client():
-    print(f"DEBUG azure_backup.py _get_service_client(): Called")
-    # Enhanced debug for AZURE_STORAGE_CONNECTION_STRING
-    raw_connection_string = os.environ.get('AZURE_STORAGE_CONNECTION_STRING')
-    is_present_in_environ = 'AZURE_STORAGE_CONNECTION_STRING' in os.environ
-    print(f"DEBUG azure_backup.py _get_service_client(): 'AZURE_STORAGE_CONNECTION_STRING' in os.environ: {is_present_in_environ}")
-    if is_present_in_environ:
-        # Only print length and type if it exists, to avoid error if None and to not print the secret.
-        print(f"DEBUG azure_backup.py _get_service_client(): Env var AZURE_STORAGE_CONNECTION_STRING - Type: {type(raw_connection_string)}, Length: {len(raw_connection_string) if raw_connection_string is not None else 'None'}")
-    else:
-        print(f"DEBUG azure_backup.py _get_service_client(): Env var AZURE_STORAGE_CONNECTION_STRING was NOT FOUND in os.environ.")
-
-    # The original logic uses 'connection_string', so we ensure it's assigned from raw_connection_string for consistency with previous debug.
-    connection_string = raw_connection_string
-    print(f"DEBUG azure_backup.py _get_service_client(): Value used for connection_string (first 5 chars if set): '{connection_string[:5] if connection_string else 'None'}'")
+    connection_string = os.environ.get('AZURE_STORAGE_CONNECTION_STRING')
     if not connection_string:
         raise RuntimeError('AZURE_STORAGE_CONNECTION_STRING environment variable is required')
     if ShareServiceClient is None:
@@ -194,6 +174,30 @@ def list_available_backups():
     except Exception as e:
         logger.error(f"Error listing available full system backups: {e}", exc_info=True)
         return []
+
+def restore_full_backup(backup_timestamp, socketio_instance=None, task_id=None, dry_run=False):
+    logger.warning(f"Placeholder function 'restore_full_backup' called for timestamp: {backup_timestamp}, dry_run: {dry_run}. Not implemented.")
+    # Expected to return: restored_db_path, map_config_json_path, resource_configs_json_path, user_configs_json_path, actions_list
+    # For a placeholder, we can return None for paths and an empty list for actions.
+    if dry_run:
+        actions_list = [
+            "DRY RUN: Would check for Azure service client.",
+            f"DRY RUN: Would attempt to find backup set for {backup_timestamp}.",
+            "DRY RUN: Would download database backup file.",
+            "DRY RUN: Would download map configuration file.",
+            "DRY RUN: Would download resource configurations file.",
+            "DRY RUN: Would download user configurations file.",
+            "DRY RUN: Would download media files (floor maps, resource uploads)."
+        ]
+        # Simulate some progress messages for dry run via socketio if provided
+        _emit_progress(socketio_instance, task_id, 'restore_progress', "DRY RUN: Starting full system restore dry run...", detail=f'Timestamp: {backup_timestamp}')
+        for action in actions_list:
+            _emit_progress(socketio_instance, task_id, 'restore_progress', action, level='INFO')
+        _emit_progress(socketio_instance, task_id, 'restore_progress', "DRY RUN: Completed.", detail='SUCCESS', actions=actions_list) # Pass actions here
+        return None, None, None, None, actions_list # For dry_run=True, paths are None, actions_list is populated
+
+    _emit_progress(socketio_instance, task_id, 'restore_progress', "Restore Error: Full restore is not implemented.", detail='NOT_IMPLEMENTED', level='ERROR')
+    return None, None, None, None, [] # For actual run, paths are None, actions_list is empty
 
 # --- LEGACY - Azure CSV Functionality - Kept for reference / To be removed ---
 # def backup_bookings_csv(app, socketio_instance=None, task_id=None, start_date_dt=None, end_date_dt=None, range_label=None):
@@ -692,12 +696,35 @@ def list_available_incremental_booking_backups():
 
 # --- Full System Backup Functions ---
 def create_full_backup(timestamp_str, map_config_data=None, resource_configs_data=None, user_configs_data=None, socketio_instance=None, task_id=None):
-    logger.info(f"Creating full system backup for {timestamp_str} (simulated).")
-    # This is a placeholder. The actual complex logic for creating a full system backup
-    # (including DB, configs, media) should be here.
-    # For the purpose of restoring `list_available_backups`, the content of this function
-    # is not directly relevant, other than that it *creates* backups that `list_available_backups` would find.
-    return True # Simulate success
+    _emit_progress(socketio_instance, task_id, 'backup_progress', "Attempting to initialize Azure service client for backup...", level='INFO')
+    try:
+        service_client = _get_service_client() # Call this at the beginning
+        if not service_client: # Should not happen if _get_service_client raises error on failure
+            _emit_progress(socketio_instance, task_id, 'backup_progress', "Failed to get Azure service client (returned None).", level='ERROR')
+            return False
+        _emit_progress(socketio_instance, task_id, 'backup_progress', "Azure service client initialized. Proceeding with placeholder backup.", level='INFO')
+    except RuntimeError as e:
+        # This exception (e.g. missing connection string or SDK not installed) will be caught by the calling function in api_system.py
+        logger.error(f"RuntimeError during _get_service_client in create_full_backup: {str(e)}")
+        _emit_progress(socketio_instance, task_id, 'backup_progress', f"Backup Pre-check Failed: {str(e)}", detail=str(e), level='ERROR')
+        raise # Re-raise the error so api_system.py can catch it and handle it as an operational failure
+
+    logger.warning(f"Placeholder function 'create_full_backup' called for timestamp: {timestamp_str}. Simulating backup process.")
+    _emit_progress(socketio_instance, task_id, 'backup_progress', f"Starting placeholder backup for {timestamp_str}...", detail='PLACEHOLDER_INFO', level='INFO')
+
+    # Simulate some steps for the placeholder
+    _emit_progress(socketio_instance, task_id, 'backup_progress', "Placeholder: Simulating database backup...", level='INFO')
+    # time.sleep(1) # Optional: simulate work
+    _emit_progress(socketio_instance, task_id, 'backup_progress', "Placeholder: Simulating map configuration backup...", level='INFO')
+    # time.sleep(1) # Optional: simulate work
+
+    # The actual implementation would involve using service_client to upload files.
+    # For now, just log and return success.
+
+    final_message = f"Placeholder backup for {timestamp_str} completed (simulated)."
+    logger.info(final_message)
+    _emit_progress(socketio_instance, task_id, 'backup_progress', "Placeholder backup completed successfully (simulated).", detail='SUCCESS_PLACEHOLDER', level='SUCCESS')
+    return True # Simulate overall success of the placeholder operation
 
 def backup_database():
     logger.info("Simulating backup_database")
@@ -773,9 +800,3 @@ def download_booking_data_json_backup(filename: str, backup_type: str):
     except Exception as e:
         logger.error(f"Unexpected error downloading unified backup '{filename}': {e}", exc_info=True)
         return None
-
-print(f"DEBUG azure_backup.py: END OF FILE. Type of create_full_backup is {type(create_full_backup)}")
-if callable(create_full_backup):
-    print("DEBUG azure_backup.py: create_full_backup is callable.")
-else:
-    print("DEBUG azure_backup.py: create_full_backup is NOT callable (or is None).")
