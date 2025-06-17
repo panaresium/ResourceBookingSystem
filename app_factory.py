@@ -30,6 +30,7 @@ from routes.gmail_auth import init_gmail_auth_routes # Added for Gmail OAuth flo
 # For scheduler
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.base import JobLookupError # Added import
+# TODO: Imports for 'run_scheduled_incremental_booking_data_task' and 'run_periodic_full_booking_data_task' commented out as these functions are obsolete in scheduler_tasks.py.
 from scheduler_tasks import (
     cancel_unchecked_bookings,
     apply_scheduled_resource_status_changes,
@@ -38,8 +39,8 @@ from scheduler_tasks import (
     auto_checkout_overdue_bookings,
     auto_release_unclaimed_bookings,
     send_checkin_reminders,
-    run_scheduled_incremental_booking_data_task, # New task for unified incrementals
-    run_periodic_full_booking_data_task # New task for unified periodic fulls
+    # run_scheduled_incremental_booking_data_task, # New task for unified incrementals
+    # run_periodic_full_booking_data_task # New task for unified periodic fulls
 )
 # Conditional import for azure_backup
 try:

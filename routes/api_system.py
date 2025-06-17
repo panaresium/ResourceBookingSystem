@@ -52,7 +52,8 @@ try:
         # Imports for new booking restore functionalities
         # list_available_booking_csv_backups, # Removed
         # restore_bookings_from_csv_backup, # Removed
-        list_available_incremental_booking_backups, # Keeping non-CSV legacy for now
+        # TODO: Obsolete? Import commented out as 'list_available_incremental_booking_backups' is likely obsolete.
+        # list_available_incremental_booking_backups, # Keeping non-CSV legacy for now
         restore_incremental_bookings, # Keeping non-CSV legacy for now
         restore_bookings_from_full_db_backup,
         backup_incremental_bookings, # Added for manual incremental backup
@@ -89,7 +90,8 @@ except ImportError as e_detailed_azure_import: # Capture the exception instance
     restore_database_component = None
     download_map_config_component = None
     restore_media_component = None
-    list_available_incremental_booking_backups = None
+    # TODO: Obsolete? Usage of 'list_available_incremental_booking_backups' commented out.
+    # list_available_incremental_booking_backups = None
     restore_incremental_bookings = None
     restore_bookings_from_full_db_backup = None
     backup_incremental_bookings = None
