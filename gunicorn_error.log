@@ -1,0 +1,7 @@
+[2025-06-17 11:02:41 +0000] [1663] [INFO] Starting gunicorn 23.0.0
+[2025-06-17 11:02:41 +0000] [1663] [INFO] Listening at: http://0.0.0.0:8000 (1663)
+[2025-06-17 11:02:41 +0000] [1663] [INFO] Using worker: eventlet
+[2025-06-17 11:02:41 +0000] [1665] [INFO] Booting worker with pid: 1665
+[2025-06-17 11:02:56 +0000] [1663] [INFO] Handling signal: term
+[2025-06-17 11:02:57 +0000] [1665] [INFO] Worker exiting (pid: 1665)
+[2025-06-17 11:02:57 +0000] [1663] [INFO] Shutting down: Master
