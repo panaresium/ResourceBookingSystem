@@ -96,14 +96,56 @@ def _ensure_directory_exists(share_client, directory_path):
         current_path += "/"
 
 def _create_share_with_retry(share_client, share_name, retries=3, delay=5, factor=2):
-    logger.debug(f"_create_share_with_retry called for {share_name}")
-    # Simulate share creation
-    pass
+    current_delay = delay
+    for i in range(retries):
+        try:
+            if _client_exists(share_client):
+                logger.info(f"Share '{share_name}' already exists.")
+                return True
+
+            logger.info(f"Attempting to create share '{share_name}' (Attempt {i+1}/{retries}).")
+            share_client.create_share()
+            logger.info(f"Share '{share_name}' created successfully.")
+            return True
+        except HttpResponseError as e:
+            # Common error is "ShareBeingDeleted" or "Conflict" if share is in transitioning state
+            logger.warning(f"HttpResponseError creating share '{share_name}' (Attempt {i+1}/{retries}): {e.message or e}")
+            if i == retries - 1: # Last retry
+                logger.error(f"Failed to create share '{share_name}' after {retries} retries. Last error: {e.message or e}")
+                raise
+            logger.info(f"Retrying share creation for '{share_name}' in {current_delay} seconds...")
+            time.sleep(current_delay)
+            current_delay *= factor
+        except Exception as e:
+            logger.error(f"Unexpected error creating share '{share_name}': {e}", exc_info=True)
+            raise # Re-raise other exceptions immediately
+    logger.error(f"Share '{share_name}' could not be created after {retries} retries.")
+    return False
 
 def upload_file(share_client, source_path, file_path):
-    logger.debug(f"upload_file called for {source_path} to {file_path}")
-    # Simulate file upload
-    pass
+    logger.info(f"Attempting to upload '{source_path}' to '{share_client.share_name}/{file_path}'.")
+    file_client = share_client.get_file_client(file_path)
+
+    try:
+        with open(source_path, "rb") as f_source:
+            file_client.upload_file(f_source, overwrite=True) # Using overwrite=True as it's common for backups
+        logger.info(f"Successfully uploaded '{source_path}' to '{share_client.share_name}/{file_path}'.")
+        return True
+    except FileNotFoundError:
+        logger.error(f"Upload failed: Source file '{source_path}' not found.")
+        return False
+    except ResourceNotFoundError:
+        # This can mean the share itself doesn't exist, or the parent directory for the file doesn't exist.
+        logger.error(f"Upload failed: Resource not found for '{share_client.share_name}/{file_path}'. The share or parent directory might not exist. Ensure directories are created first if needed.")
+        return False
+    except HttpResponseError as e:
+        # More specific Azure storage error
+        error_message = e.message or getattr(e.response, 'text', str(e))
+        logger.error(f"Upload failed due to HttpResponseError for '{share_client.share_name}/{file_path}': {error_message}", exc_info=True)
+        return False
+    except Exception as e:
+        logger.error(f"An unexpected error occurred during upload of '{source_path}' to '{share_client.share_name}/{file_path}': {e}", exc_info=True)
+        return False
 
 def download_file(share_client, file_path, dest_path):
     logger.debug(f"download_file called for {file_path} to {dest_path}")
@@ -696,35 +738,257 @@ def list_available_incremental_booking_backups():
 
 # --- Full System Backup Functions ---
 def create_full_backup(timestamp_str, map_config_data=None, resource_configs_data=None, user_configs_data=None, socketio_instance=None, task_id=None):
+    overall_success = True # Initialize at the start of the function
+    backed_up_items = [] # Initialize list to track backed up items
     _emit_progress(socketio_instance, task_id, 'backup_progress', "Attempting to initialize Azure service client for backup...", level='INFO')
     try:
         service_client = _get_service_client() # Call this at the beginning
         if not service_client: # Should not happen if _get_service_client raises error on failure
             _emit_progress(socketio_instance, task_id, 'backup_progress', "Failed to get Azure service client (returned None).", level='ERROR')
-            return False
-        _emit_progress(socketio_instance, task_id, 'backup_progress', "Azure service client initialized. Proceeding with placeholder backup.", level='INFO')
+            return False # Critical failure, cannot proceed
+        _emit_progress(socketio_instance, task_id, 'backup_progress', "Azure service client initialized.", level='INFO')
     except RuntimeError as e:
         # This exception (e.g. missing connection string or SDK not installed) will be caught by the calling function in api_system.py
         logger.error(f"RuntimeError during _get_service_client in create_full_backup: {str(e)}")
         _emit_progress(socketio_instance, task_id, 'backup_progress', f"Backup Pre-check Failed: {str(e)}", detail=str(e), level='ERROR')
         raise # Re-raise the error so api_system.py can catch it and handle it as an operational failure
 
-    logger.warning(f"Placeholder function 'create_full_backup' called for timestamp: {timestamp_str}. Simulating backup process.")
-    _emit_progress(socketio_instance, task_id, 'backup_progress', f"Starting placeholder backup for {timestamp_str}...", detail='PLACEHOLDER_INFO', level='INFO')
+    # --- Database Backup ---
+    _emit_progress(socketio_instance, task_id, 'backup_progress', "Starting database backup...", level='INFO')
+    db_share_name = os.environ.get('AZURE_DB_SHARE', 'db-backups')
+    db_share_client = None
+    try:
+        db_share_client = service_client.get_share_client(db_share_name)
+        if not _create_share_with_retry(db_share_client, db_share_name):
+            _emit_progress(socketio_instance, task_id, 'backup_progress', f"Failed to create or access DB share: {db_share_name}", level='ERROR')
+            return False # Critical failure
 
-    # Simulate some steps for the placeholder
-    _emit_progress(socketio_instance, task_id, 'backup_progress', "Placeholder: Simulating database backup...", level='INFO')
-    # time.sleep(1) # Optional: simulate work
-    _emit_progress(socketio_instance, task_id, 'backup_progress', "Placeholder: Simulating map configuration backup...", level='INFO')
-    # time.sleep(1) # Optional: simulate work
+        _ensure_directory_exists(db_share_client, DB_BACKUPS_DIR) # Ensure base directory for DB backups
 
-    # The actual implementation would involve using service_client to upload files.
-    # For now, just log and return success.
+        local_db_path = os.path.join(DATA_DIR, 'site.db') # Assuming this is the DB path
+        db_backup_filename = f"{DB_FILENAME_PREFIX}{timestamp_str}.db"
+        remote_db_file_path = f"{DB_BACKUPS_DIR}/{db_backup_filename}"
 
-    final_message = f"Placeholder backup for {timestamp_str} completed (simulated)."
-    logger.info(final_message)
-    _emit_progress(socketio_instance, task_id, 'backup_progress', "Placeholder backup completed successfully (simulated).", detail='SUCCESS_PLACEHOLDER', level='SUCCESS')
-    return True # Simulate overall success of the placeholder operation
+        if not os.path.exists(local_db_path):
+            _emit_progress(socketio_instance, task_id, 'backup_progress', f"Local database file not found at {local_db_path}", level='ERROR')
+            return False # Critical failure
+
+        _emit_progress(socketio_instance, task_id, 'backup_progress', f"Uploading database '{local_db_path}' to '{db_share_name}/{remote_db_file_path}'...", level='INFO')
+        if upload_file(db_share_client, local_db_path, remote_db_file_path):
+            _emit_progress(socketio_instance, task_id, 'backup_progress', "Database backup successful.", level='SUCCESS')
+            backed_up_items.append({
+                "type": "database",
+                "source_path": local_db_path,
+                "azure_path": f"{db_share_name}/{remote_db_file_path}",
+                "filename": db_backup_filename
+            })
+        else:
+            _emit_progress(socketio_instance, task_id, 'backup_progress', "Database backup failed during upload.", level='ERROR')
+            # overall_success = False # Set flag, but for now, requirement is to return False directly
+            return False
+    except Exception as e_db:
+        logger.error(f"Error during database backup: {e_db}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, 'backup_progress', f"Database backup failed: {str(e_db)}", level='ERROR')
+        # overall_success = False
+        return False
+
+    # --- Configuration Data Backup ---
+    _emit_progress(socketio_instance, task_id, 'backup_progress', "Starting configuration data backup...", level='INFO')
+    config_share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
+    config_share_client = None
+    try:
+        config_share_client = service_client.get_share_client(config_share_name)
+        if not _create_share_with_retry(config_share_client, config_share_name):
+            _emit_progress(socketio_instance, task_id, 'backup_progress', f"Failed to create or access Config share: {config_share_name}", level='ERROR')
+            return False # Critical failure for configs as a whole
+
+        _ensure_directory_exists(config_share_client, CONFIG_BACKUPS_DIR)
+
+        configs_to_backup = [
+            (map_config_data, "map_config", MAP_CONFIG_FILENAME_PREFIX),
+            (resource_configs_data, "resource_configs", "resource_configs_"), # Using a new prefix
+            (user_configs_data, "user_configs", "user_configs_")          # Using a new prefix
+        ]
+
+        for config_data, config_name, filename_prefix in configs_to_backup:
+            _emit_progress(socketio_instance, task_id, 'backup_progress', f"Processing {config_name} backup...", level='INFO')
+            if not config_data: # Handles None or empty dict/list
+                _emit_progress(socketio_instance, task_id, 'backup_progress', f"{config_name} data is empty, skipping.", level='INFO')
+                continue
+
+            tmp_file_path = None
+            try:
+                # Using delete=False, so we manage deletion in the finally block
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8', dir=DATA_DIR) as tmp_file:
+                    json.dump(config_data, tmp_file, indent=4)
+                    tmp_file_path = tmp_file.name
+
+                config_backup_filename = f"{filename_prefix}{timestamp_str}.json"
+                remote_config_file_path = f"{CONFIG_BACKUPS_DIR}/{config_backup_filename}"
+
+                _emit_progress(socketio_instance, task_id, 'backup_progress', f"Uploading {config_name} ({config_backup_filename}) to '{config_share_name}/{remote_config_file_path}'...", level='INFO')
+                if upload_file(config_share_client, tmp_file_path, remote_config_file_path):
+                    _emit_progress(socketio_instance, task_id, 'backup_progress', f"{config_name} backup successful.", level='SUCCESS')
+                    backed_up_items.append({
+                        "type": "config",
+                        "config_name": config_name,
+                        "source_data_type": str(type(config_data)),
+                        "azure_path": f"{config_share_name}/{remote_config_file_path}",
+                        "filename": config_backup_filename
+                    })
+                else:
+                    _emit_progress(socketio_instance, task_id, 'backup_progress', f"{config_name} backup failed during upload.", level='ERROR')
+                    overall_success = False # Continue with other configs but mark overall as failed
+            except Exception as e_conf_item: # Catch error for individual config processing/upload
+                logger.error(f"Error during {config_name} backup: {e_conf_item}", exc_info=True)
+                _emit_progress(socketio_instance, task_id, 'backup_progress', f"{config_name} backup failed: {str(e_conf_item)}", level='ERROR')
+                overall_success = False
+            finally:
+                if tmp_file_path and os.path.exists(tmp_file_path):
+                    try:
+                        os.remove(tmp_file_path)
+                    except OSError as e_remove:
+                        logger.error(f"Error removing temporary config file {tmp_file_path}: {e_remove}")
+                        _emit_progress(socketio_instance, task_id, 'backup_progress', f"Error cleaning up temp file for {config_name}: {str(e_remove)}", level='WARNING')
+
+    except Exception as e_config_share_setup: # Catch errors from share/dir setup for configs
+        logger.error(f"Error during configuration share/directory setup: {e_config_share_setup}", exc_info=True)
+        _emit_progress(socketio_instance, task_id, 'backup_progress', f"Configuration backup stage failed critically: {str(e_config_share_setup)}", level='ERROR')
+        overall_success = False # Mark as failed
+        return False # Critical failure for the entire backup operation if config share setup fails
+
+    # --- Media Files Backup ---
+    if overall_success: # Only proceed if previous critical steps were okay
+        _emit_progress(socketio_instance, task_id, 'backup_progress', "Starting media files backup...", level='INFO')
+        media_share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media-backups')
+        media_share_client = None
+        try:
+            media_share_client = service_client.get_share_client(media_share_name)
+            if not _create_share_with_retry(media_share_client, media_share_name):
+                _emit_progress(socketio_instance, task_id, 'backup_progress', f"Failed to create or access Media share: {media_share_name}", level='ERROR')
+                return False # Critical failure for media backup stage
+
+            # Timestamped parent directory for this backup's media
+            timestamped_media_backup_base_dir = f"{MEDIA_BACKUPS_DIR_BASE}/backup_{timestamp_str}"
+            _ensure_directory_exists(media_share_client, MEDIA_BACKUPS_DIR_BASE) # Ensure base 'media_backups' dir
+            _ensure_directory_exists(media_share_client, timestamped_media_backup_base_dir) # Ensure 'media_backups/backup_YYYYMMDD_HHMMSS'
+
+            media_sources = [
+                {"name": "Floor Map Uploads", "local_path": FLOOR_MAP_UPLOADS, "azure_subdir": "floor_map_uploads"},
+                {"name": "Resource Uploads", "local_path": RESOURCE_UPLOADS, "azure_subdir": "resource_uploads"}
+            ]
+
+            for media_source in media_sources:
+                media_type_name = media_source["name"]
+                local_folder_path = media_source["local_path"]
+                azure_target_sub_dir_name = media_source["azure_subdir"]
+
+                _emit_progress(socketio_instance, task_id, 'backup_progress', f"Processing {media_type_name} backup from '{local_folder_path}'...", level='INFO')
+
+                if not os.path.isdir(local_folder_path):
+                    _emit_progress(socketio_instance, task_id, 'backup_progress', f"Local folder for {media_type_name} ('{local_folder_path}') not found, skipping.", level='WARNING')
+                    continue
+
+                # Specific Azure directory for this media type for this backup run
+                azure_media_type_target_dir = f"{timestamped_media_backup_base_dir}/{azure_target_sub_dir_name}"
+                try:
+                    _ensure_directory_exists(media_share_client, azure_media_type_target_dir)
+                except Exception as e_dir_create:
+                    logger.error(f"Failed to create Azure directory '{azure_media_type_target_dir}' for {media_type_name}: {e_dir_create}", exc_info=True)
+                    _emit_progress(socketio_instance, task_id, 'backup_progress', f"Failed to create Azure directory for {media_type_name}, skipping. Error: {str(e_dir_create)}", level='ERROR')
+                    overall_success = False
+                    continue # Skip this media type if its directory cannot be created
+
+                files_in_local_folder = os.listdir(local_folder_path)
+                if not files_in_local_folder:
+                    _emit_progress(socketio_instance, task_id, 'backup_progress', f"No files found in {media_type_name} at '{local_folder_path}', skipping.", level='INFO')
+                    continue
+
+                file_backup_count = 0
+                successful_uploads_count = 0
+                for filename in files_in_local_folder:
+                    local_file_path = os.path.join(local_folder_path, filename)
+                    if os.path.isfile(local_file_path):
+                        file_backup_count +=1
+                        remote_media_file_path = f"{azure_media_type_target_dir}/{filename}"
+                        # Reduced verbosity for individual file uploads unless an error occurs
+                        # _emit_progress(socketio_instance, task_id, 'backup_progress', f"Uploading {media_type_name} file '{filename}' to '{media_share_name}/{remote_media_file_path}'...", level='DEBUG')
+                        if upload_file(media_share_client, local_file_path, remote_media_file_path):
+                            successful_uploads_count += 1
+                            backed_up_items.append({
+                                "type": "media",
+                                "media_type": media_type_name,
+                                "source_path": local_file_path,
+                                "azure_path": f"{media_share_name}/{remote_media_file_path}",
+                                "filename": filename
+                            })
+                        else:
+                            _emit_progress(socketio_instance, task_id, 'backup_progress', f"Backup of {media_type_name} file '{filename}' failed.", level='ERROR')
+                            overall_success = False # Continue with other files but mark overall as failed
+                _emit_progress(socketio_instance, task_id, 'backup_progress', f"{successful_uploads_count}/{file_backup_count} file(s) successfully backed up for {media_type_name}.", level='INFO' if successful_uploads_count == file_backup_count else 'WARNING')
+
+        except Exception as e_media_share_setup: # Errors from media share or top-level timestamped dir creation
+            logger.error(f"Error during media files share/directory setup: {e_media_share_setup}", exc_info=True)
+            _emit_progress(socketio_instance, task_id, 'backup_progress', f"Media files backup stage failed critically: {str(e_media_share_setup)}", level='ERROR')
+            overall_success = False # Mark as failed
+            return False # Critical failure for the entire backup operation
+
+    # --- Manifest File Creation and Upload ---
+    if overall_success: # Only create manifest if all previous steps deemed critical were successful
+        _emit_progress(socketio_instance, task_id, 'backup_progress', "Creating backup manifest...", level='INFO')
+        manifest_data = {
+            "backup_timestamp_utc": timestamp_str,
+            "backup_format_version": "1.0",
+            "status": "success", # If we are here, overall_success was true
+            "files": backed_up_items,
+            "summary": {
+                "total_files_listed": len(backed_up_items),
+                "database_files": sum(1 for item in backed_up_items if item["type"] == "database"),
+                "config_files": sum(1 for item in backed_up_items if item["type"] == "config"),
+                "media_files": sum(1 for item in backed_up_items if item["type"] == "media"),
+            }
+        }
+        tmp_manifest_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8', dir=DATA_DIR) as tmp_file:
+                json.dump(manifest_data, tmp_file, indent=4)
+                tmp_manifest_path = tmp_file.name
+
+            manifest_filename = f"backup_manifest_{timestamp_str}.json"
+            # Upload manifest to the DB backup share and directory for co-location with DB backup
+            if db_share_client: # db_share_client should be defined from DB backup step
+                remote_manifest_path = f"{DB_BACKUPS_DIR}/{manifest_filename}"
+                _emit_progress(socketio_instance, task_id, 'backup_progress', f"Uploading backup manifest '{manifest_filename}' to '{db_share_name}/{remote_manifest_path}'...", level='INFO')
+                if upload_file(db_share_client, tmp_manifest_path, remote_manifest_path):
+                    _emit_progress(socketio_instance, task_id, 'backup_progress', "Backup manifest uploaded successfully.", level='SUCCESS')
+                else:
+                    _emit_progress(socketio_instance, task_id, 'backup_progress', "Failed to upload backup manifest.", level='ERROR')
+                    overall_success = False # Manifest is critical for a complete backup set
+            else:
+                _emit_progress(socketio_instance, task_id, 'backup_progress', "DB share client not available for manifest upload. Skipping manifest.", level='ERROR')
+                overall_success = False
+
+        except Exception as e_manifest:
+            logger.error(f"Error creating or uploading manifest: {e_manifest}", exc_info=True)
+            _emit_progress(socketio_instance, task_id, 'backup_progress', f"Error creating or uploading manifest: {str(e_manifest)}", level='ERROR')
+            overall_success = False
+        finally:
+            if tmp_manifest_path and os.path.exists(tmp_manifest_path):
+                try:
+                    os.remove(tmp_manifest_path)
+                except OSError as e_remove_manifest:
+                    logger.error(f"Error removing temporary manifest file {tmp_manifest_path}: {e_remove_manifest}")
+                    _emit_progress(socketio_instance, task_id, 'backup_progress', f"Error cleaning up temp manifest file: {str(e_remove_manifest)}", level='WARNING')
+    elif not overall_success:
+         _emit_progress(socketio_instance, task_id, 'backup_progress', "Skipping manifest creation due to previous errors in backup process.", level='WARNING')
+
+
+    # At the very end of create_full_backup, after all steps:
+    if overall_success:
+       _emit_progress(socketio_instance, task_id, 'backup_progress', "Full system backup completed successfully.", detail='Overall Success', level='SUCCESS')
+    else:
+       _emit_progress(socketio_instance, task_id, 'backup_progress', "Full system backup completed with one or more failures.", detail='Overall Failure', level='ERROR')
+    return overall_success
 
 def backup_database():
     logger.info("Simulating backup_database")
