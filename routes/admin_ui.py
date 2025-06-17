@@ -308,8 +308,36 @@ def system_settings_page():
 @login_required
 @permission_required('view_analytics')
 def analytics_bookings_data():
-    # ... (implementation as provided) ...
-    return jsonify(final_response)
+    current_app.logger.info(f"User {current_user.username} attempting to fetch analytics data.")
+    try:
+        total_bookings = db.session.query(func.count(Booking.id)).scalar()
+
+        status_counts_query = db.session.query(Booking.status, func.count(Booking.id)).group_by(Booking.status).all()
+        bookings_by_status = {status: count for status, count in status_counts_query}
+
+        # Example: Bookings per day (last 30 days for simplicity)
+        # This requires Booking.start_time to be a DateTime field
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        bookings_per_day_query = db.session.query(
+                cast(Booking.start_time, Date).label('booking_date'),
+                func.count(Booking.id).label('count')
+            ).filter(Booking.start_time >= thirty_days_ago)\
+            .group_by(cast(Booking.start_time, Date))\
+            .order_by(cast(Booking.start_time, Date))\
+            .all()
+
+        bookings_per_day = {item.booking_date.isoformat(): item.count for item in bookings_per_day_query}
+
+        final_response = {
+            "total_bookings": total_bookings,
+            "bookings_by_status": bookings_by_status,
+            "bookings_per_day": bookings_per_day # Added this new metric
+        }
+        current_app.logger.info(f"Successfully fetched analytics data: {final_response}")
+        return jsonify(final_response)
+    except Exception as e:
+        current_app.logger.error(f"Error fetching analytics data: {e}", exc_info=True)
+        return jsonify({"error": "Could not fetch analytics data", "details": str(e)}), 500
 
 def init_admin_ui_routes(app):
     app.register_blueprint(admin_ui_bp)
