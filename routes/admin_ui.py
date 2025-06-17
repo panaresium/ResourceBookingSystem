@@ -321,7 +321,8 @@ def analytics_bookings_data():
         bookings_per_day_query = db.session.query(
                 cast(Booking.start_time, Date).label('booking_date'),
                 func.count(Booking.id).label('count')
-            ).filter(Booking.start_time >= thirty_days_ago)\
+            ).filter(Booking.start_time.isnot(None))\
+            .filter(Booking.start_time >= thirty_days_ago)\
             .group_by(cast(Booking.start_time, Date))\
             .order_by(cast(Booking.start_time, Date))\
             .all()
