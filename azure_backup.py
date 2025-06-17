@@ -12,7 +12,6 @@ import shutil
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError, ServiceRequestError
 
 from models import Booking, db
-from utils import update_task_log # Added for HTTP polling task status
 
 try:
     from azure.storage.fileshare import ShareServiceClient, ShareClient, ShareDirectoryClient, ShareFileClient
@@ -79,6 +78,7 @@ def _client_exists(client):
         return False
 
 def _emit_progress(task_id, message, detail='', level='INFO'):
+    from utils import update_task_log # Added for HTTP polling task status
     if task_id:
         try:
             update_task_log(task_id, message, detail, level.lower())
