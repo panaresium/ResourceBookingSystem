@@ -19,6 +19,6 @@ APScheduler
 Flask-Migrate
 Pillow>=9.0.0
 google-api-python-client>=2.0.0
-eventlet==0.36.1
+eventlet==0.38.1
 python-socketio==5.11.2
 python-engineio==4.9.1
