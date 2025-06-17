@@ -317,25 +317,41 @@ def analytics_bookings_data():
 
         # Example: Bookings per day (last 30 days for simplicity)
         # This requires Booking.start_time to be a DateTime field
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-        bookings_per_day_query = db.session.query(
-                cast(Booking.start_time, Date).label('booking_date'),
-                func.count(Booking.id).label('count')
-            ).filter(Booking.start_time.isnot(None))\
-            .filter(Booking.start_time != '')\
-            .filter(Booking.start_time >= thirty_days_ago)\
-            .group_by(cast(Booking.start_time, Date))\
-            .order_by(cast(Booking.start_time, Date))\
-            .all()
+        thirty_days_ago_dt = datetime.utcnow() - timedelta(days=30)
 
-        bookings_per_day = {item.booking_date.isoformat(): item.count for item in bookings_per_day_query}
+        # Fetch raw start_time values for bookings in the relevant period
+        query_results = db.session.query(
+            Booking.start_time
+        ).filter(
+            Booking.start_time.isnot(None),
+            Booking.start_time != ''
+        ).filter(
+             Booking.start_time >= thirty_days_ago_dt
+        ).all()
+
+        bookings_per_day = {}
+        for row in query_results:
+            raw_start_time_value = row[0]
+            try:
+                # Attempt to convert to string first, as fromisoformat expects a string
+                start_time_as_string = str(raw_start_time_value)
+                # Then parse the string to a datetime object, then get the date part
+                date_obj = datetime.fromisoformat(start_time_as_string).date()
+                date_key = date_obj.isoformat()
+                bookings_per_day[date_key] = bookings_per_day.get(date_key, 0) + 1
+            except ValueError as ve:
+                current_app.logger.warning(f"Analytics: Could not parse start_time '{raw_start_time_value}' to date. Error: {ve}")
+            except TypeError as te:
+                current_app.logger.warning(f"Analytics: TypeError while processing start_time '{raw_start_time_value}'. Error: {te}")
+            except Exception as ex:
+                current_app.logger.error(f"Analytics: Unexpected error processing start_time '{raw_start_time_value}'. Error: {ex}", exc_info=True)
 
         final_response = {
             "total_bookings": total_bookings,
             "bookings_by_status": bookings_by_status,
-            "bookings_per_day": bookings_per_day # Added this new metric
+            "bookings_per_day": bookings_per_day
         }
-        current_app.logger.info(f"Successfully fetched analytics data: {final_response}")
+        current_app.logger.info(f"Successfully fetched analytics data (Python-parsed daily counts): {final_response}")
         return jsonify(final_response)
     except Exception as e:
         current_app.logger.error(f"Error fetching analytics data: {e}", exc_info=True)
