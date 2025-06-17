@@ -27,6 +27,11 @@ from models import AuditLog, User, Resource, FloorMap, Role, Booking, BookingSet
 from sqlalchemy import func
 from sqlalchemy.sql import func as sqlfunc
 
+# New imports for task management
+import uuid
+import threading
+# from datetime import datetime # Already imported
+
 # Global lists for logging (if these are the sole modifiers)
 email_log = []
 slack_log = []
@@ -50,6 +55,85 @@ DEFAULT_SCHEDULER_SETTINGS = {
     "booking_csv_backup": DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy(),
     "auto_restore_booking_records_on_startup": False
 }
+
+# --- Task Management Infrastructure ---
+task_statuses = {}
+task_lock = threading.Lock()
+
+def create_task(task_type="generic"):
+    # Creates a new task entry and returns its ID.
+    task_id = uuid.uuid4().hex
+    with task_lock:
+        task_statuses[task_id] = {
+            'type': task_type,
+            'status_summary': 'Initializing...', # A brief summary string
+            'log_entries': [], # List of log dicts
+            'started_at': datetime.utcnow().isoformat() + 'Z',
+            'updated_at': datetime.utcnow().isoformat() + 'Z',
+            'is_done': False,
+            'success': None, # True, False, or None if not done
+            'result_message': None # Final message or error details
+        }
+    current_app.logger.info(f"Task created with ID: {task_id}, type: {task_type}")
+    return task_id
+
+def get_task_status(task_id):
+    # Returns the status of a specific task.
+    with task_lock:
+        return task_statuses.get(task_id) # Returns None if not found
+
+def update_task_log(task_id, message, detail="", level="info"):
+    # Adds a log entry to the task.
+    with task_lock:
+        if task_id in task_statuses:
+            entry = {
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'level': level,
+                'message': message,
+                'detail': detail
+            }
+            task_statuses[task_id]['log_entries'].append(entry)
+            task_statuses[task_id]['status_summary'] = message # Update summary to the latest message
+            task_statuses[task_id]['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+            # current_app.logger.debug(f"Task {task_id} log updated: {message} - {detail}") # Can be too verbose
+            return True
+        current_app.logger.warning(f"Attempted to update log for non-existent task ID: {task_id}")
+        return False
+
+def mark_task_done(task_id, success, result_message=""):
+    # Marks a task as completed (successfully or failed).
+    with task_lock:
+        if task_id in task_statuses:
+            task_statuses[task_id]['is_done'] = True
+            task_statuses[task_id]['success'] = success
+            task_statuses[task_id]['result_message'] = result_message
+            task_statuses[task_id]['status_summary'] = result_message if result_message else ("Completed successfully" if success else "Failed")
+            task_statuses[task_id]['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+
+            final_log_level = "info" if success else "error"
+            # Use a temporary list for log entries if update_task_log is called from within the same lock
+            # to avoid re-locking if update_task_log is not designed for reentrancy.
+            # However, current update_task_log re-acquires the lock, which is fine for non-reentrant locks.
+            # For simplicity, direct append might be okay if we ensure no deadlocks,
+            # but calling update_task_log is cleaner.
+            # The previous implementation of update_task_log re-acquires the lock, so this is fine.
+            log_entry_message = "Task finished."
+            log_entry_detail = result_message
+
+            # Add final log entry directly to avoid re-locking issues if update_task_log changes
+            entry = {
+                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'level': final_log_level,
+                'message': log_entry_message,
+                'detail': log_entry_detail
+            }
+            task_statuses[task_id]['log_entries'].append(entry)
+            current_app.logger.info(f"Task {task_id} marked done. Success: {success}. Message: {result_message}")
+            return True
+        current_app.logger.warning(f"Attempted to mark non-existent task ID {task_id} as done.")
+        return False
+# --- End Task Management Infrastructure ---
+
 
 # --- Assume all other existing functions from utils.py are present here ---
 # load_scheduler_settings, save_scheduler_settings, add_audit_log, resource_to_dict, etc.
@@ -221,17 +305,6 @@ def check_resources_availability_for_user(resources_list: list[Resource], target
     logger_instance.info(f"Overall resource availability for user {user.username} on date {target_date}: {is_available} (based on {available_count} available slots).")
     return is_available
 
-# --- Other utility functions from the original utils.py should be maintained below ---
-# (Assuming they are not part of this specific update task but should be preserved if they existed)
-# For example:
-# load_scheduler_settings, save_scheduler_settings, add_audit_log, resource_to_dict,
-# generate_booking_image, send_email, send_slack_notification, send_teams_notification,
-# parse_simple_rrule, allowed_file, _get_map_configuration_data, _get_resource_configurations_data,
-# _get_user_configurations_data, _import_user_configurations_data, _import_resource_configurations_data,
-# _import_map_configuration_data, _parse_iso_datetime, _emit_import_progress,
-# import_bookings_from_csv_file, _load_schedule_from_json, _save_schedule_to_json
-
-# Minimal stubs for other functions if they were expected to be complete in the prompt but weren't fully listed
 def load_scheduler_settings():
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     if not os.path.exists(SCHEDULER_SETTINGS_FILE_PATH):
@@ -309,19 +382,6 @@ def resource_to_dict(resource: Resource) -> dict:
         'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
     }
 
-# Add other stubs or full functions if they were part of the original prompt's context for utils.py
-# For brevity, I'm only adding a few key ones that might be expected.
-# If the original utils.py was much larger, those functions would be assumed to be here.
-# If functions like send_email, generate_booking_image etc. were defined previously, they would be part of this.
-# The prompt implies this new code block IS the new utils.py for the specified functions,
-# and other functions should be preserved. A full overwrite strategy means the provided code
-# should contain ALL necessary functions for utils.py.
-# The provided snippet is quite comprehensive for the new functions and their direct needs.
-# If other distinct utility functions existed, they would be removed by this overwrite.
-# Given the prompt's focus on replacing specific functions and providing a large block,
-# it's interpreted as "this is the new state of utils.py including those replacements".
-
-# Example stubs for other functions mentioned in the original file if they are not meant to be removed:
 def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_name: str) -> str | None:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.debug(f"generate_booking_image called for {resource_name} - STUB")
@@ -354,23 +414,6 @@ def allowed_file(filename):
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'json', 'csv'} # Example
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# ... and so on for other functions that should be preserved from the original utils.py
-# The key is that the provided code block is treated as the new complete utils.py.
-# Any functions from the *original* utils.py that are NOT in this block will be gone.
-# The prompt's phrasing "Assume all other existing functions from utils.py are present here"
-# inside the Python comment suggests the provided code block should be self-sufficient
-# or that those other functions are not relevant to the current task's focus.
-# I've added back minimal versions of some functions seen in the original read_files output
-# to better align with the idea of "preserving other utility functions".
-# However, a true "replace specific functions" would use replace_with_git_merge_diff.
-# Since overwrite is chosen, the provided block becomes the source of truth.
-
-# For functions like _parse_iso_datetime, _emit_import_progress, import_bookings_from_csv_file, etc.
-# that were in the original read_files output, they would need to be included here if they are
-# to be preserved. The provided snippet in the prompt did *not* include them.
-# I'll add them back as stubs or simple versions based on the read_files output
-# to make the "overwrite" more robust to the implied "preserve other functions" context.
-
 def _parse_iso_datetime(dt_str):
     if not dt_str: return None
     try:
@@ -382,16 +425,9 @@ def _emit_import_progress(socketio_instance, task_id, message, detail='', level=
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.info(f"SOCKETIO_EMIT (Import Task: {task_id}): {context_prefix}{message} - {detail} ({level})")
 
-# Removed import_bookings_from_csv_file function
-
 def _get_map_configuration_data() -> dict:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.warning("_get_map_configuration_data is currently a STUB. Exporting map configurations will not provide actual data.")
-    # Expected to return a dictionary structure, e.g.:
-    # {
-    #   'maps': [map_data_dict1, map_data_dict2, ...],
-    #   'resources_map_info': [resource_map_info_dict1, ...]
-    # }
     return {
         'maps': [],
         'resources_map_info': [],
@@ -401,8 +437,6 @@ def _get_map_configuration_data() -> dict:
 def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.warning("_import_map_configuration_data is currently a STUB. Importing map configurations will not actually process data.")
-    # Expected to return a tuple: (summary_dict, status_code)
-    # summary_dict might contain counts of created/updated maps/resources and any errors.
     summary = {
         'maps_processed': 0,
         'maps_created': 0,
@@ -412,42 +446,25 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
         'errors': ["Stub implementation: No actual map configuration data imported."],
         'message': "Map configuration import is currently a STUB."
     }
-    status_code = 200 # Or 207 if errors were genuinely processed
+    status_code = 200
     return summary, status_code
 
 def _get_resource_configurations_data() -> list:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.warning("_get_resource_configurations_data is currently a STUB. Exporting resource configurations will not provide actual data.")
-    # Expected to return a list of resource data dictionaries.
     return []
 
 def _import_resource_configurations_data(resources_data_list: list) -> tuple[int, int, list]:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.warning("_import_resource_configurations_data is currently a STUB. Import will not function correctly.")
-    # Args: resources_data_list (list of dicts)
-    # Returns: tuple (created_count, updated_count, errors_list)
     created_count = 0
     updated_count = 0
-    errors = []
-
-    # Example of how it might iterate, actual logic is missing
-    # for resource_data in resources_data_list:
-    #     try:
-    #         # ... find or create resource ...
-    #         # ... update fields ...
-    #         # if new: created_count += 1
-    #         # else: updated_count += 1
-    #         pass # Placeholder for actual import logic
-    #     except Exception as e:
-    #         errors.append(f"Error processing resource data {resource_data.get('name', 'Unknown')}: {str(e)}")
-
-    errors.append("This function is a stub and did not process any data.")
+    errors = ["This function is a stub and did not process any data."]
     return created_count, updated_count, errors
 
 def _get_user_configurations_data() -> dict:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.warning("_get_user_configurations_data is currently a STUB. Exporting user configurations will not provide actual data.")
-    # Expected to return a dict, e.g., {'users': [], 'roles': []}
     return {
         'users': [],
         'roles': [],
@@ -457,7 +474,6 @@ def _get_user_configurations_data() -> dict:
 def _import_user_configurations_data(user_config_data: dict) -> tuple[int, int, int, int, list]:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.warning("_import_user_configurations_data is currently a STUB. Importing user configurations will not actually process data.")
-    # Expected: tuple[roles_created, roles_updated, users_created, users_updated, errors_list]
     roles_created = 0
     roles_updated = 0
     users_created = 0
@@ -465,20 +481,20 @@ def _import_user_configurations_data(user_config_data: dict) -> tuple[int, int, 
     errors = ["Stub implementation: No actual user configuration data imported."]
     return roles_created, roles_updated, users_created, users_updated, errors
 
-def _load_schedule_from_json(): # Example, might need current_app context
+def _load_schedule_from_json():
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.debug("_load_schedule_from_json STUB")
     return {}
 
-def _save_schedule_to_json(data_to_save): # Example
+def _save_schedule_to_json(data_to_save):
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.debug(f"_save_schedule_to_json STUB with data: {data_to_save}")
     return True, "Stub save successful"
 
-def load_unified_backup_schedule_settings(app): # app instance passed as argument
-    logger = app.logger # Use app.logger
-    config_file = app.config['UNIFIED_SCHEDULE_CONFIG_FILE'] # Use app.config
-    default_settings = app.config['DEFAULT_UNIFIED_SCHEDULE_DATA'] # Use app.config
+def load_unified_backup_schedule_settings(app):
+    logger = app.logger
+    config_file = app.config['UNIFIED_SCHEDULE_CONFIG_FILE']
+    default_settings = app.config['DEFAULT_UNIFIED_SCHEDULE_DATA']
 
     if not os.path.exists(config_file):
         logger.warning(f"Unified backup schedule file '{config_file}' not found. Returning default settings.")
@@ -491,7 +507,6 @@ def load_unified_backup_schedule_settings(app): # app instance passed as argumen
         logger.error(f"Error loading or parsing unified backup schedule file '{config_file}': {e}. Returning default settings.")
         return default_settings.copy()
 
-    # Ensure all keys from default are present
     updated_settings = default_settings.copy()
     for key, value in loaded_settings.items():
         if key in updated_settings:
@@ -499,20 +514,18 @@ def load_unified_backup_schedule_settings(app): # app instance passed as argumen
                 updated_settings[key].update(value)
             else:
                 updated_settings[key] = value
-        else: # Preserve unknown keys from loaded file if any - though usually we want to prune them
+        else:
             updated_settings[key] = value
 
-    # Ensure all sub-keys from default are present
     for main_key, main_value_dict in default_settings.items():
-        if main_key not in updated_settings: # Should not happen if we copy first
+        if main_key not in updated_settings:
             updated_settings[main_key] = main_value_dict.copy()
-        elif not isinstance(updated_settings[main_key], dict): # Loaded value is not a dict where default is
+        elif not isinstance(updated_settings[main_key], dict):
              updated_settings[main_key] = main_value_dict.copy()
-        else: # Both are dicts, ensure all sub_keys from default are there
+        else:
             for sub_key, sub_value in main_value_dict.items():
                 if sub_key not in updated_settings[main_key]:
                     updated_settings[main_key][sub_key] = sub_value
-
     return updated_settings
 
 def save_unified_backup_schedule_settings(data):
@@ -520,13 +533,10 @@ def save_unified_backup_schedule_settings(data):
     config_file = current_app.config['UNIFIED_SCHEDULE_CONFIG_FILE']
     default_settings = current_app.config['DEFAULT_UNIFIED_SCHEDULE_DATA']
 
-    # Basic validation: data should be a dict
     if not isinstance(data, dict):
         return False, "Invalid data format: settings must be a dictionary."
 
     validated_data = {}
-
-    # Validate unified_full_backup settings
     full_backup_data = data.get("unified_full_backup", {})
     default_full_backup = default_settings["unified_full_backup"]
     validated_data["unified_full_backup"] = {}
@@ -545,23 +555,22 @@ def save_unified_backup_schedule_settings(data):
         return False, "Invalid 'time_of_day' for full backup: must be HH:MM format."
     validated_data["unified_full_backup"]["time_of_day"] = time_of_day
 
-    day_of_week = full_backup_data.get("day_of_week") # Allow None
+    day_of_week = full_backup_data.get("day_of_week")
     if schedule_type == "weekly":
         if not (isinstance(day_of_week, int) and 0 <= day_of_week <= 6):
             return False, "Invalid 'day_of_week' for weekly full backup: must be an integer between 0 and 6."
     else:
-        day_of_week = None # Ensure it's None if not weekly
+        day_of_week = None
     validated_data["unified_full_backup"]["day_of_week"] = day_of_week
 
-    day_of_month = full_backup_data.get("day_of_month") # Allow None
+    day_of_month = full_backup_data.get("day_of_month")
     if schedule_type == "monthly":
         if not (isinstance(day_of_month, int) and 1 <= day_of_month <= 31):
             return False, "Invalid 'day_of_month' for monthly full backup: must be an integer between 1 and 31."
     else:
-        day_of_month = None # Ensure it's None if not monthly
+        day_of_month = None
     validated_data["unified_full_backup"]["day_of_month"] = day_of_month
 
-    # Validate unified_incremental_backup settings
     incremental_backup_data = data.get("unified_incremental_backup", {})
     default_incremental_backup = default_settings["unified_incremental_backup"]
     validated_data["unified_incremental_backup"] = {}
@@ -571,15 +580,13 @@ def save_unified_backup_schedule_settings(data):
     validated_data["unified_incremental_backup"]["is_enabled"] = incremental_backup_data["is_enabled"]
 
     interval_minutes = incremental_backup_data.get("interval_minutes", default_incremental_backup["interval_minutes"])
-    if not (isinstance(interval_minutes, int) and interval_minutes > 0): # Basic check, could add upper bound
+    if not (isinstance(interval_minutes, int) and interval_minutes > 0):
         return False, "Invalid 'interval_minutes' for incremental backup: must be a positive integer."
     validated_data["unified_incremental_backup"]["interval_minutes"] = interval_minutes
 
-    # Ensure no extra keys are saved, by building from default structure
     final_data_to_save = default_settings.copy()
     final_data_to_save["unified_full_backup"].update(validated_data["unified_full_backup"])
     final_data_to_save["unified_incremental_backup"].update(validated_data["unified_incremental_backup"])
-
 
     try:
         os.makedirs(os.path.dirname(config_file), exist_ok=True)
@@ -591,16 +598,8 @@ def save_unified_backup_schedule_settings(data):
         logger.error(f"Error saving unified backup schedule settings to '{config_file}': {e}")
         return False, f"Failed to write settings to file: {e}"
 
-# Moved from app_factory.py
-# Needs:
-# - load_unified_backup_schedule_settings (already in this file)
-# - run_scheduled_incremental_booking_data_task, run_periodic_full_booking_data_task (from scheduler_tasks)
-# - logging (app_instance.logger)
-# - current_app (implicitly by load_unified_backup_schedule_settings)
-
 from scheduler_tasks import run_scheduled_incremental_booking_data_task, run_periodic_full_booking_data_task
 from apscheduler.jobstores.base import JobLookupError
-# from flask import current_app # Already imported
 
 def reschedule_unified_backup_jobs(app_instance):
     app_instance.logger.info("Attempting to reschedule unified backup jobs.")
@@ -610,17 +609,9 @@ def reschedule_unified_backup_jobs(app_instance):
         app_instance.logger.warning("Scheduler not available or not running. Cannot reschedule unified backup jobs.")
         return
 
-    # Load the latest settings
-    # load_unified_backup_schedule_settings uses current_app.config, which is fine if this
-    # function is called within an active app context (e.g., from a route).
-    # If called from a place without app context, app_instance.config should be used by
-    # load_unified_backup_schedule_settings, or settings passed to it.
-    # For now, assuming it's called from api_system.py route, so app_context is available.
-    # THIS IS NOW CHANGED: load_unified_backup_schedule_settings now takes 'app'
     unified_schedule_settings = load_unified_backup_schedule_settings(app_instance)
     app_instance.logger.info(f"Loaded settings for rescheduling: {unified_schedule_settings}")
 
-    # Reschedule Incremental Backup Job
     try:
         app_instance.logger.info("Attempting to remove job 'unified_incremental_booking_backup_job' during reschedule.")
         try:
@@ -651,7 +642,6 @@ def reschedule_unified_backup_jobs(app_instance):
     except Exception as e:
         app_instance.logger.exception(f"Error rescheduling unified incremental backup job: {e}")
 
-    # Reschedule Full Backup Job
     try:
         app_instance.logger.info("Attempting to remove job 'unified_full_booking_backup_job' during reschedule.")
         try:
@@ -677,13 +667,13 @@ def reschedule_unified_backup_jobs(app_instance):
 
             if schedule_type == 'weekly':
                 day_of_week = full_config.get('day_of_week')
-                if day_of_week is None or not (0 <= int(day_of_week) <= 6): # Validate day_of_week
+                if day_of_week is None or not (0 <= int(day_of_week) <= 6):
                     app_instance.logger.error(f"Invalid day_of_week ({day_of_week}) for weekly unified full backup. Must be 0-6. Job not scheduled.")
                     raise ValueError("Invalid day_of_week for weekly schedule.")
                 trigger_args['day_of_week'] = str(day_of_week)
             elif schedule_type == 'monthly':
                 day_of_month = full_config.get('day_of_month')
-                if day_of_month is None or not (1 <= int(day_of_month) <= 31): # Validate day_of_month
+                if day_of_month is None or not (1 <= int(day_of_month) <= 31):
                     app_instance.logger.error(f"Invalid day_of_month ({day_of_month}) for monthly unified full backup. Must be 1-31. Job not scheduled.")
                     raise ValueError("Invalid day_of_month for monthly schedule.")
                 trigger_args['day'] = str(day_of_month)
@@ -706,3 +696,26 @@ def reschedule_unified_backup_jobs(app_instance):
         app_instance.logger.exception(f"Error rescheduling unified full backup job: {e}")
 
     app_instance.logger.info("Finished rescheduling unified backup jobs.")
+
+# Ensure all functions that might be used by other modules are explicitly available.
+# If utils.py were a package, __all__ would be useful. For a single file, direct imports work.
+# However, to be explicit about what this module provides (especially after adding new functions):
+__all__ = [
+    'create_task', 'get_task_status', 'update_task_log', 'mark_task_done', # New task functions
+    'get_current_effective_time', 'check_booking_permission',
+    'get_detailed_map_availability_for_user', 'check_resources_availability_for_user',
+    'load_scheduler_settings', 'save_scheduler_settings', 'add_audit_log',
+    'resource_to_dict', 'generate_booking_image', 'send_email',
+    'send_slack_notification', 'send_teams_notification', 'parse_simple_rrule',
+    'allowed_file', '_parse_iso_datetime', '_emit_import_progress',
+    '_get_map_configuration_data', '_import_map_configuration_data',
+    '_get_resource_configurations_data', '_import_resource_configurations_data',
+    '_get_user_configurations_data', '_import_user_configurations_data',
+    '_load_schedule_from_json', '_save_schedule_to_json',
+    'load_unified_backup_schedule_settings', 'save_unified_backup_schedule_settings',
+    'reschedule_unified_backup_jobs',
+    # Constants if they are meant to be exported
+    'email_log', 'slack_log', 'teams_log',
+    'active_booking_statuses_for_conflict', 'DATA_DIR',
+    'SCHEDULER_SETTINGS_FILE_PATH', 'DEFAULT_SCHEDULER_SETTINGS'
+]
