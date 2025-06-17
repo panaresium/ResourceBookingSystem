@@ -3217,6 +3217,8 @@ document.addEventListener('DOMContentLoaded', function() {
         socket.on('connect', () => console.log('Socket.IO connected'));
         socket.on('disconnect', () => console.log('Socket.IO disconnected'));
         socket.on('connect_error', (err) => console.error('Socket.IO connection error:', err));
+    } else {
+        console.warn('Socket.IO client library (socket.io.js) not loaded. Real-time features will be unavailable. Ensure the server is running correctly and serving the Socket.IO client.');
     }
 
     const userDropdownButtonGlobal = document.getElementById('user-dropdown-button');
