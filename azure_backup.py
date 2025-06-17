@@ -127,8 +127,20 @@ def upload_file(share_client, source_path, file_path):
     file_client = share_client.get_file_client(file_path)
 
     try:
+        # Check if the file exists and delete it if it does.
+        try:
+            file_client.get_file_properties()
+            # If get_file_properties() does not raise ResourceNotFoundError, the file exists.
+            logger.info(f"File '{file_path}' already exists in share '{share_client.share_name}'. Deleting it before upload.")
+            file_client.delete_file()
+            logger.info(f"Successfully deleted existing file '{file_path}' from share '{share_client.share_name}'.")
+        except ResourceNotFoundError:
+            # File does not exist, no need to delete.
+            logger.info(f"File '{file_path}' does not exist in share '{share_client.share_name}'. Proceeding with upload.")
+            pass # Proceed to upload
+
         with open(source_path, "rb") as f_source:
-            file_client.upload_file(f_source, overwrite=True) # Using overwrite=True as it's common for backups
+            file_client.upload_file(f_source) # Changed overwrite=True to overwrite=False (or remove)
         logger.info(f"Successfully uploaded '{source_path}' to '{share_client.share_name}/{file_path}'.")
         return True
     except FileNotFoundError:
