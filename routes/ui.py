@@ -255,6 +255,12 @@ def check_in_at_resource(resource_id):
         return redirect(url_for('ui.serve_login', next=url_for('ui.check_in_at_resource', resource_id=resource_id, _external=True)))
 
 
+@ui_bp.route("/minimal_socket_test")
+def serve_minimal_socket_test():
+    current_app.logger.info("Serving minimal_socket_test.html")
+    return render_template("minimal_socket_test.html")
+
+
 # Function to register this blueprint in the app factory
 def init_ui_routes(app):
     app.register_blueprint(ui_bp)

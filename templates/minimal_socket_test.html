@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Minimal Socket.IO Test</title>
+</head>
+<body>
+    <h1>Minimal Socket.IO Test Page</h1>
+    <p>Check the browser console for messages.</p>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        try {
+            console.log('Attempting to connect to Socket.IO...');
+            const socket = io();
+
+            socket.on('connect', () => {
+                console.log('Minimal test: Socket.IO connected successfully!');
+                alert('Minimal test: Socket.IO connected successfully!');
+            });
+
+            socket.on('connect_error', (error) => {
+                console.error('Minimal test: Socket.IO connection error:', error);
+                alert('Minimal test: Socket.IO connection error: ' + error);
+            });
+
+            socket.on('disconnect', (reason) => {
+                console.log('Minimal test: Socket.IO disconnected:', reason);
+            });
+
+        } catch (e) {
+            console.error('Minimal test: Error initializing Socket.IO client:', e);
+            alert('Minimal test: Error initializing Socket.IO client: ' + e);
+        }
+    </script>
+</body>
+</html>
