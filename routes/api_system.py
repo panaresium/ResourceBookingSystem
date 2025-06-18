@@ -62,7 +62,8 @@ try:
         restore_bookings_from_full_json_export, # For restoring from full JSON export
         delete_incremental_booking_backup, # For deleting incremental JSON backups
         # New Unified Booking Data Protection functions
-        backup_full_booking_data_json_azure, # For manual full backup trigger
+        # TODO: Obsolete? Import commented out as 'backup_full_booking_data_json_azure' is likely obsolete.
+        # backup_full_booking_data_json_azure, # For manual full backup trigger
         list_booking_data_json_backups,    # For listing unified backups
         # restore_booking_data_from_json_backup, # This is now primarily for full restore, called by orchestrator
         delete_booking_data_json_backup,   # For deleting specific unified backups
@@ -99,7 +100,8 @@ except ImportError as e_detailed_azure_import: # Capture the exception instance
     list_available_full_booking_json_exports = None
     restore_bookings_from_full_json_export = None
     delete_incremental_booking_backup = None
-    backup_full_booking_data_json_azure = None
+    # TODO: Obsolete? Assignment for 'backup_full_booking_data_json_azure' commented out.
+    # backup_full_booking_data_json_azure = None
     list_booking_data_json_backups = None
     delete_booking_data_json_backup = None
     restore_booking_data_to_point_in_time = None
@@ -208,22 +210,24 @@ def api_manual_booking_data_backup_json():
     # ... (rest of original code for this route) ...
     # This route and others below for unified booking data are NOT refactored in this step.
     current_app.logger.info(f"User {current_user.username} initiated manual unified booking data backup (Task ID: {task_id}).")
-    if not backup_full_booking_data_json_azure:
-        current_app.logger.error("azure_backup.backup_full_booking_data_json_azure function not available.")
-        # SocketIO emit might be removed if all comms via polling
-        return jsonify({'success': False, 'message': 'Manual unified booking data backup function is not available on the server.', 'task_id': task_id}), 500
-    try:
-        success = backup_full_booking_data_json_azure(app=current_app._get_current_object(), task_id=task_id) # Removed socketio_instance
-        if success:
-            add_audit_log(action="MANUAL_UNIFIED_BOOKING_BACKUP_COMPLETED", details=f"Task ID: {task_id}", user_id=current_user.id)
-            return jsonify({'success': True, 'message': 'Manual unified booking data backup process completed.', 'task_id': task_id}), 200
-        else:
-            add_audit_log(action="MANUAL_UNIFIED_BOOKING_BACKUP_FAILED", details=f"Task ID: {task_id}.", user_id=current_user.id)
-            return jsonify({'success': False, 'message': 'Failed to complete manual unified booking data backup.', 'task_id': task_id}), 500
-    except Exception as e:
-        # ... (original exception handling) ...
-        add_audit_log(action="MANUAL_UNIFIED_BOOKING_BACKUP_ERROR", details=f"Task ID: {task_id}. Exception: {str(e)}", user_id=current_user.id)
-        return jsonify({'success': False, 'message': f'An unexpected error occurred: {str(e)}', 'task_id': task_id}), 500
+    # TODO: Obsolete? Usage of 'backup_full_booking_data_json_azure' commented out as the function is obsolete.
+    # if not backup_full_booking_data_json_azure:
+    #     current_app.logger.error("azure_backup.backup_full_booking_data_json_azure function not available.")
+    #     # SocketIO emit might be removed if all comms via polling
+    #     return jsonify({'success': False, 'message': 'Manual unified booking data backup function is not available on the server.', 'task_id': task_id}), 500
+    # try:
+    #     success = backup_full_booking_data_json_azure(app=current_app._get_current_object(), task_id=task_id) # Removed socketio_instance
+    #     if success:
+    #         add_audit_log(action="MANUAL_UNIFIED_BOOKING_BACKUP_COMPLETED", details=f"Task ID: {task_id}", user_id=current_user.id)
+    #         return jsonify({'success': True, 'message': 'Manual unified booking data backup process completed.', 'task_id': task_id}), 200
+    #     else:
+    #         add_audit_log(action="MANUAL_UNIFIED_BOOKING_BACKUP_FAILED", details=f"Task ID: {task_id}.", user_id=current_user.id)
+    #         return jsonify({'success': False, 'message': 'Failed to complete manual unified booking data backup.', 'task_id': task_id}), 500
+    # except Exception as e:
+    #     # ... (original exception handling) ...
+    #     add_audit_log(action="MANUAL_UNIFIED_BOOKING_BACKUP_ERROR", details=f"Task ID: {task_id}. Exception: {str(e)}", user_id=current_user.id)
+    #     return jsonify({'success': False, 'message': f'An unexpected error occurred: {str(e)}', 'task_id': task_id}), 500
+    return jsonify({'success': False, 'message': 'This functionality is temporarily disabled due to obsolete components.', 'task_id': task_id}), 503
 
 
 @api_system_bp.route('/api/admin/booking_data_protection/list_backups', methods=['GET'])
