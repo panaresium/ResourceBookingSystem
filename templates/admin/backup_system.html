@@ -225,6 +225,8 @@
     {{ super() }}
     {# admin_backup_common.js now includes polling logic, disable/enable interactions, appendLog, and UTC clock #}
     <script src="{{ url_for('static', filename='js/admin_backup_common.js') }}" defer></script>
+    {# NEW: Added event listener for restore dry run functionality #}
+    <script src="{{ url_for('static', filename='js/restore_dry_run_event_listener.js') }}" defer></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
@@ -419,15 +421,16 @@
                         if(selectiveRestoreModalStatusEl) selectiveRestoreModalStatusEl.className = 'status-message mt-2';
                         if(selectiveRestoreModal) selectiveRestoreModal.style.display = 'block';
                         return; // Modal handles its own submission
-                    } else if (targetButton.classList.contains('restore-dry-run-btn')) {
-                        // This was not refactored in API to be async, assuming it's quick or will be
-                        // For now, keep its original synchronous-like fetch, or refactor API if it's long
-                        console.warn("Dry run not yet fully refactored for polling in this UI example.");
-                        // If it were async: operationType = 'restore_dry_run'; currentOperationTaskIdVariable = 'currentDryRunTaskId';
-                        // endpoint = `/api/admin/restore_dry_run/${timestamp}`; // Needs task_id return from API
-                        // For now, it might be better to leave the old sync logic or simplify
-                        alert("Dry run functionality needs UI update for async tasks if it's long running.");
-                        return;
+                    // REMOVED: Conflicting restore-dry-run-btn handler. This is now in restore_dry_run_event_listener.js
+                    // } else if (targetButton.classList.contains('restore-dry-run-btn')) {
+                    //     // This was not refactored in API to be async, assuming it's quick or will be
+                    //     // For now, keep its original synchronous-like fetch, or refactor API if it's long
+                    //     console.warn("Dry run not yet fully refactored for polling in this UI example.");
+                    //     // If it were async: operationType = 'restore_dry_run'; currentOperationTaskIdVariable = 'currentDryRunTaskId';
+                    //     // endpoint = `/api/admin/restore_dry_run/${timestamp}`; // Needs task_id return from API
+                    //     // For now, it might be better to leave the old sync logic or simplify
+                    //     alert("Dry run functionality needs UI update for async tasks if it's long running.");
+                    //     return;
                     } else if (targetButton.classList.contains('verify-backup-btn-js')) {
                         operationType = 'verify_backup';
                         currentOperationTaskIdVariable = 'currentVerifyTaskId'; // String name of var
