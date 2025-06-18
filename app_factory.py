@@ -346,6 +346,7 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
     csrf.init_app(app)
     socketio.init_app(app) # Add message_queue from config
+    csrf.exempt(socketio)
     migrate.init_app(app, db)
 
     # login_manager and oauth are initialized within init_auth
