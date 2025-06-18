@@ -346,7 +346,6 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
     csrf.init_app(app)
     socketio.init_app(app) # Add message_queue from config
-    csrf.exempt(socketio)
     migrate.init_app(app, db)
 
     # login_manager and oauth are initialized within init_auth
@@ -363,6 +362,14 @@ def create_app(config_object=config, testing=False): # Added testing parameter
            if not app.config.get('TESTING', False) and \
               app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite'):
                _ensure_sqlite_configured_factory_hook(app, db)
+
+    # Add this block for CSRF exemption for Socket.IO paths
+    @app.before_request
+    def csrf_protect_socketio():
+        from flask import g # Import g here
+        # request is already imported at the top of app_factory.py
+        if request.path.startswith('/socket.io'):
+            g._csrf_exempt = True
 
     # 5. Register i18n
     init_translations(app) # i18n might be needed for tests if templates are rendered
