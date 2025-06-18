@@ -436,31 +436,258 @@ def _get_map_configuration_data() -> dict:
 
 def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    logger.warning("_import_map_configuration_data is currently a STUB. Importing map configurations will not actually process data.")
-    summary = {
-        'maps_processed': 0,
-        'maps_created': 0,
-        'maps_updated': 0,
-        'resources_processed': 0,
-        'resources_updated_map_info': 0,
-        'errors': ["Stub implementation: No actual map configuration data imported."],
-        'message': "Map configuration import is currently a STUB."
-    }
+
+    maps_data = config_data.get('maps', [])
+    resources_map_info_data = config_data.get('resources_map_info', [])
+
+    maps_processed = 0
+    maps_created = 0
+    maps_updated = 0
+    resources_processed = 0
+    resources_updated_map_info = 0
+
+    errors = []
+    warnings = []
+    backup_to_new_map_id_mapping = {}
+
+    # Process Maps
+    for map_item in maps_data:
+        maps_processed += 1
+        backup_map_id = map_item.get('id')
+
+        if backup_map_id is None:
+            errors.append(f"Map item found with no 'id': {map_item.get('name', 'Unknown map')}")
+            continue
+
+        try:
+            floor_map = db.session.get(FloorMap, backup_map_id)
+
+            if floor_map: # Map exists with this ID
+                floor_map.name = map_item.get('name', floor_map.name)
+                floor_map.description = map_item.get('description', floor_map.description)
+                # image_filename is stored as is. Actual file restoration is separate.
+                floor_map.image_filename = map_item.get('image_filename', floor_map.image_filename)
+                floor_map.display_order = map_item.get('display_order', floor_map.display_order)
+                floor_map.is_published = map_item.get('is_published', floor_map.is_published)
+                # map_data_json can be None, get() handles this.
+                floor_map.map_data_json = map_item.get('map_data_json', floor_map.map_data_json)
+
+                db.session.add(floor_map)
+                maps_updated += 1
+                backup_to_new_map_id_mapping[backup_map_id] = floor_map.id
+            else: # Map with this ID does not exist, create a new one
+                new_map = FloorMap(
+                    name=map_item.get('name'),
+                    description=map_item.get('description'),
+                    image_filename=map_item.get('image_filename'),
+                    display_order=map_item.get('display_order', 0),
+                    is_published=map_item.get('is_published', True),
+                    map_data_json=map_item.get('map_data_json')
+                    # Do NOT set 'id', let the DB assign it.
+                )
+                db.session.add(new_map)
+                db.session.flush() # Flush to get the new_map.id
+
+                backup_to_new_map_id_mapping[backup_map_id] = new_map.id
+                maps_created += 1
+                warnings.append(f"Map with backup ID {backup_map_id} ('{new_map.name}') not found. Created as new map with ID {new_map.id}.")
+        except Exception as e_map:
+            error_msg = f"Error processing map (Backup ID: {backup_map_id}, Name: {map_item.get('name', 'N/A')}): {str(e_map)}"
+            errors.append(error_msg)
+            logger.error(error_msg, exc_info=True)
+
+
+    # Process Resource Map Info
+    for resource_info in resources_map_info_data:
+        resources_processed += 1
+        resource_id = resource_info.get('resource_id')
+        resource_backup_map_id = resource_info.get('map_id') # This is the ID from the backup's maps section
+        resource_map_x = resource_info.get('map_x')
+        resource_map_y = resource_info.get('map_y')
+
+        if resource_id is None:
+            errors.append("Resource map info item found with no 'resource_id'.")
+            continue
+
+        try:
+            resource = db.session.get(Resource, resource_id)
+            if resource:
+                actual_db_map_id = None
+                if resource_backup_map_id is not None: # If map_id is None/null in backup, it means unassign from map
+                    actual_db_map_id = backup_to_new_map_id_mapping.get(resource_backup_map_id)
+                    if actual_db_map_id is None and resource_backup_map_id is not None: # Check again if it was explicitly set in backup
+                        warnings.append(f"For Resource ID {resource_id}, backed up Map ID {resource_backup_map_id} was not found or could not be mapped to a current map. Map assignment skipped.")
+
+                resource.floor_map_id = actual_db_map_id
+                resource.map_x = resource_map_x
+                resource.map_y = resource_map_y
+                db.session.add(resource)
+                resources_updated_map_info += 1
+            else:
+                errors.append(f"Resource with ID {resource_id} not found. Cannot update its map info.")
+        except Exception as e_res:
+            error_msg = f"Error processing resource map info (Resource ID: {resource_id}): {str(e_res)}"
+            errors.append(error_msg)
+            logger.error(error_msg, exc_info=True)
+
     status_code = 200
-    return summary, status_code
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        errors.append(f"Database commit error: {str(e)}")
+        logger.error(f"Database commit error during map configuration import: {e}", exc_info=True)
+        status_code = 500 # Indicate server error if commit fails
+
+    final_message_parts = [
+        f"Maps processed: {maps_processed} (Created: {maps_created}, Updated: {maps_updated}).",
+        f"Resources map info processed: {resources_processed} (Updated: {resources_updated_map_info})."
+    ]
+    if warnings:
+        final_message_parts.append(f"Warnings: {'; '.join(warnings)}")
+    if errors:
+        final_message_parts.append(f"Errors: {'; '.join(errors)}")
+        if status_code == 200: # If commit was successful but there were data errors
+            status_code = 207 # Multi-Status, as some operations might have failed
+
+    final_message = " ".join(final_message_parts)
+    logger.info(f"Map configuration import result: {final_message}")
+
+    summary_dict = {
+        'maps_processed': maps_processed,
+        'maps_created': maps_created,
+        'maps_updated': maps_updated,
+        'resources_processed': resources_processed,
+        'resources_updated_map_info': resources_updated_map_info,
+        'errors': errors,
+        'warnings': warnings,
+        'message': final_message,
+        'status_code': status_code # Added for clarity on outcome
+    }
+    # The routes expect the function to return a boolean for success, or a more complex object.
+    # For now, returning the summary_dict directly might be okay if the caller handles it.
+    # The original selective_restore expected True or a string/dict with error.
+    # Let's return True if there are no errors, otherwise the error list or a summary string.
+    # The prompt for do_selective_restore_work expects `import_result is True`
+    if not errors and status_code == 200:
+        return True # Or summary_dict, if the caller is adapted
+    else:
+        # Return a string or dict that can be interpreted as error/partial success by the caller
+        return {'message': final_message, 'errors': errors, 'warnings': warnings}
+
 
 def _get_resource_configurations_data() -> list:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.warning("_get_resource_configurations_data is currently a STUB. Exporting resource configurations will not provide actual data.")
     return []
 
-def _import_resource_configurations_data(resources_data_list: list) -> tuple[int, int, list]:
+def _import_resource_configurations_data(resources_data_list: list): # Return type will be bool or dict
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    logger.warning("_import_resource_configurations_data is currently a STUB. Import will not function correctly.")
-    created_count = 0
-    updated_count = 0
-    errors = ["This function is a stub and did not process any data."]
-    return created_count, updated_count, errors
+
+    resources_processed = 0
+    resources_updated = 0
+    errors = []
+    warnings = []
+
+    for resource_data in resources_data_list:
+        resources_processed += 1
+        backup_id = resource_data.get('id')
+
+        if backup_id is None:
+            errors.append(f"Resource data item found with no 'id': {resource_data.get('name', 'Unknown resource')}")
+            continue
+
+        try:
+            resource = db.session.get(Resource, backup_id)
+
+            if resource:
+                resource.name = resource_data.get('name', resource.name)
+                resource.capacity = resource_data.get('capacity', resource.capacity)
+                resource.equipment = resource_data.get('equipment', resource.equipment)
+                resource.status = resource_data.get('status', resource.status)
+
+                # Handle tags (assuming model stores as string, backup might be string or list)
+                tags_data = resource_data.get('tags', resource.tags)
+                if isinstance(tags_data, list):
+                    resource.tags = ",".join(tags_data) # Convert list to comma-separated string
+                elif tags_data is None: # If backup explicitly has null tags
+                    resource.tags = None
+                else: # Is a string or keep existing
+                    resource.tags = tags_data
+
+                resource.booking_restriction = resource_data.get('booking_restriction', resource.booking_restriction)
+
+                published_at_str = resource_data.get('published_at')
+                if published_at_str: # Only update if provided
+                    resource.published_at = _parse_iso_datetime(published_at_str)
+
+                # Handle allowed_user_ids (assuming model stores as JSON string)
+                allowed_users_data = resource_data.get('allowed_user_ids', resource.allowed_user_ids)
+                if isinstance(allowed_users_data, list): # If backup provides a list
+                    resource.allowed_user_ids = json.dumps(allowed_users_data)
+                elif allowed_users_data is None: # If backup explicitly has null
+                     resource.allowed_user_ids = None
+                else: # Is a string (hopefully JSON string) or keep existing
+                    resource.allowed_user_ids = allowed_users_data
+
+                resource.is_under_maintenance = resource_data.get('is_under_maintenance', resource.is_under_maintenance)
+
+                maintenance_until_str = resource_data.get('maintenance_until')
+                resource.maintenance_until = _parse_iso_datetime(maintenance_until_str) # _parse_iso_datetime handles None
+
+                # Handle Roles (Many-to-Many)
+                backed_up_role_ids_data = resource_data.get('roles', [])
+                if backed_up_role_ids_data is not None: # Check if 'roles' key was present
+                    backed_up_role_ids = {role_info.get('id') for role_info in backed_up_role_ids_data if role_info.get('id') is not None}
+
+                    if backed_up_role_ids: # Only query if there are IDs to look for
+                        current_roles_in_db = Role.query.filter(Role.id.in_(backed_up_role_ids)).all()
+                        found_role_ids_in_db = {role.id for role in current_roles_in_db}
+
+                        for backed_up_id in backed_up_role_ids:
+                            if backed_up_id not in found_role_ids_in_db:
+                                warnings.append(f"For Resource ID {backup_id}, Role ID {backed_up_id} from backup not found in database. Skipping assignment of this role.")
+                        resource.roles = current_roles_in_db # Assign the list of Role objects found in DB
+                    else: # Empty list of roles in backup means remove all roles
+                        resource.roles = []
+                # If 'roles' key is missing from backup, existing roles are preserved by not touching resource.roles
+
+                db.session.add(resource)
+                resources_updated += 1
+            else:
+                warnings.append(f"Resource with backup ID {backup_id} ('{resource_data.get('name', 'N/A')}') not found in DB. Skipped update.")
+        except Exception as e_res:
+            error_msg = f"Error processing resource (Backup ID: {backup_id}, Name: {resource_data.get('name', 'N/A')}): {str(e_res)}"
+            errors.append(error_msg)
+            logger.error(error_msg, exc_info=True)
+
+    status_code = 200
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        errors.append(f"Database commit error: {str(e)}")
+        logger.error(f"Database commit error during resource configurations import: {e}", exc_info=True)
+        status_code = 500
+
+    final_message_parts = [
+        f"Resources processed: {resources_processed} (Updated: {resources_updated})."
+    ]
+    if warnings:
+        final_message_parts.append(f"Warnings: {'; '.join(warnings)}")
+    if errors:
+        final_message_parts.append(f"Errors: {'; '.join(errors)}")
+        if status_code == 200: status_code = 207
+
+    final_message = " ".join(final_message_parts)
+    logger.info(f"Resource configurations import result: {final_message}")
+
+    if not errors and status_code == 200:
+        return True
+    else:
+        return {'message': final_message, 'errors': errors, 'warnings': warnings, 'status_code': status_code,
+                'resources_processed': resources_processed, 'resources_updated': resources_updated}
+
 
 def _get_user_configurations_data() -> dict:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
@@ -471,15 +698,148 @@ def _get_user_configurations_data() -> dict:
         'message': "Stub implementation: No actual user configuration data exported."
     }
 
-def _import_user_configurations_data(user_config_data: dict) -> tuple[int, int, int, int, list]:
+def _import_user_configurations_data(user_config_data: dict): # Return type will be bool or dict
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    logger.warning("_import_user_configurations_data is currently a STUB. Importing user configurations will not actually process data.")
+
+    roles_data = user_config_data.get('roles', [])
+    users_data = user_config_data.get('users', [])
+
+    roles_processed = 0
     roles_created = 0
     roles_updated = 0
-    users_created = 0
+    users_processed = 0
     users_updated = 0
-    errors = ["Stub implementation: No actual user configuration data imported."]
-    return roles_created, roles_updated, users_created, users_updated, errors
+
+    errors = []
+    warnings = []
+    backup_to_new_role_id_mapping = {} # Maps backup role ID to current DB role ID
+
+    # Process Roles
+    for role_item in roles_data:
+        roles_processed += 1
+        backup_role_id = role_item.get('id')
+        role_name = role_item.get('name')
+
+        if backup_role_id is None or role_name is None:
+            errors.append(f"Role item found with missing 'id' or 'name': {role_item}")
+            continue
+
+        try:
+            permissions_json_str = role_item.get('permissions', '[]')
+            try:
+                permissions_list = json.loads(permissions_json_str)
+                if not isinstance(permissions_list, list):
+                    raise ValueError("Permissions data is not a list.")
+            except json.JSONDecodeError as jde:
+                errors.append(f"Error decoding permissions JSON for Role ID {backup_role_id} ('{role_name}'): {str(jde)}. Permissions raw: '{permissions_json_str}'")
+                continue
+            except ValueError as ve:
+                errors.append(f"Invalid permissions format for Role ID {backup_role_id} ('{role_name}'): {str(ve)}. Permissions raw: '{permissions_json_str}'")
+                continue
+
+            role = db.session.get(Role, backup_role_id)
+
+            if role: # Role exists by ID
+                role.name = role_name
+                role.permissions = permissions_list
+                db.session.add(role)
+                roles_updated += 1
+                backup_to_new_role_id_mapping[backup_role_id] = role.id
+            else: # Role does not exist by ID, try to find by name
+                role_by_name = Role.query.filter_by(name=role_name).first()
+                if role_by_name:
+                    warnings.append(f"Role with backup ID {backup_role_id} not found, but role with name '{role_name}' (ID: {role_by_name.id}) exists. Updating existing role by name.")
+                    role_by_name.permissions = permissions_list
+                    db.session.add(role_by_name)
+                    roles_updated += 1
+                    backup_to_new_role_id_mapping[backup_role_id] = role_by_name.id
+                else: # Create new role
+                    new_role = Role(name=role_name, permissions=permissions_list)
+                    db.session.add(new_role)
+                    db.session.flush()
+                    backup_to_new_role_id_mapping[backup_role_id] = new_role.id
+                    roles_created += 1
+                    warnings.append(f"Role with backup ID {backup_role_id} ('{role_name}') not found. Created as new role with ID {new_role.id}.")
+        except Exception as e_role:
+            error_msg = f"Error processing role (Backup ID: {backup_role_id}, Name: {role_name}): {str(e_role)}"
+            errors.append(error_msg)
+            logger.error(error_msg, exc_info=True)
+
+    # Process Users (Update existing only)
+    for user_item in users_data:
+        users_processed += 1
+        backup_user_id = user_item.get('id')
+        username = user_item.get('username')
+
+        if backup_user_id is None or username is None:
+            errors.append(f"User item found with missing 'id' or 'username': {user_item}")
+            continue
+
+        try:
+            user = db.session.get(User, backup_user_id)
+
+            if user:
+                user.username = username
+                user.email = user_item.get('email', user.email)
+                user.is_admin = user_item.get('is_admin', user.is_admin)
+                user.status = user_item.get('status', user.status)
+                # Password hash is intentionally NOT updated from backup.
+
+                backed_up_user_role_ids_data = user_item.get('role_ids', [])
+                if backed_up_user_role_ids_data is not None:
+                    backed_up_user_role_ids = {role_id for role_id in backed_up_user_role_ids_data if role_id is not None}
+                    actual_db_roles = []
+
+                    for b_role_id in backed_up_user_role_ids:
+                        actual_db_role_id = backup_to_new_role_id_mapping.get(b_role_id)
+                        if actual_db_role_id:
+                            role_obj = db.session.get(Role, actual_db_role_id)
+                            if role_obj:
+                                actual_db_roles.append(role_obj)
+                            else:
+                                warnings.append(f"For User '{username}' (Backup ID {backup_user_id}), mapped Role ID {actual_db_role_id} (from backup Role ID {b_role_id}) not found in DB. Skipping assignment.")
+                        else:
+                            warnings.append(f"For User '{username}' (Backup ID {backup_user_id}), backup Role ID {b_role_id} could not be mapped to a current Role ID. Skipping assignment.")
+                    user.roles = actual_db_roles
+                # If 'role_ids' key is missing, existing user roles are preserved.
+
+                db.session.add(user)
+                users_updated += 1
+            else:
+                warnings.append(f"User with backup ID {backup_user_id} ('{username}') not found in DB. Skipped (user creation from backup is not supported by this import).")
+        except Exception as e_user:
+            error_msg = f"Error processing user (Backup ID: {backup_user_id}, Username: {username}): {str(e_user)}"
+            errors.append(error_msg)
+            logger.error(error_msg, exc_info=True)
+
+    status_code = 200
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        errors.append(f"Database commit error: {str(e)}")
+        logger.error(f"Database commit error during user configurations import: {e}", exc_info=True)
+        status_code = 500
+
+    final_message_parts = [
+        f"Roles processed: {roles_processed} (Created: {roles_created}, Updated: {roles_updated}).",
+        f"Users processed: {users_processed} (Updated: {users_updated})."
+    ]
+    if warnings:
+        final_message_parts.append(f"Warnings: {'; '.join(warnings)}")
+    if errors:
+        final_message_parts.append(f"Errors: {'; '.join(errors)}")
+        if status_code == 200: status_code = 207
+
+    final_message = " ".join(final_message_parts)
+    logger.info(f"User configurations import result: {final_message}")
+
+    if not errors and status_code == 200:
+        return True
+    else:
+        return {'message': final_message, 'errors': errors, 'warnings': warnings, 'status_code': status_code,
+                'roles_processed': roles_processed, 'roles_created': roles_created, 'roles_updated': roles_updated,
+                'users_processed': users_processed, 'users_updated': users_updated}
 
 def _load_schedule_from_json():
     logger = current_app.logger if current_app else logging.getLogger(__name__)
