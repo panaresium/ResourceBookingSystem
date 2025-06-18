@@ -252,7 +252,7 @@
 </div> {# End of main-content #}
 
 <!-- Modals -->
-<div class="modal fade" id="confirmClearAllModal" tabindex="-1" role="dialog"> <div class="modal-dialog"> <div class="modal-content"> <div class="modal-header"> <h5 class="modal-title">{{ _("Confirm Clear All Booking Data") }}</h5> <button type="button" class="close" data-dismiss="modal">&times;</button> </div> <div class="modal-body"> {{ _("Are you sure you want to permanently delete all booking data? This action cannot be undone.") }} </div> <div class="modal-footer"> <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ _("Cancel") }}</button> <button type="button" class="btn btn-danger" onclick="executeClearAllBookingData()">{{ _("Clear All Data") }}</button> </div> </div> </div> </div>
+<div class="modal fade" id="confirmClearAllModal" tabindex="-1" role="dialog" style="display: none !important;"> <div class="modal-dialog"> <div class="modal-content"> <div class="modal-header"> <h5 class="modal-title">{{ _("Confirm Clear All Booking Data") }}</h5> <button type="button" class="close" data-dismiss="modal">&times;</button> </div> <div class="modal-body"> {{ _("Are you sure you want to permanently delete all booking data? This action cannot be undone.") }} </div> <div class="modal-footer"> <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ _("Cancel") }}</button> <button type="button" class="btn btn-danger" onclick="executeClearAllBookingData()">{{ _("Clear All Data") }}</button> </div> </div> </div> </div>
 <div class="modal fade" id="actionProgressModal" tabindex="-1" aria-labelledby="actionProgressModalLabel" aria-hidden="true" style="display: none;"> <div class="modal-dialog"> <div class="modal-content"> <div class="modal-header"> <h5 class="modal-title" id="actionProgressModalLabel">Action in Progress</h5> </div> <div class="modal-body"> <p id="actionProgressMessage">Loading initial page data...</p> <div class="progress"> <div id="actionProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div> </div> </div> </div> </div> </div>
 {% endblock %}
 
@@ -483,7 +483,27 @@
     }
 
     $(document).ready(function() {
-        $('#confirmClearAllModal').modal('hide'); // Ensure modal is hidden on page load
+        $('#confirmClearAllModal').css('display', 'none'); // Initial forceful hide via CSS
+
+        // Persistent hiding logic
+        let hideIntervalCount = 0;
+        const hideModalInterval = setInterval(function() {
+            const modalElement = document.getElementById('confirmClearAllModal');
+            if (modalElement && (modalElement.style.display !== 'none' || $(modalElement).hasClass('show'))) {
+                $(modalElement).modal('hide'); // Use Bootstrap's method
+                // If Bootstrap's hide doesn't set display:none (e.g. during transition), force it.
+                if (modalElement.style.display !== 'none') {
+                     modalElement.style.setProperty('display', 'none', 'important');
+                }
+                console.log('Persistently attempting to hide confirmClearAllModal (JS interval)...');
+            }
+            hideIntervalCount++;
+            if (hideIntervalCount >= 20) { // Try for 2 seconds (20 * 100ms)
+                clearInterval(hideModalInterval);
+                console.log('Persistent hide interval for confirmClearAllModal cleared.');
+            }
+        }, 100);
+
         updateServerTime(); setInterval(updateServerTime, 60000);
 
         showProgressModal("{{ _('Loading initial page data...') }}");
