@@ -337,6 +337,21 @@
                     const backupTimestamp = this.dataset.timestamp;
                     const selectedComponents = Array.from(document.querySelectorAll('#selective-restore-form input[name="components"]:checked')).map(cb => cb.value);
 
+                    // Define all possible individual components
+                    const allIndividualComponentValues = ['database', 'map_config', 'floor_maps', 'resource_uploads'];
+
+                    // Check for "Full Restore" intent
+                    const isAllComponentsCheckboxChecked = componentAllCheckbox.checked;
+                    const areAllIndividualComponentsActuallyChecked = allIndividualComponentValues.every(val => selectedComponents.includes(val)) && selectedComponents.length === allIndividualComponentValues.length;
+
+                    if (isAllComponentsCheckboxChecked || areAllIndividualComponentsActuallyChecked) {
+                        selectiveRestoreModalStatusEl.textContent = "{{ _('Actual full restore functionality is not yet implemented. This feature will be available in a future update. For now, only selective restore of individual components is simulated.') }}";
+                        selectiveRestoreModalStatusEl.className = 'alert alert-warning mt-2';
+                        // No disablePageInteractions() has been called yet in this path, so no need to re-enable.
+                        // The modal remains open for the user to close or change selection.
+                        return; // Prevent the fetch call and further processing for full restore attempts
+                    }
+
                     if (selectedComponents.length === 0) {
                         selectiveRestoreModalStatusEl.textContent = "{{ _('Please select at least one component to restore.') }}";
                         selectiveRestoreModalStatusEl.className = 'alert alert-warning mt-2';
