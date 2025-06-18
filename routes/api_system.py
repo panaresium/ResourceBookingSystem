@@ -990,6 +990,71 @@ def api_bulk_delete_system_backups():
     add_audit_log(action="BULK_DELETE_SYSTEM_BACKUPS_STARTED", details=f"Task {task_id} for {len(timestamps_to_delete)} timestamps by user {username_for_audit}.", user_id=user_id_for_audit, username=username_for_audit)
     return jsonify({'success': True, 'message': 'Bulk backup deletion task started.', 'task_id': task_id})
 
+
+@api_system_bp.route('/api/admin/restore_bookings_from_full_db', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def api_restore_bookings_from_full_db():
+    user_id_for_audit = current_user.id if hasattr(current_user, 'id') else None
+    username_for_audit = current_user.username if hasattr(current_user, 'username') else "System"
+
+    data = request.get_json()
+    if not data or 'backup_filename' not in data:
+        current_app.logger.warning(f"Restore bookings from full DB attempt by {username_for_audit} failed: Missing backup_filename.")
+        return jsonify({'success': False, 'message': 'Backup filename is required.'}), 400
+
+    backup_filename = data['backup_filename']
+    # Assuming create_task is available and imported from utils
+    task_id = create_task(task_type='restore_bookings_from_full_db')
+    current_app.logger.info(f"User {username_for_audit} initiated restore of bookings from full DB. Task ID: {task_id}, Backup Filename: {backup_filename}")
+
+    def do_restore_work(app_context, task_id_param, backup_filename_param, user_id_audit, username_audit):
+        with app_context:
+            try:
+                current_app.logger.info(f"Worker thread started for restore bookings from full DB task: {task_id_param}")
+                # Assuming update_task_log and mark_task_done are available and imported from utils
+                update_task_log(task_id_param, f"Process initiated for restoring bookings from full DB backup '{backup_filename_param}'.", level="info")
+
+                # Assuming restore_bookings_from_full_db_backup is imported from azure_backup (conditionally)
+                if not restore_bookings_from_full_db_backup:
+                    update_task_log(task_id_param, "Restore function (restore_bookings_from_full_db_backup) not available.", level="error")
+                    mark_task_done(task_id_param, success=False, result_message="Restore function not available.")
+                    # Assuming add_audit_log is available and imported from utils
+                    add_audit_log(action="RESTORE_BOOKINGS_FULLDB_WORKER_ERROR", details=f"Task {task_id_param}: restore_bookings_from_full_db_backup not available.", user_id=user_id_audit, username=username_audit)
+                    return
+
+                # Call the actual restore function
+                # Assuming restore_bookings_from_full_db_backup takes task_id for progress updates
+                # and returns a tuple (success_flag, message_string)
+                success, message = restore_bookings_from_full_db_backup(
+                    backup_filename=backup_filename_param,
+                    app=current_app._get_current_object(),
+                    task_id=task_id_param
+                )
+
+                if success:
+                    final_message = f"Bookings successfully restored from full DB backup '{backup_filename_param}'. Message: {message}"
+                    mark_task_done(task_id_param, success=True, result_message=final_message)
+                    add_audit_log(action="RESTORE_BOOKINGS_FULLDB_WORKER_COMPLETED", details=f"Task {task_id_param}, Success: True. {final_message}", user_id=user_id_audit, username=username_audit)
+                else:
+                    error_detail = f"Restore bookings from full DB backup '{backup_filename_param}' failed. Reason: {message}"
+                    mark_task_done(task_id_param, success=False, result_message=error_detail)
+                    add_audit_log(action="RESTORE_BOOKINGS_FULLDB_WORKER_FAILED", details=f"Task {task_id_param}, Error: {error_detail}", user_id=user_id_audit, username=username_audit)
+                current_app.logger.info(f"Restore bookings from full DB task {task_id_param} worker finished. Success: {success}")
+
+            except Exception as e:
+                current_app.logger.error(f"Exception in restore bookings from full DB worker thread for task {task_id_param}: {e}", exc_info=True)
+                mark_task_done(task_id_param, success=False, result_message=f"Restore failed due to an unexpected exception: {str(e)}")
+                add_audit_log(action="RESTORE_BOOKINGS_FULLDB_WORKER_EXCEPTION", details=f"Task {task_id_param}, Exception: {str(e)}", user_id=user_id_audit, username=username_audit)
+
+    flask_app_context = current_app.app_context()
+    # Assuming threading.Thread is available (imported as import threading)
+    thread = threading.Thread(target=do_restore_work, args=(flask_app_context, task_id, backup_filename, user_id_for_audit, username_for_audit))
+    thread.start()
+
+    add_audit_log(action="RESTORE_BOOKINGS_FULLDB_STARTED", details=f"Task {task_id} for backup {backup_filename} initiated by user {username_for_audit}.", user_id=user_id_for_audit, username=username_for_audit)
+    return jsonify({'success': True, 'message': 'Restore bookings from full DB task started.', 'task_id': task_id})
+
 def init_api_system_routes(app):
 # ... (rest of file, including init_api_system_routes, get_booking_settings, etc. remains unchanged) ...
     app.register_blueprint(api_system_bp)
