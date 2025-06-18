@@ -3178,6 +3178,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (languageSelector) languageSelector.addEventListener('change', handleLanguageChange);
     loadLanguagePreference();
 
+    // Global Socket.IO connection for real-time UI updates (e.g., booking changes)
+    // This requires /socket.io/socket.io.js to be loaded (typically via base.html).
     if (typeof io !== 'undefined') {
         const socket = io();
         socket.on('booking_updated', (data) => {
