@@ -1029,6 +1029,50 @@ class AdminAPITestCase(AppTests):
         self.assertIn("Placeholder function 'list_booking_data_json_backups' called", mock_azure_logger_warning.call_args[0][0])
         self.logout()
 
+    @patch('routes.api_system.create_full_backup', None)
+    def test_one_click_backup_azure_not_configured(self, mock_create_full_backup_none):
+        admin_user = self._create_admin_user(username="admin_one_click_backup_test", email_ext="oneclick")
+        self.login(admin_user.username, "adminapipass")
+
+        response = self.client.post(url_for('api_system.api_one_click_backup'))
+        self.assertEqual(response.status_code, 200)
+        json_response = response.get_json()
+        self.assertTrue(json_response['success'])
+        self.assertIn('task_id', json_response)
+        task_id = json_response['task_id']
+
+        # Poll task status
+        start_time = time.time()
+        timeout_seconds = 10 # Max wait time for the task to finish
+        final_task_status = None
+
+        while time.time() - start_time < timeout_seconds:
+            status_response = self.client.get(url_for('api_system.get_task_status_api', task_id=task_id))
+            self.assertEqual(status_response.status_code, 200)
+            task_status = status_response.get_json()
+            if task_status.get('is_done'):
+                final_task_status = task_status
+                break
+            time.sleep(0.2) # Poll every 200ms
+
+        self.assertIsNotNone(final_task_status, f"Task {task_id} did not finish within {timeout_seconds} seconds.")
+
+        self.assertEqual(final_task_status['status_summary'], "Azure backup module not available.")
+        self.assertFalse(final_task_status['success'])
+        self.assertEqual(final_task_status['result_message'], "Azure backup module not available.")
+
+        # Verify the specific log entry within the task
+        # The worker `do_backup_work` calls `update_task_log` with the more detailed message first.
+        found_log_entry = False
+        for entry in final_task_status.get('log_entries', []):
+            if "Azure backup module (create_full_backup) not available." in entry.get('message', ''):
+                self.assertEqual(entry.get('level'), 'error')
+                found_log_entry = True
+                break
+        self.assertTrue(found_log_entry, "Expected log entry about 'create_full_backup not available' not found.")
+
+        self.logout()
+
 
 class TestBookingResourceRelease(AppTests):
     def _common_user_setup(self):
