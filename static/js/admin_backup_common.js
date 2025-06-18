@@ -218,6 +218,7 @@ function pollTaskStatus(taskId, logAreaId, statusMessageEl, operationType) {
                 if (operationType === 'verify_system_backup') currentVerifyTaskId = null;
                 if (operationType === 'delete_system_backup') currentDeleteTaskId = null;
                 if (operationType === 'bulk_delete_system_backups') currentBulkDeleteTaskId = null;
+                if (operationType === 'restore_dry_run') currentDryRunTaskId = null; // Added for dry run
                 // currentRestoreTaskId is for one-click full restore, not yet refactored in this common script.
             }
         })
