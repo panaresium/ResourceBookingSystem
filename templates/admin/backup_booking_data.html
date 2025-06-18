@@ -156,6 +156,29 @@
         </div>
     </div>
 
+    <!-- Automatic Restore Settings Section -->
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="mb-0"><i class="fas fa-power-off"></i> {{ _("Startup Settings") }}</h4>
+                </div>
+                <div class="card-body">
+                    <p class="card-text">{{ _("Configure settings related to server startup behavior.") }}</p>
+                    <div class="form-group">
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="autoRestoreBookingDataOnStartup">
+                            <label class="form-check-label" for="autoRestoreBookingDataOnStartup">{{ _("Enable Automatic Restore of Booking Data on Server Restart") }}</label>
+                        </div>
+                        <small class="form-text text-muted">{{ _("If enabled, the system will attempt to restore the latest booking data backup automatically when the server starts. This uses the primary unified backup system.") }}</small>
+                    </div>
+                    <button id="saveAutoRestoreBookingDataSettingBtn" class="btn btn-success mt-2">{{ _("Save Setting") }}</button>
+                    <div id="autoRestoreSettingFeedback" class="mt-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Legacy & Other Booking Data Operations - Section Removed -->
     <!-- Section has been removed as per requirements -->
 
@@ -169,18 +192,7 @@
                 <div class="card-body">
                     <p>{{ _("Restore booking data from available backups using methods other than the primary Unified Azure JSON system. The Unified Azure JSON Backup section provides more robust point-in-time recovery.") }}</p>
 
-                    <div class="card mb-3">
-                        <div class="card-header"> {{ _("Restore Bookings from Full System Backup") }} </div>
-                        <div class="card-body">
-                            <p>{{ _("Select a full system backup from Azure to restore its booking data. This will overwrite existing bookings.") }}</p>
-                            <div class="form-group">
-                                <label for="full-backup-system-list">{{ _("Available Full System Backups (on Azure)") }}</label>
-                                <select id="full-backup-system-list" class="form-control"></select>
-                            </div>
-                            <button class="btn btn-primary" onclick="restoreBookingsFromFullSystemBackup()">{{ _("Restore Bookings from Selected System Backup") }}</button>
-                            <button class="btn btn-info" onclick="loadFullBackupsForRestore()">{{ _("Refresh List") }}</button>
-                        </div>
-                    </div>
+                    <!-- Restore Bookings from Full System Backup - Section Removed -->
 
                     <!-- CSV Restore Section Removed -->
                     <!-- Section has been removed as per requirements -->
@@ -303,7 +315,8 @@
                 populateUnifiedBackupSelect([]); renderUnifiedBackupListForManagement([]);
             })
             .finally(() => { // Simulating finally
-                loadFullBackupsForRestore();
+                // loadFullBackupsForRestore(); // Removed call
+                hideProgressModal(); // Now called directly here
             });
     }
 
@@ -432,83 +445,10 @@
 
     // --- Legacy and Other Restore/Backup Functions ---
     // Note: All CSV related JS functions have been removed.
-    // Functions like loadFullBackupsForRestore, restoreBookingsFromFullSystemBackup,
-    // confirmClearAllBookingData, executeClearAllBookingData remain if they handle non-CSV operations.
+    // Functions like confirmClearAllBookingData, executeClearAllBookingData remain if they handle non-CSV operations.
 
-    function loadFullBackupsForRestore() {
-        // This function is now the last step in the initial data loading chain started by refreshUnifiedAzureBackupList.
-        // The initial showProgressModal is in $(document).ready().
-        fetch("{{ url_for('api_system.api_list_backups') }}")
-            .then(response => response.json())
-            .then(data => {
-                const select = $('#full-backup-system-list');
-                select.empty();
-                if (data.success && data.backups && data.backups.length > 0) {
-                    data.backups.forEach(backup => {
-                        let displayName = backup.filename || backup.timestamp_str || backup.timestamp; // Ensure some display name
-                        if (backup.timestamp_str) { // Prefer formatted timestamp if available
-                             try { displayName = `${new Date(backup.timestamp_str).toLocaleString()} (${backup.filename})`; }
-                             catch(e) { console.warn("Error parsing timestamp_str:", backup.timestamp_str, e); }
-                        }
-                        select.append($('<option>', { value: backup.filename, text: displayName }));
-                    });
-                } else {
-                    select.append($('<option>', { text: data.message || "{{ _('No full system backups found') }}" }));
-                     if (!data.success) alert("{{ _('Error loading full system backups for restore list:') }} " + (data.message || "{{ _('Unknown error') }}"));
-                }
-            })
-            .catch(error => {
-                console.error("{{ _('Error fetching full system backups list for restore:') }}", error);
-                alert("{{ _('Error fetching full system backups list for restore.') }}");
-                const select = $('#full-backup-system-list');
-                select.empty();
-                select.append($('<option>', { text: "{{ _('Error loading backups') }}" }));
-            })
-            .finally(() => {
-                // This is now the final step of the initial data loading chain.
-                hideProgressModal();
-            });
-    }
-
-    function restoreBookingsFromFullSystemBackup() {
-        const selectedBackup = $('#full-backup-system-list').val();
-        if (!selectedBackup || selectedBackup === "{{ _('No full system backups found') }}") {
-            alert("{{ _('Please select a system backup to restore bookings from.') }}");
-            return;
-        }
-        if (!confirm("{{ _('Are you sure you want to restore bookings from the system backup') }} '" + selectedBackup + "'? {{ _('This will overwrite current booking data. This action cannot be undone.') }}")) {
-            return;
-        }
-        showProgressModal("{{ _('Restoring bookings from system backup...') }}");
-        disablePageInteractions(); // Disable UI
-
-        fetch("{{ url_for('api_system.api_restore_bookings_from_full_db') }}", {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
-            body: JSON.stringify({ backup_filename: selectedBackup })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.task_id) {
-                const statusEl = document.getElementById('actionProgressMessage');
-                statusEl.textContent = "{{ _('Restore bookings from full system backup task started. Task ID:') }} " + data.task_id;
-                currentRestoreBookingsFullSysTaskId = data.task_id;
-                if (activePolls[data.task_id]) clearInterval(activePolls[data.task_id]);
-                displayedLogCounts[data.task_id] = 0;
-                pollTaskStatus(data.task_id, null, statusEl, 'restore_bookings_from_full_system_backup');
-            } else {
-                hideProgressModal();
-                alert("{{ _('Error starting restore bookings task:') }} " + (data.message || "{{ _('Unknown error.') }}"));
-                enablePageInteractions(); // Re-enable UI on error
-            }
-        })
-        .catch(error => {
-            hideProgressModal();
-            alert("{{ _('Error during restore from system backup.') }}");
-            console.error(error);
-            enablePageInteractions(); // Re-enable UI on fetch error
-        });
-    }
+    // loadFullBackupsForRestore() function removed.
+    // restoreBookingsFromFullSystemBackup() function removed.
 
     // CSV related functions were previously removed.
     // loadCsvBackupsForRestore, restoreBookingsFromCsvBackup, deleteCsvBackup,
@@ -548,13 +488,15 @@
         showProgressModal("{{ _('Loading initial page data...') }}");
 
         // Unified Azure JSON Backups - This will start the chain.
-        // refreshUnifiedAzureBackupList calls loadFullBackupsForRestore in its finally block.
-        // loadFullBackupsForRestore will now call hideProgressModal in its finally block,
-        // effectively ending the initial data load sequence.
+        // refreshUnifiedAzureBackupList will now call hideProgressModal in its finally block,
+        // effectively ending the initial data load sequence for this part of the page.
         refreshUnifiedAzureBackupList();
 
         // Load Unified Backup Schedule Settings - this happens in parallel / independently.
         loadUnifiedBackupSchedule();
+
+        // Load Automatic Restore on Startup Setting
+        loadAutoRestoreBookingDataSetting();
 
         $('#actionProgressModal').on('hide.bs.modal', function () {
             // Explicitly move focus to the body before the modal is hidden
@@ -566,6 +508,9 @@
         $('#unified_full_schedule_type').on('change', handleScheduleTypeChange);
         $('#saveUnifiedBackupScheduleBtn').on('click', saveUnifiedBackupSchedule);
 
+        // Attach event listener for Auto Restore setting
+        $('#saveAutoRestoreBookingDataSettingBtn').on('click', saveAutoRestoreBookingDataSetting);
+
 
         // Check if socket event for manualUnifiedBackup needs correction.
         // It was 'booking_data_protection_backup_progress', changed to 'full_booking_data_backup_progress'.
@@ -575,6 +520,62 @@
     });
 
     // --- Unified Backup Schedule JS ---
+
+    // --- Automatic Restore on Startup JS ---
+    function loadAutoRestoreBookingDataSetting() {
+        const feedbackDiv = $('#autoRestoreSettingFeedback');
+        feedbackDiv.html(''); // Clear previous feedback
+        console.log("Loading auto restore booking data on startup setting...");
+
+        fetch("{{ url_for('api_system.get_auto_restore_booking_data_setting') }}")
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`{{ _('Network response was not ok:') }} ${response.statusText}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.error) { // Assuming error is a key for server-side handled errors
+                    throw new Error(data.message || data.error);
+                }
+                $('#autoRestoreBookingDataOnStartup').prop('checked', data.is_enabled);
+                feedbackDiv.html(`<div class="alert alert-info mt-2">{{ _('Current setting loaded.') }}</div>`);
+                console.log("Auto restore setting loaded:", data.is_enabled);
+            })
+            .catch(error => {
+                console.error("{{ _('Error loading auto restore setting:') }}", error);
+                feedbackDiv.html(`<div class="alert alert-danger mt-2">{{ _('Error loading setting:') }} ${error.message}</div>`);
+            });
+    }
+
+    function saveAutoRestoreBookingDataSetting() {
+        const feedbackDiv = $('#autoRestoreSettingFeedback');
+        feedbackDiv.html(''); // Clear previous feedback
+        const isEnabled = $('#autoRestoreBookingDataOnStartup').is(':checked');
+        console.log("Saving auto restore setting:", isEnabled);
+
+        fetch("{{ url_for('api_system.update_auto_restore_booking_data_setting') }}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            },
+            body: JSON.stringify({ is_enabled: isEnabled })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                feedbackDiv.html(`<div class="alert alert-success mt-2">${data.message || "{{ _('Setting saved successfully.') }}"}</div>`);
+                console.log("Auto restore setting saved successfully.");
+            } else {
+                throw new Error(data.message || "{{ _('Error saving setting.') }}");
+            }
+        })
+        .catch(error => {
+            console.error("{{ _('Error saving auto restore setting:') }}", error);
+            feedbackDiv.html(`<div class="alert alert-danger mt-2">{{ _('Error saving setting:') }} ${error.message}</div>`);
+        });
+    }
 
     function downloadUnifiedBackup(filename, backupType) {
         // Construct the download URL using placeholders and replacing them
