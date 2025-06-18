@@ -32,6 +32,9 @@ from utils import (
 import threading # Added for threading
 # from app_factory import reschedule_unified_backup_jobs # Removed
 
+# Global variable to store Azure import error messages
+azure_import_error_message = None
+
 # Conditional imports for Azure Backup functionality
 # Ensure download_booking_data_json_backup is imported
 try:
@@ -73,8 +76,8 @@ try:
     import azure_backup # To access module-level constants if needed by moved functions
     print(f"DEBUG api_system.py: Successfully imported from azure_backup (again). create_full_backup type: {type(create_full_backup)}") # New debug
 except (ImportError, RuntimeError) as e_detailed_azure_import: # Capture the exception instance
-    # Log the error with a clear message
-    current_app.logger.error(f"Azure Storage connection might be missing or Azure SDK not installed. Error: {e_detailed_azure_import}")
+    # Assign a descriptive error message to the global variable
+    azure_import_error_message = f"Azure Storage connection might be missing or Azure SDK not installed. Error: {e_detailed_azure_import}"
     print(f"CRITICAL_DEBUG api_system.py: Caught ImportError or RuntimeError when importing from azure_backup. Exception type: {type(e_detailed_azure_import)}, Error: {e_detailed_azure_import}")
     import traceback # Import traceback module
     print("CRITICAL_DEBUG api_system.py: Full traceback of the import error:")
@@ -399,13 +402,26 @@ def api_one_click_backup():
 @login_required
 @permission_required('manage_system')
 def api_list_backups():
+    global azure_import_error_message
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 5, type=int)
         if page < 1: page = 1
         if per_page < 1: per_page = 5
+
+        # Check if there was an import error and log it within the request context
+        if azure_import_error_message and list_available_backups is None:
+            current_app.logger.error(azure_import_error_message)
+            # Clear the message after logging to avoid re-logging on subsequent calls
+            # This behavior might be adjusted based on whether we want to log it once per startup or on every relevant API call.
+            # For now, let's assume we want to log it if the functions are still None.
+            # azure_import_error_message = None
+            return jsonify({'success': False, 'message': 'Backup module is not configured.', 'backups': [], 'page': page, 'per_page': per_page, 'total_items': 0, 'total_pages': 0, 'has_next': False, 'has_prev': False}), 500
+
         current_app.logger.info(f"User {current_user.username} requested list of available backups (page: {page}, per_page: {per_page}).")
         if not list_available_backups:
+            # This condition is now also covered by the azure_import_error_message check,
+            # but kept for safety in case list_available_backups becomes None through other means.
             return jsonify({'success': False, 'message': 'Backup module is not configured.', 'backups': [], 'page': page, 'per_page': per_page, 'total_items': 0, 'total_pages': 0, 'has_next': False, 'has_prev': False}), 500
         all_backups = list_available_backups()
         total_items = len(all_backups)

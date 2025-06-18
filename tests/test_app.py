@@ -989,15 +989,27 @@ class AdminAPITestCase(AppTests):
         return admin_user
 
     @patch('routes.api_system.list_available_backups', None)
-    def test_list_backups_azure_not_configured(self):
+    @patch('routes.api_system.current_app.logger.error')
+    def test_list_backups_azure_not_configured(self, mock_logger_error, mock_list_backups_import):
+        # mock_list_backups_import is implicitly used by the decorator
         admin_user = self._create_admin_user()
         self.login(admin_user.username, "adminapipass")
 
-        response = self.client.get(url_for('api_system.api_list_backups'))
+        # Set the global error message in the routes.api_system module to simulate an import error
+        # This is necessary because the actual import happens at module load time,
+        # but we want to test the behavior of the endpoint when this message is set.
+        with patch('routes.api_system.azure_import_error_message', "Simulated Azure Import Error for testing logging"):
+            response = self.client.get(url_for('api_system.api_list_backups'))
 
         self.assertEqual(response.status_code, 500)
         json_response = response.get_json()
         self.assertEqual(json_response['message'], "Backup module is not configured.")
+
+        mock_logger_error.assert_called_once()
+        # Check that the specific deferred message (which now comes from azure_import_error_message) was logged.
+        # The original test set azure_import_error_message directly.
+        # The actual error message logged will be the one set in azure_import_error_message.
+        self.assertIn("Simulated Azure Import Error for testing logging", mock_logger_error.call_args[0][0])
         self.logout()
 
 
