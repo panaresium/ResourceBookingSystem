@@ -146,6 +146,11 @@ function pollTaskStatus(taskId, logAreaId, statusMessageEl, operationType) {
         console.log(`Polling for task ${taskId} was cancelled or already stopped.`);
         return;
     }
+
+    if (operationType === 'restore_dry_run') {
+        console.log(`pollTaskStatus: Polling for restore_dry_run task ${taskId}. LogArea: ${logAreaId}.`);
+    }
+
     fetch(`/api/task/${taskId}/status`)
         .then(response => {
             if (!response.ok) {

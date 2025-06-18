@@ -8,6 +8,9 @@ document.addEventListener('DOMContentLoaded', function () {
         availableBackupsTable.addEventListener('click', function (event) {
             const target = event.target;
             if (target.classList.contains('restore-dry-run-btn')) {
+                const backupTimestamp = target.dataset.timestamp; // Get timestamp early for logging
+                console.log('Dry Run button clicked. Timestamp:', backupTimestamp); // Logging added
+
                 event.preventDefault();
 
                 if (currentDryRunTaskId && activePolls[currentDryRunTaskId]) {
@@ -42,6 +45,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 appendLog('restore-log-area', `Initiating dry run restore for backup ${backupTimestamp}...`, "", "info", restoreStatusMessageEl);
 
+                console.log('CSRF Token for Dry Run:', csrfToken); // Logging CSRF Token
+                console.log('Using Backup Timestamp for Fetch URL:', backupTimestamp); // Logging timestamp for fetch
+
                 fetch(`/api/admin/restore_dry_run/${backupTimestamp}`, {
                     method: 'POST',
                     headers: {
@@ -49,7 +55,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         'Accept': 'application/json',
                         'Content-Type': 'application/json'
                     },
-                    // body: JSON.stringify({}) // No body needed for this request as timestamp is in URL
+                    body: JSON.stringify({}) // Explicitly empty JSON body
                 })
                 .then(response => response.json())
                 .then(data => {
@@ -58,6 +64,8 @@ document.addEventListener('DOMContentLoaded', function () {
                         displayedLogCounts[currentDryRunTaskId] = 0;
 
                         appendLog('restore-log-area', `Dry run task successfully initiated. Task ID: ${currentDryRunTaskId}`, "", "info", restoreStatusMessageEl);
+
+                        console.log('Starting pollTaskStatus for Dry Run. Task ID:', currentDryRunTaskId, 'Log Area: restore-log-area', 'Status Element:', restoreStatusMessageEl, 'OpType: restore_dry_run'); // Logging before poll
 
                         if (activePolls[currentDryRunTaskId]) clearInterval(activePolls[currentDryRunTaskId]); // Clear old poll if any
                         activePolls[currentDryRunTaskId] = setInterval(() => {

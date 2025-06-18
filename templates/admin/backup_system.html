@@ -337,33 +337,37 @@
                     const backupTimestamp = this.dataset.timestamp;
                     const selectedComponents = Array.from(document.querySelectorAll('#selective-restore-form input[name="components"]:checked')).map(cb => cb.value);
 
-                    // Define all possible individual components
-                    const allIndividualComponentValues = ['database', 'map_config', 'floor_maps', 'resource_uploads'];
-
-                    // Check for "Full Restore" intent
-                    const isAllComponentsCheckboxChecked = componentAllCheckbox.checked;
-                    const areAllIndividualComponentsActuallyChecked = allIndividualComponentValues.every(val => selectedComponents.includes(val)) && selectedComponents.length === allIndividualComponentValues.length;
-
-                    if (isAllComponentsCheckboxChecked || areAllIndividualComponentsActuallyChecked) {
-                        selectiveRestoreModalStatusEl.textContent = "{{ _('Actual full restore functionality is not yet implemented. This feature will be available in a future update. For now, only selective restore of individual components is simulated.') }}";
-                        selectiveRestoreModalStatusEl.className = 'alert alert-warning mt-2';
-                        // No disablePageInteractions() has been called yet in this path, so no need to re-enable.
-                        // The modal remains open for the user to close or change selection.
-                        return; // Prevent the fetch call and further processing for full restore attempts
-                    }
-
+                    // Retain the check for no components selected first.
                     if (selectedComponents.length === 0) {
-                        selectiveRestoreModalStatusEl.textContent = "{{ _('Please select at least one component to restore.') }}";
-                        selectiveRestoreModalStatusEl.className = 'alert alert-warning mt-2';
+                        if (selectiveRestoreModalStatusEl) {
+                            selectiveRestoreModalStatusEl.textContent = "{{ _('Please select at least one component to restore.') }}";
+                            selectiveRestoreModalStatusEl.className = 'alert alert-warning mt-2';
+                        }
                         return;
                     }
+
+                    // New: Display informational message that this is a simulation
+                    // This message will appear in the modal.
+                    if (selectiveRestoreModalStatusEl) {
+                        selectiveRestoreModalStatusEl.textContent = "{{ _('Note: This will run a *simulation* of restoring the selected components. No live data will be changed. Actual restore functionality will be implemented separately.') }}";
+                        selectiveRestoreModalStatusEl.className = 'alert alert-info mt-2';
+                    }
+
+                    // The previous logic for blocking "full restore" has been removed as per new instructions.
+                    // The form will now proceed to simulate for any valid selection.
 
                     disablePageInteractions(); // Disable interactions on main page
                     if(restoreLogAreaEl) { restoreLogAreaEl.innerHTML = ''; restoreLogAreaEl.style.display = 'block'; }
                     if(backupLogAreaEl && backupLogAreaEl.style.display !== 'none') backupLogAreaEl.style.display = 'none';
-                    appendLog('restore-log-area', `{{ _('Initiating selective restore for') }} ${backupTimestamp}...`, `Components: ${selectedComponents.join(', ')}`, 'info', restoreStatusMessageEl);
-                    selectiveRestoreModalStatusEl.textContent = "{{ _('Processing...') }}";
-                    selectiveRestoreModalStatusEl.className = 'alert alert-info mt-2';
+
+                    // The main page log and status will indicate the start of the operation.
+                    // The modal message (set above) will remain visible until the task starts successfully and closes the modal,
+                    // or if an error occurs before then.
+                    appendLog('restore-log-area', `{{ _('Initiating selective restore simulation for') }} ${backupTimestamp}...`, `Components: ${selectedComponents.join(', ')}`, 'info', restoreStatusMessageEl);
+                    // No longer setting modal status to "Processing..." here, let the info message persist longer.
+                    // selectiveRestoreModalStatusEl.textContent = "{{ _('Processing...') }}";
+                    // selectiveRestoreModalStatusEl.className = 'alert alert-info mt-2';
+
 
                     fetch('/api/admin/selective_restore', {
                         method: 'POST',
