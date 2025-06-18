@@ -225,8 +225,7 @@
     {{ super() }}
     {# admin_backup_common.js now includes polling logic, disable/enable interactions, appendLog, and UTC clock #}
     <script src="{{ url_for('static', filename='js/admin_backup_common.js') }}" defer></script>
-    {# NEW: Added event listener for restore dry run functionality #}
-    <script src="{{ url_for('static', filename='js/restore_dry_run_event_listener.js') }}" defer></script>
+    {# REMOVED: restore_dry_run_event_listener.js - logic moved inline below #}
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
@@ -440,16 +439,93 @@
                         if(selectiveRestoreModalStatusEl) selectiveRestoreModalStatusEl.className = 'status-message mt-2';
                         if(selectiveRestoreModal) selectiveRestoreModal.style.display = 'block';
                         return; // Modal handles its own submission
-                    // REMOVED: Conflicting restore-dry-run-btn handler. This is now in restore_dry_run_event_listener.js
-                    // } else if (targetButton.classList.contains('restore-dry-run-btn')) {
-                    //     // This was not refactored in API to be async, assuming it's quick or will be
-                    //     // For now, keep its original synchronous-like fetch, or refactor API if it's long
-                    //     console.warn("Dry run not yet fully refactored for polling in this UI example.");
-                    //     // If it were async: operationType = 'restore_dry_run'; currentOperationTaskIdVariable = 'currentDryRunTaskId';
-                    //     // endpoint = `/api/admin/restore_dry_run/${timestamp}`; // Needs task_id return from API
-                    //     // For now, it might be better to leave the old sync logic or simplify
-                    //     alert("Dry run functionality needs UI update for async tasks if it's long running.");
-                    //     return;
+                    } else if (targetButton.classList.contains('restore-dry-run-btn')) {
+                        event.preventDefault(); // Added to be sure
+
+                        const backupTimestamp = targetButton.dataset.timestamp;
+                        console.log('Dry Run button clicked. Timestamp:', backupTimestamp, '- Test 5 (Inside Inline Listener)');
+
+                        // CSRF token is already available as 'csrfToken' in this scope.
+                        console.log('CSRF Token for Dry Run:', csrfToken, '- Test 6');
+                        if (!csrfToken) {
+                            appendLog('restore-log-area', 'CSRF token not found. Cannot proceed.', '', 'error', restoreStatusMessageEl);
+                            console.error("CSRF token not found. Halting dry run request.");
+                            return;
+                        }
+
+                        if (currentDryRunTaskId && activePolls[currentDryRunTaskId]) {
+                            appendLog('restore-log-area', "A dry run operation is already in progress.", "", "warning", restoreStatusMessageEl);
+                            console.warn("Dry run already in progress, new request blocked.");
+                            return;
+                        }
+
+                        if (!confirm("Are you sure you want to perform a dry run restore for backup " + backupTimestamp + "? This will simulate the restore process without making changes.")) {
+                            console.log("Dry run cancelled by user.");
+                            return;
+                        }
+
+                        disablePageInteractions();
+                        // restoreLogAreaEl and restoreStatusMessageEl are already defined in this scope
+
+                        if (restoreLogAreaEl) {
+                            restoreLogAreaEl.innerHTML = '';
+                            restoreLogAreaEl.style.display = 'block';
+                        }
+                        if (backupLogAreaEl && backupLogAreaEl.style.display !== 'none') { // backupLogAreaEl is defined in this scope
+                            backupLogAreaEl.style.display = 'none';
+                        }
+                        // Also hide verify and delete log areas if they exist
+                        ['verify-log-area', 'delete-log-area'].forEach(id => {
+                            const area = document.getElementById(id);
+                            if (area) area.style.display = 'none';
+                        });
+
+                        appendLog('restore-log-area', "Initiating restore dry run for " + backupTimestamp + "...", '', 'info', restoreStatusMessageEl);
+                        console.log('Using Backup Timestamp for Fetch URL:', backupTimestamp, '- Test 7');
+
+                        fetch(`/api/admin/restore_dry_run/${backupTimestamp}`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': csrfToken,
+                                'Accept': 'application/json'
+                            },
+                            body: JSON.stringify({})
+                        })
+                        .then(response => {
+                            if (!response.ok) {
+                                return response.text().then(text => {
+                                    throw new Error(`Server responded with ${response.status}: ${text || 'No error message from server'}`);
+                                });
+                            }
+                            return response.json();
+                        })
+                        .then(data => {
+                            const message = data.message || (data.success ? "Dry run task started." : "Failed to start dry run task.");
+                            const taskIdDetail = `Task ID: ${data.task_id || 'N/A'}`;
+                            appendLog('restore-log-area', message, taskIdDetail, data.success ? 'info' : 'error', restoreStatusMessageEl);
+
+                            if (data.success && data.task_id) {
+                                currentDryRunTaskId = data.task_id;
+                                displayedLogCounts[currentDryRunTaskId] = 0;
+                                if (activePolls[currentDryRunTaskId]) {
+                                    clearInterval(activePolls[currentDryRunTaskId]);
+                                }
+                                console.log('Starting pollTaskStatus for Dry Run. Task ID:', currentDryRunTaskId, '- Test 8');
+                                const intervalMs = (typeof POLLING_INTERVAL_MS !== 'undefined') ? POLLING_INTERVAL_MS : 3000;
+                                activePolls[currentDryRunTaskId] = setInterval(() => {
+                                    pollTaskStatus(currentDryRunTaskId, 'restore-log-area', restoreStatusMessageEl, 'restore_dry_run');
+                                }, intervalMs);
+                            } else {
+                                enablePageInteractions();
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Restore Dry Run request error:', error, '- Test 9');
+                            appendLog('restore-log-area', "Restore Dry Run request failed:", error.message ? error.message : 'Unknown error', 'error', restoreStatusMessageEl);
+                            enablePageInteractions();
+                        });
+                        return; // Added to make sure this branch is exclusive
                     } else if (targetButton.classList.contains('verify-backup-btn-js')) {
                         operationType = 'verify_backup';
                         currentOperationTaskIdVariable = 'currentVerifyTaskId'; // String name of var
