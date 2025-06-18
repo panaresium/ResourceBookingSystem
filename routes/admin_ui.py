@@ -140,16 +140,8 @@ def serve_backup_system_page():
 @permission_required('manage_system')
 def serve_backup_booking_data_page():
     current_app.logger.info(f"User {current_user.username} accessed Booking Data Management page.")
-    scheduler_settings = load_scheduler_settings()
-    DEFAULT_BOOKING_DATA_PROTECTION_SCHEDULE = {'is_enabled': False, 'interval_minutes': 1440}
-    booking_data_protection_schedule = scheduler_settings.get('booking_data_protection_schedule', DEFAULT_BOOKING_DATA_PROTECTION_SCHEDULE.copy())
-    booking_data_protection_schedule.setdefault('is_enabled', DEFAULT_BOOKING_DATA_PROTECTION_SCHEDULE['is_enabled'])
-    booking_data_protection_schedule.setdefault('interval_minutes', DEFAULT_BOOKING_DATA_PROTECTION_SCHEDULE['interval_minutes'])
-
-    # Legacy CSV list is no longer server-populated. Client-side JS will handle fetching if needed.
-    # Default/empty values are passed to the template for any remaining placeholders.
-    # paginated_booking_csv_backups = [] # Removed
-    # page, total_pages, has_prev, has_next = 1, 0, False, False # Removed
+    # scheduler_settings and booking_data_protection_schedule are no longer loaded here.
+    # This information is now fetched by client-side JavaScript via an API endpoint.
 
     time_offset_value = 0
     try:
@@ -160,7 +152,6 @@ def serve_backup_booking_data_page():
     except Exception as e: current_app.logger.error(f"Error fetching BookingSettings for booking data page: {e}", exc_info=True)
 
     return render_template('admin/backup_booking_data.html',
-                           booking_data_protection_schedule=booking_data_protection_schedule,
                            global_time_offset_hours=time_offset_value)
 
 @admin_ui_bp.route('/backup/settings', methods=['GET'])

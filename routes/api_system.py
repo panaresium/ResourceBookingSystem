@@ -28,6 +28,8 @@ from utils import (
     reschedule_unified_backup_jobs, # Moved from app_factory
     # New imports for task management
     create_task, get_task_status, update_task_log, mark_task_done,
+    # Imports for scheduler settings if not already present (they should be in utils)
+    load_scheduler_settings, save_scheduler_settings,
 )
 import threading # Added for threading
 # from app_factory import reschedule_unified_backup_jobs # Removed
@@ -206,37 +208,61 @@ def debug_list_routes():
 @login_required
 @permission_required('manage_system')
 def api_manual_booking_data_backup_json():
-    # This endpoint might need refactoring if backup_full_booking_data_json_azure is very long.
-    # For now, assuming it's quick enough or already internally managed if long.
-    # If it needs to be a polled task:
-    # user_id_for_audit = current_user.id if hasattr(current_user, 'id') else None
-    # username_for_audit = current_user.username if hasattr(current_user, 'username') else "System"
-    # task_id = create_task(task_type='manual_booking_data_backup')
-    # ... start thread with worker calling backup_full_booking_data_json_azure ...
-    # return jsonify({'success': True, 'message': 'Manual booking data backup task started.', 'task_id': task_id})
-    # For now, keeping original synchronous-like structure for this and other unified booking routes
-    task_id = uuid.uuid4().hex
-    # ... (rest of original code for this route) ...
-    # This route and others below for unified booking data are NOT refactored in this step.
-    current_app.logger.info(f"User {current_user.username} initiated manual unified booking data backup (Task ID: {task_id}).")
-    # TODO: Obsolete? Usage of 'backup_full_booking_data_json_azure' commented out as the function is obsolete.
-    # if not backup_full_booking_data_json_azure:
-    #     current_app.logger.error("azure_backup.backup_full_booking_data_json_azure function not available.")
-    #     # SocketIO emit might be removed if all comms via polling
-    #     return jsonify({'success': False, 'message': 'Manual unified booking data backup function is not available on the server.', 'task_id': task_id}), 500
-    # try:
-    #     success = backup_full_booking_data_json_azure(app=current_app._get_current_object(), task_id=task_id) # Removed socketio_instance
-    #     if success:
-    #         add_audit_log(action="MANUAL_UNIFIED_BOOKING_BACKUP_COMPLETED", details=f"Task ID: {task_id}", user_id=current_user.id)
-    #         return jsonify({'success': True, 'message': 'Manual unified booking data backup process completed.', 'task_id': task_id}), 200
-    #     else:
-    #         add_audit_log(action="MANUAL_UNIFIED_BOOKING_BACKUP_FAILED", details=f"Task ID: {task_id}.", user_id=current_user.id)
-    #         return jsonify({'success': False, 'message': 'Failed to complete manual unified booking data backup.', 'task_id': task_id}), 500
-    # except Exception as e:
-    #     # ... (original exception handling) ...
-    #     add_audit_log(action="MANUAL_UNIFIED_BOOKING_BACKUP_ERROR", details=f"Task ID: {task_id}. Exception: {str(e)}", user_id=current_user.id)
-    #     return jsonify({'success': False, 'message': f'An unexpected error occurred: {str(e)}', 'task_id': task_id}), 500
-    return jsonify({'success': False, 'message': 'This functionality is temporarily disabled due to obsolete components.', 'task_id': task_id}), 503
+    user_id_for_audit = current_user.id if hasattr(current_user, 'id') else None
+    username_for_audit = current_user.username if hasattr(current_user, 'username') else "System"
+
+    task_id = create_task(task_type='manual_booking_data_backup')
+    current_app.logger.info(f"User {username_for_audit} initiated manual booking data backup. Task ID: {task_id}")
+
+    def do_manual_booking_backup_work(app_context, task_id_param, user_id_audit, username_audit):
+        with app_context:
+            current_app.logger.info(f"Worker thread started for manual booking data backup task: {task_id_param}")
+            update_task_log(task_id_param, "Manual booking data backup process initiated.", level="info")
+            add_audit_log(action="MANUAL_BOOKING_BACKUP_WORKER_STARTED", details=f"Task {task_id_param}: Worker started.", user_id=user_id_audit, username=username_audit)
+
+            try:
+                if not backup_full_bookings_json:
+                    update_task_log(task_id_param, "Core function 'backup_full_bookings_json' is not available (Azure module issue?).", level="error")
+                    mark_task_done(task_id_param, success=False, result_message="Backup function not available.")
+                    add_audit_log(action="MANUAL_BOOKING_BACKUP_WORKER_ERROR", details=f"Task {task_id_param}: backup_full_bookings_json not available.", user_id=user_id_audit, username=username_audit)
+                    current_app.logger.error(f"Task {task_id_param}: backup_full_bookings_json not available.")
+                    return
+
+                # Call the actual backup function
+                # Assuming backup_full_bookings_json is designed to take app and task_id
+                # and returns True/False or throws an exception.
+                # It should internally use update_task_log.
+                success_flag = backup_full_bookings_json(
+                    app=current_app._get_current_object(),
+                    task_id=task_id_param
+                )
+
+                if success_flag:
+                    final_message = "Manual full JSON booking data backup completed successfully."
+                    update_task_log(task_id_param, final_message, level="success")
+                    mark_task_done(task_id_param, success=True, result_message=final_message)
+                    add_audit_log(action="MANUAL_BOOKING_BACKUP_WORKER_COMPLETED", details=f"Task {task_id_param}: {final_message}", user_id=user_id_audit, username=username_audit)
+                    current_app.logger.info(f"Task {task_id_param}: Manual booking data backup completed successfully.")
+                else:
+                    error_detail = "Backup process reported failure."
+                    update_task_log(task_id_param, error_detail, level="error")
+                    mark_task_done(task_id_param, success=False, result_message=error_detail)
+                    add_audit_log(action="MANUAL_BOOKING_BACKUP_WORKER_FAILED", details=f"Task {task_id_param}: {error_detail}", user_id=user_id_audit, username=username_audit)
+                    current_app.logger.warning(f"Task {task_id_param}: Manual booking data backup failed.")
+
+            except Exception as e:
+                error_msg = f"Unexpected error during manual booking data backup: {str(e)}"
+                current_app.logger.error(f"Task {task_id_param}: {error_msg}", exc_info=True)
+                update_task_log(task_id_param, error_msg, level="critical")
+                mark_task_done(task_id_param, success=False, result_message=error_msg)
+                add_audit_log(action="MANUAL_BOOKING_BACKUP_WORKER_EXCEPTION", details=f"Task {task_id_param}: {error_msg}", user_id=user_id_audit, username=username_audit)
+
+    flask_app_context = current_app.app_context()
+    thread = threading.Thread(target=do_manual_booking_backup_work, args=(flask_app_context, task_id, user_id_for_audit, username_for_audit))
+    thread.start()
+
+    add_audit_log(action="MANUAL_BOOKING_BACKUP_API_STARTED", details=f"Task {task_id} initiated by user {username_for_audit}.", user_id=user_id_for_audit, username=username_for_audit)
+    return jsonify({'success': True, 'message': 'Manual booking data backup task started.', 'task_id': task_id})
 
 
 @api_system_bp.route('/api/admin/booking_data_protection/list_backups', methods=['GET'])
@@ -258,24 +284,77 @@ def api_list_booking_data_backups():
 @login_required
 @permission_required('manage_system')
 def api_unified_booking_data_point_in_time_restore():
-    # This endpoint might need refactoring if restore_booking_data_to_point_in_time is very long.
-    # Similar to manual_backup, keeping original structure for now.
-    task_id = uuid.uuid4().hex
-    # ... (rest of original code for this route, ensuring task_id is passed to restore_booking_data_to_point_in_time) ...
+    user_id_for_audit = current_user.id if hasattr(current_user, 'id') else None
+    username_for_audit = current_user.username if hasattr(current_user, 'username') else "System"
+
     data = request.get_json()
-    filename = data.get('filename'); backup_type = data.get('backup_type'); backup_timestamp_iso = data.get('backup_timestamp_iso')
-    if not all([filename, backup_type, backup_timestamp_iso]): return jsonify({'success': False, 'message': 'Missing required parameters.', 'task_id': task_id}), 400
-    current_app.logger.info(f"User {current_user.username} initiated Point-in-Time booking data restore (Task {task_id})")
-    if not restore_booking_data_to_point_in_time: return jsonify({'success': False, 'message': 'Restore function not available.', 'task_id': task_id}), 501
-    try:
-        summary = restore_booking_data_to_point_in_time(app=current_app._get_current_object(),selected_filename=filename,selected_type=backup_type,selected_timestamp_iso=backup_timestamp_iso,task_id=task_id) # Removed socketio_instance
-        add_audit_log(action="POINT_IN_TIME_RESTORE_BOOKING_DATA", details=f"Task {task_id}. Summary: {json.dumps(summary)}",user_id=current_user.id)
-        return jsonify({'success': True, 'summary': summary, 'task_id': task_id}), 200
-    except Exception as e:
-        # ... (original exception handling) ...
-        add_audit_log(action="POINT_IN_TIME_RESTORE_BOOKING_DATA_ERROR", details=f"Task {task_id}. Error: {str(e)}",user_id=current_user.id)
-        error_summary = {'status': 'failure', 'message': f'An unexpected error occurred: {str(e)}', 'errors': [str(e)]}
-        return jsonify({'success': False, 'message': str(e), 'task_id': task_id, 'summary': error_summary}), 500
+    if not data:
+        return jsonify({'success': False, 'message': 'Request body must be JSON.'}), 400
+
+    filename = data.get('filename')
+    backup_type = data.get('backup_type')
+    backup_timestamp_iso = data.get('backup_timestamp_iso')
+
+    if not all([filename, backup_type, backup_timestamp_iso]):
+        return jsonify({'success': False, 'message': 'Missing required parameters: filename, backup_type, backup_timestamp_iso.'}), 400
+
+    task_id = create_task(task_type='unified_booking_data_restore')
+    current_app.logger.info(f"User {username_for_audit} initiated Unified Booking Data Point-in-Time Restore. Task ID: {task_id}, File: {filename}, Type: {backup_type}, Timestamp: {backup_timestamp_iso}")
+
+    def do_unified_restore_work(app_context, task_id_param, filename_param, type_param, timestamp_iso_param, user_id_audit, username_audit):
+        with app_context:
+            current_app.logger.info(f"Worker thread started for unified restore task: {task_id_param}")
+            update_task_log(task_id_param, f"Unified booking data restore process initiated for {filename_param}.", level="info")
+            add_audit_log(action="UNIFIED_RESTORE_WORKER_STARTED", details=f"Task {task_id_param}: Worker started for {filename_param}.", user_id=user_id_audit, username=username_audit)
+
+            try:
+                if not restore_booking_data_to_point_in_time:
+                    update_task_log(task_id_param, "Core function 'restore_booking_data_to_point_in_time' is not available (Azure module issue?).", level="error")
+                    mark_task_done(task_id_param, success=False, result_message="Restore function not available.")
+                    add_audit_log(action="UNIFIED_RESTORE_WORKER_ERROR", details=f"Task {task_id_param}: restore_booking_data_to_point_in_time not available.", user_id=user_id_audit, username=username_audit)
+                    current_app.logger.error(f"Task {task_id_param}: restore_booking_data_to_point_in_time not available.")
+                    return
+
+                # Call the actual restore orchestrator function
+                # It should internally use update_task_log and return a summary object.
+                summary = restore_booking_data_to_point_in_time(
+                    app=current_app._get_current_object(),
+                    selected_filename=filename_param,
+                    selected_type=type_param,
+                    selected_timestamp_iso=timestamp_iso_param,
+                    task_id=task_id_param
+                )
+
+                if summary.get('status') == 'success':
+                    final_message = summary.get('message', "Unified booking data restore completed successfully.")
+                    update_task_log(task_id_param, final_message, level="success")
+                    mark_task_done(task_id_param, success=True, result_message=final_message, result_data=summary)
+                    add_audit_log(action="UNIFIED_RESTORE_WORKER_COMPLETED", details=f"Task {task_id_param}: {final_message}. Summary: {json.dumps(summary)}", user_id=user_id_audit, username=username_audit)
+                    current_app.logger.info(f"Task {task_id_param}: Unified restore completed successfully. Summary: {summary}")
+                else:
+                    error_detail = summary.get('message', "Restore process reported failure.")
+                    update_task_log(task_id_param, error_detail, level="error", detail_info=json.dumps(summary.get('errors', [])))
+                    mark_task_done(task_id_param, success=False, result_message=error_detail, result_data=summary)
+                    add_audit_log(action="UNIFIED_RESTORE_WORKER_FAILED", details=f"Task {task_id_param}: {error_detail}. Summary: {json.dumps(summary)}", user_id=user_id_audit, username=username_audit)
+                    current_app.logger.warning(f"Task {task_id_param}: Unified restore failed. Summary: {summary}")
+
+            except Exception as e:
+                error_msg = f"Unexpected error during unified booking data restore: {str(e)}"
+                current_app.logger.error(f"Task {task_id_param}: {error_msg}", exc_info=True)
+                error_summary = {'status': 'failure', 'message': error_msg, 'errors': [str(e)]}
+                update_task_log(task_id_param, error_msg, level="critical")
+                mark_task_done(task_id_param, success=False, result_message=error_msg, result_data=error_summary)
+                add_audit_log(action="UNIFIED_RESTORE_WORKER_EXCEPTION", details=f"Task {task_id_param}: {error_msg}", user_id=user_id_audit, username=username_audit)
+
+    flask_app_context = current_app.app_context()
+    thread = threading.Thread(target=do_unified_restore_work, args=(
+        flask_app_context, task_id, filename, backup_type, backup_timestamp_iso, user_id_for_audit, username_for_audit
+    ))
+    thread.start()
+
+    initial_summary = {'status': 'pending', 'message': 'Restore task has been queued.'} # This can be more dynamic if needed
+    add_audit_log(action="UNIFIED_RESTORE_API_STARTED", details=f"Task {task_id} for {filename} by {username_for_audit}.", user_id=user_id_for_audit, username=username_for_audit)
+    return jsonify({'success': True, 'message': 'Unified booking data restore task started.', 'task_id': task_id, 'summary': initial_summary})
 
 @api_system_bp.route('/api/admin/booking_data_protection/delete', methods=['POST'])
 @login_required
@@ -1054,6 +1133,53 @@ def api_restore_bookings_from_full_db():
 
     add_audit_log(action="RESTORE_BOOKINGS_FULLDB_STARTED", details=f"Task {task_id} for backup {backup_filename} initiated by user {username_for_audit}.", user_id=user_id_for_audit, username=username_for_audit)
     return jsonify({'success': True, 'message': 'Restore bookings from full DB task started.', 'task_id': task_id})
+
+@api_system_bp.route('/api/admin/settings/auto_restore_booking_data_on_startup', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def get_auto_restore_booking_data_setting():
+    try:
+        scheduler_settings = load_scheduler_settings()
+        # Default to False if the key doesn't exist
+        is_enabled = scheduler_settings.get('auto_restore_booking_records_on_startup', False)
+        current_app.logger.info(f"User {current_user.username} fetched auto_restore_booking_records_on_startup setting: {is_enabled}.")
+        return jsonify({'is_enabled': is_enabled}), 200
+    except Exception as e:
+        current_app.logger.error(f"Error fetching auto_restore_booking_records_on_startup setting for user {current_user.username}: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': 'Failed to fetch setting due to a server error.'}), 500
+
+@api_system_bp.route('/api/admin/settings/auto_restore_booking_data_on_startup', methods=['POST'])
+@login_required
+@permission_required('manage_system')
+def update_auto_restore_booking_data_setting():
+    data = request.get_json()
+    if data is None or 'is_enabled' not in data or not isinstance(data['is_enabled'], bool):
+        return jsonify({'success': False, 'message': 'Invalid payload. "is_enabled" (boolean) is required.'}), 400
+
+    new_value = data['is_enabled']
+    user_id_for_audit = current_user.id if hasattr(current_user, 'id') else None
+    username_for_audit = current_user.username if hasattr(current_user, 'username') else "System"
+
+    try:
+        scheduler_settings = load_scheduler_settings()
+        scheduler_settings['auto_restore_booking_records_on_startup'] = new_value
+
+        # save_scheduler_settings is expected to handle the actual file saving.
+        # It might take the app context or the full settings object depending on its design.
+        # Assuming it takes the settings object.
+        save_scheduler_settings(scheduler_settings) # Pass the modified settings object
+
+        add_audit_log(
+            action="UPDATE_AUTO_RESTORE_BOOKING_DATA_SETTING",
+            details=f"Set auto_restore_booking_records_on_startup to {new_value}.",
+            user_id=user_id_for_audit,
+            username=username_for_audit
+        )
+        current_app.logger.info(f"User {username_for_audit} updated auto_restore_booking_records_on_startup to {new_value}.")
+        return jsonify({'success': True, 'message': 'Setting updated successfully.'}), 200
+    except Exception as e:
+        current_app.logger.error(f"Error updating auto_restore_booking_records_on_startup setting for user {username_for_audit}: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': f'Failed to update setting: {str(e)}'}), 500
 
 def init_api_system_routes(app):
 # ... (rest of file, including init_api_system_routes, get_booking_settings, etc. remains unchanged) ...
