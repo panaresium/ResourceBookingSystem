@@ -483,6 +483,7 @@
     }
 
     $(document).ready(function() {
+        $('#confirmClearAllModal').modal('hide'); // Ensure modal is hidden on page load
         updateServerTime(); setInterval(updateServerTime, 60000);
 
         showProgressModal("{{ _('Loading initial page data...') }}");
