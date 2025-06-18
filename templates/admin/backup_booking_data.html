@@ -215,15 +215,18 @@
 
 {% block scripts %}
 {{ super() }}
-<script src="/socket.io/socket.io.js"></script>
+<script src="{{ url_for('static', filename='js/admin_backup_common.js') }}" defer></script>
 <script>
-    // Socket.IO connection and utility functions (showProgressModal, hideProgressModal, updateServerTime)
-    // should remain as they are. For brevity, they are not repeated here.
-    var socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port);
-    socket.on('connect', () => console.log("Socket.IO connected for backup_booking_data."));
-    socket.on('disconnect', () => console.log("Socket.IO disconnected."));
-    socket.on('error', err => { console.error("Socket.IO error:", err); alert("{{ _('Socket.IO connection error.') }}"); });
+    // Task ID variables for polling
+    let currentManualUnifiedBackupTaskId = null;
+    let currentRestoreBookingsFullSysTaskId = null;
+    // currentSelectiveRestoreTaskId is assumed to be available from admin_backup_common.js
+    // along with pollTaskStatus, activePolls, displayedLogCounts,
+    // showTaskProgressModal, hideTaskProgressModal, disablePageInteractions, enablePageInteractions.
 
+    // Utility functions (showProgressModal, hideProgressModal, updateServerTime)
+    // For this refactor, we keep the local showProgressModal/hideProgressModal,
+    // but disablePageInteractions will be called explicitly.
     function showProgressModal(message) { $('#actionProgressMessage').text(message); $('#actionProgressModal').modal({backdrop: 'static', keyboard: false}); }
     function hideProgressModal() { $('#actionProgressModal').modal('hide'); }
     function updateServerTime() {
@@ -315,22 +318,29 @@
     function manualUnifiedBackup() {
         if (!confirm("{{ _('Are you sure you want to run a manual full JSON backup now? This may take some time.') }}")) return;
         showProgressModal("{{ _('Starting manual full Unified Azure JSON backup...') }}");
+        disablePageInteractions(); // Disable UI
+
         fetch("{{ url_for('api_system.api_manual_booking_data_backup_json') }}", {
             method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token() }}' }
         }).then(response => response.json()).then(data => {
-            if (data.task_id) {
-                $('#actionProgressMessage').text("{{ _('Manual backup started. Task ID:') }} " + data.task_id);
-            } else { throw new Error(data.message || "{{ _('Unknown error starting manual backup.') }}"); }
-        }).catch(error => { hideProgressModal(); alert("{{ _('Error starting manual backup:') }} " + error.message); });
-
-        socket.off('full_booking_data_backup_progress').on('full_booking_data_backup_progress', function(data) { // Ensure correct event name
-            if (data.error || data.level === 'ERROR') {
-                hideProgressModal(); alert("{{ _('Error during manual backup:') }} " + (data.message || data.error)); socket.off('full_booking_data_backup_progress');
-            } else if (data.status === 'completed' || data.status === 'success') {
-                hideProgressModal(); alert("{{ _('Manual backup completed successfully!') }} " + (data.message || "")); socket.off('full_booking_data_backup_progress');
-                refreshUnifiedAzureBackupList();
-            } else { $('#actionProgressMessage').text(data.message || data.status); }
+            if (data.success && data.task_id) {
+                const statusEl = document.getElementById('actionProgressMessage');
+                statusEl.textContent = "{{ _('Manual backup task started. Task ID:') }} " + data.task_id;
+                currentManualUnifiedBackupTaskId = data.task_id;
+                if (activePolls[data.task_id]) clearInterval(activePolls[data.task_id]);
+                displayedLogCounts[data.task_id] = 0;
+                pollTaskStatus(data.task_id, null, statusEl, 'manual_unified_booking_backup');
+                // hideProgressModal will be called by pollTaskStatus logic via enablePageInteractions
+            } else {
+                throw new Error(data.message || "{{ _('Unknown error starting manual backup.') }}");
+            }
+        }).catch(error => {
+            hideProgressModal();
+            alert("{{ _('Error starting manual backup:') }} " + error.message);
+            enablePageInteractions(); // Re-enable UI on fetch error
         });
+
+        // Socket.IO event handler removed
     }
 
     function restoreSelectedUnifiedBackup() {
@@ -347,27 +357,33 @@
         if (!confirm(confirmMsg + ` {{ _('Cannot be undone.') }}`)) return;
 
         showProgressModal(`{{ _('Starting restore from') }} ${backupFilename}...`);
+        disablePageInteractions(); // Disable UI
+
         fetch("{{ url_for('api_system.api_unified_booking_data_point_in_time_restore') }}", {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
             body: JSON.stringify({ filename: backupFilename, backup_type: backupType, backup_timestamp_iso: backupTimestampIso })
         }).then(response => response.json()).then(data => {
-            if (data.task_id) {
-                let initialMsg = (data.summary && data.summary.message) ? data.summary.message : "{{ _('Restore started...') }}";
-                if (data.summary && data.summary.status === 'failure') { hideProgressModal(); alert(`{{ _('Failed to start restore:') }} ${data.summary.message}`); return; }
-                $('#actionProgressMessage').text(`{{ _('Task ID:') }} ${data.task_id}. ${initialMsg}`);
-            } else if (data.success === false) { throw new Error((data.summary && data.summary.message) || data.message || "{{ _('Error starting restore.') }}"); }
-        }).catch(error => { hideProgressModal(); alert("{{ _('Error starting restore:') }} " + error.message); });
+            if (data.success && data.task_id) {
+                const statusEl = document.getElementById('actionProgressMessage');
+                let initialMsg = (data.summary && data.summary.message) ? data.summary.message : "{{ _('Restore task started...') }}";
+                statusEl.textContent = `{{ _('Task ID:') }} ${data.task_id}. ${initialMsg}`;
 
-        socket.off('booking_data_protection_restore_progress').on('booking_data_protection_restore_progress', function(data) {
-            let msg = data.message || data.status || (data.error ? `Error: ${data.error}` : "{{ _('Processing...') }}");
-            if (data.detail) msg += ` (${data.detail})`;
-            $('#actionProgressMessage').text(msg);
-            if (data.error || data.level === 'ERROR' || data.level === 'CRITICAL_ERROR' || data.status === 'failure') {
-                hideProgressModal(); alert(`{{ _('Restore error:') }} ${msg}`); socket.off('booking_data_protection_restore_progress');
-            } else if (data.status === 'completed' || data.status === 'success') {
-                hideProgressModal(); alert(`{{ _('Restore finished:') }} ${msg}`); socket.off('booking_data_protection_restore_progress');
+                currentSelectiveRestoreTaskId = data.task_id; // Assuming this var is from admin_backup_common.js
+                if (activePolls[data.task_id]) clearInterval(activePolls[data.task_id]);
+                displayedLogCounts[data.task_id] = 0;
+                pollTaskStatus(data.task_id, null, statusEl, 'unified_booking_data_restore');
+            } else if (data.summary && data.summary.status === 'failure') {
+                throw new Error(data.summary.message || `{{ _('Failed to start restore task.') }}`);
+            } else {
+                throw new Error(data.message || `{{ _('Unknown error starting restore task.') }}`);
             }
+        }).catch(error => {
+            hideProgressModal();
+            alert("{{ _('Error starting restore:') }} " + error.message);
+            enablePageInteractions(); // Re-enable UI on fetch error
         });
+
+        // Socket.IO event handler removed
     }
 
     function deleteUnifiedBackup(filename, backupType) {
@@ -433,24 +449,33 @@
             return;
         }
         showProgressModal("{{ _('Restoring bookings from system backup...') }}");
-        fetch("{{ url_for('api_system.api_restore_bookings_from_full_db') }}", { // Ensure this API endpoint is correct
+        disablePageInteractions(); // Disable UI
+
+        fetch("{{ url_for('api_system.api_restore_bookings_from_full_db') }}", {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
             body: JSON.stringify({ backup_filename: selectedBackup })
         })
         .then(response => response.json())
         .then(data => {
-            hideProgressModal();
-            if (data.success) {
-                alert("{{ _('Bookings restored successfully from system backup:') }} " + data.message);
+            if (data.success && data.task_id) {
+                const statusEl = document.getElementById('actionProgressMessage');
+                statusEl.textContent = "{{ _('Restore bookings from full system backup task started. Task ID:') }} " + data.task_id;
+                currentRestoreBookingsFullSysTaskId = data.task_id;
+                if (activePolls[data.task_id]) clearInterval(activePolls[data.task_id]);
+                displayedLogCounts[data.task_id] = 0;
+                pollTaskStatus(data.task_id, null, statusEl, 'restore_bookings_from_full_system_backup');
             } else {
-                alert("{{ _('Error restoring bookings from system backup:') }} " + data.message);
+                hideProgressModal();
+                alert("{{ _('Error starting restore bookings task:') }} " + (data.message || "{{ _('Unknown error.') }}"));
+                enablePageInteractions(); // Re-enable UI on error
             }
         })
         .catch(error => {
             hideProgressModal();
             alert("{{ _('Error during restore from system backup.') }}");
             console.error(error);
+            enablePageInteractions(); // Re-enable UI on fetch error
         });
     }
 
