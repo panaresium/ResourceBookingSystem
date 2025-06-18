@@ -499,7 +499,8 @@
         // Load Automatic Restore on Startup Setting
         loadAutoRestoreBookingDataSetting();
 
-        $('#actionProgressModal').on('hide.bs.modal', function () {
+        $('#actionProgressModal').on('hide.bs.modal', function (e) {
+            $(e.target).blur(); // Explicitly blur the modal
             // Explicitly move focus to the body before the modal is hidden
             // to prevent aria-hidden conflicts if the modal or its content had focus.
             document.body.focus();
