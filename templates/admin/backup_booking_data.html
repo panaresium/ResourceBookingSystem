@@ -215,31 +215,14 @@
 
 {% block scripts %}
 {{ super() }}
-<script src="/engine.io/engine.io.js"></script>
+<script src="/socket.io/socket.io.js"></script>
 <script>
     // Socket.IO connection and utility functions (showProgressModal, hideProgressModal, updateServerTime)
     // should remain as they are. For brevity, they are not repeated here.
-    var socket = new eio.Socket({'transports': ['websocket', 'polling']}); // Connects to the current host/port by default
-    socket.on('open', () => console.log("Engine.IO connection opened for backup_booking_data."));
-    socket.on('close', () => console.log("Engine.IO connection closed."));
-    socket.on('error', err => { console.error("Engine.IO error:", err); alert("{{ _('Engine.IO connection error.') }}"); });
-
-    socket.on('message', function(data) {
-        console.log("Engine.IO message received:", data);
-        // TODO: Parse this data to handle custom events like 'full_booking_data_backup_progress'
-        // and 'booking_data_protection_restore_progress'.
-        // Example: if data is JSON string:
-        // try {
-        //     const parsedData = JSON.parse(data);
-        //     if (parsedData.event === 'full_booking_data_backup_progress') {
-        //         // Call a function to handle this event with parsedData.payload
-        //     } else if (parsedData.event === 'booking_data_protection_restore_progress') {
-        //         // Call a function to handle this event with parsedData.payload
-        //     }
-        // } catch (e) {
-        //     console.error("Error parsing message data:", e);
-        // }
-    });
+    var socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port);
+    socket.on('connect', () => console.log("Socket.IO connected for backup_booking_data."));
+    socket.on('disconnect', () => console.log("Socket.IO disconnected."));
+    socket.on('error', err => { console.error("Socket.IO error:", err); alert("{{ _('Socket.IO connection error.') }}"); });
 
     function showProgressModal(message) { $('#actionProgressMessage').text(message); $('#actionProgressModal').modal({backdrop: 'static', keyboard: false}); }
     function hideProgressModal() { $('#actionProgressModal').modal('hide'); }
@@ -340,7 +323,6 @@
             } else { throw new Error(data.message || "{{ _('Unknown error starting manual backup.') }}"); }
         }).catch(error => { hideProgressModal(); alert("{{ _('Error starting manual backup:') }} " + error.message); });
 
-        /*
         socket.off('full_booking_data_backup_progress').on('full_booking_data_backup_progress', function(data) { // Ensure correct event name
             if (data.error || data.level === 'ERROR') {
                 hideProgressModal(); alert("{{ _('Error during manual backup:') }} " + (data.message || data.error)); socket.off('full_booking_data_backup_progress');
@@ -349,7 +331,6 @@
                 refreshUnifiedAzureBackupList();
             } else { $('#actionProgressMessage').text(data.message || data.status); }
         });
-        */
     }
 
     function restoreSelectedUnifiedBackup() {
@@ -377,7 +358,6 @@
             } else if (data.success === false) { throw new Error((data.summary && data.summary.message) || data.message || "{{ _('Error starting restore.') }}"); }
         }).catch(error => { hideProgressModal(); alert("{{ _('Error starting restore:') }} " + error.message); });
 
-        /*
         socket.off('booking_data_protection_restore_progress').on('booking_data_protection_restore_progress', function(data) {
             let msg = data.message || data.status || (data.error ? `Error: ${data.error}` : "{{ _('Processing...') }}");
             if (data.detail) msg += ` (${data.detail})`;
@@ -388,7 +368,6 @@
                 hideProgressModal(); alert(`{{ _('Restore finished:') }} ${msg}`); socket.off('booking_data_protection_restore_progress');
             }
         });
-        */
     }
 
     function deleteUnifiedBackup(filename, backupType) {
