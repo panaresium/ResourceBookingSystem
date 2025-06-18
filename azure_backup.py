@@ -304,8 +304,67 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
     # Manifest
     if overall_success:
         _emit_progress(task_id, "Creating backup manifest...", level='INFO')
-        # ... (manifest creation and upload logic) ...
-        _emit_progress(task_id, "Manifest uploaded.", level='SUCCESS')
+        manifest_data = {
+            "backup_timestamp": timestamp_str,
+            "backup_version": "1.0",  # Consider making this dynamic if app version is available
+            "components": []
+        }
+
+        # Add database component
+        for item in backed_up_items:
+            if item.get("type") == "database":
+                manifest_data["components"].append({
+                    "type": "database",
+                    "filename": item["filename"],
+                    "share": db_share_name
+                })
+                break # Assuming only one DB backup
+
+        # Add config components
+        for item in backed_up_items:
+            if item.get("type") == "config":
+                manifest_data["components"].append({
+                    "type": "config",
+                    "name": item["name"],
+                    "filename": item["filename"],
+                    "share": config_share_name
+                })
+
+        # Add media component (if media backup was attempted and successful up to this point)
+        # This assumes that if overall_success is true and media_share_name is set, media was included.
+        media_share_name_local = os.environ.get('AZURE_MEDIA_SHARE', 'media-backups') # Get it as it's defined in the media backup section
+        if media_share_name_local: # Check if media backup was configured/attempted
+             manifest_data["components"].append({
+                "type": "media",
+                "base_dir": f"{MEDIA_BACKUPS_DIR_BASE}/backup_{timestamp_str}",
+                "share": media_share_name_local
+            })
+
+        tmp_manifest_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', dir=DATA_DIR, encoding='utf-8') as tmp_mf:
+                tmp_manifest_path = tmp_mf.name
+                json.dump(manifest_data, tmp_mf, indent=4)
+
+            manifest_filename = f"backup_manifest_{timestamp_str}.json"
+            remote_manifest_path = f"{DB_BACKUPS_DIR}/{manifest_filename}"
+
+            if db_share_client and upload_file(db_share_client, tmp_manifest_path, remote_manifest_path):
+                _emit_progress(task_id, "Manifest uploaded successfully.", detail=f"Manifest: {manifest_filename}", level='SUCCESS')
+                # Optionally add manifest to backed_up_items if needed for other post-processing
+                # backed_up_items.append({"type": "manifest", "filename": manifest_filename, "share": db_share_name})
+            else:
+                _emit_progress(task_id, "Manifest upload failed.", detail=f"Could not upload {manifest_filename}", level='ERROR')
+                overall_success = False # Mark overall backup as failed if manifest upload fails
+        except Exception as e_manifest:
+            _emit_progress(task_id, "Error creating or uploading manifest.", detail=str(e_manifest), level='ERROR')
+            overall_success = False
+        finally:
+            if tmp_manifest_path and os.path.exists(tmp_manifest_path):
+                try:
+                    os.remove(tmp_manifest_path)
+                except OSError as e_remove:
+                    _emit_progress(task_id, f"Error removing temporary manifest file {tmp_manifest_path}", detail=str(e_remove), level='ERROR')
 
     _emit_progress(task_id, "Full system backup finished.", detail=f"Overall success: {overall_success}", level='SUCCESS' if overall_success else 'ERROR')
     return overall_success
