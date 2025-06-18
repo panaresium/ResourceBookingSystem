@@ -610,9 +610,6 @@ def api_selective_restore():
                     add_audit_log(action="SELECTIVE_RESTORE_AZURE_CLIENT_ERROR", details=f"Task {task_id_param}: {str(e)}", user_id=user_id_audit, username=username_audit)
                     return
 
-                # Get share clients (lazily, or up-front if all components always use them)
-                # For simplicity, getting them if any relevant component is selected.
-                # These could also be obtained just before they are needed.
                 db_share_name = os.environ.get('AZURE_DB_SHARE', 'db-backups')
                 config_share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
                 media_share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media-backups')
@@ -622,7 +619,6 @@ def api_selective_restore():
                     if not _client_exists(db_share_client):
                         update_task_log(task_id_param, f"DB share '{db_share_name}' not found.", level="error")
                         overall_success = False; errors_list.append(f"DB share '{db_share_name}' not found.")
-                        # Depending on strategy, might stop here or continue with other components
 
                 if any(c in components_param for c in ["map_config", "resource_configs", "user_configs"]):
                     config_share_client = service_client.get_share_client(config_share_name)
@@ -636,16 +632,14 @@ def api_selective_restore():
                         update_task_log(task_id_param, f"Media share '{media_share_name}' not found.", level="error")
                         overall_success = False; errors_list.append(f"Media share '{media_share_name}' not found.")
 
-
-                # Database Component Restore (must be first if other components depend on it)
-                if "database" in components_param and overall_success: # Proceed if basic shares are ok
+                if "database" in components_param and overall_success:
                     update_task_log(task_id_param, "Starting database component restore.", level="info")
-                    if not db_share_client: # Should have been caught if share didn't exist, but defensive check
+                    if not db_share_client:
                          update_task_log(task_id_param, "DB Share client not available for database restore.", level="error")
                          overall_success = False; errors_list.append("DB Share client missing for DB restore.")
                     else:
                         db_success, db_msg, downloaded_db_path, db_err = azure_backup.restore_database_component(
-                            backup_ts_param, db_share_client, task_id=task_id_param, dry_run=False # dry_run_mode is False for actual restore
+                            backup_ts_param, db_share_client, task_id=task_id_param, dry_run=False
                         )
                         if db_success:
                             actions_summary.append(f"Database backup downloaded to: {downloaded_db_path}")
@@ -657,11 +651,7 @@ def api_selective_restore():
                             err_detail = db_msg or db_err or "Unknown database restore error."
                             errors_list.append(f"Database: {err_detail}")
                             update_task_log(task_id_param, f"Database component restore failed: {err_detail}", level="ERROR")
-                            # Optionally, decide to stop here if DB restore fails
-                            # update_task_log(task_id_param, "Halting further component restores due to database restore failure.", level="ERROR")
-                            # mark_task_done(...) and return
 
-                # Configuration Components
                 config_component_map = {
                     "map_config": {"func": azure_backup.download_map_config_component, "import_func": _import_map_configuration_data, "name": "Map Configuration"},
                     "resource_configs": {"func": azure_backup.download_resource_config_component, "import_func": _import_resource_configurations_data, "name": "Resource Configurations"},
@@ -669,7 +659,7 @@ def api_selective_restore():
                 }
 
                 for comp_key, comp_details in config_component_map.items():
-                    if comp_key in components_param and overall_success: # Check overall_success if we want to stop on prior failure
+                    if comp_key in components_param and overall_success:
                         update_task_log(task_id_param, f"Starting {comp_details['name']} restore.", level="info")
                         if not config_share_client:
                             update_task_log(task_id_param, f"Config Share client not available for {comp_details['name']} restore.", level="error")
@@ -677,40 +667,55 @@ def api_selective_restore():
                             continue
 
                         cfg_success, cfg_msg, downloaded_cfg_path, cfg_err = comp_details['func'](
-                            backup_ts_param, config_share_client, task_id=task_id_param, dry_run=False # dry_run_mode is False
+                            backup_ts_param, config_share_client, task_id=task_id_param, dry_run=False
                         )
                         if cfg_success:
                             update_task_log(task_id_param, f"{comp_details['name']} backup downloaded to '{downloaded_cfg_path}'. Attempting to apply...", level="INFO")
                             try:
-                                with open(downloaded_cfg_path, 'r') as f:
-                                    loaded_json_data = json.load(f)
+                                with open(downloaded_cfg_path, 'r', encoding='utf-8') as f:
+                                    json_data = json.load(f)
 
-                                # Assuming import functions return True on success, or a string/dict with error on failure
-                                import_success_or_msg = comp_details['import_func'](loaded_json_data)
+                                import_result = comp_details['import_func'](json_data)
 
-                                if import_success_or_msg is True: # Explicitly check for True
+                                if import_result is True:
                                     actions_summary.append(f"{comp_details['name']} restored and applied.")
                                     update_task_log(task_id_param, f"{comp_details['name']} applied successfully.", level="SUCCESS")
-                                else: # Import failed
+                                    try:
+                                        os.remove(downloaded_cfg_path)
+                                    except OSError as e_remove:
+                                        update_task_log(task_id_param, f"Warning: Could not remove temporary file {downloaded_cfg_path}: {e_remove}", level="WARNING")
+                                else:
                                     overall_success = False
-                                    err_detail = str(import_success_or_msg) if import_success_or_msg is not False else "Import function returned False."
-                                    errors_list.append(f"{comp_details['name']} apply failed: {err_detail}")
-                                    update_task_log(task_id_param, f"Failed to apply downloaded {comp_details['name']}: {err_detail}", level="ERROR")
-                                os.remove(downloaded_cfg_path) # Clean up temp file
-                            except json.JSONDecodeError as json_e:
-                                overall_success = False; errors_list.append(f"{comp_details['name']} JSON decode error: {str(json_e)}");
-                                update_task_log(task_id_param, f"Failed to parse downloaded {comp_details['name']} JSON: {str(json_e)}", level="ERROR")
-                            except Exception as import_e: # Catch errors from import_func or file ops
-                                overall_success = False; errors_list.append(f"{comp_details['name']} apply error: {str(import_e)}");
-                                update_task_log(task_id_param, f"Error applying {comp_details['name']}: {str(import_e)}", level="ERROR")
-                                if os.path.exists(downloaded_cfg_path): os.remove(downloaded_cfg_path) # Attempt cleanup
-                        else: # Download failed
+                                    error_message_from_import = import_result.get('message', f"Apply failed for {comp_details['name']}")
+                                    detailed_errors_from_import = import_result.get('errors', [])
+                                    detailed_warnings_from_import = import_result.get('warnings', [])
+
+                                    full_error_details = f"Errors: {'; '.join(detailed_errors_from_import) if detailed_errors_from_import else 'None'}."
+                                    if detailed_warnings_from_import:
+                                        full_error_details += f" Warnings: {'; '.join(detailed_warnings_from_import)}."
+
+                                    errors_list.append(f"{comp_details['name']} apply failed: {error_message_from_import}. {full_error_details}")
+                                    update_task_log(task_id_param, f"Failed to apply downloaded {comp_details['name']}: {error_message_from_import}", detail=full_error_details, level="ERROR")
+                                    update_task_log(task_id_param, f"Downloaded file {downloaded_cfg_path} kept for inspection due to import failure.", level="WARNING")
+                            except FileNotFoundError:
+                                overall_success = False
+                                errors_list.append(f"{comp_details['name']} apply error: Downloaded file {downloaded_cfg_path} not found.")
+                                update_task_log(task_id_param, f"Error applying {comp_details['name']}: Downloaded file not found at {downloaded_cfg_path}.", level="ERROR")
+                            except json.JSONDecodeError as e_json:
+                                overall_success = False
+                                errors_list.append(f"{comp_details['name']} apply error: Could not parse JSON from {downloaded_cfg_path}: {e_json}")
+                                update_task_log(task_id_param, f"Error applying {comp_details['name']}: Could not parse JSON from downloaded file.", detail=str(e_json), level="ERROR")
+                            except Exception as e_apply:
+                                overall_success = False
+                                errors_list.append(f"{comp_details['name']} apply error: {str(e_apply)}")
+                                update_task_log(task_id_param, f"Error applying downloaded {comp_details['name']}: {str(e_apply)}", level="ERROR")
+                                update_task_log(task_id_param, f"Downloaded file {downloaded_cfg_path} kept for inspection due to apply error.", level="WARNING")
+                        else:
                             overall_success = False
                             err_detail = cfg_msg or cfg_err or f"Unknown {comp_details['name']} download error."
                             errors_list.append(f"{comp_details['name']}: {err_detail}")
                             update_task_log(task_id_param, f"{comp_details['name']} download failed: {err_detail}", level="ERROR")
 
-                # Media Components
                 media_component_map = {
                     "floor_maps": {"name": "Floor Maps", "azure_subdir": "floor_map_uploads", "local_target": azure_backup.FLOOR_MAP_UPLOADS},
                     "resource_uploads": {"name": "Resource Uploads", "azure_subdir": "resource_uploads", "local_target": azure_backup.RESOURCE_UPLOADS}
