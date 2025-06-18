@@ -51,6 +51,8 @@ try:
         RESOURCE_UPLOADS,  # For selective restore media component
         restore_database_component, # For selective restore
         download_map_config_component, # For selective restore
+        download_resource_config_component, # For selective restore (New)
+        download_user_config_component, # For selective restore (New)
         restore_media_component, # For selective restore
         # Imports for new booking restore functionalities
         # list_available_booking_csv_backups, # Removed
@@ -95,6 +97,8 @@ except (ImportError, RuntimeError) as e_detailed_azure_import: # Capture the exc
     RESOURCE_UPLOADS = None
     restore_database_component = None
     download_map_config_component = None
+    download_resource_config_component = None # New
+    download_user_config_component = None # New
     restore_media_component = None
     # TODO: Obsolete? Usage of 'list_available_incremental_booking_backups' commented out.
     # list_available_incremental_booking_backups = None
@@ -574,40 +578,183 @@ def api_selective_restore():
     task_id = create_task(task_type='selective_system_restore')
     current_app.logger.info(f"User {username_for_audit} initiated SELECTIVE RESTORE. Task ID: {task_id}, Timestamp: {backup_timestamp}, Components: {components_to_restore}.")
 
-    def do_selective_restore_work(app_context, task_id_param, backup_ts_param, components_param, user_id_audit, username_audit):
+    def do_selective_restore_work(app_context, task_id_param, backup_ts_param, components_param, user_id_audit, username_audit, dry_run_mode=False): # Added dry_run_mode
         with app_context:
+            update_task_log(task_id_param, f"Selective restore process initiated for timestamp {backup_ts_param} with components: {', '.join(components_param)}.", level="info")
+            overall_success = True
+            actions_summary = []
+            errors_list = []
+            service_client = None
+            db_share_client = None
+            config_share_client = None
+            media_share_client = None
+
             try:
-                current_app.logger.info(f"Worker thread started for selective restore task: {task_id_param}")
-                update_task_log(task_id_param, f"Selective restore process initiated for timestamp {backup_ts_param} with components: {', '.join(components_param)}.", level="info")
-
-                import time # For simulation
-                simulated_overall_success = True
-                simulated_actions_summary = []
-
-                if not azure_backup or not _get_service_client or not restore_database_component or not download_map_config_component or not restore_media_component or not _client_exists:
+                # Check if essential Azure functions are available
+                if not azure_backup or not _get_service_client or not restore_database_component or \
+                   not download_map_config_component or not download_resource_config_component or \
+                   not download_user_config_component or not restore_media_component or not _client_exists:
                     message = "Selective Restore failed: Azure Backup module or critical components not configured/available."
                     update_task_log(task_id_param, message, level="error")
                     mark_task_done(task_id_param, success=False, result_message=message)
                     add_audit_log(action="SELECTIVE_RESTORE_SETUP_ERROR", details=f"Task {task_id_param}: {message}", user_id=user_id_audit, username=username_audit)
                     return
 
-                # Simulate restoring each component
-                for component in components_param:
-                    update_task_log(task_id_param, f"Starting restore of component: {component}...", level="info")
-                    time.sleep(1) # Simulate some work
-                    # Placeholder: Call actual component restore function from azure_backup.py
-                    # e.g., if component == "database": success, msg, _, _ = restore_database_component(backup_ts_param, ..., task_id=task_id_param)
-                    # For now, just simulating success
-                    update_task_log(task_id_param, f"Component {component} restore attempt finished (simulated).", level="info")
-                    simulated_actions_summary.append(f"{component}: Simulated successful restore.")
+                # Initialize Azure service client
+                try:
+                    service_client = _get_service_client()
+                    update_task_log(task_id_param, "Azure service client initialized.", level="info")
+                except RuntimeError as e:
+                    update_task_log(task_id_param, f"Failed to initialize Azure service client: {str(e)}", level="error")
+                    mark_task_done(task_id_param, success=False, result_message=f"Azure client init failed: {str(e)}")
+                    add_audit_log(action="SELECTIVE_RESTORE_AZURE_CLIENT_ERROR", details=f"Task {task_id_param}: {str(e)}", user_id=user_id_audit, username=username_audit)
+                    return
 
-                final_message = f"Selective restore for {backup_ts_param} (components: {', '.join(components_param)}) finished. Summary: {'; '.join(simulated_actions_summary)}"
-                mark_task_done(task_id_param, success=simulated_overall_success, result_message=final_message)
-                add_audit_log(action="SELECTIVE_RESTORE_WORKER_COMPLETED", details=f"Task {task_id_param}: {final_message}", user_id=user_id_audit, username=username_audit)
-                current_app.logger.info(f"Selective restore task {task_id_param} worker finished. Success: {simulated_overall_success}")
+                # Get share clients (lazily, or up-front if all components always use them)
+                # For simplicity, getting them if any relevant component is selected.
+                # These could also be obtained just before they are needed.
+                db_share_name = os.environ.get('AZURE_DB_SHARE', 'db-backups')
+                config_share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
+                media_share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media-backups')
 
-            except Exception as e:
-                error_msg = f"Critical error during selective restore worker for task {task_id_param}: {str(e)}"
+                if any(c in components_param for c in ["database"]):
+                    db_share_client = service_client.get_share_client(db_share_name)
+                    if not _client_exists(db_share_client):
+                        update_task_log(task_id_param, f"DB share '{db_share_name}' not found.", level="error")
+                        overall_success = False; errors_list.append(f"DB share '{db_share_name}' not found.")
+                        # Depending on strategy, might stop here or continue with other components
+
+                if any(c in components_param for c in ["map_config", "resource_configs", "user_configs"]):
+                    config_share_client = service_client.get_share_client(config_share_name)
+                    if not _client_exists(config_share_client):
+                        update_task_log(task_id_param, f"Config share '{config_share_name}' not found.", level="error")
+                        overall_success = False; errors_list.append(f"Config share '{config_share_name}' not found.")
+
+                if any(c in components_param for c in ["floor_maps", "resource_uploads"]):
+                    media_share_client = service_client.get_share_client(media_share_name)
+                    if not _client_exists(media_share_client):
+                        update_task_log(task_id_param, f"Media share '{media_share_name}' not found.", level="error")
+                        overall_success = False; errors_list.append(f"Media share '{media_share_name}' not found.")
+
+
+                # Database Component Restore (must be first if other components depend on it)
+                if "database" in components_param and overall_success: # Proceed if basic shares are ok
+                    update_task_log(task_id_param, "Starting database component restore.", level="info")
+                    if not db_share_client: # Should have been caught if share didn't exist, but defensive check
+                         update_task_log(task_id_param, "DB Share client not available for database restore.", level="error")
+                         overall_success = False; errors_list.append("DB Share client missing for DB restore.")
+                    else:
+                        db_success, db_msg, downloaded_db_path, db_err = azure_backup.restore_database_component(
+                            backup_ts_param, db_share_client, task_id=task_id_param, dry_run=False # dry_run_mode is False for actual restore
+                        )
+                        if db_success:
+                            actions_summary.append(f"Database backup downloaded to: {downloaded_db_path}")
+                            update_task_log(task_id_param, f"IMPORTANT: Database backup downloaded to '{downloaded_db_path}'.", level="WARNING")
+                            update_task_log(task_id_param, "ACTION REQUIRED: To complete database restore: 1. Stop the application. 2. Manually replace the live 'site.db' with the downloaded file. 3. Restart the application.", level="WARNING")
+                            update_task_log(task_id_param, "Other selected components will be restored assuming the database is (or will be) manually updated.", level="INFO")
+                        else:
+                            overall_success = False
+                            err_detail = db_msg or db_err or "Unknown database restore error."
+                            errors_list.append(f"Database: {err_detail}")
+                            update_task_log(task_id_param, f"Database component restore failed: {err_detail}", level="ERROR")
+                            # Optionally, decide to stop here if DB restore fails
+                            # update_task_log(task_id_param, "Halting further component restores due to database restore failure.", level="ERROR")
+                            # mark_task_done(...) and return
+
+                # Configuration Components
+                config_component_map = {
+                    "map_config": {"func": azure_backup.download_map_config_component, "import_func": _import_map_configuration_data, "name": "Map Configuration"},
+                    "resource_configs": {"func": azure_backup.download_resource_config_component, "import_func": _import_resource_configurations_data, "name": "Resource Configurations"},
+                    "user_configs": {"func": azure_backup.download_user_config_component, "import_func": _import_user_configurations_data, "name": "User Configurations"}
+                }
+
+                for comp_key, comp_details in config_component_map.items():
+                    if comp_key in components_param and overall_success: # Check overall_success if we want to stop on prior failure
+                        update_task_log(task_id_param, f"Starting {comp_details['name']} restore.", level="info")
+                        if not config_share_client:
+                            update_task_log(task_id_param, f"Config Share client not available for {comp_details['name']} restore.", level="error")
+                            overall_success = False; errors_list.append(f"Config Share client missing for {comp_details['name']}.")
+                            continue
+
+                        cfg_success, cfg_msg, downloaded_cfg_path, cfg_err = comp_details['func'](
+                            backup_ts_param, config_share_client, task_id=task_id_param, dry_run=False # dry_run_mode is False
+                        )
+                        if cfg_success:
+                            update_task_log(task_id_param, f"{comp_details['name']} backup downloaded to '{downloaded_cfg_path}'. Attempting to apply...", level="INFO")
+                            try:
+                                with open(downloaded_cfg_path, 'r') as f:
+                                    loaded_json_data = json.load(f)
+
+                                # Assuming import functions return True on success, or a string/dict with error on failure
+                                import_success_or_msg = comp_details['import_func'](loaded_json_data)
+
+                                if import_success_or_msg is True: # Explicitly check for True
+                                    actions_summary.append(f"{comp_details['name']} restored and applied.")
+                                    update_task_log(task_id_param, f"{comp_details['name']} applied successfully.", level="SUCCESS")
+                                else: # Import failed
+                                    overall_success = False
+                                    err_detail = str(import_success_or_msg) if import_success_or_msg is not False else "Import function returned False."
+                                    errors_list.append(f"{comp_details['name']} apply failed: {err_detail}")
+                                    update_task_log(task_id_param, f"Failed to apply downloaded {comp_details['name']}: {err_detail}", level="ERROR")
+                                os.remove(downloaded_cfg_path) # Clean up temp file
+                            except json.JSONDecodeError as json_e:
+                                overall_success = False; errors_list.append(f"{comp_details['name']} JSON decode error: {str(json_e)}");
+                                update_task_log(task_id_param, f"Failed to parse downloaded {comp_details['name']} JSON: {str(json_e)}", level="ERROR")
+                            except Exception as import_e: # Catch errors from import_func or file ops
+                                overall_success = False; errors_list.append(f"{comp_details['name']} apply error: {str(import_e)}");
+                                update_task_log(task_id_param, f"Error applying {comp_details['name']}: {str(import_e)}", level="ERROR")
+                                if os.path.exists(downloaded_cfg_path): os.remove(downloaded_cfg_path) # Attempt cleanup
+                        else: # Download failed
+                            overall_success = False
+                            err_detail = cfg_msg or cfg_err or f"Unknown {comp_details['name']} download error."
+                            errors_list.append(f"{comp_details['name']}: {err_detail}")
+                            update_task_log(task_id_param, f"{comp_details['name']} download failed: {err_detail}", level="ERROR")
+
+                # Media Components
+                media_component_map = {
+                    "floor_maps": {"name": "Floor Maps", "azure_subdir": "floor_map_uploads", "local_target": azure_backup.FLOOR_MAP_UPLOADS},
+                    "resource_uploads": {"name": "Resource Uploads", "azure_subdir": "resource_uploads", "local_target": azure_backup.RESOURCE_UPLOADS}
+                }
+
+                for comp_key, comp_details in media_component_map.items():
+                    if comp_key in components_param and overall_success:
+                        update_task_log(task_id_param, f"Starting {comp_details['name']} media restore.", level="info")
+                        if not media_share_client:
+                            update_task_log(task_id_param, f"Media Share client not available for {comp_details['name']} restore.", level="error")
+                            overall_success = False; errors_list.append(f"Media Share client missing for {comp_details['name']}.")
+                            continue
+
+                        # Construct the full remote path for this media component
+                        azure_remote_folder = f"{azure_backup.MEDIA_BACKUPS_DIR_BASE}/backup_{backup_ts_param}/{comp_details['azure_subdir']}"
+
+                        media_success, media_msg, media_err = azure_backup.restore_media_component(
+                            backup_ts_param, comp_details['name'], azure_remote_folder,
+                            comp_details['local_target'], media_share_client, task_id=task_id_param, dry_run=False # dry_run_mode is False
+                        )
+                        if media_success:
+                            actions_summary.append(f"{comp_details['name']} media restored.")
+                            update_task_log(task_id_param, f"{comp_details['name']} media restored successfully: {media_msg}", level="SUCCESS")
+                        else:
+                            overall_success = False
+                            err_detail = media_msg or media_err or f"Unknown {comp_details['name']} media restore error."
+                            errors_list.append(f"{comp_details['name']} media: {err_detail}")
+                            update_task_log(task_id_param, f"{comp_details['name']} media restore failed: {err_detail}", level="ERROR")
+
+                # Finalization
+                if overall_success:
+                    final_task_message = f"Selective restore for {backup_ts_param} completed. Summary: {'; '.join(actions_summary) if actions_summary else 'No actions performed for selected components, or prerequisite shares not found.'}"
+                    if "database" in components_param and any("Database backup downloaded" in s for s in actions_summary): # Check if DB was processed
+                        final_task_message += " REMEMBER: Manual intervention is required to apply the downloaded database."
+                    mark_task_done(task_id_param, success=True, result_message=final_task_message)
+                    add_audit_log(action="SELECTIVE_RESTORE_WORKER_COMPLETED", details=f"Task {task_id_param}: {final_task_message}", user_id=user_id_audit, username=username_audit)
+                else:
+                    final_task_message = f"Selective restore for {backup_ts_param} completed with errors. Errors: {'; '.join(errors_list)}."
+                    mark_task_done(task_id_param, success=False, result_message=final_task_message)
+                    add_audit_log(action="SELECTIVE_RESTORE_WORKER_FAILED", details=f"Task {task_id_param}: {final_task_message}", user_id=user_id_audit, username=username_audit)
+                current_app.logger.info(f"Selective restore task {task_id_param} worker finished. Overall Success: {overall_success}")
+
+            except Exception as e: # Catch-all for the entire worker
+                error_msg = f"Critical unexpected error during selective restore worker for task {task_id_param}: {str(e)}"
                 current_app.logger.error(error_msg, exc_info=True)
                 mark_task_done(task_id_param, success=False, result_message=error_msg)
                 add_audit_log(action="SELECTIVE_RESTORE_WORKER_EXCEPTION", details=f"Task {task_id_param}: {error_msg}", user_id=user_id_audit, username=username_audit)

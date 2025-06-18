@@ -637,19 +637,276 @@ def verify_backup_set(backup_timestamp, task_id=None):
     return {'status': status, 'message': final_message, 'checks': checks, 'errors': errors}
 
 def restore_database_component(backup_timestamp, db_share_client, dry_run=False, task_id=None):
-    logger.warning(f"Placeholder 'restore_database_component' for {backup_timestamp}, task_id: {task_id}.")
-    _emit_progress(task_id, "DB component restore not implemented.", level='WARNING')
-    return False, "DB component restore not implemented.", None, None
+    """
+    Restores (downloads) the database component from a backup.
+
+    Args:
+        backup_timestamp (str): The timestamp of the backup.
+        db_share_client (ShareClient): The Azure File Share client for the DB share.
+        dry_run (bool): If True, simulates the restore without actual download/changes.
+        task_id (str, optional): The ID of the task for progress emission.
+
+    Returns:
+        tuple: (success_status, message, downloaded_file_path, error_detail)
+               - success_status (bool): True if successful or dry run, False otherwise.
+               - message (str): A message describing the outcome.
+               - downloaded_file_path (str | None): Path to the downloaded DB file, or a simulated path for dry run.
+               - error_detail (str | None): Details of any error that occurred.
+    """
+    if dry_run:
+        _emit_progress(task_id, "DRY RUN: Simulating database component download.", level='INFO')
+        _emit_progress(task_id, "DRY RUN: Database component download simulated successfully.", level='SUCCESS')
+        return True, "Dry run: Database download simulated.", f"simulated_{DB_FILENAME_PREFIX}{backup_timestamp}.db", None
+
+    _emit_progress(task_id, f"Starting actual database component restore for timestamp {backup_timestamp}.", level='INFO')
+
+    db_filename = f"{DB_FILENAME_PREFIX}{backup_timestamp}.db"
+    remote_db_file_path = f"{DB_BACKUPS_DIR}/{db_filename}"
+
+    # Ensure DATA_DIR exists for temporary download
+    if not os.path.exists(DATA_DIR):
+        try:
+            os.makedirs(DATA_DIR)
+            _emit_progress(task_id, f"Created local data directory: {DATA_DIR}", level='INFO')
+        except OSError as e:
+            _emit_progress(task_id, f"Error creating local data directory {DATA_DIR}: {str(e)}", level='ERROR')
+            return False, f"Error creating local data directory: {str(e)}", None, str(e)
+
+    local_temp_db_path = os.path.join(DATA_DIR, f"downloaded_{db_filename}")
+
+    _emit_progress(task_id, f"Attempting to download database backup '{remote_db_file_path}' to '{local_temp_db_path}'.", level='INFO')
+
+    try:
+        if not db_share_client: # Should be passed by the calling function (e.g. restore_full_backup)
+            _emit_progress(task_id, "Azure DB Share client not available/provided.", level='ERROR')
+            return False, "Azure DB Share client not available.", None, "DB Share client was None."
+
+        download_success = download_file(db_share_client, remote_db_file_path, local_temp_db_path)
+
+        if download_success:
+            _emit_progress(task_id, f"Database backup '{db_filename}' downloaded successfully to '{local_temp_db_path}'.", level='SUCCESS')
+            return True, f"Database backup '{db_filename}' downloaded to '{local_temp_db_path}'.", local_temp_db_path, None
+        else:
+            # download_file function logs its own errors, so just a general message here.
+            error_msg = f"Failed to download database backup '{db_filename}' from Azure. Check logs for details from download_file utility."
+            _emit_progress(task_id, error_msg, level='ERROR')
+            return False, error_msg, None, error_msg # Provide the same message as detail for consistency
+
+    except ResourceNotFoundError:
+        error_msg = f"Database backup file '{remote_db_file_path}' not found in Azure share '{db_share_client.share_name}'."
+        _emit_progress(task_id, error_msg, level='ERROR')
+        return False, error_msg, None, error_msg
+    except HttpResponseError as e:
+        error_msg = f"Azure HTTP error during database component restore: {str(e)}"
+        _emit_progress(task_id, error_msg, detail=e.message or str(e), level='ERROR')
+        return False, error_msg, None, str(e.message or e)
+    except Exception as e:
+        error_msg = f"Unexpected error during database component restore: {str(e)}"
+        _emit_progress(task_id, error_msg, level='ERROR')
+        logger.error(f"Unexpected error in restore_database_component for {backup_timestamp}: {e}", exc_info=True)
+        return False, error_msg, None, str(e)
 
 def download_map_config_component(backup_timestamp, config_share_client, dry_run=False, task_id=None):
     logger.warning(f"Placeholder 'download_map_config_component' for {backup_timestamp}, task_id: {task_id}.")
     _emit_progress(task_id, "Map config download not implemented.", level='WARNING')
     return False, "Map config download not implemented.", None, None
 
-def restore_media_component(backup_timestamp, media_component_name, azure_remote_folder, local_target_folder, media_share_client, dry_run=False, task_id=None):
-    logger.warning(f"Placeholder 'restore_media_component' for {media_component_name}, task_id: {task_id}.")
-    _emit_progress(task_id, f"{media_component_name} restore not implemented.", level='WARNING')
-    return False, f"{media_component_name} restore not implemented.", None
+
+def _download_config_component_generic(
+    backup_timestamp,
+    config_share_client,
+    component_type_str,
+    filename_prefix,
+    task_id=None,
+    dry_run=False
+):
+    """
+    Generic helper to download a configuration component (map, resource, user configs).
+    """
+    if dry_run:
+        _emit_progress(task_id, f"DRY RUN: Simulating {component_type_str} component download.", level='INFO')
+        _emit_progress(task_id, f"DRY RUN: {component_type_str} component download simulated successfully.", level='SUCCESS')
+        simulated_filename = f"simulated_{filename_prefix}{backup_timestamp}.json"
+        return True, f"Dry run: {component_type_str} download simulated.", simulated_filename, None
+
+    _emit_progress(task_id, f"Starting actual {component_type_str} component download for timestamp {backup_timestamp}.", level='INFO')
+
+    if not config_share_client:
+        error_msg = f"{component_type_str} download error: config_share_client not provided."
+        _emit_progress(task_id, error_msg, level='ERROR')
+        return False, error_msg, None, "config_share_client is None"
+
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True) # Ensure DATA_DIR exists
+
+        config_filename = f"{filename_prefix}{backup_timestamp}.json"
+        remote_config_file_path = f"{CONFIG_BACKUPS_DIR}/{config_filename}"
+        local_temp_config_path = os.path.join(DATA_DIR, f"downloaded_{config_filename}")
+
+        _emit_progress(task_id, f"Attempting to download {component_type_str} backup '{remote_config_file_path}' to '{local_temp_config_path}'.", level='INFO')
+
+        download_success = download_file(config_share_client, remote_config_file_path, local_temp_config_path)
+
+        if download_success:
+            _emit_progress(task_id, f"{component_type_str} backup '{config_filename}' downloaded successfully to '{local_temp_config_path}'.", level='SUCCESS')
+            return True, f"{component_type_str} backup '{config_filename}' downloaded to '{local_temp_config_path}'.", local_temp_config_path, None
+        else:
+            error_msg = f"Failed to download '{remote_config_file_path}' for {component_type_str} from Azure."
+            _emit_progress(task_id, f"Failed to download {component_type_str} backup '{config_filename}'. Error details should be in previous logs from download_file utility.", level='ERROR')
+            return False, error_msg, None, error_msg
+
+    except Exception as e:
+        logger.error(f"Unexpected error during {component_type_str} component download for {backup_timestamp}: {e}", exc_info=True)
+        error_msg = f"Error during {component_type_str} download: {str(e)}"
+        _emit_progress(task_id, error_msg, level='ERROR')
+        return False, error_msg, None, str(e)
+
+def download_map_config_component(backup_timestamp, config_share_client, dry_run=False, task_id=None):
+    return _download_config_component_generic(
+        backup_timestamp,
+        config_share_client,
+        "map config",
+        MAP_CONFIG_FILENAME_PREFIX,
+        task_id,
+        dry_run
+    )
+
+def download_resource_config_component(backup_timestamp, config_share_client, dry_run=False, task_id=None):
+    return _download_config_component_generic(
+        backup_timestamp,
+        config_share_client,
+        "resource configs",
+        RESOURCE_CONFIG_FILENAME_PREFIX,
+        task_id,
+        dry_run
+    )
+
+def download_user_config_component(backup_timestamp, config_share_client, dry_run=False, task_id=None):
+    return _download_config_component_generic(
+        backup_timestamp,
+        config_share_client,
+        "user configs",
+        USER_CONFIG_FILENAME_PREFIX,
+        task_id,
+        dry_run
+    )
+
+def restore_media_component(backup_timestamp, media_component_name, azure_remote_folder_base, local_target_folder_base, media_share_client, dry_run=False, task_id=None):
+    """
+    Restores (downloads) a media component (e.g., Floor Maps, Resource Uploads) from Azure.
+
+    Args:
+        backup_timestamp (str): The timestamp of the backup (used for logging context).
+        media_component_name (str): Name of the media component (e.g., "Floor Maps").
+        azure_remote_folder_base (str): The full path to the Azure directory containing the files to download
+                                         (e.g., "media_backups/backup_YYYYMMDD_HHMMSS/floor_map_uploads").
+        local_target_folder_base (str): The local base directory to download files into
+                                         (e.g., "/app/static/floor_map_uploads").
+        media_share_client (ShareClient): The Azure File Share client for the media share.
+        dry_run (bool): If True, simulates the restore.
+        task_id (str, optional): The ID of the task for progress emission.
+
+    Returns:
+        tuple: (success_status, message, error_detail)
+               - success_status (bool): True if successful/dry run with no issues, False otherwise.
+               - message (str): A message describing the outcome.
+               - error_detail (str | None): Details of any error that occurred.
+    """
+    _emit_progress(task_id, f"Processing media component: {media_component_name}", level='INFO')
+
+    if not media_share_client:
+        error_msg = f"{media_component_name} restore error: media_share_client not provided."
+        _emit_progress(task_id, error_msg, level='ERROR')
+        return False, error_msg, error_msg
+
+    try:
+        dir_client = media_share_client.get_directory_client(azure_remote_folder_base)
+
+        if dry_run:
+            _emit_progress(task_id, f"DRY RUN: Simulating media restore for {media_component_name} from {azure_remote_folder_base} to {local_target_folder_base}.", level='INFO')
+            if not _client_exists(dir_client):
+                _emit_progress(task_id, f"DRY RUN: Azure source folder {azure_remote_folder_base} would not be found.", level='WARNING')
+                # For dry run, not finding the source might not be a failure of the dry run itself, but a finding.
+                return True, f"Dry run: Azure source folder {azure_remote_folder_base} not found for {media_component_name}.", None
+
+            item_count = 0
+            for item in dir_client.list_directories_and_files():
+                if not item['is_directory']:
+                    _emit_progress(task_id, f"DRY RUN: Would download {item['name']} for {media_component_name}.", level='INFO')
+                    item_count +=1
+            if item_count == 0:
+                 _emit_progress(task_id, f"DRY RUN: No files found in {azure_remote_folder_base} to download for {media_component_name}.", level='INFO')
+            _emit_progress(task_id, f"DRY RUN: Media restore for {media_component_name} simulated successfully. {item_count} files would be processed.", level='SUCCESS')
+            return True, f"Dry run: Media restore for {media_component_name} simulated.", None
+
+        # Actual Restore
+        _emit_progress(task_id, f"Starting actual media restore for {media_component_name} from {azure_remote_folder_base} to {local_target_folder_base}.", level='INFO')
+
+        os.makedirs(local_target_folder_base, exist_ok=True)
+
+        if not _client_exists(dir_client):
+            error_msg = f"Azure source folder {azure_remote_folder_base} not found for {media_component_name}."
+            _emit_progress(task_id, error_msg, level='ERROR')
+            return False, error_msg, error_msg
+
+        files_downloaded_count = 0
+        files_failed_count = 0
+        errors_list = []
+        items_in_source_dir = list(dir_client.list_directories_and_files()) # Consume generator to check if empty
+
+        if not items_in_source_dir:
+            final_message = f"Media restore for {media_component_name}: No files found in backup source '{azure_remote_folder_base}'."
+            _emit_progress(task_id, final_message, level='INFO')
+            return True, final_message, None
+
+        for item in items_in_source_dir:
+            if item['is_directory']:
+                _emit_progress(task_id, f"Skipping subdirectory '{item['name']}' in media restore (not recursive).", level='INFO')
+                continue
+
+            file_name = item['name']
+            # remote_file_path needs to be relative to the share for download_file if media_share_client is ShareClient
+            # If azure_remote_folder_base is already the full path from share root, then this is correct.
+            remote_file_path = f"{azure_remote_folder_base}/{file_name}"
+            local_file_path = os.path.join(local_target_folder_base, file_name)
+
+            _emit_progress(task_id, f"Downloading media file '{file_name}' for {media_component_name} to '{local_file_path}'.", level='INFO')
+
+            # download_file expects share_client, path_on_share, local_destination_path
+            download_success = download_file(media_share_client, remote_file_path, local_file_path)
+
+            if download_success:
+                files_downloaded_count += 1
+            else:
+                files_failed_count += 1
+                error_detail = f"Failed to download {file_name} for {media_component_name}."
+                errors_list.append(error_detail)
+                _emit_progress(task_id, error_detail, level='ERROR')
+
+        # After loop
+        if files_failed_count > 0:
+            final_message = f"Media restore for {media_component_name} completed with errors. Downloaded: {files_downloaded_count}, Failed: {files_failed_count}."
+            _emit_progress(task_id, final_message, level='ERROR')
+            return False, final_message, "; ".join(errors_list)
+        # This case is now handled before the loop by checking items_in_source_dir
+        # else if files_downloaded_count == 0:
+        #     final_message = f"Media restore for {media_component_name}: No files were downloaded. Source '{azure_remote_folder_base}' might have been empty or contained only directories."
+        #     _emit_progress(task_id, final_message, level='INFO')
+        #     return True, final_message, None
+        else: # files_downloaded_count > 0 and files_failed_count == 0
+            final_message = f"Media restore for {media_component_name} completed successfully. Downloaded: {files_downloaded_count} files."
+            _emit_progress(task_id, final_message, level='SUCCESS')
+            return True, final_message, None
+
+    except ResourceNotFoundError: # Should be caught by _client_exists generally, but good to have defense
+        error_msg = f"Azure source folder {azure_remote_folder_base} not found during media restore for {media_component_name}."
+        _emit_progress(task_id, error_msg, level='ERROR')
+        return False, error_msg, error_msg
+    except Exception as e:
+        logger.error(f"Unexpected error during media restore for {media_component_name} (from {azure_remote_folder_base}): {e}", exc_info=True)
+        error_msg = f"Error during media restore for {media_component_name}: {str(e)}"
+        _emit_progress(task_id, error_msg, level='ERROR')
+        return False, error_msg, str(e)
 
 def restore_incremental_bookings(app, task_id=None):
     logger.warning(f"Placeholder 'restore_incremental_bookings', task_id: {task_id}.")
