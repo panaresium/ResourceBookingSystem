@@ -339,34 +339,39 @@
                     // Retain the check for no components selected first.
                     if (selectedComponents.length === 0) {
                         if (selectiveRestoreModalStatusEl) {
-                            selectiveRestoreModalStatusEl.textContent = "{{ _('Please select at least one component to restore.') }}";
+                            selectiveRestoreModalStatusEl.textContent = "Please select at least one component to restore."; // Static string
                             selectiveRestoreModalStatusEl.className = 'alert alert-warning mt-2';
                         }
                         return;
                     }
 
-                    // New: Display informational message that this is a simulation
-                    // This message will appear in the modal.
-                    if (selectiveRestoreModalStatusEl) {
-                        selectiveRestoreModalStatusEl.textContent = "{{ _('Note: This will run a *simulation* of restoring the selected components. No live data will be changed. Actual restore functionality will be implemented separately.') }}";
-                        selectiveRestoreModalStatusEl.className = 'alert alert-info mt-2';
+                    // REMOVED: Previous informational message about simulation.
+
+                    // New: Add strong confirmation dialog
+                    const confirmationMessage = `WARNING: You are about to perform an ACTUAL RESTORE of the selected components (${selectedComponents.join(', ')}). This will overwrite current data and may require manual steps (like application restart for database restore). This action cannot be undone easily. Are you absolutely sure you want to proceed?`;
+                    if (!confirm(confirmationMessage)) {
+                        console.log("Actual selective restore cancelled by user.");
+                        if (selectiveRestoreModalStatusEl) {
+                            selectiveRestoreModalStatusEl.textContent = "Restore cancelled by user.";
+                            selectiveRestoreModalStatusEl.className = 'alert alert-info mt-2';
+                        }
+                        // Ensure interactions are enabled if they were somehow disabled before this point, though they shouldn't be.
+                        // enablePageInteractions(); // Not strictly needed here if disable is only after confirm.
+                        return;
                     }
 
-                    // The previous logic for blocking "full restore" has been removed as per new instructions.
-                    // The form will now proceed to simulate for any valid selection.
-
+                    // If user confirmed:
                     disablePageInteractions(); // Disable interactions on main page
+
                     if(restoreLogAreaEl) { restoreLogAreaEl.innerHTML = ''; restoreLogAreaEl.style.display = 'block'; }
                     if(backupLogAreaEl && backupLogAreaEl.style.display !== 'none') backupLogAreaEl.style.display = 'none';
 
-                    // The main page log and status will indicate the start of the operation.
-                    // The modal message (set above) will remain visible until the task starts successfully and closes the modal,
-                    // or if an error occurs before then.
-                    appendLog('restore-log-area', `{{ _('Initiating selective restore simulation for') }} ${backupTimestamp}...`, `Components: ${selectedComponents.join(', ')}`, 'info', restoreStatusMessageEl);
-                    // No longer setting modal status to "Processing..." here, let the info message persist longer.
-                    // selectiveRestoreModalStatusEl.textContent = "{{ _('Processing...') }}";
-                    // selectiveRestoreModalStatusEl.className = 'alert alert-info mt-2';
+                    appendLog('restore-log-area', `Initiating ACTUAL selective restore for ${backupTimestamp}...`, `Components: ${selectedComponents.join(', ')}`, 'info', restoreStatusMessageEl);
 
+                    if (selectiveRestoreModalStatusEl) {
+                        selectiveRestoreModalStatusEl.textContent = "Initiating actual restore... Please wait.";
+                        selectiveRestoreModalStatusEl.className = 'alert alert-info mt-2';
+                    }
 
                     fetch('/api/admin/selective_restore', {
                         method: 'POST',
@@ -377,10 +382,12 @@
                     .then(data => {
                         const messageType = data.success ? 'info' : 'error';
                         // Log to main page's restore log area
-                        appendLog('restore-log-area', data.message || (data.success ? `{{ _('Selective restore task for ${backupTimestamp} started.') }}` : `{{ _('Failed to start selective restore for ${backupTimestamp}.') }}`), `Task ID: ${data.task_id || 'N/A'}`, messageType, restoreStatusMessageEl);
+                        // Using static strings instead of Jinja templates here
+                        const logMessage = data.message || (data.success ? `Selective restore task for ${backupTimestamp} started.` : `Failed to start selective restore for ${backupTimestamp}.`);
+                        appendLog('restore-log-area', logMessage, `Task ID: ${data.task_id || 'N/A'}`, messageType, restoreStatusMessageEl);
 
                         // Update modal status
-                        selectiveRestoreModalStatusEl.textContent = data.message;
+                        selectiveRestoreModalStatusEl.textContent = data.message || (data.success ? "Task initiated." : "Failed to initiate task.");
                         selectiveRestoreModalStatusEl.className = `alert alert-${messageType} mt-2`;
 
                         if (data.success && data.task_id) {
@@ -397,9 +404,9 @@
                     })
                     .catch(error => {
                         console.error('Selective restore error:', error);
-                        const errorMsg = `{{ _('Selective restore request for ${backupTimestamp} failed:') }} ${error.toString()}`;
+                        const errorMsg = `Selective restore request for ${backupTimestamp} failed: ${error.toString()}`;
                         appendLog('restore-log-area', errorMsg, '', 'error', restoreStatusMessageEl);
-                        selectiveRestoreModalStatusEl.textContent = errorMsg;
+                        selectiveRestoreModalStatusEl.textContent = errorMsg; // Static string
                         selectiveRestoreModalStatusEl.className = 'alert alert-danger mt-2';
                         enablePageInteractions();
                     });
