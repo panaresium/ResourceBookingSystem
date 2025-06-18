@@ -528,6 +528,12 @@
         // Load Unified Backup Schedule Settings - this happens in parallel / independently.
         loadUnifiedBackupSchedule();
 
+        $('#actionProgressModal').on('hide.bs.modal', function () {
+            // Explicitly move focus to the body before the modal is hidden
+            // to prevent aria-hidden conflicts if the modal or its content had focus.
+            document.body.focus();
+        });
+
         // Attach event listeners for new schedule section
         $('#unified_full_schedule_type').on('change', handleScheduleTypeChange);
         $('#saveUnifiedBackupScheduleBtn').on('click', saveUnifiedBackupSchedule);
