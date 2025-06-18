@@ -1012,6 +1012,23 @@ class AdminAPITestCase(AppTests):
         self.assertIn("Simulated Azure Import Error for testing logging", mock_logger_error.call_args[0][0])
         self.logout()
 
+    @patch('azure_backup.logger.warning') # Patch the logger where the warning is issued
+    def test_list_booking_data_protection_backups_placeholder(self, mock_azure_logger_warning):
+        admin_user = self._create_admin_user(username="admin_booking_dp_list", email_ext="bookingdp")
+        self.login(admin_user.username, "adminapipass")
+
+        response = self.client.get(url_for('api_system.api_list_booking_data_backups'))
+
+        self.assertEqual(response.status_code, 200)
+        json_response = response.get_json()
+        self.assertTrue(json_response['success'])
+        self.assertEqual(json_response['backups'], [])
+
+        # Assert that the placeholder's warning was logged
+        mock_azure_logger_warning.assert_called_once()
+        self.assertIn("Placeholder function 'list_booking_data_json_backups' called", mock_azure_logger_warning.call_args[0][0])
+        self.logout()
+
 
 class TestBookingResourceRelease(AppTests):
     def _common_user_setup(self):
