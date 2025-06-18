@@ -224,31 +224,7 @@
     <!-- Available Booking CSV Backups Table (Legacy) - Section Removed -->
     <!-- Section has been removed as per requirements -->
 </main>
-<footer>
-    <div class="container-fluid mt-auto py-3 bg-light">
-        <div class="row">
-            <div class="col-md-6">
-                <p class="mb-0">{{ _("Accessibility Controls:") }}</p>
-                <button id="increase-font-size" class="btn btn-sm btn-outline-secondary me-2"><i class="fas fa-search-plus"></i> {{ _("Increase Font") }}</button>
-                <button id="decrease-font-size" class="btn btn-sm btn-outline-secondary"><i class="fas fa-search-minus"></i> {{ _("Decrease Font") }}</button>
-            </div>
-            <div class="col-md-6 text-md-end">
-                <p class="mb-0">{{ _("Language:") }}</p>
-                <select id="language-selector" class="form-select form-select-sm" style="width: auto; display: inline-block;">
-                    <option value="en">{{ _("English") }}</option>
-                    <option value="es">{{ _("Spanish") }}</option>
-                    <option value="fr">{{ _("French") }}</option>
-                    <!-- Add more languages as needed -->
-                </select>
-            </div>
-        </div>
-        <div class="row mt-2">
-            <div class="col-12 text-center">
-                <p class="mb-0 text-muted">&copy; {{ current_year }} {{ _("Your Company Name. All rights reserved.") }}</p>
-            </div>
-        </div>
-    </div>
-</footer>
+{# Removed duplicate footer section from here. The main footer is in base.html #}
 </div> {# End of main-content #}
 
 <!-- Modals -->
