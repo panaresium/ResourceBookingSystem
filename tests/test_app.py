@@ -973,6 +973,34 @@ class TestAdminBookingSettingsRoutes(AppTests):
         self.logout()
 
 
+class AdminAPITestCase(AppTests):
+    def _create_admin_user(self, username="admin_api_user", email_ext="admin_api"):
+        admin_user = User.query.filter_by(username=username).first()
+        if not admin_user:
+            admin_user = User(username=username, email=f"{email_ext}@example.com", is_admin=True)
+            admin_user.set_password("adminapipass")
+            role = Role.query.filter_by(name='Admin').first()
+            if not role:
+                role = Role(name='Admin', permissions=['manage_system', 'view_audit_logs']) # Add relevant permissions
+                db.session.add(role)
+            admin_user.roles.append(role)
+            db.session.add(admin_user)
+            db.session.commit()
+        return admin_user
+
+    @patch('routes.api_system.list_available_backups', None)
+    def test_list_backups_azure_not_configured(self):
+        admin_user = self._create_admin_user()
+        self.login(admin_user.username, "adminapipass")
+
+        response = self.client.get(url_for('api_system.api_list_backups'))
+
+        self.assertEqual(response.status_code, 500)
+        json_response = response.get_json()
+        self.assertEqual(json_response['message'], "Backup module is not configured.")
+        self.logout()
+
+
 class TestBookingResourceRelease(AppTests):
     def _common_user_setup(self):
         user1 = User.query.filter_by(username='testuser1_release').first()

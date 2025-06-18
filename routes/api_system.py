@@ -72,8 +72,10 @@ try:
     )
     import azure_backup # To access module-level constants if needed by moved functions
     print(f"DEBUG api_system.py: Successfully imported from azure_backup (again). create_full_backup type: {type(create_full_backup)}") # New debug
-except ImportError as e_detailed_azure_import: # Capture the exception instance
-    print(f"CRITICAL_DEBUG api_system.py: Caught ImportError when importing from azure_backup. Exception type: {type(e_detailed_azure_import)}, Error: {e_detailed_azure_import}")
+except (ImportError, RuntimeError) as e_detailed_azure_import: # Capture the exception instance
+    # Log the error with a clear message
+    current_app.logger.error(f"Azure Storage connection might be missing or Azure SDK not installed. Error: {e_detailed_azure_import}")
+    print(f"CRITICAL_DEBUG api_system.py: Caught ImportError or RuntimeError when importing from azure_backup. Exception type: {type(e_detailed_azure_import)}, Error: {e_detailed_azure_import}")
     import traceback # Import traceback module
     print("CRITICAL_DEBUG api_system.py: Full traceback of the import error:")
     traceback.print_exc() # Print the full traceback for the caught error
