@@ -3,6 +3,8 @@
 {% block title %}{{ _("Booking Data Management") }}{% endblock %}
 
 {% block content %}
+<div id="main-content">
+<main>
 <div class="container-fluid">
     <h1 class="mt-4">{{ _("Booking Data Management") }}</h1>
     <p class="mb-4">{{ _("Manage backups and restore options for booking data. For full system backups, please visit the System Backup page.") }}</p>
@@ -155,6 +157,7 @@
     </div>
 
     <!-- Legacy & Other Booking Data Operations - Section Removed -->
+    <!-- Section has been removed as per requirements -->
 
     <!-- Restore Booking Data Section (Non-CSV Legacy/Other Methods) -->
     <div class="row mt-4">
@@ -180,6 +183,7 @@
                     </div>
 
                     <!-- CSV Restore Section Removed -->
+                    <!-- Section has been removed as per requirements -->
 
                     <div class="card mb-3">
                         <div class="card-header"> {{ _("Restore Bookings from Incremental Backups (JSON - Legacy/Other)") }} </div>
@@ -206,11 +210,38 @@
     </div>
 
     <!-- Available Booking CSV Backups Table (Legacy) - Section Removed -->
-</div>
+    <!-- Section has been removed as per requirements -->
+</main>
+<footer>
+    <div class="container-fluid mt-auto py-3 bg-light">
+        <div class="row">
+            <div class="col-md-6">
+                <p class="mb-0">{{ _("Accessibility Controls:") }}</p>
+                <button id="increase-font-size" class="btn btn-sm btn-outline-secondary me-2"><i class="fas fa-search-plus"></i> {{ _("Increase Font") }}</button>
+                <button id="decrease-font-size" class="btn btn-sm btn-outline-secondary"><i class="fas fa-search-minus"></i> {{ _("Decrease Font") }}</button>
+            </div>
+            <div class="col-md-6 text-md-end">
+                <p class="mb-0">{{ _("Language:") }}</p>
+                <select id="language-selector" class="form-select form-select-sm" style="width: auto; display: inline-block;">
+                    <option value="en">{{ _("English") }}</option>
+                    <option value="es">{{ _("Spanish") }}</option>
+                    <option value="fr">{{ _("French") }}</option>
+                    <!-- Add more languages as needed -->
+                </select>
+            </div>
+        </div>
+        <div class="row mt-2">
+            <div class="col-12 text-center">
+                <p class="mb-0 text-muted">&copy; {{ current_year }} {{ _("Your Company Name. All rights reserved.") }}</p>
+            </div>
+        </div>
+    </div>
+</footer>
+</div> {# End of main-content #}
 
 <!-- Modals -->
 <div class="modal fade" id="confirmClearAllModal" tabindex="-1" role="dialog"> <div class="modal-dialog"> <div class="modal-content"> <div class="modal-header"> <h5 class="modal-title">{{ _("Confirm Clear All Booking Data") }}</h5> <button type="button" class="close" data-dismiss="modal">&times;</button> </div> <div class="modal-body"> {{ _("Are you sure you want to permanently delete all booking data? This action cannot be undone.") }} </div> <div class="modal-footer"> <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ _("Cancel") }}</button> <button type="button" class="btn btn-danger" onclick="executeClearAllBookingData()">{{ _("Clear All Data") }}</button> </div> </div> </div> </div>
-<div class="modal fade" id="actionProgressModal" tabindex="-1" role="dialog" aria-labelledby="actionProgressModalLabel" aria-hidden="true"> <div class="modal-dialog"> <div class="modal-content"> <div class="modal-header"> <h5 class="modal-title" id="actionProgressModalLabel">{{ _("Action in Progress") }}</h5> </div> <div class="modal-body"> <p id="actionProgressMessage">{{ _("Please wait...") }}</p> <div class="progress"> <div id="actionProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div> </div> </div> </div> </div> </div>
+<div class="modal fade" id="actionProgressModal" tabindex="-1" aria-labelledby="actionProgressModalLabel" aria-hidden="true" style="display: none;"> <div class="modal-dialog"> <div class="modal-content"> <div class="modal-header"> <h5 class="modal-title" id="actionProgressModalLabel">Action in Progress</h5> </div> <div class="modal-body"> <p id="actionProgressMessage">Loading initial page data...</p> <div class="progress"> <div id="actionProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div> </div> </div> </div> </div> </div>
 {% endblock %}
 
 {% block scripts %}
@@ -479,13 +510,10 @@
         });
     }
 
-    // Removed: loadCsvBackupsForRestore
-    // Removed: restoreBookingsFromCsvBackup
-    // Removed: deleteCsvBackup
-    // Removed: loadLegacyCsvBackups
-    // Removed: renderLegacyCsvPagination
-    // Removed: directRestoreFromCsv
-    // Removed: directDeleteCsv
+    // CSV related functions were previously removed.
+    // loadCsvBackupsForRestore, restoreBookingsFromCsvBackup, deleteCsvBackup,
+    // loadLegacyCsvBackups, renderLegacyCsvPagination, directRestoreFromCsv, directDeleteCsv
+    // have been confirmed as removed.
 
     function confirmClearAllBookingData() {
         $('#confirmClearAllModal').modal('show');
