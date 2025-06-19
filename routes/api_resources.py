@@ -771,7 +771,7 @@ def import_resources_admin():
 
     response_data = {
         'message': message,
-        'created': created_count,  # This will be 0
+        'created': created_count,
         'updated': updated_count,
         'errors': errors_list
     }

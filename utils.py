@@ -648,6 +648,7 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
 
     resources_processed = 0
     resources_updated = 0
+    created_count = 0  # Initialize created_count
     errors = []
     warnings = []
 
@@ -663,6 +664,7 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
             resource = db.session.get(Resource, backup_id)
 
             if resource:
+                # Existing update logic
                 resource.name = resource_data.get('name', resource.name)
                 resource.capacity = resource_data.get('capacity', resource.capacity)
                 resource.equipment = resource_data.get('equipment', resource.equipment)
@@ -717,7 +719,64 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
                 db.session.add(resource)
                 resources_updated += 1
             else:
-                warnings.append(f"Resource with backup ID {backup_id} ('{resource_data.get('name', 'N/A')}') not found in DB. Skipped update.")
+                # Create new resource
+                logger.info(f"Resource with backup ID {backup_id} not found. Creating as new resource.")
+                if not isinstance(backup_id, int):
+                    errors.append(f"Resource with backup ID {backup_id} ('{resource_data.get('name', 'N/A')}') has a non-integer ID. Cannot create.")
+                    continue
+
+                new_resource = Resource()
+                new_resource.id = backup_id # Set ID from backup_id
+
+                new_resource.name = resource_data.get('name')
+                new_resource.capacity = resource_data.get('capacity')
+                new_resource.equipment = resource_data.get('equipment')
+                new_resource.status = resource_data.get('status', 'draft') # Default to 'draft'
+
+                tags_data = resource_data.get('tags')
+                if isinstance(tags_data, list):
+                    new_resource.tags = ",".join(tags_data)
+                elif tags_data is None:
+                    new_resource.tags = None
+                else:
+                    new_resource.tags = tags_data
+
+                new_resource.booking_restriction = resource_data.get('booking_restriction')
+
+                published_at_str = resource_data.get('published_at')
+                new_resource.published_at = _parse_iso_datetime(published_at_str)
+
+                allowed_users_data = resource_data.get('allowed_user_ids')
+                if isinstance(allowed_users_data, list):
+                    new_resource.allowed_user_ids = json.dumps(allowed_users_data)
+                elif allowed_users_data is None:
+                    new_resource.allowed_user_ids = None
+                else:
+                    new_resource.allowed_user_ids = allowed_users_data
+
+                new_resource.is_under_maintenance = resource_data.get('is_under_maintenance', False) # Default to False
+
+                maintenance_until_str = resource_data.get('maintenance_until')
+                new_resource.maintenance_until = _parse_iso_datetime(maintenance_until_str)
+
+                # Handle Roles (Many-to-Many) for new resource
+                backed_up_role_ids_data = resource_data.get('roles', []) # Default to empty list
+                new_resource_roles = []
+                if backed_up_role_ids_data is not None: # Check if 'roles' key was present
+                    backed_up_role_ids = {role_info.get('id') for role_info in backed_up_role_ids_data if role_info.get('id') is not None}
+
+                    if backed_up_role_ids:
+                        current_roles_in_db = Role.query.filter(Role.id.in_(backed_up_role_ids)).all()
+                        found_role_ids_in_db = {role.id for role in current_roles_in_db}
+
+                        for backed_up_id_role in backed_up_role_ids:
+                            if backed_up_id_role not in found_role_ids_in_db:
+                                warnings.append(f"For new Resource (Backup ID {backup_id}), Role ID {backed_up_id_role} from backup not found in database. Skipping assignment of this role.")
+                        new_resource_roles = current_roles_in_db
+                new_resource.roles = new_resource_roles
+
+                db.session.add(new_resource)
+                created_count += 1
         except Exception as e_res:
             error_msg = f"Error processing resource (Backup ID: {backup_id}, Name: {resource_data.get('name', 'N/A')}): {str(e_res)}"
             errors.append(error_msg)
@@ -733,7 +792,7 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
         status_code = 500
 
     final_message_parts = [
-        f"Resources processed: {resources_processed} (Updated: {resources_updated})."
+        f"Resources processed: {resources_processed} (Created: {created_count}, Updated: {resources_updated})."
     ]
     if warnings:
         final_message_parts.append(f"Warnings: {'; '.join(warnings)}")
@@ -746,13 +805,11 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
 
     if not errors and status_code == 200:
         # Success case: return tuple (updated_count, created_count, errors, warnings, status_code, message)
-        # created_count is 0 as this function primarily updates.
-        return resources_updated, 0, [], [], 200, final_message
+        return resources_updated, created_count, [], [], 200, final_message
     else:
         # Failure/warnings case: extract details and return tuple
-        # created_count is 0.
-        # The variables final_message, errors, warnings, status_code, resources_updated are already available.
-        return resources_updated, 0, errors, warnings, status_code, final_message
+        # The variables final_message, errors, warnings, status_code, resources_updated, created_count are already available.
+        return resources_updated, created_count, errors, warnings, status_code, final_message
 
 
 def _get_user_configurations_data() -> dict:
