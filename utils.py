@@ -380,6 +380,7 @@ def resource_to_dict(resource: Resource) -> dict:
         'roles': [{'id': r.id, 'name': r.name} for r in resource.roles],
         'floor_map_id': resource.floor_map_id,
         'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
+        'map_allowed_role_ids': json.loads(resource.map_allowed_role_ids) if resource.map_allowed_role_ids else None,
         'is_under_maintenance': resource.is_under_maintenance,
         'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
     }
