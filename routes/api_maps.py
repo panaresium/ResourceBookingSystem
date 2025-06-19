@@ -518,59 +518,52 @@ def get_map_details(map_id):
         # user_role_ids = [role.id for role in current_user.roles] # This will be generated inside the loop now as user_role_ids_set
 
         for resource in mapped_resources_query:
-            # --- Start of new permission logic block ---
+            parsed_map_coords = json.loads(resource.map_coordinates) if resource.map_coordinates else None
+            role_ids_from_map_coords = None
+            if parsed_map_coords and isinstance(parsed_map_coords, dict):
+                role_ids_from_map_coords = parsed_map_coords.get('allowed_role_ids')
+                if role_ids_from_map_coords is not None and not isinstance(role_ids_from_map_coords, list):
+                    current_app.logger.warning(f"Resource {resource.id} 'allowed_role_ids' in map_coordinates is not a list: {role_ids_from_map_coords}. Treating as no specific map roles defined.")
+                    role_ids_from_map_coords = None # Treat as if not present if malformed
+
             current_user_can_book_flag = False # Default deny
 
             if current_user.is_admin:
-                current_app.logger.debug(f"User {current_user.username} is admin. Access granted for resource {resource.id}.")
+                current_app.logger.debug(f"User {current_user.username} is admin. Map access granted for resource {resource.id}.")
                 current_user_can_book_flag = True
-            else:
-                # map_allowed_role_ids is a string from the DB
-                if resource.map_allowed_role_ids and resource.map_allowed_role_ids.strip(): # Check if not None and not empty/whitespace
-                    current_app.logger.debug(f"Resource {resource.id} has map_allowed_role_ids: '{resource.map_allowed_role_ids}'. Processing...")
-                    try:
-                        allowed_roles_from_json = json.loads(resource.map_allowed_role_ids)
+            elif role_ids_from_map_coords is not None: # This implies it's a list (empty or populated)
+                if not role_ids_from_map_coords: # Empty list means public for authenticated users
+                    current_app.logger.debug(f"Resource {resource.id} 'allowed_role_ids' in map_coordinates is empty. Granting map access (public for authenticated users).")
+                    current_user_can_book_flag = True
+                else:
+                    # It's a populated list of role IDs.
+                    malformed_id_found_in_coords = False
+                    processed_role_ids_from_coords = set()
+                    for r_id in role_ids_from_map_coords:
+                        try:
+                            processed_role_ids_from_coords.add(int(r_id))
+                        except (ValueError, TypeError):
+                            malformed_id_found_in_coords = True
+                            current_app.logger.warning(f"Resource {resource.id} 'allowed_role_ids' in map_coordinates contains a non-integer role ID: '{r_id}'. Denying map access due to malformed ID.")
+                            break
 
-                        if not isinstance(allowed_roles_from_json, list):
-                            current_app.logger.warning(f"Resource {resource.id} 'map_allowed_role_ids' ('{resource.map_allowed_role_ids}') is not a list after JSON parsing. Denying access for safety.")
-                            current_user_can_book_flag = False
-                        elif not allowed_roles_from_json: # Parsed to an empty list e.g., from '[]'
-                            current_app.logger.debug(f"Resource {resource.id} 'map_allowed_role_ids' ('{resource.map_allowed_role_ids}') is an empty list. Granting access (public for authenticated users).")
+                    if malformed_id_found_in_coords:
+                        current_user_can_book_flag = False
+                    else:
+                        user_role_ids_set = {role.id for role in current_user.roles}
+                        current_app.logger.debug(f"Resource {resource.id} (map_coordinates): Comparing user roles {user_role_ids_set} with processed resource roles {processed_role_ids_from_coords} from map_coordinates.")
+                        if not user_role_ids_set.isdisjoint(processed_role_ids_from_coords):
+                            current_app.logger.debug(f"Resource {resource.id} (map_coordinates): Overlap found. Map access granted.")
                             current_user_can_book_flag = True
                         else:
-                            # It's a populated list of role IDs. Attempt to convert to integers and check for intersection.
-                            malformed_id_found = False
-                            processed_allowed_role_ids = set()
-                            for r_id in allowed_roles_from_json:
-                                try:
-                                    processed_allowed_role_ids.add(int(r_id)) # Ensure conversion to int
-                                except (ValueError, TypeError):
-                                    malformed_id_found = True
-                                    current_app.logger.warning(f"Resource {resource.id} 'map_allowed_role_ids' ('{resource.map_allowed_role_ids}') contains a non-integer role ID: '{r_id}'. Denying access due to malformed ID.")
-                                    break
+                            current_app.logger.debug(f"Resource {resource.id} (map_coordinates): No overlap. Map access denied.")
+                            current_user_can_book_flag = False
+            else:
+                # role_ids_from_map_coords is None (e.g. 'allowed_role_ids' key missing, or map_coordinates was None/not dict)
+                # This means the resource is considered public to all authenticated users for map view.
+                current_app.logger.debug(f"Resource {resource.id} has no 'allowed_role_ids' in map_coordinates or map_coordinates is invalid. Granting map access (public for authenticated users).")
+                current_user_can_book_flag = True
 
-                            if malformed_id_found:
-                                current_user_can_book_flag = False
-                            else:
-                                user_role_ids_set = {role.id for role in current_user.roles}
-                                current_app.logger.debug(f"Resource {resource.id}: Comparing user roles {user_role_ids_set} with processed resource roles {processed_allowed_role_ids}.")
-                                if not user_role_ids_set.isdisjoint(processed_allowed_role_ids):
-                                    current_app.logger.debug(f"Resource {resource.id}: Overlap found. Access granted.")
-                                    current_user_can_book_flag = True
-                                else:
-                                    current_app.logger.debug(f"Resource {resource.id}: No overlap. Access denied.")
-                                    current_user_can_book_flag = False # Explicitly set, though already default
-                    except json.JSONDecodeError:
-                        current_app.logger.warning(f"Resource {resource.id} has invalid JSON in 'map_allowed_role_ids' ('{resource.map_allowed_role_ids}'). Denying access for safety.")
-                        current_user_can_book_flag = False
-                else:
-                    # resource.map_allowed_role_ids is None, empty string, or whitespace only.
-                    # This means the resource is considered public to all authenticated users.
-                    current_app.logger.debug(f"Resource {resource.id} has no specific 'map_allowed_role_ids' defined (value: '{resource.map_allowed_role_ids}'). Granting access (public for authenticated users).")
-                    current_user_can_book_flag = True
-            # --- End of new permission logic block ---
-
-            # The 'if can_view_resource:' block is removed. All resources are processed.
             bookings_on_date = Booking.query.filter(
                 Booking.resource_id == resource.id,
                 func.date(Booking.start_time) == target_date_obj, # func.date needs sqlalchemy import
@@ -584,29 +577,36 @@ def get_map_details(map_id):
                 'id': resource.id, 'name': resource.name, 'capacity': resource.capacity,
                 'equipment': resource.equipment,
                 'image_url': url_for('static', filename=f'resource_uploads/{resource.image_filename}', _external=False) if resource.image_filename else None,
-                'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
+                'map_coordinates': parsed_map_coords, # Use already parsed coordinates
                 'booking_restriction': resource.booking_restriction, 'status': resource.status,
                 'published_at': resource.published_at.isoformat() if resource.published_at else None,
-                'allowed_user_ids': resource.allowed_user_ids,
+                'allowed_user_ids': resource.allowed_user_ids, # This is for specific user restriction, not map roles
                 'is_under_maintenance': resource.is_under_maintenance,
                 'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
                 'bookings_on_date': bookings_info,
-                'current_user_can_book': current_user_can_book_flag # Added the flag here
+                'current_user_can_book': current_user_can_book_flag
             }
 
-            allowed_roles_info = []
-            if resource.map_allowed_role_ids:
-                try:
-                    role_ids = json.loads(resource.map_allowed_role_ids)
-                    if isinstance(role_ids, list) and all(isinstance(rid, int) for rid in role_ids):
-                        roles = Role.query.filter(Role.id.in_(role_ids)).all()
-                        allowed_roles_info = [{'id': role.id, 'name': role.name} for role in roles]
-                except (json.JSONDecodeError, TypeError):
-                     pass # Error already logged when determining current_user_can_book_flag
-            resource_info['roles'] = allowed_roles_info # This remains, contains roles that CAN book, not if current user CAN book
+            # Populate 'roles' for display based on role_ids_from_map_coords
+            allowed_roles_info_display = []
+            if role_ids_from_map_coords and isinstance(role_ids_from_map_coords, list):
+                # Attempt to fetch role names for display.
+                # Ensure IDs are integers for querying.
+                valid_role_ids_for_query = []
+                for r_id in role_ids_from_map_coords:
+                    try:
+                        valid_role_ids_for_query.append(int(r_id))
+                    except (ValueError, TypeError):
+                        current_app.logger.warning(f"Resource {resource.id} has non-integer role ID '{r_id}' in map_coordinates.allowed_role_ids. Skipping for display.")
+
+                if valid_role_ids_for_query:
+                    roles_for_display = Role.query.filter(Role.id.in_(valid_role_ids_for_query)).all()
+                    allowed_roles_info_display = [{'id': role.id, 'name': role.name} for role in roles_for_display]
+
+            resource_info['roles'] = allowed_roles_info_display # Roles allowed by map_coordinates
             mapped_resources_list.append(resource_info)
 
-        current_app.logger.info(f"User {current_user.username} fetched map details for map ID {map_id} for date {target_date_obj}. Total resources processed: {len(mapped_resources_list)}.") # Log message updated
+        current_app.logger.info(f"User {current_user.username} fetched map details for map ID {map_id} for date {target_date_obj}. Total resources processed: {len(mapped_resources_list)}.")
         return jsonify({
             'map_details': map_details_response,
             'mapped_resources': mapped_resources_list
