@@ -366,21 +366,8 @@ def resource_to_dict(resource: Resource) -> dict:
         except RuntimeError: # Outside of application context
             image_url = f"/static/resource_uploads/{resource.image_filename}"
 
-    # Robust parsing for map_allowed_role_ids
-    parsed_map_allowed_role_ids = None
-    if resource.map_allowed_role_ids and resource.map_allowed_role_ids.strip():
-        try:
-            loaded_roles = json.loads(resource.map_allowed_role_ids)
-            if isinstance(loaded_roles, list):
-                parsed_map_allowed_role_ids = loaded_roles
-            else:
-                logger.warning(f"Resource ID {resource.id}: Parsed map_allowed_role_ids is not a list. Value: '{resource.map_allowed_role_ids}'. Defaulting to None.")
-                # parsed_map_allowed_role_ids remains None
-        except json.JSONDecodeError:
-            logger.warning(f"Resource ID {resource.id}: Failed to decode map_allowed_role_ids JSON: '{resource.map_allowed_role_ids}'. Defaulting to None.")
-            # parsed_map_allowed_role_ids remains None
-
-    return {
+    # Initialize main dictionary
+    d = {
         'id': resource.id,
         'name': resource.name,
         'capacity': resource.capacity,
@@ -391,13 +378,40 @@ def resource_to_dict(resource: Resource) -> dict:
         'image_url': image_url,
         'published_at': resource.published_at.isoformat() if resource.published_at else None,
         'allowed_user_ids': resource.allowed_user_ids, # Assuming this is already a string or None
-        'roles': [{'id': r.id, 'name': r.name} for r in resource.roles],
+        'roles': [{'id': r.id, 'name': r.name} for r in resource.roles], # General roles
         'floor_map_id': resource.floor_map_id,
         'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
-        'map_allowed_role_ids': parsed_map_allowed_role_ids,
         'is_under_maintenance': resource.is_under_maintenance,
         'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
     }
+
+    # Explicit and logged handling for map_allowed_role_ids
+    raw_map_roles_value = resource.map_allowed_role_ids
+    logger.info(f"Resource ID {resource.id}: Raw map_allowed_role_ids from DB is '{raw_map_roles_value}' (type: {type(raw_map_roles_value)})")
+
+    parsed_roles_list = None
+    if raw_map_roles_value and isinstance(raw_map_roles_value, str) and raw_map_roles_value.strip():
+        try:
+            loaded_data = json.loads(raw_map_roles_value)
+            if isinstance(loaded_data, list):
+                parsed_roles_list = loaded_data
+                logger.info(f"Resource ID {resource.id}: Successfully parsed map_allowed_role_ids into list: {parsed_roles_list}")
+            else:
+                logger.warning(f"Resource ID {resource.id}: Parsed map_allowed_role_ids ('{raw_map_roles_value}') is not a list (type: {type(loaded_data)}). Defaulting to None.")
+                # parsed_roles_list remains None
+        except json.JSONDecodeError as e:
+            logger.error(f"Resource ID {resource.id}: JSONDecodeError for map_allowed_role_ids value '{raw_map_roles_value}'. Error: {e}. Defaulting to None.")
+            # parsed_roles_list remains None
+    elif raw_map_roles_value is None:
+        logger.info(f"Resource ID {resource.id}: map_allowed_role_ids is None in DB. Defaulting to None.")
+        # parsed_roles_list remains None
+    else: # Empty string or not a string (though DB should provide string or None)
+        logger.info(f"Resource ID {resource.id}: map_allowed_role_ids is empty or not a string (value: '{raw_map_roles_value}'). Defaulting to None.")
+        # parsed_roles_list remains None
+
+    d['map_allowed_role_ids'] = parsed_roles_list
+
+    return d
 
 def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_name: str) -> str | None:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
