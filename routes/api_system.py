@@ -328,13 +328,13 @@ def api_unified_booking_data_point_in_time_restore():
                 if summary.get('status') == 'success':
                     final_message = summary.get('message', "Unified booking data restore completed successfully.")
                     update_task_log(task_id_param, final_message, level="success")
-                    mark_task_done(task_id_param, success=True, result_message=final_message, result_data=summary)
+                    mark_task_done(task_id_param, success=True, result_message=f"{final_message} Summary: {json.dumps(summary)}")
                     add_audit_log(action="UNIFIED_RESTORE_WORKER_COMPLETED", details=f"Task {task_id_param}: {final_message}. Summary: {json.dumps(summary)}", user_id=user_id_audit, username=username_audit)
                     current_app.logger.info(f"Task {task_id_param}: Unified restore completed successfully. Summary: {summary}")
                 else:
                     error_detail = summary.get('message', "Restore process reported failure.")
-                    update_task_log(task_id_param, error_detail, level="error", detail_info=json.dumps(summary.get('errors', [])))
-                    mark_task_done(task_id_param, success=False, result_message=error_detail, result_data=summary)
+                    update_task_log(task_id_param, error_detail, detail=json.dumps(summary.get('errors', [])), level="error")
+                    mark_task_done(task_id_param, success=False, result_message=f"{error_detail} Summary: {json.dumps(summary)}")
                     add_audit_log(action="UNIFIED_RESTORE_WORKER_FAILED", details=f"Task {task_id_param}: {error_detail}. Summary: {json.dumps(summary)}", user_id=user_id_audit, username=username_audit)
                     current_app.logger.warning(f"Task {task_id_param}: Unified restore failed. Summary: {summary}")
 
@@ -343,7 +343,7 @@ def api_unified_booking_data_point_in_time_restore():
                 current_app.logger.error(f"Task {task_id_param}: {error_msg}", exc_info=True)
                 error_summary = {'status': 'failure', 'message': error_msg, 'errors': [str(e)]}
                 update_task_log(task_id_param, error_msg, level="critical")
-                mark_task_done(task_id_param, success=False, result_message=error_msg, result_data=error_summary)
+                mark_task_done(task_id_param, success=False, result_message=f"{error_msg} Details: {json.dumps(error_summary.get('errors', []))}")
                 add_audit_log(action="UNIFIED_RESTORE_WORKER_EXCEPTION", details=f"Task {task_id_param}: {error_msg}", user_id=user_id_audit, username=username_audit)
 
     flask_app_context = current_app.app_context()
