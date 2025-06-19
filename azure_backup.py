@@ -958,24 +958,22 @@ def backup_full_bookings_json(app, task_id=None):
         for booking in all_bookings:
             booking_dict = {
                 'id': booking.id,
-                'title': booking.title,
-                'user_name': booking.user_name,
                 'resource_id': booking.resource_id,
+                'user_name': booking.user_name,
                 'start_time': booking.start_time.isoformat() if booking.start_time else None,
                 'end_time': booking.end_time.isoformat() if booking.end_time else None,
-                'status': booking.status,
-                'created_at': booking.created_at.isoformat() if booking.created_at else None,
-                'updated_at': booking.updated_at.isoformat() if booking.updated_at else None,
+                'title': booking.title,
                 'checked_in_at': booking.checked_in_at.isoformat() if booking.checked_in_at else None,
                 'checked_out_at': booking.checked_out_at.isoformat() if booking.checked_out_at else None,
-                'notes': booking.notes,
-                'is_recurring': booking.is_recurring,
-                'recurrence_id': booking.recurrence_id,
+                'status': booking.status,
                 'recurrence_rule': booking.recurrence_rule,
-                'is_private': booking.is_private,
-                'attendees': booking.attendees, # Assuming attendees is already in a serializable format (e.g., string)
+                'admin_deleted_message': booking.admin_deleted_message,
+                'check_in_token': booking.check_in_token,
+                'check_in_token_expires_at': booking.check_in_token_expires_at.isoformat() if booking.check_in_token_expires_at else None,
                 'checkin_reminder_sent_at': booking.checkin_reminder_sent_at.isoformat() if booking.checkin_reminder_sent_at else None,
-                'series_id': booking.series_id
+                'last_modified': booking.last_modified.isoformat() if booking.last_modified else None,
+                'booking_display_start_time': booking.booking_display_start_time.isoformat() if booking.booking_display_start_time else None,
+                'booking_display_end_time': booking.booking_display_end_time.isoformat() if booking.booking_display_end_time else None
             }
             booking_list_for_json.append(booking_dict)
 
