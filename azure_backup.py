@@ -924,9 +924,120 @@ def backup_incremental_bookings(app, task_id=None):
     return False
 
 def backup_full_bookings_json(app, task_id=None):
-    logger.warning(f"Placeholder 'backup_full_bookings_json', task_id: {task_id}.")
-    _emit_progress(task_id, "Full booking JSON export not implemented.", level='WARNING')
-    return False
+    """
+    Creates a full backup of all booking data to a JSON file and uploads it to Azure File Share.
+    """
+    _emit_progress(task_id, "Starting manual full JSON backup of booking data...", level='INFO')
+
+    try:
+        connection_string = app.config.get('AZURE_STORAGE_CONNECTION_STRING', os.environ.get('AZURE_STORAGE_CONNECTION_STRING'))
+        share_name = app.config.get('AZURE_BOOKING_DATA_SHARE', 'booking-data-backups') # Using 'booking-data-backups'
+
+        if not connection_string:
+            _emit_progress(task_id, "Azure Storage connection string is not configured.", level='ERROR')
+            return False
+        if not share_name:
+            _emit_progress(task_id, "Azure File Share name for booking data is not configured.", level='ERROR')
+            return False
+
+        if ShareServiceClient is None:
+            _emit_progress(task_id, "Azure SDK not installed. Cannot perform backup.", level='ERROR')
+            return False
+
+        _emit_progress(task_id, f"Fetching all bookings from the database...", level='INFO')
+        all_bookings = Booking.query.all()
+
+        if not all_bookings:
+            _emit_progress(task_id, "No bookings found in the database. Proceeding to create an empty export.", level='WARNING')
+            # Decide if an empty export is desired or return True (success, nothing to back up)
+            # For now, proceeding to create an empty export as per plan.
+        else:
+            _emit_progress(task_id, f"Successfully fetched {len(all_bookings)} bookings.", level='INFO')
+
+        booking_list_for_json = []
+        for booking in all_bookings:
+            booking_dict = {
+                'id': booking.id,
+                'title': booking.title,
+                'user_name': booking.user_name,
+                'resource_id': booking.resource_id,
+                'start_time': booking.start_time.isoformat() if booking.start_time else None,
+                'end_time': booking.end_time.isoformat() if booking.end_time else None,
+                'status': booking.status,
+                'created_at': booking.created_at.isoformat() if booking.created_at else None,
+                'updated_at': booking.updated_at.isoformat() if booking.updated_at else None,
+                'checked_in_at': booking.checked_in_at.isoformat() if booking.checked_in_at else None,
+                'checked_out_at': booking.checked_out_at.isoformat() if booking.checked_out_at else None,
+                'notes': booking.notes,
+                'is_recurring': booking.is_recurring,
+                'recurrence_id': booking.recurrence_id,
+                'recurrence_rule': booking.recurrence_rule,
+                'is_private': booking.is_private,
+                'attendees': booking.attendees, # Assuming attendees is already in a serializable format (e.g., string)
+                'checkin_reminder_sent_at': booking.checkin_reminder_sent_at.isoformat() if booking.checkin_reminder_sent_at else None,
+                'series_id': booking.series_id
+            }
+            booking_list_for_json.append(booking_dict)
+
+        _emit_progress(task_id, "Booking data serialized to JSON format.", level='INFO')
+
+        export_data = {
+            "export_timestamp": datetime.now(timezone.utc).isoformat(),
+            "bookings": booking_list_for_json
+        }
+
+        timestamp_str = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+        filename = f"manual_full_booking_export_{timestamp_str}.json"
+
+        # Use os.path.join for local-like path construction, then ensure forward slashes for Azure
+        target_directory_parts = [AZURE_BOOKING_DATA_PROTECTION_DIR, "manual_full_json"]
+        target_directory = "/".join(part.strip("/") for part in target_directory_parts if part)
+
+
+        _emit_progress(task_id, f"Initializing Azure ShareServiceClient for share '{share_name}'.", level='INFO')
+        service_client = ShareServiceClient.from_connection_string(connection_string)
+        share_client = service_client.get_share_client(share_name)
+
+        if not _create_share_with_retry(share_client, share_name):
+             _emit_progress(task_id, f"Failed to ensure Azure share '{share_name}' exists or create it.", level='ERROR')
+             return False
+
+        _emit_progress(task_id, f"Ensuring target directory '{target_directory}' exists in share '{share_name}'.", level='INFO')
+        _ensure_directory_exists(share_client, target_directory) # _ensure_directory_exists handles path splitting
+
+        tmp_file_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8') as tmp_file:
+                json.dump(export_data, tmp_file, indent=4)
+                tmp_file_path = tmp_file.name
+
+            _emit_progress(task_id, f"Temporary local JSON file created at {tmp_file_path}.", level='INFO')
+
+            # Construct full remote path, ensuring forward slashes
+            remote_file_path = f"{target_directory}/{filename}"
+
+            _emit_progress(task_id, f"Uploading {filename} to Azure path {share_name}/{remote_file_path}.", level='INFO')
+            upload_success = upload_file(share_client, tmp_file_path, remote_file_path)
+
+            if upload_success:
+                _emit_progress(task_id, "Manual full JSON backup of booking data completed successfully.", detail=f"File: {filename} uploaded to {share_name}/{target_directory}", level='SUCCESS')
+                return True
+            else:
+                _emit_progress(task_id, "Failed to upload manual full JSON backup of booking data.", detail=f"Attempted to upload {filename} to {share_name}/{remote_file_path}", level='ERROR')
+                return False
+        finally:
+            if tmp_file_path and os.path.exists(tmp_file_path):
+                try:
+                    os.remove(tmp_file_path)
+                    _emit_progress(task_id, f"Temporary local file {tmp_file_path} cleaned up.", level='INFO')
+                except OSError as e:
+                    _emit_progress(task_id, f"Error removing temporary file {tmp_file_path}: {e}", level='ERROR')
+                    logger.error(f"Error removing temporary file {tmp_file_path}: {e}", exc_info=True)
+
+    except Exception as e:
+        logger.error(f"An unexpected error occurred in backup_full_bookings_json: {e}", exc_info=True)
+        _emit_progress(task_id, "An unexpected error occurred during the backup process.", detail=str(e), level='ERROR')
+        return False
 
 def list_available_full_booking_json_exports():
     logger.warning("Placeholder 'list_available_full_booking_json_exports'. Not implemented.")
