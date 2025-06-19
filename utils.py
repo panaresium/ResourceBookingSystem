@@ -366,20 +366,6 @@ def resource_to_dict(resource: Resource) -> dict:
         except RuntimeError: # Outside of application context
             image_url = f"/static/resource_uploads/{resource.image_filename}"
 
-    # Robust parsing for map_allowed_role_ids
-    parsed_map_allowed_role_ids = None
-    if resource.map_allowed_role_ids and resource.map_allowed_role_ids.strip():
-        try:
-            loaded_roles = json.loads(resource.map_allowed_role_ids)
-            if isinstance(loaded_roles, list):
-                parsed_map_allowed_role_ids = loaded_roles
-            else:
-                logger.warning(f"Resource ID {resource.id}: Parsed map_allowed_role_ids is not a list. Value: '{resource.map_allowed_role_ids}'. Defaulting to None.")
-                # parsed_map_allowed_role_ids remains None
-        except json.JSONDecodeError:
-            logger.warning(f"Resource ID {resource.id}: Failed to decode map_allowed_role_ids JSON: '{resource.map_allowed_role_ids}'. Defaulting to None.")
-            # parsed_map_allowed_role_ids remains None
-
     return {
         'id': resource.id,
         'name': resource.name,
@@ -394,7 +380,24 @@ def resource_to_dict(resource: Resource) -> dict:
         'roles': [{'id': r.id, 'name': r.name} for r in resource.roles],
         'floor_map_id': resource.floor_map_id,
         'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
-        'map_allowed_role_ids': parsed_map_allowed_role_ids,
+        # Robust parsing for map_allowed_role_ids
+        'map_allowed_role_ids': (lambda val: (
+            parsed_ids := None,
+            (
+                parsed_ids := json.loads(val) if val else None,
+                (
+                    logger.warning(f"Resource ID {resource.id}: map_allowed_role_ids parsed to non-list type ({type(parsed_ids)}). Value: '{val}'. Defaulting to None.")
+                    if not isinstance(parsed_ids, list) and parsed_ids is not None else None
+                ),
+                parsed_ids if isinstance(parsed_ids, list) else None
+            )[2] if val else None
+        ) catch (json.JSONDecodeError) {
+            (
+                logger.warning(f"Resource ID {resource.id}: Failed to decode map_allowed_role_ids JSON: '{val}'. Defaulting to None.")
+                if val else None # Log only if val was not None/empty
+            ),
+            None
+        })[1])(resource.map_allowed_role_ids),
         'is_under_maintenance': resource.is_under_maintenance,
         'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
     }
