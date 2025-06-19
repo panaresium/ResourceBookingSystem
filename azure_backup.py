@@ -623,11 +623,65 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             ts_media_dir = f"{MEDIA_BACKUPS_DIR_BASE}/backup_{timestamp_str}"; _ensure_directory_exists(media_share_client, MEDIA_BACKUPS_DIR_BASE); _ensure_directory_exists(media_share_client, ts_media_dir)
             media_sources = [{"name": "Floor Maps", "path": FLOOR_MAP_UPLOADS, "subdir": "floor_map_uploads"}, {"name": "Resource Uploads", "path": RESOURCE_UPLOADS, "subdir": "resource_uploads"}]
             for src in media_sources:
-                if not os.path.isdir(src["path"]): _emit_progress(task_id, f"{src['name']} folder not found, skipping.", level='WARNING'); continue
-                azure_target_dir = f"{ts_media_dir}/{src['subdir']}"; _ensure_directory_exists(media_share_client, azure_target_dir)
-                # ... (simplified loop for brevity, actual upload logic for each file) ...
-                _emit_progress(task_id, f"{src['name']} backup processed.", level='INFO') # Placeholder
-        except Exception as e_media: _emit_progress(task_id, f"Media backup error: {str(e_media)}", level='ERROR'); return False
+                _emit_progress(task_id, f"Processing media source: {src['name']}. Local path configured: '{src['path']}'", level='DEBUG')
+                is_dir = os.path.isdir(src["path"])
+                _emit_progress(task_id, f"Path '{src['path']}' is directory? {is_dir}", level='DEBUG')
+
+                if not is_dir:
+                    _emit_progress(task_id, f"{src['name']} local path '{src['path']}' is not a directory or not found, skipping.", level='WARNING')
+                    continue
+
+                azure_target_dir = f"{ts_media_dir}/{src['subdir']}"
+                _ensure_directory_exists(media_share_client, azure_target_dir)
+
+                files_in_source_path = []
+                try:
+                    files_in_source_path = os.listdir(src["path"])
+                    _emit_progress(task_id, f"Files/folders found in '{src['path']}': {files_in_source_path}", level='DEBUG')
+                except Exception as e_listdir:
+                    _emit_progress(task_id, f"Error listing directory '{src['path']}': {str(e_listdir)}", level='ERROR')
+                    overall_success = False
+                    continue # Skip to the next media source
+
+                if not files_in_source_path:
+                    _emit_progress(task_id, f"No files or subdirectories found in local folder '{src['path']}' for {src['name']}, skipping upload for this source.", level='INFO')
+                    continue
+
+                _emit_progress(task_id, f"Starting upload of items from {src['path']} to Azure directory {azure_target_dir} for {src['name']}...", level='INFO')
+
+                file_upload_success_count = 0
+                file_upload_failure_count = 0
+
+                for filename in files_in_source_path:
+                    local_file_path = os.path.join(src["path"], filename)
+                    _emit_progress(task_id, f"Processing item: '{filename}'. Full local path: '{local_file_path}'", level='DEBUG')
+                    is_file = os.path.isfile(local_file_path)
+                    _emit_progress(task_id, f"Path '{local_file_path}' is file? {is_file}", level='DEBUG')
+
+                    if is_file:
+                        remote_file_path_in_azure = f"{azure_target_dir}/{filename}"
+
+                        if upload_file(media_share_client, local_file_path, remote_file_path_in_azure):
+                            _emit_progress(task_id, f"Successfully uploaded {filename} for {src['name']}.", level='INFO')
+                            file_upload_success_count += 1
+                        else:
+                            _emit_progress(task_id, f"Failed to upload {filename} for {src['name']}.", level='ERROR')
+                            file_upload_failure_count += 1
+                    else:
+                        _emit_progress(task_id, f"Skipping non-file item '{filename}' in {src['path']}.", level='INFO')
+
+                if file_upload_failure_count > 0:
+                    _emit_progress(task_id, f"{src['name']} backup: {file_upload_success_count} file(s) uploaded successfully, {file_upload_failure_count} file(s) failed.", level='ERROR')
+                    overall_success = False
+                elif file_upload_success_count > 0 :
+                     _emit_progress(task_id, f"{src['name']} backup: All {file_upload_success_count} file(s) uploaded successfully.", level='SUCCESS')
+                else:
+                    _emit_progress(task_id, f"{src['name']} backup: No actual files were uploaded (source might have been empty or contained only non-files).", level='INFO')
+        except Exception as e_media:
+            _emit_progress(task_id, f"Media backup error: {str(e_media)}", level='ERROR')
+            overall_success = False # Ensure overall_success is false if the entire media block fails
+            # Depending on desired behavior, you might return False here if media backup is critical
+            # For now, setting overall_success to False and letting manifest creation handle it.
     # Manifest
     if overall_success:
         _emit_progress(task_id, "Creating backup manifest...", level='INFO')
