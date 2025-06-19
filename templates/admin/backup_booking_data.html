@@ -245,6 +245,22 @@
     // but disablePageInteractions will be called explicitly.
     function showProgressModal(message) { $('#actionProgressMessage').text(message); $('#actionProgressModal').modal({backdrop: 'static', keyboard: false}); }
     function hideProgressModal() { $('#actionProgressModal').modal('hide'); }
+
+    function handleManualBackupCompletion(taskData) {
+        hideProgressModal(); // Always hide the modal
+        if (taskData && taskData.success) {
+            console.log("Manual backup successful, refreshing unified backup list.");
+            refreshUnifiedAzureBackupList();
+        } else if (taskData) {
+            // Optional: handle the case where taskData is present but not successful,
+            // though pollTaskStatus usually logs errors.
+            console.warn("Manual backup task completed but was not successful. List not refreshed.");
+        } else {
+            // Fallback if taskData is not provided to the callback for some reason
+            console.warn("Manual backup task completion callback received no task data. List not refreshed.");
+        }
+    }
+
     function updateServerTime() {
         fetch("{{ url_for('api_system.ping') }}")
         .then(response => response.json())
@@ -360,7 +376,7 @@
                         clearInterval(newIntervalId); // Clear this page's interval for this task.
                         return;
                     }
-                    pollTaskStatus(currentManualUnifiedBackupTaskId, null, statusEl, 'manual_unified_booking_backup', hideProgressModal);
+                    pollTaskStatus(currentManualUnifiedBackupTaskId, null, statusEl, 'manual_unified_booking_backup', handleManualBackupCompletion);
                 }, POLLING_INTERVAL_MS);
                 activePolls[currentManualUnifiedBackupTaskId] = newIntervalId;
 
