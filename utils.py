@@ -511,6 +511,20 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
     warnings = []
     backup_to_new_map_id_mapping = {}
 
+    # Define valid attributes for FloorMap model based on presumed model definition
+    # Excludes 'id' for constructor_args, but can be in map_item for updates (though SQLAlchemy handles PKs)
+    # These are fields that are safe to set directly from the input dictionary.
+    VALID_FLOOR_MAP_ATTRIBUTES = {
+        'name', 'image_filename', 'location', 'floor',
+        'offset_x', 'offset_y',
+        # The following were previously explicitly set but are now considered non-standard
+        # and will only be set if they are valid attributes of the actual model.
+        # If they are not valid, setattr would raise an error, so it's safer to omit them
+        # or handle them explicitly if they have different names or need transformation.
+        # For this task, we will only use the attributes explicitly mentioned as "expected".
+        # 'description', 'display_order', 'is_published', 'map_data_json'
+    }
+
     # Process Maps
     for map_item in maps_data:
         maps_processed += 1
@@ -524,28 +538,35 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
             floor_map = db.session.get(FloorMap, backup_map_id)
 
             if floor_map: # Map exists with this ID
-                floor_map.name = map_item.get('name', floor_map.name)
-                floor_map.description = map_item.get('description', floor_map.description)
-                # image_filename is stored as is. Actual file restoration is separate.
-                floor_map.image_filename = map_item.get('image_filename', floor_map.image_filename)
-                floor_map.display_order = map_item.get('display_order', floor_map.display_order)
-                floor_map.is_published = map_item.get('is_published', floor_map.is_published)
-                # map_data_json can be None, get() handles this.
-                floor_map.map_data_json = map_item.get('map_data_json', floor_map.map_data_json)
+                update_data = {}
+                for key, value in map_item.items():
+                    if key in VALID_FLOOR_MAP_ATTRIBUTES:
+                        update_data[key] = value
+
+                for key, value in update_data.items():
+                    setattr(floor_map, key, value)
+
+                # Handle potentially non-standard attributes if they exist on model and are in map_item
+                # This part is removed to strictly adhere to only setting confirmed valid attributes.
+                # if 'description' in map_item: floor_map.description = map_item.get('description', floor_map.description)
+                # if 'display_order' in map_item: floor_map.display_order = map_item.get('display_order', floor_map.display_order)
+                # if 'is_published' in map_item: floor_map.is_published = map_item.get('is_published', floor_map.is_published)
+                # if 'map_data_json' in map_item: floor_map.map_data_json = map_item.get('map_data_json', floor_map.map_data_json)
 
                 db.session.add(floor_map)
                 maps_updated += 1
                 backup_to_new_map_id_mapping[backup_map_id] = floor_map.id
             else: # Map with this ID does not exist, create a new one
-                new_map = FloorMap(
-                    name=map_item.get('name'),
-                    description=map_item.get('description'),
-                    image_filename=map_item.get('image_filename'),
-                    display_order=map_item.get('display_order', 0),
-                    is_published=map_item.get('is_published', True),
-                    map_data_json=map_item.get('map_data_json')
-                    # Do NOT set 'id', let the DB assign it.
-                )
+                constructor_args = {}
+                for key, value in map_item.items():
+                    if key in VALID_FLOOR_MAP_ATTRIBUTES: # 'id' will be ignored by SQLAlchemy constructor if present
+                        constructor_args[key] = value
+
+                # Set defaults for potentially missing valid fields if necessary for constructor
+                # (SQLAlchemy might handle nullable fields, but explicit is safer for non-nullable without defaults)
+                # For this task, assuming model handles defaults or fields are always present if required.
+
+                new_map = FloorMap(**constructor_args)
                 db.session.add(new_map)
                 db.session.flush() # Flush to get the new_map.id
 
