@@ -75,10 +75,6 @@ class FloorMap(db.Model):
     # New offset columns
     offset_x = db.Column(db.Integer, nullable=False, default=0)
     offset_y = db.Column(db.Integer, nullable=False, default=0)
-    display_order = db.Column(db.Integer, nullable=True, default=0)
-    is_published = db.Column(db.Boolean, nullable=True, default=True)
-    description = db.Column(db.Text, nullable=True)
-    map_data_json = db.Column(db.Text, nullable=True)
 
     def __repr__(self):
         # Consider adding offsets to repr if useful for debugging
