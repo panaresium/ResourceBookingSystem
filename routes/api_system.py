@@ -447,27 +447,63 @@ def api_one_click_backup():
                     add_audit_log(action="ONE_CLICK_BACKUP_WORKER_ERROR", details=f"Task {task_id_param}: create_full_backup not available.", user_id=user_id_audit, username=username_audit)
                     return
 
+                update_task_log(task_id_param, "Gathering map configuration data...", level="info")
                 map_config_data = _get_map_configuration_data()
+                update_task_log(task_id_param, f"Map configuration data gathered. Found {len(map_config_data.get('maps', []))} maps.", level="info")
+
+                update_task_log(task_id_param, "Gathering resource configuration data...", level="info")
                 resource_config_data = _get_resource_configurations_data()
+                update_task_log(task_id_param, f"Resource configuration data gathered. Found {len(resource_config_data)} resources.", level="info")
+
+                update_task_log(task_id_param, "Gathering user configuration data...", level="info")
                 user_config_data = _get_user_configurations_data()
+                update_task_log(task_id_param, f"User configuration data gathered. Found {len(user_config_data.get('users', []))} users and {len(user_config_data.get('roles', []))} roles.", level="info")
 
                 actual_success_flag = create_full_backup(
                     timestamp_str,
                     map_config_data=map_config_data,
-                    resource_configs_data=resource_config_data,
-                    user_configs_data=user_config_data,
-                    task_id=task_id_param # Pass task_id for _emit_progress
+                    resource_configs_data=resource_config_data, # Pass new data
+                    user_configs_data=user_config_data,       # Pass new data
+                    task_id=task_id_param
                 )
 
                 if actual_success_flag:
-                    final_message = f"Full system backup (timestamp {timestamp_str}) completed and uploaded successfully."
-                    mark_task_done(task_id_param, success=True, result_message=final_message)
-                    add_audit_log(action="ONE_CLICK_BACKUP_WORKER_COMPLETED", details=f"Task {task_id_param}, Timestamp {timestamp_str}, Success: True", user_id=user_id_audit, username=username_audit)
+                    final_message = f"Full system backup (timestamp {timestamp_str}) core components completed and uploaded successfully."
+                    update_task_log(task_id_param, final_message, level="success") # Log success of core backup first
+
+                    # Add explicit booking backup
+                    if backup_full_bookings_json:
+                        update_task_log(task_id_param, "Attempting to perform additional backup of booking records as JSON...", level="info")
+                        try:
+                            bookings_backup_success = backup_full_bookings_json(
+                                app=current_app._get_current_object(),
+                                task_id=task_id_param
+                            )
+                            if bookings_backup_success:
+                                update_task_log(task_id_param, "Booking records JSON backup completed successfully.", level="success")
+                                final_message += " Additional booking records JSON backup also completed successfully."
+                            else:
+                                update_task_log(task_id_param, "Booking records JSON backup reported failure. Main backup remains successful.", level="warning")
+                                final_message += " Additional booking records JSON backup reported failure."
+                                # Optionally, if this failure should mark the whole task as failed:
+                                # actual_success_flag = False # Uncomment if this is critical
+                        except Exception as e_booking_backup:
+                            update_task_log(task_id_param, f"Error during booking records JSON backup: {str(e_booking_backup)}", level="error")
+                            final_message += f" Additional booking records JSON backup failed with error: {str(e_booking_backup)}."
+                            # Optionally, if this failure should mark the whole task as failed:
+                            # actual_success_flag = False # Uncomment if this is critical
+                    else:
+                        update_task_log(task_id_param, "Booking records JSON backup function not available (Azure module issue?). Skipping this step.", level="warning")
+                        final_message += " Booking records JSON backup step skipped as function is not available."
+
+                    mark_task_done(task_id_param, success=actual_success_flag, result_message=final_message) # Use potentially updated actual_success_flag
+                    add_audit_log(action="ONE_CLICK_BACKUP_WORKER_COMPLETED", details=f"Task {task_id_param}, Timestamp {timestamp_str}, Success: {actual_success_flag}, Message: {final_message}", user_id=user_id_audit, username=username_audit)
                 else:
-                    error_detail = "Backup process reported an internal failure during execution by azure_backup module."
+                    error_detail = "Core backup process (create_full_backup) reported an internal failure."
                     mark_task_done(task_id_param, success=False, result_message=f"Full system backup failed: {error_detail}")
                     add_audit_log(action="ONE_CLICK_BACKUP_WORKER_FAILED", details=f"Task {task_id_param}, Timestamp {timestamp_str}, Error: {error_detail}", user_id=user_id_audit, username=username_audit)
-                current_app.logger.info(f"One-click backup task {task_id_param} worker finished. Success: {actual_success_flag}")
+
+                current_app.logger.info(f"One-click backup task {task_id_param} worker finished. Overall Success: {actual_success_flag}")
             except Exception as e:
                 current_app.logger.error(f"Exception in backup worker thread for task {task_id_param}: {e}", exc_info=True)
                 mark_task_done(task_id_param, success=False, result_message=f"Backup failed due to an unexpected exception: {str(e)}")
