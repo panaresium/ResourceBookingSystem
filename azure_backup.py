@@ -34,9 +34,95 @@ HASH_DB = os.path.join(DATA_DIR, 'backup_hashes.db')
 
 logger = logging.getLogger(__name__)
 
+# Assuming ShareServiceClient, _get_service_client, _client_exists, AZURE_BOOKING_DATA_PROTECTION_DIR, logger are defined above in the file.
+
 def list_booking_data_json_backups():
-    logger.warning("Placeholder function 'list_booking_data_json_backups' called. This functionality is not fully implemented.")
-    return []
+    logger.info("Attempting to list unified booking data JSON backups from Azure.")
+    all_backups = []
+
+    try:
+        service_client = _get_service_client()
+        # Use app.config for share name if available, otherwise fallback to env var or default.
+        # This function might be called from contexts where app is not directly available.
+        # For now, assume direct os.environ.get or a fixed name if app.config is not straightforward here.
+        # Let's use a common share name, ideally configured via app.
+        # Assuming current_app can be imported or share name is passed/globally available.
+        # For this subtask, let's rely on environment variable as a fallback like _get_service_client does for connection string.
+        share_name = os.environ.get('AZURE_BOOKING_DATA_SHARE', 'booking-data-backups')
+        if not share_name:
+            logger.error("Azure share name for booking data backups is not configured (AZURE_BOOKING_DATA_SHARE).")
+            return []
+
+        share_client = service_client.get_share_client(share_name)
+        if not _client_exists(share_client):
+            logger.warning(f"Azure share '{share_name}' not found. Cannot list booking data backups.")
+            return []
+
+        base_backup_dir_client = share_client.get_directory_client(AZURE_BOOKING_DATA_PROTECTION_DIR)
+        if not _client_exists(base_backup_dir_client):
+            logger.info(f"Base backup directory '{AZURE_BOOKING_DATA_PROTECTION_DIR}' not found in share '{share_name}'. No backups to list.")
+            return []
+
+        # Define subdirectories and their types/parsers
+        # Add more as other backup types (scheduled full, incremental) are implemented
+        backup_sources = [
+            {"subdir": "manual_full_json", "type": "manual_full_json", "name_pattern": re.compile(r"manual_full_booking_export_(\d{8}_\d{6})\.json")}
+            # Example for future:
+            # {"subdir": "full", "type": "scheduled_full_json", "name_pattern": re.compile(r"scheduled_full_export_(\d{8}_\d{6})\.json")},
+            # {"subdir": "incrementals", "type": "incremental_json", "name_pattern": re.compile(r"incremental_(\d{8}_\d{6})_to_(\d{8}_\d{6})\.json")}
+        ]
+
+        for source in backup_sources:
+            source_dir_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{source['subdir']}"
+            dir_client = share_client.get_directory_client(source_dir_path)
+            if not _client_exists(dir_client):
+                logger.info(f"Backup subdirectory '{source_dir_path}' not found. Skipping.")
+                continue
+
+            logger.info(f"Scanning for backups in '{source_dir_path}' of type '{source['type']}'.")
+            for item in dir_client.list_directories_and_files():
+                if item['is_directory']:
+                    continue # Not expecting further subdirectories for these backup files
+
+                filename = item['name']
+                match = source['name_pattern'].match(filename)
+                if match:
+                    timestamp_str_from_name = match.group(1) # Assumes first group is the timestamp
+                    try:
+                        # Parse timestamp from YYYYMMDD_HHMMSS format
+                        dt_obj_naive = datetime.strptime(timestamp_str_from_name, '%Y%m%d_%H%M%S')
+                        # Convert to UTC and then to ISO format string
+                        # Assuming filename timestamp is already effectively UTC as per generation logic
+                        dt_obj_utc = dt_obj_naive.replace(tzinfo=timezone.utc)
+                        iso_timestamp_str = dt_obj_utc.isoformat()
+
+                        display_name = f"{source['type'].replace('_', ' ').title()} - {dt_obj_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+
+                        all_backups.append({
+                            'filename': filename, # Store full filename for download/delete operations
+                            'full_path': f"{source_dir_path}/{filename}", # Useful for operations needing full path
+                            'display_name': display_name,
+                            'type': source['type'],
+                            'timestamp_str': iso_timestamp_str, # ISO string for sorting and client-side parsing
+                            'size_bytes': item.get('size', 0) # Get size if available
+                        })
+                        logger.debug(f"Found backup: {filename}, Timestamp: {iso_timestamp_str}")
+                    except ValueError:
+                        logger.warning(f"Could not parse timestamp from filename: {filename} in {source_dir_path}. Skipping.")
+                    except Exception as e_parse:
+                         logger.error(f"Error processing file {filename} in {source_dir_path}: {e_parse}", exc_info=True)
+                else:
+                    logger.debug(f"Filename {filename} in {source_dir_path} did not match pattern for type {source['type']}.")
+
+        # Sort backups by timestamp string (ISO format naturally sorts chronologically)
+        all_backups.sort(key=lambda x: x['timestamp_str'], reverse=True)
+
+        logger.info(f"Found {len(all_backups)} unified booking data backups.")
+        return all_backups
+
+    except Exception as e:
+        logger.error(f"Error listing unified booking data JSON backups: {e}", exc_info=True)
+        return []
 
 def delete_booking_data_json_backup(filename, backup_type=None, task_id=None):
     logger.warning(f"Placeholder function 'delete_booking_data_json_backup' called for file: {filename}, type: {backup_type}. This functionality is not fully implemented.")
