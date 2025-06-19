@@ -524,8 +524,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 showError(document.getElementById('admin-maps-list-status'), 'No file selected for map configuration import.');
                 return;
             }
-            if (file.type !== 'application/json') {
-                showError(document.getElementById('admin-maps-list-status'), 'Please select a valid JSON file for map configuration.');
+            if (!file.name.toLowerCase().endsWith('.zip')) {
+                showError(document.getElementById('admin-maps-list-status'), 'Please select a valid ZIP file for map configuration.');
                 return;
             }
 
