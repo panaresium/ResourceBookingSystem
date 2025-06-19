@@ -12,6 +12,9 @@ import shutil
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError, ServiceRequestError
 
 from models import Booking, db
+from extensions import db # Ensure db is imported from extensions (already imported via models)
+from utils import update_task_log # Ensure this is imported from utils
+from datetime import datetime, time, timezone # Ensure these are imported (datetime, time were already there, timezone might be new)
 
 try:
     from azure.storage.fileshare import ShareServiceClient, ShareClient, ShareDirectoryClient, ShareFileClient
@@ -171,8 +174,144 @@ def delete_booking_data_json_backup(filename, backup_type=None, task_id=None): #
         return False
 
 def restore_booking_data_to_point_in_time(app, selected_filename, selected_type, selected_timestamp_iso, task_id=None):
-    logger.warning(f"Placeholder function 'restore_booking_data_to_point_in_time' called for file: {selected_filename}. This functionality is not fully implemented.")
-    return {'status': 'not_implemented', 'message': 'Restore to point in time is not implemented.', 'errors': ['Not implemented']}
+    update_task_log(task_id, f"Starting restore from '{selected_filename}' (Type: {selected_type}).", level="info")
+
+    if selected_type != "manual_full_json": # For now, only support restoring this type
+        msg = f"Restore for backup type '{selected_type}' is not currently supported. Only 'manual_full_json' is supported."
+        update_task_log(task_id, msg, level="error")
+        return {'status': 'failure', 'message': msg, 'errors': [msg]}
+
+    try:
+        with app.app_context(): # Ensure DB operations are within app context
+            update_task_log(task_id, f"Downloading backup file: {selected_filename}...", level="info")
+            file_content_bytes = download_booking_data_json_backup(filename=selected_filename, backup_type=selected_type)
+
+            if file_content_bytes is None:
+                msg = f"Failed to download backup file '{selected_filename}'."
+                update_task_log(task_id, msg, level="error")
+                return {'status': 'failure', 'message': msg, 'errors': ["File download failed."]}
+
+            try:
+                file_content_str = file_content_bytes.decode('utf-8')
+                backup_data = json.loads(file_content_str)
+                bookings_from_json = backup_data.get("bookings", [])
+                export_timestamp = backup_data.get("export_timestamp", "N/A")
+                update_task_log(task_id, f"Successfully downloaded and parsed backup file. Exported at: {export_timestamp}. Contains {len(bookings_from_json)} bookings.", level="info")
+            except json.JSONDecodeError as e:
+                msg = f"Failed to parse JSON from backup file: {str(e)}"
+                update_task_log(task_id, msg, level="error")
+                return {'status': 'failure', 'message': msg, 'errors': [f"JSON decode error: {str(e)}"]}
+            except Exception as e: # Catch other errors like decode if not utf-8
+                msg = f"Error processing backup file content: {str(e)}"
+                update_task_log(task_id, msg, level="error")
+                return {'status': 'failure', 'message': msg, 'errors': [f"File processing error: {str(e)}"]}
+
+            update_task_log(task_id, "WARNING: All existing booking data in the database will be deleted before restoring. This action cannot be undone.", level="warning")
+
+            # Add a small delay to allow user to potentially see the warning if this were interactive,
+            # or for logs to catch up. In a real scenario, a confirmation step would be better.
+            # For now, just proceeding after warning.
+            # import time as time_module # Already imported in azure_backup.py
+            # time_module.sleep(3)
+
+            update_task_log(task_id, "Deleting existing booking data...", level="info")
+            try:
+                num_deleted = db.session.query(Booking).delete()
+                db.session.commit() # Commit deletion
+                update_task_log(task_id, f"Successfully deleted {num_deleted} existing bookings.", level="info")
+            except Exception as e:
+                db.session.rollback()
+                msg = f"Failed to delete existing bookings: {str(e)}"
+                update_task_log(task_id, msg, level="error")
+                return {'status': 'failure', 'message': msg, 'errors': [f"DB delete error: {str(e)}"]}
+
+            update_task_log(task_id, f"Starting import of {len(bookings_from_json)} bookings from backup...", level="info")
+            bookings_restored_count = 0
+            bookings_failed_count = 0
+            restore_errors = []
+
+            for i, booking_json in enumerate(bookings_from_json):
+                try:
+                    # Basic validation of essential fields
+                    if not all(k in booking_json for k in ['id', 'resource_id', 'user_name', 'start_time', 'end_time', 'status']):
+                        bookings_failed_count += 1
+                        err_msg = f"Skipping booking entry {i+1} due to missing essential fields (id, resource_id, etc.). Data: {str(booking_json)[:200]}"
+                        restore_errors.append(err_msg)
+                        update_task_log(task_id, err_msg, level="warning")
+                        continue
+
+                    # Convert datetime strings to datetime objects
+                    # Ensure _parse_iso_datetime is available or define it, or use datetime.fromisoformat directly
+                    # _parse_iso_datetime is in utils.py, but azure_backup.py might not import it directly.
+                    # For simplicity, using datetime.fromisoformat, assuming Z means UTC.
+                    def parse_datetime_optional(dt_str):
+                        if not dt_str: return None
+                        # Handle 'Z' for UTC explicitly for fromisoformat if not automatically handled by older pythons for it
+                        if isinstance(dt_str, str) and dt_str.endswith('Z'):
+                            return datetime.fromisoformat(dt_str[:-1] + '+00:00')
+                        return datetime.fromisoformat(dt_str) if isinstance(dt_str, str) else None
+
+                    def parse_time_optional(t_str):
+                        if not t_str: return None
+                        return time.fromisoformat(t_str) if isinstance(t_str, str) else None
+
+                    new_booking = Booking(
+                        id=booking_json['id'], # Attempt to preserve original ID
+                        resource_id=booking_json['resource_id'],
+                        user_name=booking_json.get('user_name'),
+                        title=booking_json.get('title'),
+                        start_time=parse_datetime_optional(booking_json['start_time']),
+                        end_time=parse_datetime_optional(booking_json['end_time']),
+                        status=booking_json.get('status', 'approved'), # Default status if missing
+                        checked_in_at=parse_datetime_optional(booking_json.get('checked_in_at')),
+                        checked_out_at=parse_datetime_optional(booking_json.get('checked_out_at')),
+                        recurrence_rule=booking_json.get('recurrence_rule'),
+                        admin_deleted_message=booking_json.get('admin_deleted_message'),
+                        check_in_token=booking_json.get('check_in_token'),
+                        check_in_token_expires_at=parse_datetime_optional(booking_json.get('check_in_token_expires_at')),
+                        checkin_reminder_sent_at=parse_datetime_optional(booking_json.get('checkin_reminder_sent_at')),
+                        last_modified=parse_datetime_optional(booking_json.get('last_modified')) or datetime.now(timezone.utc), # Use backup's last_modified or now
+                        booking_display_start_time=parse_time_optional(booking_json.get('booking_display_start_time')),
+                        booking_display_end_time=parse_time_optional(booking_json.get('booking_display_end_time'))
+                    )
+
+                    # Check if booking with this ID already exists (should not happen if we deleted all)
+                    # This is more relevant if we were not bulk-deleting.
+                    # existing_booking = Booking.query.get(new_booking.id)
+                    # if existing_booking:
+                    #     # Handle conflict: skip, update, or error
+                    #     update_task_log(task_id, f"Booking with ID {new_booking.id} already exists. Skipping.", level="warning")
+                    #     bookings_failed_count += 1
+                    #     continue
+
+                    db.session.add(new_booking)
+                    bookings_restored_count += 1
+
+                    if bookings_restored_count % 100 == 0: # Log progress every 100 bookings
+                        update_task_log(task_id, f"Restored {bookings_restored_count}/{len(bookings_from_json)} bookings...", level="info")
+
+                except Exception as e_item:
+                    bookings_failed_count += 1
+                    err_msg = f"Error restoring booking item {i+1} (ID: {booking_json.get('id', 'N/A')}): {str(e_item)}. Data: {str(booking_json)[:200]}"
+                    restore_errors.append(err_msg)
+                    update_task_log(task_id, err_msg, level="error")
+                    db.session.rollback() # Rollback this item
+
+            if bookings_failed_count > 0:
+                db.session.commit() # Commit successful ones if any
+                update_task_log(task_id, f"Restore partially completed. Successfully restored: {bookings_restored_count}. Failed: {bookings_failed_count}.", level="warning")
+                return {'status': 'failure', 'message': f"Restore partially completed. Restored: {bookings_restored_count}, Failed: {bookings_failed_count}.", 'errors': restore_errors}
+            else:
+                db.session.commit()
+                msg = f"Successfully restored {bookings_restored_count} bookings from '{selected_filename}'."
+                update_task_log(task_id, msg, level="success")
+                return {'status': 'success', 'message': msg}
+
+    except Exception as e_main:
+        db.session.rollback()
+        msg = f"A critical error occurred during the restore process: {str(e_main)}"
+        update_task_log(task_id, msg, level="critical", detail=str(e_main)) # Pass exception as detail
+        return {'status': 'failure', 'message': msg, 'errors': [str(e_main)]}
 
 def download_booking_data_json_backup(filename, backup_type=None):
     logger.info(f"Attempting to download unified backup: Type='{backup_type}', Filename='{filename}'.")
