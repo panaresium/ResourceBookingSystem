@@ -1042,6 +1042,232 @@ class TestAdminBookingSettingsRoutes(AppTests):
         self.assertEqual(settings_after_error.auto_release_if_not_checked_in_minutes, initial_settings.auto_release_if_not_checked_in_minutes)
         self.logout()
 
+from utils import SCHEDULER_SETTINGS_FILE_PATH, DEFAULT_SCHEDULER_SETTINGS # For scheduler settings tests
+
+# ... (existing AppTests class and other test classes)
+
+class TestAdminBackupSettingsRoutes(AppTests):
+    def _create_admin_user_for_backup_settings(self, username="backup_admin_user", password="adminpassword"):
+        admin_user = User.query.filter_by(username=username).first()
+        if not admin_user:
+            admin_user = User(username=username, email=f"{username}@example.com", is_admin=True)
+            admin_user.set_password(password)
+
+            # Assign a role with 'manage_system' permission
+            admin_role = Role.query.filter_by(name="Admin").first()
+            if not admin_role:
+                # Ensure the Admin role has all permissions needed by setup or other tests if it's created here.
+                # For this test class, 'manage_system' is key.
+                admin_role = Role(name="Admin", permissions="manage_system,manage_users,view_audit_logs,manage_resources,manage_bookings,manage_system_settings,manage_floor_maps")
+                db.session.add(admin_role)
+
+            if admin_role not in admin_user.roles:
+                admin_user.roles.append(admin_role)
+
+            db.session.add(admin_user)
+            db.session.commit()
+        self.login(username, password)
+        return admin_user
+
+    def setUp(self):
+        super().setUp()
+        # Explicitly delete all BookingSettings before each test in this class
+        # to ensure a clean state, as some tests expect no settings to exist initially.
+        db.session.query(BookingSettings).delete()
+        # Also clear AuditLog to prevent interference between tests
+        db.session.query(AuditLog).delete()
+        db.session.commit()
+
+        # For scheduler settings, we primarily rely on mocking
+        # load_scheduler_settings and save_scheduler_settings directly in the tests.
+        # This avoids direct file system interaction for SCHEDULER_SETTINGS_FILE_PATH.
+        pass
+
+    def tearDown(self):
+        # Clean up any BookingSettings created during a test, if necessary.
+        # db.session.query(BookingSettings).delete()
+        # db.session.commit()
+        # Audit logs are cleaned in setUp.
+        super().tearDown()
+
+    def test_save_global_time_offset_success(self):
+        admin = self._create_admin_user_for_backup_settings()
+
+        # Test creates settings if not present, so start with none or one to be updated.
+        # For this test, let's ensure one exists to be updated.
+        initial_db_settings = BookingSettings(global_time_offset_hours=0)
+        db.session.add(initial_db_settings)
+        db.session.commit()
+        original_offset = initial_db_settings.global_time_offset_hours
+
+        new_offset = 5
+        # Ensure new_offset is different from original_offset to actually test an update.
+        if new_offset == original_offset:
+            new_offset = original_offset + 1 if original_offset < 23 else original_offset -1
+            if not (-23 <= new_offset <= 23): new_offset = 0 # fallback if +1 goes out of bounds
+
+        response = self.client.post(url_for('admin_ui.save_backup_time_offset'),
+                                    data={'global_time_offset_hours': str(new_offset)},
+                                    follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.location.endswith(url_for('admin_ui.serve_backup_settings_page')))
+
+        redirect_response = self.client.get(response.location)
+        self.assertIn(b"Global time offset saved successfully.", redirect_response.data)
+
+        updated_settings = BookingSettings.query.first()
+        self.assertIsNotNone(updated_settings)
+        self.assertEqual(updated_settings.global_time_offset_hours, new_offset)
+
+        audit_log = AuditLog.query.filter_by(action='Update Global Time Offset').order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log)
+        self.assertIn(f'Set to {new_offset} hours', audit_log.details)
+        self.assertEqual(audit_log.user_id, admin.id)
+
+    def test_save_global_time_offset_invalid_value(self):
+        admin = self._create_admin_user_for_backup_settings()
+        # Ensure a setting exists to check it's unchanged
+        settings = BookingSettings(global_time_offset_hours=1)
+        db.session.add(settings)
+        db.session.commit()
+        initial_offset = settings.global_time_offset_hours
+        initial_audit_count = AuditLog.query.filter_by(action='Update Global Time Offset').count()
+
+
+        # Test non-integer
+        response_abc = self.client.post(url_for('admin_ui.save_backup_time_offset'),
+                                        data={'global_time_offset_hours': 'abc'},
+                                        follow_redirects=True)
+        self.assertIn(b"Invalid value for time offset.", response_abc.data)
+        db.session.refresh(settings) # Re-fetch from DB
+        self.assertEqual(settings.global_time_offset_hours, initial_offset)
+
+        # Test out of range (too high)
+        response_high = self.client.post(url_for('admin_ui.save_backup_time_offset'),
+                                         data={'global_time_offset_hours': '25'},
+                                         follow_redirects=True)
+        self.assertIn(b"Global time offset must be between -23 and 23 hours.", response_high.data)
+        db.session.refresh(settings)
+        self.assertEqual(settings.global_time_offset_hours, initial_offset)
+
+        # Test out of range (too low)
+        response_low = self.client.post(url_for('admin_ui.save_backup_time_offset'),
+                                        data={'global_time_offset_hours': '-25'},
+                                        follow_redirects=True)
+        self.assertIn(b"Global time offset must be between -23 and 23 hours.", response_low.data)
+        db.session.refresh(settings)
+        self.assertEqual(settings.global_time_offset_hours, initial_offset)
+
+        # Verify no new audit log was created for these failed attempts
+        final_audit_count = AuditLog.query.filter_by(action='Update Global Time Offset').count()
+        self.assertEqual(final_audit_count, initial_audit_count)
+
+
+    def test_save_global_time_offset_no_initial_settings(self):
+        admin = self._create_admin_user_for_backup_settings()
+        # setUp ensures no BookingSettings exist, so we can directly test creation.
+        self.assertIsNone(BookingSettings.query.first())
+
+        response = self.client.post(url_for('admin_ui.save_backup_time_offset'),
+                                    data={'global_time_offset_hours': '3'},
+                                    follow_redirects=True)
+        self.assertIn(b"Global time offset saved successfully.", response.data)
+
+        new_settings = BookingSettings.query.first()
+        self.assertIsNotNone(new_settings)
+        self.assertEqual(new_settings.global_time_offset_hours, 3)
+
+        audit_log = AuditLog.query.filter_by(action='Update Global Time Offset').order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log)
+        self.assertIn('Set to 3 hours', audit_log.details)
+        self.assertEqual(audit_log.user_id, admin.id)
+
+
+    @patch('routes.admin_ui.save_scheduler_settings') # utils.save_scheduler_settings is called by this
+    @patch('routes.admin_ui.load_scheduler_settings') # utils.load_scheduler_settings is called by this
+    def test_save_auto_restore_startup_behavior_enabled(self, mock_load_settings, mock_save_settings):
+        admin = self._create_admin_user_for_backup_settings()
+        # Simulate that current settings have this disabled
+        mock_load_settings.return_value = {'auto_restore_booking_records_on_startup': False, 'other_setting': 'value'}
+
+        response = self.client.post(url_for('admin_ui.save_auto_restore_booking_records_settings'),
+                                    data={'auto_restore_booking_records_enabled': 'true'}, # This is the name in the form
+                                    follow_redirects=True)
+        self.assertIn(b"Startup behavior settings saved successfully.", response.data)
+
+        mock_save_settings.assert_called_once()
+        args_called = mock_save_settings.call_args[0][0] # First argument to the mock
+        self.assertTrue(args_called['auto_restore_booking_records_on_startup'])
+        self.assertEqual(args_called['other_setting'], 'value') # Ensure other settings are preserved
+
+        audit_log = AuditLog.query.filter_by(action='Update Startup Behavior Settings').order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log)
+        self.assertIn('set to True', audit_log.details) # Based on new implementation
+        self.assertEqual(audit_log.user_id, admin.id)
+
+    @patch('routes.admin_ui.save_scheduler_settings')
+    @patch('routes.admin_ui.load_scheduler_settings')
+    def test_save_auto_restore_startup_behavior_disabled(self, mock_load_settings, mock_save_settings):
+        admin = self._create_admin_user_for_backup_settings()
+        # Simulate that current settings have this enabled
+        mock_load_settings.return_value = {'auto_restore_booking_records_on_startup': True, 'other_setting': 'value'}
+
+        # If checkbox is unchecked, 'auto_restore_booking_records_enabled' is not in request.form
+        response = self.client.post(url_for('admin_ui.save_auto_restore_booking_records_settings'),
+                                    data={},
+                                    follow_redirects=True)
+        self.assertIn(b"Startup behavior settings saved successfully.", response.data)
+
+        mock_save_settings.assert_called_once()
+        args_called = mock_save_settings.call_args[0][0]
+        # The route logic converts absence of 'auto_restore_booking_records_enabled' or value not 'true' to False
+        self.assertFalse(args_called['auto_restore_booking_records_on_startup'])
+        self.assertEqual(args_called['other_setting'], 'value')
+
+        audit_log = AuditLog.query.filter_by(action='Update Startup Behavior Settings').order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(audit_log)
+        self.assertIn('set to False', audit_log.details) # Based on new implementation
+        self.assertEqual(audit_log.user_id, admin.id)
+
+    def test_save_settings_permission_denied_non_admin(self):
+        # Create a non-admin user (no 'manage_system' permission)
+        non_admin_user = User.query.filter_by(username='non_admin_backup_test').first()
+        if not non_admin_user:
+            non_admin_user = User(username='non_admin_backup_test', email='non_admin_bk@example.com', is_admin=False)
+            non_admin_user.set_password('password')
+            # Ensure this user does NOT have the 'Admin' role or any role with 'manage_system'
+            basic_role = Role.query.filter_by(name="User").first()
+            if not basic_role:
+                basic_role = Role(name="User", permissions="can_book") # Example basic role
+                db.session.add(basic_role)
+            if basic_role not in non_admin_user.roles:
+                 non_admin_user.roles.append(basic_role)
+            db.session.add(non_admin_user)
+            db.session.commit()
+
+        self.login(non_admin_user.username, 'password')
+
+        response_offset = self.client.post(url_for('admin_ui.save_backup_time_offset'),
+                                           data={'global_time_offset_hours': '5'},
+                                           follow_redirects=False) # Check redirect before follow
+        # @permission_required typically redirects to login or a 'permission_denied' page
+        # Check for 302 redirect, then optionally check the flash message on the target page
+        self.assertEqual(response_offset.status_code, 302)
+        # Example: flash message check after redirect
+        # redirected_page_offset = self.client.get(response_offset.location)
+        # self.assertIn(b"You do not have permission to access this page.", redirected_page_offset.data)
+
+
+        response_startup = self.client.post(url_for('admin_ui.save_auto_restore_booking_records_settings'),
+                                            data={'auto_restore_booking_records_enabled': 'true'},
+                                            follow_redirects=False)
+        self.assertEqual(response_startup.status_code, 302)
+        # redirected_page_startup = self.client.get(response_startup.location)
+        # self.assertIn(b"You do not have permission to access this page.", redirected_page_startup.data)
+
+        self.logout()
+
+
 # Need io for file uploads in AdminAPITestCase
 import io
 

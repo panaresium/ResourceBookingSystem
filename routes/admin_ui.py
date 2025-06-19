@@ -207,14 +207,64 @@ def save_booking_data_protection_schedule():
 @login_required
 @permission_required('manage_system')
 def save_auto_restore_booking_records_settings():
-    # ... (implementation as provided) ...
+    logger = current_app.logger
+    try:
+        # Checkbox value is 'true' if checked, otherwise not present in form data
+        auto_restore_enabled_str = request.form.get('auto_restore_booking_records_enabled')
+        auto_restore_enabled_bool = auto_restore_enabled_str == 'true'
+
+        scheduler_settings = load_scheduler_settings()
+        scheduler_settings['auto_restore_booking_records_on_startup'] = auto_restore_enabled_bool
+        save_scheduler_settings(scheduler_settings)
+
+        flash(_('Startup behavior settings saved successfully.'), 'success')
+        add_audit_log(action='Update Startup Behavior Settings', details=f'Automatic booking restore on startup set to {auto_restore_enabled_bool}')
+        logger.info(f"Startup behavior settings (auto_restore_booking_records_on_startup) set to {auto_restore_enabled_bool} by user {current_user.username}.")
+
+    except Exception as e:
+        flash(_('Error saving startup behavior settings: %(error)s', error=str(e)), 'error')
+        logger.error(f"Error saving startup behavior settings: {e}", exc_info=True)
+
     return redirect(url_for('admin_ui.serve_backup_settings_page'))
 
 @admin_ui_bp.route('/backup/settings/time_offset', methods=['POST'], endpoint='save_backup_time_offset')
 @login_required
 @permission_required('manage_system')
 def save_backup_time_offset_route():
-    # ... (implementation as provided) ...
+    logger = current_app.logger
+    try:
+        offset_value_str = request.form.get('global_time_offset_hours')
+        if offset_value_str is None:
+            flash(_('No time offset value provided.'), 'error')
+            return redirect(url_for('admin_ui.serve_backup_settings_page'))
+
+        offset_value = int(offset_value_str)
+
+        if not (-23 <= offset_value <= 23):
+            flash(_('Global time offset must be between -23 and 23 hours.'), 'error')
+            return redirect(url_for('admin_ui.serve_backup_settings_page'))
+
+        settings = BookingSettings.query.first()
+        if not settings:
+            logger.info("No BookingSettings found, creating a new one.")
+            settings = BookingSettings()
+            db.session.add(settings)
+
+        settings.global_time_offset_hours = offset_value
+        db.session.commit()
+
+        flash(_('Global time offset saved successfully.'), 'success')
+        add_audit_log(action='Update Global Time Offset', details=f'Set to {offset_value} hours.')
+        logger.info(f"Global time offset set to {offset_value} hours by user {current_user.username}.")
+
+    except ValueError:
+        flash(_('Invalid value for time offset. Please enter a whole number.'), 'error')
+        logger.warning(f"ValueError while trying to set time offset: {offset_value_str}")
+    except Exception as e:
+        db.session.rollback()
+        flash(_('Error saving global time offset: %(error)s', error=str(e)), 'error')
+        logger.error(f"Error saving global time offset: {e}", exc_info=True)
+
     return redirect(url_for('admin_ui.serve_backup_settings_page'))
 
 # LEGACY - Azure CSV Verify Route - Body fully commented out.
