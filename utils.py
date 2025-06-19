@@ -561,19 +561,22 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
         'resources_updated_map_info': resources_updated_map_info,
         'errors': errors,
         'warnings': warnings,
-        'message': final_message,
-        'status_code': status_code # Added for clarity on outcome
+        'message': final_message
+        # 'status_code' is now returned as the second element of the tuple
     }
-    # The routes expect the function to return a boolean for success, or a more complex object.
-    # For now, returning the summary_dict directly might be okay if the caller handles it.
-    # The original selective_restore expected True or a string/dict with error.
-    # Let's return True if there are no errors, otherwise the error list or a summary string.
-    # The prompt for do_selective_restore_work expects `import_result is True`
+
+    # Consistently return a tuple: (summary_dict, status_code)
     if not errors and status_code == 200:
-        return True # Or summary_dict, if the caller is adapted
+        return summary_dict, 200
     else:
-        # Return a string or dict that can be interpreted as error/partial success by the caller
-        return {'message': final_message, 'errors': errors, 'warnings': warnings}
+        # Ensure status_code reflects the presence of errors/warnings if not already set by commit error
+        current_status_code = status_code
+        if not errors and warnings and current_status_code == 200: # No errors, but warnings exist, and not a commit error
+            current_status_code = 207 # Multi-Status for warnings
+        elif errors and current_status_code == 200: # Errors exist, and not a commit error (e.g. bad request not caught)
+             current_status_code = 400 # Bad request or processing error if not already 500 or 207
+
+        return summary_dict, current_status_code
 
 
 def _get_resource_configurations_data() -> list:
