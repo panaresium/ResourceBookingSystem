@@ -1163,7 +1163,21 @@ def update_resource_map_info_admin(resource_id):
 
     # Update fields like floor_map_id, map_coordinates, booking_restriction, allowed_user_ids, role_ids
     if 'floor_map_id' in data: resource.floor_map_id = data['floor_map_id']
-    if 'coordinates' in data: resource.map_coordinates = json.dumps(data['coordinates']) if data['coordinates'] else None
+
+    if 'coordinates' in data and data['coordinates'] is not None:
+        coords_payload = data['coordinates']
+        # Ensure coords_payload is a dictionary before attempting to pop
+        if isinstance(coords_payload, dict):
+            allowed_role_ids = coords_payload.pop('allowed_role_ids', None)
+            resource.map_allowed_role_ids = json.dumps(allowed_role_ids) if allowed_role_ids is not None else None
+            resource.map_coordinates = json.dumps(coords_payload) if coords_payload else None
+        else:
+            # If coords_payload is not a dict (e.g., already None or a string), handle appropriately
+            resource.map_coordinates = json.dumps(coords_payload) if coords_payload else None # Or handle as an error case
+            resource.map_allowed_role_ids = None
+    else:
+        resource.map_coordinates = None
+        resource.map_allowed_role_ids = None
     # ... (other fields from original app.py's update_resource_map_info)
 
     try:
