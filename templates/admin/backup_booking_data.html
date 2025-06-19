@@ -180,47 +180,29 @@
     <!-- Legacy & Other Booking Data Operations - Section Removed -->
     <!-- Section has been removed as per requirements -->
 
-    <!-- Restore Booking Data Section (Non-CSV Legacy/Other Methods) -->
+    <!-- Available Booking CSV Backups Table (Legacy) - Section Removed -->
+    <!-- Section has been removed as per requirements -->
+
+    <!-- Destructive Actions Section -->
     <div class="row mt-4">
         <div class="col-md-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="fas fa-undo-alt"></i> {{ _("Restore Booking Data (Other Methods)") }}</h5>
+            <div class="card border-danger"> <!-- Added border-danger for more visual warning -->
+                <div class="card-header bg-danger text-white">
+                    <h5 class="mb-0"><i class="fas fa-exclamation-triangle"></i> {{ _("Destructive Actions") }}</h5>
                 </div>
                 <div class="card-body">
-                    <p>{{ _("Restore booking data from available backups using methods other than the primary Unified Azure JSON system. The Unified Azure JSON Backup section provides more robust point-in-time recovery.") }}</p>
-
-                    <!-- Restore Bookings from Full System Backup - Section Removed -->
-
-                    <!-- CSV Restore Section Removed -->
-                    <!-- Section has been removed as per requirements -->
-
-                    <div class="card mb-3">
-                        <div class="card-header"> {{ _("Restore Bookings from Incremental Backups (JSON - Legacy/Other)") }} </div>
-                        <div class="card-body">
-                            <p><em>{{ _("Placeholder: Functionality to restore from legacy or other non-unified incremental JSON backups would be here. The Unified Azure JSON system is the primary method for incremental restores.") }}</em></p>
-                            <!-- Example:
-                            <div class="form-group">
-                                <label for="incremental-json-backup-list">{{ _("Available Incremental JSON Backups (Legacy)") }}</label>
-                                <select id="incremental-json-backup-list" class="form-control" disabled></select>
-                            </div>
-                            <button class="btn btn-outline-primary" disabled>{{ _("Restore from Selected Legacy Incremental JSON") }}</button>
-                            <button class="btn btn-outline-info" disabled>{{ _("Refresh Legacy Incremental List") }}</button>
-                            -->
-                        </div>
+                    <p class="card-text">{{ _("These actions can lead to data loss if not used carefully. Ensure you have adequate backups before proceeding.") }}</p>
+                    <!-- Clear All Booking Data -->
+                    <div class="mt-3"> <!-- Added margin for spacing -->
+                        <h6>{{ _("Clear All Booking Data") }}</h6>
+                        <p>{{ _("This will permanently delete all booking entries from the database. This action cannot be undone.") }}</p>
+                        <button class="btn btn-danger" onclick="confirmClearAllBookingData()">{{ _("Clear All Booking Data Now") }}</button>
+                        <small class="form-text text-muted mt-1">{{ _("Use with extreme caution.") }}</small>
                     </div>
-                     <!-- Destructive Actions -->
-                    <hr>
-                    <h5>{{ _("Destructive Actions") }}</h5>
-                    <button class="btn btn-danger" onclick="confirmClearAllBookingData()">{{ _("Clear All Booking Data") }}</button>
-                    <small class="form-text text-muted">{{ _("This will permanently delete all booking entries from the database. Use with extreme caution.") }}</small>
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- Available Booking CSV Backups Table (Legacy) - Section Removed -->
-    <!-- Section has been removed as per requirements -->
 {# Removed duplicate footer section from here. The main footer is in base.html #}
 </div> {# End of main-content #}
 
