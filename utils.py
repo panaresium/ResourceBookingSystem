@@ -811,19 +811,29 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
                 maintenance_until_str = resource_data.get('maintenance_until')
                 resource.maintenance_until = _parse_iso_datetime(maintenance_until_str) # _parse_iso_datetime handles None
 
-                # Handle map_coordinates
+                # Handle map_coordinates and map_allowed_role_ids
                 map_coordinates_data = resource_data.get('map_coordinates')
                 if isinstance(map_coordinates_data, dict):
+                    allowed_role_ids = map_coordinates_data.pop('allowed_role_ids', None)
+                    if allowed_role_ids is not None:
+                        resource.map_allowed_role_ids = json.dumps(allowed_role_ids)
+                    else:
+                        resource.map_allowed_role_ids = None
                     resource.map_coordinates = json.dumps(map_coordinates_data)
-                elif isinstance(map_coordinates_data, str):
-                    warnings.append(f"Resource ID {backup_id}: 'map_coordinates' was a string. Using as is. Consider using a dictionary for import.")
-                    resource.map_coordinates = map_coordinates_data
                 elif map_coordinates_data is None:
                     resource.map_coordinates = None
+                    resource.map_allowed_role_ids = None
+                elif isinstance(map_coordinates_data, str):
+                    # If it's a string, use it as is for map_coordinates, and set allowed_role_ids to None
+                    # as we cannot extract it. Log a warning.
+                    warnings.append(f"Resource ID {backup_id}: 'map_coordinates' was a string. Using as is. 'allowed_role_ids' could not be extracted and is set to None.")
+                    resource.map_coordinates = map_coordinates_data
+                    resource.map_allowed_role_ids = None # Cannot extract if already a string
                 else:
                     warnings.append(f"Resource ID {backup_id}: 'map_coordinates' data is not a dictionary, string, or None. Type: {type(map_coordinates_data)}. Skipping map_coordinates.")
-                    # resource.map_coordinates remains unchanged or could be set to None explicitly
-                    # resource.map_coordinates = None
+                    # Optionally, set to None or keep existing if preferred
+                    # resource.map_coordinates = None # Or resource.map_coordinates to keep existing
+                    # resource.map_allowed_role_ids = None # Or resource.map_allowed_role_ids to keep existing
 
                 # Handle Roles (Many-to-Many)
                 backed_up_role_ids_data = resource_data.get('roles', [])
@@ -885,18 +895,26 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
                 maintenance_until_str = resource_data.get('maintenance_until')
                 new_resource.maintenance_until = _parse_iso_datetime(maintenance_until_str)
 
-                # Handle map_coordinates for new resource
+                # Handle map_coordinates and map_allowed_role_ids for new resource
                 map_coordinates_data_new = resource_data.get('map_coordinates')
                 if isinstance(map_coordinates_data_new, dict):
+                    allowed_role_ids_new = map_coordinates_data_new.pop('allowed_role_ids', None)
+                    if allowed_role_ids_new is not None:
+                        new_resource.map_allowed_role_ids = json.dumps(allowed_role_ids_new)
+                    else:
+                        new_resource.map_allowed_role_ids = None
                     new_resource.map_coordinates = json.dumps(map_coordinates_data_new)
-                elif isinstance(map_coordinates_data_new, str):
-                    warnings.append(f"New Resource (Backup ID {backup_id}): 'map_coordinates' was a string. Using as is. Consider using a dictionary for import.")
-                    new_resource.map_coordinates = map_coordinates_data_new
                 elif map_coordinates_data_new is None:
                     new_resource.map_coordinates = None
+                    new_resource.map_allowed_role_ids = None
+                elif isinstance(map_coordinates_data_new, str):
+                    warnings.append(f"New Resource (Backup ID {backup_id}): 'map_coordinates' was a string. Using as is. 'allowed_role_ids' could not be extracted and is set to None.")
+                    new_resource.map_coordinates = map_coordinates_data_new
+                    new_resource.map_allowed_role_ids = None
                 else:
                     warnings.append(f"New Resource (Backup ID {backup_id}): 'map_coordinates' data is not a dictionary, string, or None. Type: {type(map_coordinates_data_new)}. Skipping map_coordinates.")
                     # new_resource.map_coordinates = None
+                    # new_resource.map_allowed_role_ids = None
 
                 # Handle Roles (Many-to-Many) for new resource
                 backed_up_role_ids_data = resource_data.get('roles', []) # Default to empty list
