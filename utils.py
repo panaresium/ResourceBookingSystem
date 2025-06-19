@@ -1376,8 +1376,6 @@ def save_unified_backup_schedule_settings(data):
         logger.error(f"Error saving unified backup schedule settings to '{config_file}': {e}")
         return False, f"Failed to write settings to file: {e}"
 
-# TODO: Imports commented out as 'run_scheduled_incremental_booking_data_task' and 'run_periodic_full_booking_data_task' in scheduler_tasks.py are obsolete.
-# from scheduler_tasks import run_scheduled_incremental_booking_data_task, run_periodic_full_booking_data_task
 from apscheduler.jobstores.base import JobLookupError
 
 def reschedule_unified_backup_jobs(app_instance):
@@ -1403,19 +1401,8 @@ def reschedule_unified_backup_jobs(app_instance):
 
         incremental_config = unified_schedule_settings.get('unified_incremental_backup', {})
         if incremental_config.get('is_enabled'):
-            interval_minutes = int(incremental_config.get('interval_minutes', 30))
-            if interval_minutes <= 0:
-                app_instance.logger.error(f"Invalid interval_minutes ({interval_minutes}) for unified incremental backup during reschedule. Must be positive. Job not scheduled.")
-            else:
-                scheduler.add_job(
-                    func=run_scheduled_incremental_booking_data_task,
-                    trigger='interval',
-                    minutes=interval_minutes,
-                    id='unified_incremental_booking_backup_job',
-                    replace_existing=True,
-                    args=[app_instance]
-                )
-                app_instance.logger.info(f"Rescheduled unified incremental backup job to run every {interval_minutes} minutes.")
+            app_instance.logger.warning("Unified incremental backup is enabled in settings, but the target task 'run_scheduled_incremental_booking_data_task' is obsolete and will not be scheduled.")
+            # The scheduler.add_job(...) block for run_scheduled_incremental_booking_data_task has been removed.
         else:
             app_instance.logger.info("Unified incremental booking backup is disabled. Job not rescheduled.")
     except Exception as e:
@@ -1460,15 +1447,8 @@ def reschedule_unified_backup_jobs(app_instance):
                  app_instance.logger.error(f"Unknown schedule_type '{schedule_type}' for full backup reschedule.")
                  raise ValueError(f"Unknown schedule_type: {schedule_type}")
 
-            scheduler.add_job(
-                func=run_periodic_full_booking_data_task,
-                trigger='cron',
-                id='unified_full_booking_backup_job',
-                replace_existing=True,
-                args=[app_instance],
-                **trigger_args
-            )
-            app_instance.logger.info(f"Rescheduled unified full backup job with type '{schedule_type}' and args {trigger_args}.")
+            # The scheduler.add_job(...) block for run_periodic_full_booking_data_task has been removed.
+            app_instance.logger.warning("Unified full backup is enabled in settings, but the target task 'run_periodic_full_booking_data_task' is obsolete and will not be scheduled.")
         else:
             app_instance.logger.info("Unified full booking backup is disabled. Job not rescheduled.")
     except Exception as e:
