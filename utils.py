@@ -686,10 +686,14 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
     logger.info(f"Resource configurations import result: {final_message}")
 
     if not errors and status_code == 200:
-        return True
+        # Success case: return tuple (updated_count, created_count, errors, warnings, status_code, message)
+        # created_count is 0 as this function primarily updates.
+        return resources_updated, 0, [], [], 200, final_message
     else:
-        return {'message': final_message, 'errors': errors, 'warnings': warnings, 'status_code': status_code,
-                'resources_processed': resources_processed, 'resources_updated': resources_updated}
+        # Failure/warnings case: extract details and return tuple
+        # created_count is 0.
+        # The variables final_message, errors, warnings, status_code, resources_updated are already available.
+        return resources_updated, 0, errors, warnings, status_code, final_message
 
 
 def _get_user_configurations_data() -> dict:

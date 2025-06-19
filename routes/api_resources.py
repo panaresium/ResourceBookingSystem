@@ -760,14 +760,26 @@ def import_resources_admin():
     except json.JSONDecodeError: return jsonify({'error': 'Invalid JSON.'}), 400
     if not isinstance(resources_data, list): return jsonify({'error': 'JSON must be a list.'}), 400
 
-    # Pass db instance from extensions
-    created, updated, errors = _import_resource_configurations_data(resources_data)
+    # _import_resource_configurations_data now returns:
+    # (updated_count, created_count, errors_list, warnings_list, status_code, message_str)
+    updated_count, created_count, errors_list, warnings_list, status_code, message = \
+        _import_resource_configurations_data(resources_data)
 
-    summary = f"Import completed. Created: {created}, Updated: {updated}, Errors: {len(errors)}."
-    add_audit_log(action="IMPORT_RESOURCES", details=f"User {current_user.username} imported resources. {summary} Errors: {errors}")
-    if errors:
-        return jsonify({'message': summary, 'created': created, 'updated': updated, 'errors': errors}), 207
-    return jsonify({'message': summary, 'created': created, 'updated': updated}), 200
+    # Audit log uses the comprehensive message and detailed errors/warnings
+    audit_details = f"User {current_user.username} imported resource configurations. Result: {message}. Errors: {errors_list}. Warnings: {warnings_list}."
+    add_audit_log(action="IMPORT_RESOURCES", details=audit_details)
+
+    response_data = {
+        'message': message,
+        'created': created_count,  # This will be 0
+        'updated': updated_count,
+        'errors': errors_list
+    }
+    if warnings_list:  # Optionally include warnings if they exist
+        response_data['warnings'] = warnings_list
+
+    # Use the status_code returned by the utility function
+    return jsonify(response_data), status_code
 
 
 # Helper function for bulk updates
