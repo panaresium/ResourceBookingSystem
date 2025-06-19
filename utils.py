@@ -567,33 +567,39 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
                 map_constructor_args = {
                     'name': map_item.get('name'),
                     'image_filename': map_item.get('image_filename'),
-                    # Ensure all model fields are passed to constructor if available in backup
+                    # Revert to only include fields accepted by the original FloorMap constructor
                     'location': map_item.get('location'),
                     'floor': map_item.get('floor'),
                     'offset_x': map_item.get('offset_x', 0), # Default if not in backup
-                    'offset_y': map_item.get('offset_y', 0), # Default if not in backup
-                    'display_order': map_item.get('display_order', 0),
-                    'is_published': map_item.get('is_published', True),
-                    'description': map_item.get('description'),
-                    'map_data_json': map_item.get('map_data_json')
+                    'offset_y': map_item.get('offset_y', 0)  # Default if not in backup
                 }
 
-                # Description and other fields are now part of the model and constructor
-                # We will handle 'description' after object creation using direct assignment if needed,
-                # similar to how it's handled for existing map objects.
-
-                new_map = FloorMap(**map_constructor_args)
+                # Original logic for handling description, as it was not part of the constructor
+                # and other fields like display_order were not handled at all for new maps.
+                new_map = FloorMap(**map_constructor_args) # This will now use the reverted map_constructor_args
                 db.session.add(new_map)
                 db.session.flush() # Flush to get the new_map.id
 
-                # This block can be simplified as fields are now in constructor
-                # new_description = map_item.get('description')
-                # if new_description is not None and new_map.description != new_description:
-                #    new_map.description = new_description
+                new_description = map_item.get('description')
+                if new_description is not None:
+                    try:
+                        # Attempt to set 'description' after creation.
+                        # If 'description' is not a model attribute, this might log a warning
+                        # or be a no-op depending on SQLAlchemy behavior for non-column attributes,
+                        # but it avoids the TypeError during construction.
+                        setattr(new_map, 'description', new_description)
+                        # If setattr itself is problematic for non-column attributes on new instances
+                        # before commit, or if a more explicit warning is desired:
+                        if not hasattr(new_map.__class__, 'description') or not new_map.__class__.__table__.columns.get('description'):
+                             logger.warning(f"Set 'description' on newly created FloorMap (Backup ID: {backup_map_id}, New ID: {new_map.id}) post-construction, but 'description' is not a formal model attribute. Value: '{new_description}'")
+                    except AttributeError:
+                         # This catch block might be redundant if setattr on new objects behaves permissively,
+                         # but kept for safety.
+                        logger.warning(f"Attempted to set 'description' via setattr on new FloorMap (Backup ID: {backup_map_id}, New ID: {new_map.id}) but failed. Value: '{new_description}'")
 
                 backup_to_new_map_id_mapping[backup_map_id] = new_map.id
                 maps_created += 1
-                warnings.append(f"Map with backup ID {backup_map_id} ('{new_map.name}') not found. Created as new map with ID {new_map.id} and attributes from backup.")
+                warnings.append(f"Map with backup ID {backup_map_id} ('{new_map.name}') not found. Created as new map with ID {new_map.id}.")
         except Exception as e_map:
             error_msg = f"Error processing map (Backup ID: {backup_map_id}, Name: {map_item.get('name', 'N/A')}): {str(e_map)}"
             errors.append(error_msg)
