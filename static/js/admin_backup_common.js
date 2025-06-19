@@ -141,7 +141,7 @@ function appendLog(logAreaId, message, detail, type = 'info', specificStatusEl =
 }
 
 // --- HTTP Task Polling Function ---
-function pollTaskStatus(taskId, logAreaId, statusMessageEl, operationType) {
+function pollTaskStatus(taskId, logAreaId, statusMessageEl, operationType, onTaskDoneCallback) {
     if (!activePolls[taskId]) { // Polling might have been cancelled elsewhere
         console.log(`Polling for task ${taskId} was cancelled or already stopped.`);
         return;
@@ -225,6 +225,11 @@ function pollTaskStatus(taskId, logAreaId, statusMessageEl, operationType) {
                 if (operationType === 'bulk_delete_system_backups') currentBulkDeleteTaskId = null;
                 if (operationType === 'restore_dry_run') currentDryRunTaskId = null; // Added for dry run
                 // currentRestoreTaskId is for one-click full restore, not yet refactored in this common script.
+
+                if (typeof onTaskDoneCallback === 'function') {
+                    console.log(`Task ${taskId} (${operationType}) is done, executing onTaskDoneCallback.`);
+                    onTaskDoneCallback(data); // Pass the final task data to the callback
+                }
             }
         })
         .catch(error => {

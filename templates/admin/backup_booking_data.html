@@ -353,23 +353,16 @@
                 displayedLogCounts[data.task_id] = 0; // Reset log count for this new task instance
 
                 // Setup the polling interval
-                const intervalId = setInterval(() => {
-                    // Call the generic poller from admin_backup_common.js
-                    pollTaskStatus(data.task_id, null, statusEl, 'manual_unified_booking_backup');
-
-                    // Check if pollTaskStatus has completed and cleared itself from activePolls
-                    if (!activePolls[data.task_id]) {
-                        // If the entry in activePolls is gone, the task is done and pollTaskStatus
-                        // should have cleared its own interval.
-                        // Now, hide the modal.
-                        hideProgressModal();
-                        // enablePageInteractions(); // This is typically called by pollTaskStatus itself when data.is_done.
-                                                 // Assuming pollTaskStatus reliably calls enablePageInteractions.
+                const newIntervalId = setInterval(() => {
+                    // If the task's interval has been cleared from activePolls by pollTaskStatus itself,
+                    // then this specific interval (newIntervalId) should also be cleared to stop further execution.
+                    if (!activePolls[currentManualUnifiedBackupTaskId]) {
+                        clearInterval(newIntervalId); // Clear this page's interval for this task.
+                        return;
                     }
-                }, POLLING_INTERVAL_MS); // Assuming POLLING_INTERVAL_MS is accessible (it's in admin_backup_common.js)
-
-                // Store the interval ID so pollTaskStatus can clear it
-                activePolls[data.task_id] = intervalId;
+                    pollTaskStatus(currentManualUnifiedBackupTaskId, null, statusEl, 'manual_unified_booking_backup', hideProgressModal);
+                }, POLLING_INTERVAL_MS);
+                activePolls[currentManualUnifiedBackupTaskId] = newIntervalId;
 
             } else {
                 // Task initiation failed (e.g., backend couldn't create task)
