@@ -25,8 +25,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from extensions import db
-from models import AuditLog, User, Resource, FloorMap, Role, Booking, BookingSettings # Ensure Role is imported
-from sqlalchemy import func
+from models import AuditLog, User, Resource, FloorMap, Role, Booking, BookingSettings, ResourcePIN # Ensure Role and ResourcePIN are imported
+from sqlalchemy import func, exc
 from sqlalchemy.sql import func as sqlfunc
 
 # New imports for task management
@@ -359,12 +359,18 @@ def add_audit_log(action: str, details: str, user_id: int = None, username: str 
 
 def resource_to_dict(resource: Resource) -> dict:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    image_url = None
-    if resource.image_filename:
-        try:
-            image_url = url_for('static', filename=f'resource_uploads/{resource.image_filename}', _external=True)
-        except RuntimeError: # Outside of application context
-            image_url = f"/static/resource_uploads/{resource.image_filename}"
+
+    # Prepare resource_pins data
+    resource_pins_list = []
+    if hasattr(resource, 'pins'): # Check if the relationship exists
+        for pin_obj in resource.pins:
+            resource_pins_list.append({
+                'id': pin_obj.id,
+                'pin_value': pin_obj.pin_value,
+                'is_active': pin_obj.is_active,
+                'created_at': pin_obj.created_at.isoformat() if pin_obj.created_at else None,
+                'notes': pin_obj.notes
+            })
 
     return {
         'id': resource.id,
@@ -374,7 +380,7 @@ def resource_to_dict(resource: Resource) -> dict:
         'status': resource.status,
         'tags': resource.tags,
         'booking_restriction': resource.booking_restriction,
-        'image_url': image_url,
+        'image_filename': resource.image_filename, # Changed from image_url to image_filename
         'published_at': resource.published_at.isoformat() if resource.published_at else None,
         'allowed_user_ids': resource.allowed_user_ids, # Assuming this is already a string or None
         'roles': [{'id': r.id, 'name': r.name} for r in resource.roles],
@@ -382,6 +388,13 @@ def resource_to_dict(resource: Resource) -> dict:
         'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
         'is_under_maintenance': resource.is_under_maintenance,
         'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
+        # New fields added below
+        'max_recurrence_count': resource.max_recurrence_count,
+        'scheduled_status': resource.scheduled_status,
+        'current_pin': resource.current_pin,
+        'scheduled_status_at': resource.scheduled_status_at.isoformat() if resource.scheduled_status_at else None,
+        'map_allowed_role_ids': resource.map_allowed_role_ids, # Expected to be JSON string or None
+        'resource_pins': resource_pins_list
     }
 
 def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_name: str) -> str | None:
@@ -797,6 +810,27 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
                 resource.equipment = resource_data.get('equipment', resource.equipment)
                 resource.status = resource_data.get('status', resource.status)
 
+                # Handle new direct Resource fields
+                resource.image_filename = resource_data.get('image_filename', resource.image_filename)
+                resource.floor_map_id = resource_data.get('floor_map_id', resource.floor_map_id)
+                map_coordinates_data = resource_data.get('map_coordinates')
+                if map_coordinates_data is not None: # Could be dict or already JSON string
+                    if isinstance(map_coordinates_data, dict):
+                        resource.map_coordinates = json.dumps(map_coordinates_data)
+                    else: # Assume it's a valid JSON string or None
+                        resource.map_coordinates = map_coordinates_data
+                else:
+                    resource.map_coordinates = None # Explicitly set to None if not in backup
+
+                resource.max_recurrence_count = resource_data.get('max_recurrence_count', resource.max_recurrence_count)
+                resource.scheduled_status = resource_data.get('scheduled_status', resource.scheduled_status)
+                resource.map_allowed_role_ids = resource_data.get('map_allowed_role_ids', resource.map_allowed_role_ids)
+                resource.current_pin = resource_data.get('current_pin', resource.current_pin)
+
+                scheduled_status_at_str = resource_data.get('scheduled_status_at')
+                resource.scheduled_status_at = _parse_iso_datetime(scheduled_status_at_str) if scheduled_status_at_str else resource.scheduled_status_at
+
+
                 # Handle tags (assuming model stores as string, backup might be string or list)
                 tags_data = resource_data.get('tags', resource.tags)
                 if isinstance(tags_data, list):
@@ -827,7 +861,7 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
                 resource.maintenance_until = _parse_iso_datetime(maintenance_until_str) # _parse_iso_datetime handles None
 
                 # Handle Roles (Many-to-Many)
-                backed_up_role_ids_data = resource_data.get('roles', [])
+                backed_up_role_ids_data = resource_data.get('roles', []) # Default to empty list if key missing
                 if backed_up_role_ids_data is not None: # Check if 'roles' key was present
                     backed_up_role_ids = {role_info.get('id') for role_info in backed_up_role_ids_data if role_info.get('id') is not None}
 
@@ -841,24 +875,120 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
                         resource.roles = current_roles_in_db # Assign the list of Role objects found in DB
                     else: # Empty list of roles in backup means remove all roles
                         resource.roles = []
-                # If 'roles' key is missing from backup, existing roles are preserved by not touching resource.roles
+                # If 'roles' key is missing from backup, existing roles are preserved unless explicitly set to empty list
+
+                # START ResourcePIN Import/Update Logic for existing resource
+                resource_pins_data = resource_data.get('resource_pins', [])
+                if isinstance(resource_pins_data, list):
+                    for pin_data in resource_pins_data:
+                        pin_backup_id = pin_data.get('id')
+                        pin_value = pin_data.get('pin_value')
+
+                        if not pin_value: # Skip PIN if no value
+                            warnings.append(f"Resource ID {backup_id}: PIN data found with no pin_value. Skipping this PIN. Data: {pin_data}")
+                            continue
+
+                        existing_pin = None
+                        if pin_backup_id is not None:
+                            # Try to find by backup ID AND ensure it belongs to this resource
+                            # This check is important if PIN IDs from backup might not be unique across all resources
+                            # or if we want to strictly re-associate based on backup ID.
+                            # However, ResourcePIN primary key 'id' is globally unique.
+                            # So, db.session.get(ResourcePIN, pin_backup_id) is sufficient if we assume backup ID is the PK.
+                            # Let's refine: find by PK, then verify resource_id if necessary,
+                            # or if the goal is to match *within* the resource context.
+                            # Given the task, the `id` is the ResourcePIN's own PK.
+                            pin_to_check = db.session.get(ResourcePIN, pin_backup_id)
+                            if pin_to_check and pin_to_check.resource_id == resource.id:
+                                existing_pin = pin_to_check
+                            elif pin_to_check and pin_to_check.resource_id != resource.id:
+                                warnings.append(f"Resource ID {backup_id}: PIN with backup ID {pin_backup_id} found but belongs to another resource ({pin_to_check.resource_id}). Skipping update for this PIN data.")
+                                continue # Skip this pin_data, as it seems to be for a different resource
+
+                        if existing_pin:
+                            # Update existing PIN
+                            original_pin_value = existing_pin.pin_value
+                            new_pin_value = pin_data.get('pin_value', original_pin_value)
+
+                            if new_pin_value != original_pin_value:
+                                # Check for conflict before changing pin_value
+                                conflict_pin = ResourcePIN.query.filter_by(resource_id=resource.id, pin_value=new_pin_value).first()
+                                if conflict_pin and conflict_pin.id != existing_pin.id:
+                                    warnings.append(f"Resource ID {backup_id}, PIN ID {existing_pin.id}: Cannot update pin_value to '{new_pin_value}' as it conflicts with existing PIN ID {conflict_pin.id}. Value not changed.")
+                                else:
+                                    existing_pin.pin_value = new_pin_value
+
+                            existing_pin.is_active = pin_data.get('is_active', existing_pin.is_active)
+                            existing_pin.notes = pin_data.get('notes', existing_pin.notes)
+                            # created_at is generally not updated for existing PINs
+                            db.session.add(existing_pin)
+                        else:
+                            # Create new PIN if no existing_pin was found (either no pin_backup_id or ID didn't match)
+                            # Check for conflict before creating
+                            conflict_pin = ResourcePIN.query.filter_by(resource_id=resource.id, pin_value=pin_value).first()
+                            if conflict_pin:
+                                warnings.append(f"Resource ID {backup_id}: Cannot create new PIN with value '{pin_value}' as it already exists (PIN ID {conflict_pin.id}). Skipping creation of this PIN.")
+                                continue
+
+                            new_pin = ResourcePIN(resource_id=resource.id)
+                            new_pin.pin_value = pin_value
+                            new_pin.is_active = pin_data.get('is_active', True)
+                            new_pin.notes = pin_data.get('notes')
+                            created_at_str = pin_data.get('created_at')
+                            parsed_created_at = _parse_iso_datetime(created_at_str)
+                            new_pin.created_at = parsed_created_at if parsed_created_at else datetime.utcnow()
+                            # Backup ID (pin_backup_id) is not used for new_pin.id
+                            db.session.add(new_pin)
+                # END ResourcePIN Import/Update Logic
 
                 db.session.add(resource)
                 resources_updated += 1
             else:
                 # Create new resource
                 logger.info(f"Resource with backup ID {backup_id} not found. Creating as new resource.")
-                if not isinstance(backup_id, int):
-                    errors.append(f"Resource with backup ID {backup_id} ('{resource_data.get('name', 'N/A')}') has a non-integer ID. Cannot create.")
+                if not isinstance(backup_id, int): # Ensure backup_id is int for new resource ID
+                    errors.append(f"Resource with backup ID '{backup_id}' ('{resource_data.get('name', 'N/A')}') has a non-integer ID. Cannot create.")
                     continue
 
+                # Check if ID already exists (e.g. due to previous failed import or manual entry)
+                # This requires a query. If performance is critical for bulk new imports,
+                # and IDs are guaranteed unique from backup, this could be skipped.
+                # However, `db.session.get` for existing resources already handles this.
+                # This is more about `new_resource.id = backup_id` potentially colliding if not careful.
+                # SQLAlchemy's identity map usually handles this if an object with backup_id is already loaded.
+                # If we proceed with `new_resource.id = backup_id`, ensure the session is flushed or committed
+                # carefully if there's a mix of new and existing resources in one transaction.
+                # For now, let's assume `backup_id` for new resources is safe to assign.
+
                 new_resource = Resource()
-                new_resource.id = backup_id # Set ID from backup_id
+                new_resource.id = backup_id # Set ID from backup_id for new resource
 
                 new_resource.name = resource_data.get('name')
                 new_resource.capacity = resource_data.get('capacity')
                 new_resource.equipment = resource_data.get('equipment')
                 new_resource.status = resource_data.get('status', 'draft') # Default to 'draft'
+
+                # Handle new direct Resource fields for new resource
+                new_resource.image_filename = resource_data.get('image_filename')
+                new_resource.floor_map_id = resource_data.get('floor_map_id')
+                map_coordinates_data_new = resource_data.get('map_coordinates')
+                if map_coordinates_data_new is not None:
+                    if isinstance(map_coordinates_data_new, dict):
+                        new_resource.map_coordinates = json.dumps(map_coordinates_data_new)
+                    else:
+                        new_resource.map_coordinates = map_coordinates_data_new
+                else:
+                    new_resource.map_coordinates = None
+
+
+                new_resource.max_recurrence_count = resource_data.get('max_recurrence_count')
+                new_resource.scheduled_status = resource_data.get('scheduled_status')
+                new_resource.map_allowed_role_ids = resource_data.get('map_allowed_role_ids')
+                new_resource.current_pin = resource_data.get('current_pin')
+
+                scheduled_status_at_str_new = resource_data.get('scheduled_status_at')
+                new_resource.scheduled_status_at = _parse_iso_datetime(scheduled_status_at_str_new)
+
 
                 tags_data = resource_data.get('tags')
                 if isinstance(tags_data, list):
@@ -887,35 +1017,80 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
                 new_resource.maintenance_until = _parse_iso_datetime(maintenance_until_str)
 
                 # Handle Roles (Many-to-Many) for new resource
-                backed_up_role_ids_data = resource_data.get('roles', []) # Default to empty list
+                backed_up_role_ids_data_new = resource_data.get('roles', []) # Default to empty list
                 new_resource_roles = []
-                if backed_up_role_ids_data is not None: # Check if 'roles' key was present
-                    backed_up_role_ids = {role_info.get('id') for role_info in backed_up_role_ids_data if role_info.get('id') is not None}
+                # Ensure backed_up_role_ids_data_new is not None before processing
+                # This check might be redundant if default is [], but good for safety
+                if backed_up_role_ids_data_new is not None:
+                    backed_up_role_ids_new = {role_info.get('id') for role_info in backed_up_role_ids_data_new if role_info.get('id') is not None}
 
-                    if backed_up_role_ids:
-                        current_roles_in_db = Role.query.filter(Role.id.in_(backed_up_role_ids)).all()
-                        found_role_ids_in_db = {role.id for role in current_roles_in_db}
+                    if backed_up_role_ids_new:
+                        current_roles_in_db_new = Role.query.filter(Role.id.in_(backed_up_role_ids_new)).all()
+                        found_role_ids_in_db_new = {role.id for role in current_roles_in_db_new}
 
-                        for backed_up_id_role in backed_up_role_ids:
-                            if backed_up_id_role not in found_role_ids_in_db:
-                                warnings.append(f"For new Resource (Backup ID {backup_id}), Role ID {backed_up_id_role} from backup not found in database. Skipping assignment of this role.")
-                        new_resource_roles = current_roles_in_db
+                        for backed_up_id_role_new in backed_up_role_ids_new:
+                            if backed_up_id_role_new not in found_role_ids_in_db_new:
+                                warnings.append(f"For new Resource (Backup ID {backup_id}), Role ID {backed_up_id_role_new} from backup not found in database. Skipping assignment of this role.")
+                        new_resource_roles = current_roles_in_db_new
                 new_resource.roles = new_resource_roles
 
-                db.session.add(new_resource)
+                # Add the new resource to session to get its ID for PINs, if not already set (it is set above)
+                # db.session.add(new_resource) # Add new_resource first
+                # db.session.flush() # Flush to ensure new_resource gets an ID if it's auto-generated
+                                     # Not strictly necessary here as ID is set from backup_id
+
+                # START ResourcePIN Import/Update Logic for new resource
+                resource_pins_data_new = resource_data.get('resource_pins', [])
+                if isinstance(resource_pins_data_new, list):
+                    for pin_data_new in resource_pins_data_new:
+                        pin_value_new = pin_data_new.get('pin_value')
+
+                        if not pin_value_new:
+                            warnings.append(f"New Resource (Backup ID {backup_id}): PIN data found with no pin_value. Skipping this PIN. Data: {pin_data_new}")
+                            continue
+
+                        # For new resources, all PINs are new. Check for conflict before creating.
+                        # This check needs new_resource.id, which is backup_id.
+                        conflict_pin_new_res = ResourcePIN.query.filter_by(resource_id=new_resource.id, pin_value=pin_value_new).first()
+                        if conflict_pin_new_res:
+                            warnings.append(f"New Resource (Backup ID {backup_id}): Cannot create new PIN with value '{pin_value_new}' as it would conflict (likely pre-existing or duplicate in import). Skipping creation of this PIN.")
+                            continue
+
+                        fresh_pin = ResourcePIN(resource_id=new_resource.id) # Associate with new_resource.id
+                        fresh_pin.pin_value = pin_value_new
+                        fresh_pin.is_active = pin_data_new.get('is_active', True)
+                        fresh_pin.notes = pin_data_new.get('notes')
+                        created_at_str_new_pin = pin_data_new.get('created_at')
+                        parsed_created_at_new_pin = _parse_iso_datetime(created_at_str_new_pin)
+                        fresh_pin.created_at = parsed_created_at_new_pin if parsed_created_at_new_pin else datetime.utcnow()
+                        db.session.add(fresh_pin)
+                # END ResourcePIN Import/Update Logic for new resource
+
+                db.session.add(new_resource) # Add new_resource to session (might be redundant if already added for flush)
                 created_count += 1
-        except Exception as e_res:
-            error_msg = f"Error processing resource (Backup ID: {backup_id}, Name: {resource_data.get('name', 'N/A')}): {str(e_res)}"
+        except exc.IntegrityError as ie: # Catch specific DB errors like unique constraint violations for Resource itself
+            db.session.rollback() # Rollback the specific resource changes
+            error_msg = f"Database integrity error processing resource (Backup ID: {backup_id}, Name: {resource_data.get('name', 'N/A')}): {str(ie)}. This resource was skipped."
+            errors.append(error_msg)
+            logger.error(error_msg, exc_info=True)
+        except Exception as e_res: # Catch other general errors
+            db.session.rollback() # Rollback for other errors too for safety for current resource
+            error_msg = f"Error processing resource (Backup ID: {backup_id}, Name: {resource_data.get('name', 'N/A')}): {str(e_res)}. This resource was skipped."
             errors.append(error_msg)
             logger.error(error_msg, exc_info=True)
 
     status_code = 200
     try:
-        db.session.commit()
-    except Exception as e:
+        db.session.commit() # Commit all accumulated changes (valid resources and their PINs)
+    except exc.IntegrityError as e_commit: # Catch commit-time integrity errors (e.g. for PINs if not caught before)
         db.session.rollback()
-        errors.append(f"Database commit error: {str(e)}")
-        logger.error(f"Database commit error during resource configurations import: {e}", exc_info=True)
+        errors.append(f"Database commit integrity error: {str(e_commit)}. Some changes might not have been saved.")
+        logger.error(f"Database commit integrity error during resource configurations import: {e_commit}", exc_info=True)
+        status_code = 500 # Server error
+    except Exception as e_commit_other:
+        db.session.rollback()
+        errors.append(f"Database commit error: {str(e_commit_other)}")
+        logger.error(f"Database commit error during resource configurations import: {e_commit_other}", exc_info=True)
         status_code = 500
 
     final_message_parts = [
