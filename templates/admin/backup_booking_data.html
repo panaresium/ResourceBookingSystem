@@ -343,21 +343,46 @@
             if (data.success && data.task_id) {
                 const statusEl = document.getElementById('actionProgressMessage');
                 statusEl.textContent = "{{ _('Manual backup task started. Task ID:') }} " + data.task_id;
+
                 currentManualUnifiedBackupTaskId = data.task_id;
-                if (activePolls[data.task_id]) clearInterval(activePolls[data.task_id]);
-                displayedLogCounts[data.task_id] = 0;
-                pollTaskStatus(data.task_id, null, statusEl, 'manual_unified_booking_backup');
-                // hideProgressModal will be called by pollTaskStatus logic via enablePageInteractions
+
+                // Clear any existing poll for this task_id if it somehow exists (defensive)
+                if (activePolls[data.task_id]) {
+                    clearInterval(activePolls[data.task_id]);
+                }
+                displayedLogCounts[data.task_id] = 0; // Reset log count for this new task instance
+
+                // Setup the polling interval
+                const intervalId = setInterval(() => {
+                    // Call the generic poller from admin_backup_common.js
+                    pollTaskStatus(data.task_id, null, statusEl, 'manual_unified_booking_backup');
+
+                    // Check if pollTaskStatus has completed and cleared itself from activePolls
+                    if (!activePolls[data.task_id]) {
+                        // If the entry in activePolls is gone, the task is done and pollTaskStatus
+                        // should have cleared its own interval.
+                        // Now, hide the modal.
+                        hideProgressModal();
+                        // enablePageInteractions(); // This is typically called by pollTaskStatus itself when data.is_done.
+                                                 // Assuming pollTaskStatus reliably calls enablePageInteractions.
+                    }
+                }, POLLING_INTERVAL_MS); // Assuming POLLING_INTERVAL_MS is accessible (it's in admin_backup_common.js)
+
+                // Store the interval ID so pollTaskStatus can clear it
+                activePolls[data.task_id] = intervalId;
+
             } else {
+                // Task initiation failed (e.g., backend couldn't create task)
+                hideProgressModal(); // Ensure modal is hidden
+                enablePageInteractions(); // Ensure UI is re-enabled
                 throw new Error(data.message || "{{ _('Unknown error starting manual backup.') }}");
             }
         }).catch(error => {
             hideProgressModal();
             alert("{{ _('Error starting manual backup:') }} " + error.message);
-            enablePageInteractions(); // Re-enable UI on fetch error
+            enablePageInteractions();
         });
 
-        // Socket.IO event handler removed
     }
 
     function restoreSelectedUnifiedBackup() {
