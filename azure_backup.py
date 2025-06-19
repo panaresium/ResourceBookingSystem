@@ -124,18 +124,120 @@ def list_booking_data_json_backups():
         logger.error(f"Error listing unified booking data JSON backups: {e}", exc_info=True)
         return []
 
-def delete_booking_data_json_backup(filename, backup_type=None, task_id=None):
-    logger.warning(f"Placeholder function 'delete_booking_data_json_backup' called for file: {filename}, type: {backup_type}. This functionality is not fully implemented.")
-    # task_id is accepted to match potential signature but not used in placeholder
-    return False
+def delete_booking_data_json_backup(filename, backup_type=None, task_id=None): # task_id can be used for logging if needed
+    # Note: _emit_progress is tied to utils.update_task_log which might not be ideal if this isn't a long task.
+    # Using logger directly for simplicity unless this becomes a background task.
+    log_prefix = f"[Task {task_id}] " if task_id else ""
+    logger.info(f"{log_prefix}Attempting to delete unified backup: Type='{backup_type}', Filename='{filename}'.")
+
+    try:
+        service_client = _get_service_client()
+        share_name = os.environ.get('AZURE_BOOKING_DATA_SHARE', 'booking-data-backups') # Consistent with download
+        if not share_name:
+            logger.error(f"{log_prefix}Azure share name for booking data backups is not configured (AZURE_BOOKING_DATA_SHARE).")
+            return False
+
+        share_client = service_client.get_share_client(share_name)
+        if not _client_exists(share_client):
+            logger.warning(f"{log_prefix}Azure share '{share_name}' not found. Cannot delete backup.")
+            return False
+
+        target_subdir = ""
+        if backup_type == "manual_full_json":
+            target_subdir = "manual_full_json"
+        # Add other type mappings here if other backup types are introduced
+        # e.g., elif backup_type == "scheduled_full_json": target_subdir = "full"
+        else:
+            logger.error(f"{log_prefix}Cannot determine directory for backup type '{backup_type}'. Deletion aborted.")
+            return False
+
+        remote_file_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{target_subdir}/{filename}"
+
+        file_client = share_client.get_file_client(remote_file_path)
+
+        if not _client_exists(file_client):
+            logger.warning(f"{log_prefix}File '{remote_file_path}' not found in share '{share_name}'. No action taken, considered success for deletion.")
+            return True # If file doesn't exist, it's effectively "deleted"
+
+        file_client.delete_file()
+        logger.info(f"{log_prefix}Successfully deleted file '{remote_file_path}'.")
+        return True
+
+    except ResourceNotFoundError: # Should be caught by _client_exists, but as defense
+        logger.warning(f"{log_prefix}File '{filename}' (Type: {backup_type}) not found during delete. Considered success.")
+        return True
+    except Exception as e:
+        logger.error(f"{log_prefix}An unexpected error occurred during deletion of '{filename}' (Type: {backup_type}): {e}", exc_info=True)
+        return False
 
 def restore_booking_data_to_point_in_time(app, selected_filename, selected_type, selected_timestamp_iso, task_id=None):
     logger.warning(f"Placeholder function 'restore_booking_data_to_point_in_time' called for file: {selected_filename}. This functionality is not fully implemented.")
     return {'status': 'not_implemented', 'message': 'Restore to point in time is not implemented.', 'errors': ['Not implemented']}
 
 def download_booking_data_json_backup(filename, backup_type=None):
-    logger.warning(f"Placeholder function 'download_booking_data_json_backup' called for file: {filename}, type: {backup_type}. This functionality is not fully implemented.")
-    return None
+    logger.info(f"Attempting to download unified backup: Type='{backup_type}', Filename='{filename}'.")
+    try:
+        service_client = _get_service_client()
+        share_name = os.environ.get('AZURE_BOOKING_DATA_SHARE', 'booking-data-backups')
+        if not share_name:
+            logger.error("Azure share name for booking data backups is not configured (AZURE_BOOKING_DATA_SHARE).")
+            return None
+
+        share_client = service_client.get_share_client(share_name)
+        if not _client_exists(share_client):
+            logger.warning(f"Azure share '{share_name}' not found. Cannot download backup.")
+            return None
+
+        # Determine subdirectory based on backup_type
+        # This mapping should align with how list_booking_data_json_backups structures types and paths.
+        subdir_map = {
+            "manual_full_json": "manual_full_json",
+            "scheduled_full_json": "full", # Example, if scheduled backups go to 'full'
+            "incremental_json": "incrementals" # Example
+        }
+        # Fallback to a generic path or error if type unknown, for now, let's assume type gives direct subdir
+        # or filename in list_booking_data_json_backups contains the subpath.
+        # The 'full_path' from list_booking_data_json_backups is better but this function only gets filename and type.
+
+        # For simplicity, let's assume backup_type directly maps to a known subdirectory under AZURE_BOOKING_DATA_PROTECTION_DIR
+        # or that the 'filename' might sometimes be a relative path including its type-specific subdir.
+        # Given the current structure from previous steps:
+        # Manual backups are in AZURE_BOOKING_DATA_PROTECTION_DIR + "/manual_full_json/" + filename
+
+        target_subdir = ""
+        if backup_type == "manual_full_json":
+            target_subdir = "manual_full_json"
+        # Add other type mappings here if other backup types are introduced
+        # e.g., elif backup_type == "scheduled_full_json": target_subdir = "full"
+        else:
+            logger.warning(f"Unknown or unhandled backup_type '{backup_type}' for download. Attempting download from base backup directory.")
+            # If type is unknown, or if filename is expected to be unique across all types in the root of AZURE_BOOKING_DATA_PROTECTION_DIR
+            # This part might need refinement based on where `list_booking_data_json_backups` actually finds various types.
+            # For now, if type is not 'manual_full_json', assume it might be directly under AZURE_BOOKING_DATA_PROTECTION_DIR or this will fail.
+            # A safer bet is to require type to be known.
+
+        if not target_subdir:
+             logger.error(f"Cannot determine directory for backup type '{backup_type}'. Download aborted.")
+             return None
+
+        remote_file_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{target_subdir}/{filename}"
+
+        file_client = share_client.get_file_client(remote_file_path)
+        if not _client_exists(file_client):
+            logger.error(f"File '{remote_file_path}' not found in share '{share_name}'.")
+            return None
+
+        download_stream = file_client.download_file()
+        file_content = download_stream.readall()
+        logger.info(f"Successfully downloaded file '{remote_file_path}'. Size: {len(file_content)} bytes.")
+        return file_content
+
+    except ResourceNotFoundError:
+        logger.error(f"Resource not found during download operation for {filename} (Type: {backup_type}). Path might be incorrect or file does not exist.")
+        return None
+    except Exception as e:
+        logger.error(f"An unexpected error occurred during download of '{filename}' (Type: {backup_type}): {e}", exc_info=True)
+        return None
 
 # --- Constants for Backup System ---
 LAST_INCREMENTAL_BOOKING_TIMESTAMP_FILE = os.path.join(DATA_DIR, 'last_incremental_booking_timestamp.txt')
