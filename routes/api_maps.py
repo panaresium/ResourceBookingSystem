@@ -1,9 +1,11 @@
 import os
 import json
+import io
+import zipfile
 from datetime import datetime, timezone, date, time # Added time
 from werkzeug.utils import secure_filename
 
-from flask import Blueprint, jsonify, request, url_for, current_app
+from flask import Blueprint, jsonify, request, url_for, current_app, send_file
 from flask_login import login_required, current_user
 from sqlalchemy import func # For func.date in get_map_details
 from sqlalchemy.sql import func as sqlfunc # Added for explicit use of sqlfunc.trim/lower
@@ -13,7 +15,7 @@ from extensions import db
 from models import FloorMap, Resource, Booking, Role # Role removed if no longer needed
 from auth import permission_required
 # Assuming these utils will be moved to utils.py or are already there
-from utils import add_audit_log, allowed_file, _get_map_configuration_data, _import_map_configuration_data, check_resources_availability_for_user, get_detailed_map_availability_for_user
+from utils import add_audit_log, allowed_file, _get_map_configuration_data, _import_map_configuration_data, check_resources_availability_for_user, get_detailed_map_availability_for_user, _get_map_configuration_data_zip
 
 # Conditional import for Azure
 try:
@@ -352,36 +354,130 @@ def delete_floor_map(map_id):
 @permission_required('manage_floor_maps')
 def export_map_configuration():
     try:
-        export_data = _get_map_configuration_data() # Assumes this util is available
-        response = jsonify(export_data)
-        response.headers['Content-Disposition'] = 'attachment; filename=map_configuration_export.json'
-        response.mimetype = 'application/json'
-        current_app.logger.info(f"User {current_user.username} exported map configuration.")
-        add_audit_log(action="EXPORT_MAP_CONFIGURATION", details=f"User {current_user.username} exported map configuration.")
-        return response
+        zip_buffer, zip_filename = _get_map_configuration_data_zip()
+        if zip_buffer is None or zip_filename is None:
+            current_app.logger.error(f"Failed to generate map configuration ZIP for user {current_user.username}. _get_map_configuration_data_zip returned None.")
+            add_audit_log(action="EXPORT_MAP_CONFIGURATION_FAILED", details=f"User {current_user.username} failed to export map configuration (ZIP generation error).")
+            return jsonify({'error': 'Failed to generate map configuration export file.'}), 500
+
+        current_app.logger.info(f"User {current_user.username} successfully generated map configuration ZIP: {zip_filename}.")
+        add_audit_log(action="EXPORT_MAP_CONFIGURATION", details=f"User {current_user.username} exported map configuration as ZIP: {zip_filename}.")
+
+        return send_file(
+            zip_buffer,
+            as_attachment=True,
+            download_name=zip_filename,
+            mimetype='application/zip'
+        )
     except Exception as e:
-        current_app.logger.exception("Error exporting map configuration:")
-        add_audit_log(action="EXPORT_MAP_CONFIGURATION_FAILED", details=f"User {current_user.username} failed to export. Error: {str(e)}")
-        return jsonify({'error': 'Failed to export map configuration.'}), 500
+        current_app.logger.exception("Error exporting map configuration as ZIP:")
+        add_audit_log(action="EXPORT_MAP_CONFIGURATION_FAILED", details=f"User {current_user.username} failed to export map configuration as ZIP. Error: {str(e)}")
+        return jsonify({'error': 'Failed to export map configuration due to an unexpected server error.'}), 500
 
 @api_maps_bp.route('/admin/maps/import_configuration', methods=['POST'])
 @login_required
 @permission_required('manage_floor_maps')
 def import_map_configuration():
     if 'file' not in request.files:
+        current_app.logger.warning("Import map configuration: No file part in request.")
         return jsonify({'error': 'No file part in the request.'}), 400
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file.'}), 400
-    if not file.filename.endswith('.json'):
-        return jsonify({'error': 'File must be a JSON file.'}), 400
-    try:
-        config_data = json.load(file)
-    except json.JSONDecodeError:
-        return jsonify({'error': 'Invalid JSON file.'}), 400
 
-    summary, status_code = _import_map_configuration_data(config_data) # Assumes this util is available
-    return jsonify(summary), status_code
+    file = request.files['file']
+    original_filename = file.filename
+
+    if original_filename == '':
+        current_app.logger.warning("Import map configuration: No file selected.")
+        return jsonify({'error': 'No selected file.'}), 400
+
+    if not original_filename.endswith('.zip'):
+        current_app.logger.warning(f"Import map configuration: Invalid file type '{original_filename}'. Must be a ZIP file.")
+        return jsonify({'error': 'Invalid file type. File must be a ZIP archive (.zip).'}), 400
+
+    try:
+        zip_file_bytes = io.BytesIO(file.read())
+        config_data = None
+
+        with zipfile.ZipFile(zip_file_bytes, 'r') as zip_ref:
+            if 'map_configuration.json' not in zip_ref.namelist():
+                current_app.logger.error("Import map configuration: 'map_configuration.json' not found in ZIP.")
+                add_audit_log(action="IMPORT_MAP_CONFIGURATION_FAILED", details=f"User {current_user.username} failed to import from ZIP '{original_filename}': map_configuration.json missing.")
+                return jsonify({'error': "'map_configuration.json' not found in the uploaded ZIP file."}), 400
+
+            try:
+                json_data_str = zip_ref.read('map_configuration.json')
+                config_data = json.loads(json_data_str)
+                current_app.logger.info("Successfully extracted and parsed 'map_configuration.json' from ZIP.")
+            except json.JSONDecodeError as json_err:
+                current_app.logger.error(f"Import map configuration: Invalid JSON in 'map_configuration.json'. Error: {json_err}")
+                add_audit_log(action="IMPORT_MAP_CONFIGURATION_FAILED", details=f"User {current_user.username} failed to import from ZIP '{original_filename}': Invalid JSON in map_configuration.json.")
+                return jsonify({'error': f'Invalid JSON format in map_configuration.json: {str(json_err)}'}), 400
+
+            # Determine upload folder path (consistent with _get_map_configuration_data_zip)
+            upload_folder_maps = current_app.config.get('UPLOAD_FOLDER_MAPS')
+            if not upload_folder_maps:
+                static_folder = os.path.join(current_app.root_path, 'static')
+                default_map_upload_subpath = 'floor_map_uploads'
+                potential_path_static = os.path.join(static_folder, default_map_upload_subpath)
+                if os.path.isdir(potential_path_static):
+                    upload_folder_maps = potential_path_static
+                else:
+                    generic_upload_folder = current_app.config.get('UPLOAD_FOLDER')
+                    if generic_upload_folder and os.path.isdir(generic_upload_folder):
+                        potential_path_generic = os.path.join(generic_upload_folder, default_map_upload_subpath)
+                        if os.path.isdir(potential_path_generic):
+                            upload_folder_maps = potential_path_generic
+                        else:
+                            upload_folder_maps = generic_upload_folder
+                    else:
+                        upload_folder_maps = potential_path_static # Default to static subpath
+
+            os.makedirs(upload_folder_maps, exist_ok=True)
+            current_app.logger.info(f"Ensured image upload folder exists: {upload_folder_maps}")
+
+            extracted_images_count = 0
+            for member_name in zip_ref.namelist():
+                if member_name.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')) and member_name != 'map_configuration.json':
+                    s_filename = secure_filename(os.path.basename(member_name)) # Use os.path.basename to avoid issues with paths in zip
+                    if not s_filename: # secure_filename might return empty if input is odd
+                        current_app.logger.warning(f"Skipping image file with potentially insecure or empty name after sanitization: '{member_name}'")
+                        continue
+
+                    image_save_path = os.path.join(upload_folder_maps, s_filename)
+                    try:
+                        image_data = zip_ref.read(member_name)
+                        with open(image_save_path, 'wb') as f_img:
+                            f_img.write(image_data)
+                        current_app.logger.info(f"Extracted and saved map image: {s_filename} to {image_save_path}")
+                        extracted_images_count += 1
+                    except Exception as e_img_save:
+                        current_app.logger.error(f"Error saving image '{s_filename}' from ZIP to '{image_save_path}': {e_img_save}", exc_info=True)
+                        # Decide if this is a critical error. For now, log and continue.
+                        # Could collect these errors and report them in summary.
+
+        # Proceed with data import using the extracted config_data
+        summary, status_code = _import_map_configuration_data(config_data)
+
+        # Add details about ZIP processing to summary if possible, or just log
+        log_message = f"User {current_user.username} imported map configuration from ZIP '{original_filename}'. Images extracted: {extracted_images_count}."
+        if 'message' in summary:
+            summary['message'] = f"ZIP Import: {summary['message']} (Extracted {extracted_images_count} images from '{original_filename}')"
+
+        current_app.logger.info(log_message + f" Import status: {status_code}")
+        if status_code < 300: # Typically 200, 201, 207 for success/partial success
+            add_audit_log(action="IMPORT_MAP_CONFIGURATION_SUCCESS", details=log_message)
+        else: # 400, 500 for failures
+            add_audit_log(action="IMPORT_MAP_CONFIGURATION_FAILED", details=log_message + f" Errors: {summary.get('errors', 'N/A')}")
+
+        return jsonify(summary), status_code
+
+    except zipfile.BadZipFile:
+        current_app.logger.error(f"Import map configuration: Bad ZIP file uploaded ('{original_filename}').")
+        add_audit_log(action="IMPORT_MAP_CONFIGURATION_FAILED", details=f"User {current_user.username} failed to import from ZIP '{original_filename}': Bad ZIP file.")
+        return jsonify({'error': 'Uploaded file is not a valid ZIP archive or is corrupted.'}), 400
+    except Exception as e:
+        current_app.logger.exception(f"An unexpected error occurred during map configuration import from ZIP '{original_filename}':")
+        add_audit_log(action="IMPORT_MAP_CONFIGURATION_FAILED", details=f"User {current_user.username} an unexpected error occurred during import from ZIP '{original_filename}'. Error: {str(e)}")
+        return jsonify({'error': f'An unexpected error occurred during import: {str(e)}'}), 500
 
 @api_maps_bp.route('/map_details/<int:map_id>', methods=['GET'])
 @login_required

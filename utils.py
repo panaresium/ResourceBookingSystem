@@ -19,6 +19,8 @@ from google.oauth2.credentials import Credentials as UserCredentials
 import socket
 import httplib2
 import time as time_module
+import io
+import zipfile
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -636,6 +638,95 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
              current_status_code = 400 # Bad request or processing error if not already 500 or 207
 
         return summary_dict, current_status_code
+
+
+def _get_map_configuration_data_zip():
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
+    logger.info("Starting map configuration ZIP export.")
+
+    try:
+        export_data = _get_map_configuration_data()
+        json_data_str = json.dumps(export_data, indent=4)
+    except Exception as e:
+        logger.error(f"Error generating map configuration JSON data: {e}", exc_info=True)
+        # Depending on how this function is called, might raise e or return None, None
+        return None, None # Indicates an error in data generation
+
+    zip_buffer = io.BytesIO()
+    image_filenames = set()
+
+    try:
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            logger.debug("Writing map_configuration.json to ZIP.")
+            zip_file.writestr('map_configuration.json', json_data_str)
+
+            if 'maps' in export_data and isinstance(export_data['maps'], list):
+                for map_item in export_data['maps']:
+                    if map_item.get('image_filename'):
+                        image_filenames.add(map_item['image_filename'])
+
+            logger.info(f"Found {len(image_filenames)} unique image filenames to include in ZIP.")
+
+            # Determine upload folder path. Uses 'UPLOAD_FOLDER_MAPS' if defined, else a default.
+            # Defaulting to a subfolder 'floor_map_uploads' within 'static' or 'uploads'
+            # This part might need adjustment based on actual app structure/config
+            upload_folder_maps = current_app.config.get('UPLOAD_FOLDER_MAPS')
+            if not upload_folder_maps:
+                # Fallback logic for upload folder
+                static_folder = os.path.join(current_app.root_path, 'static')
+                default_map_upload_subpath = 'floor_map_uploads' # Common convention
+
+                # Check if static/floor_map_uploads exists
+                potential_path_static = os.path.join(static_folder, default_map_upload_subpath)
+                if os.path.isdir(potential_path_static):
+                    upload_folder_maps = potential_path_static
+                else:
+                    # Fallback to app.config['UPLOAD_FOLDER'] if it exists and is valid
+                    generic_upload_folder = current_app.config.get('UPLOAD_FOLDER')
+                    if generic_upload_folder and os.path.isdir(generic_upload_folder):
+                         # Try to see if a common subpath exists or use it directly
+                        potential_path_generic = os.path.join(generic_upload_folder, default_map_upload_subpath)
+                        if os.path.isdir(potential_path_generic):
+                            upload_folder_maps = potential_path_generic
+                        else: # If subpath doesn't exist in generic UPLOAD_FOLDER, maybe images are at its root
+                            upload_folder_maps = generic_upload_folder
+                    else: # Final fallback if no specific or generic upload folder is clearly identifiable
+                        upload_folder_maps = os.path.join(static_folder, default_map_upload_subpath) # Default assumption
+                        logger.warning(f"UPLOAD_FOLDER_MAPS not configured, and standard fallbacks are not definitively structured. Defaulting to: {upload_folder_maps}. Please verify.")
+
+            logger.info(f"Using image upload folder: {upload_folder_maps}")
+
+            for filename in image_filenames:
+                if not filename or not isinstance(filename, str): # Basic validation
+                    logger.warning(f"Invalid image filename found: {filename}. Skipping.")
+                    continue
+
+                # Sanitize filename to prevent directory traversal issues, though less critical for reads
+                # For ZIP archive name, it's usually fine, but for os.path.join, be careful.
+                # Assuming filenames from DB are generally safe but good practice to be aware.
+                secure_filename = filename # Placeholder if further sanitization like werkzeug.secure_filename is needed
+                                          # but that's typically for *saving* uploads, not archive paths.
+
+                image_path = os.path.join(upload_folder_maps, secure_filename)
+
+                if os.path.exists(image_path) and os.path.isfile(image_path):
+                    try:
+                        with open(image_path, 'rb') as f_img:
+                            zip_file.writestr(secure_filename, f_img.read())
+                        logger.debug(f"Added image {secure_filename} to ZIP from {image_path}.")
+                    except Exception as e_img:
+                        logger.error(f"Error reading image file {secure_filename} from {image_path}: {e_img}", exc_info=True)
+                else:
+                    logger.warning(f"Map image file {secure_filename} not found or is not a file at {image_path} during ZIP export.")
+
+        zip_buffer.seek(0)
+        zip_filename = 'map_configuration_export.zip'
+        logger.info(f"Successfully created ZIP file '{zip_filename}' in memory.")
+        return zip_buffer, zip_filename
+
+    except Exception as e_zip:
+        logger.error(f"Error creating ZIP file for map configuration: {e_zip}", exc_info=True)
+        return None, None # Indicates an error during ZIP creation
 
 
 def _get_resource_configurations_data() -> list:
