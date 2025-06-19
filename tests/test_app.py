@@ -1042,6 +1042,8 @@ class TestAdminBookingSettingsRoutes(AppTests):
         self.assertEqual(settings_after_error.auto_release_if_not_checked_in_minutes, initial_settings.auto_release_if_not_checked_in_minutes)
         self.logout()
 
+# Need io for file uploads in AdminAPITestCase
+import io
 
 class AdminAPITestCase(AppTests):
     def _create_admin_user(self, username="admin_api_user", email_ext="admin_api"):
@@ -1193,6 +1195,248 @@ class AdminAPITestCase(AppTests):
 
         mock_azure_logger_warning.assert_called_once()
         self.assertIn("Placeholder function 'download_booking_data_json_backup' called for file: testfile.json, type: full", mock_azure_logger_warning.call_args[0][0])
+        self.logout()
+
+    def test_import_new_resources_only(self):
+        admin_user = self._create_admin_user(username="admin_import_new", email_ext="import_new")
+        self.login(admin_user.username, "adminapipass")
+
+        # Setup: Create Roles
+        role1 = Role(name="Test Role 1 Import")
+        role2 = Role(name="Test Role 2 Import")
+        db.session.add_all([role1, role2])
+        db.session.commit()
+        role1_id = role1.id
+        role2_id = role2.id
+
+        # Prepare JSON data
+        now_iso = datetime.utcnow().isoformat() + "Z"
+        later_iso = (datetime.utcnow() + timedelta(days=5)).isoformat() + "Z"
+
+        import_data = [
+            {
+                "id": 101,
+                "name": "New Resource One",
+                "capacity": 10,
+                "equipment": "Projector",
+                "status": "draft",
+                "tags": "new, single_tag", # Test single tag string
+                "booking_restriction": "restricted_roles",
+                "published_at": now_iso,
+                "allowed_user_ids": json.dumps([admin_user.id]), # Test JSON string
+                "roles": [{"id": role1_id}],
+                "is_under_maintenance": False,
+                "maintenance_until": None
+            },
+            {
+                "id": 102,
+                "name": "New Resource Two",
+                "capacity": 5,
+                "equipment": "Whiteboard, Markers",
+                "status": "published",
+                "tags": ["tagA", "tagB"], # Test list of tags
+                "booking_restriction": None,
+                "published_at": None,
+                "allowed_user_ids": None, # Test None
+                "roles": [{"id": role1_id}, {"id": role2_id}],
+                "is_under_maintenance": True,
+                "maintenance_until": later_iso
+            }
+        ]
+        import_file_content = json.dumps(import_data)
+        import_file_bytes = io.BytesIO(import_file_content.encode('utf-8'))
+
+        response = self.client.post(
+            url_for('api_resources.import_resources_admin'),
+            data={'file': (import_file_bytes, 'import_new.json')},
+            content_type='multipart/form-data'
+        )
+
+        self.assertEqual(response.status_code, 200, f"Import request failed: {response.get_json()}")
+        response_json = response.get_json()
+
+        self.assertEqual(response_json['created'], 2)
+        self.assertEqual(response_json['updated'], 0)
+        self.assertEqual(response_json['errors'], [])
+        self.assertEqual(response_json['warnings'], [])
+
+        # DB Assertions
+        res101 = db.session.get(Resource, 101)
+        self.assertIsNotNone(res101)
+        self.assertEqual(res101.name, "New Resource One")
+        self.assertEqual(res101.capacity, 10)
+        self.assertEqual(res101.tags, "new, single_tag")
+        self.assertEqual(res101.booking_restriction, "restricted_roles")
+        self.assertIsNotNone(res101.published_at)
+        self.assertEqual(res101.allowed_user_ids, json.dumps([admin_user.id]))
+        self.assertEqual(len(res101.roles), 1)
+        self.assertEqual(res101.roles[0].id, role1_id)
+        self.assertFalse(res101.is_under_maintenance)
+        self.assertIsNone(res101.maintenance_until)
+
+
+        res102 = db.session.get(Resource, 102)
+        self.assertIsNotNone(res102)
+        self.assertEqual(res102.name, "New Resource Two")
+        self.assertEqual(res102.tags, "tagA,tagB") # Should be converted to string
+        self.assertTrue(res102.is_under_maintenance)
+        self.assertIsNotNone(res102.maintenance_until)
+        self.assertEqual(len(res102.roles), 2)
+        # Ensure correct parsing of datetime strings
+        self.assertEqual(res101.published_at.replace(tzinfo=None), datetime.fromisoformat(now_iso.replace("Z", "")))
+        self.assertEqual(res102.maintenance_until.replace(tzinfo=None), datetime.fromisoformat(later_iso.replace("Z", "")))
+
+
+        self.logout()
+
+    def test_import_mixed_new_and_existing_resources(self):
+        admin_user = self._create_admin_user(username="admin_import_mixed", email_ext="import_mixed")
+        self.login(admin_user.username, "adminapipass")
+
+        # Setup: Create existing Resource
+        existing_resource = Resource(id=201, name="Existing R1", capacity=5, status="draft")
+        db.session.add(existing_resource)
+        db.session.commit()
+
+        import_data = [
+            {
+                "id": 201, # Existing
+                "name": "Existing R1 Updated",
+                "capacity": 50,
+                "status": "published"
+            },
+            {
+                "id": 103, # New
+                "name": "Brand New Resource",
+                "capacity": 3,
+                "status": "draft",
+                "tags": "new_mixed_test"
+            }
+        ]
+        import_file_content = json.dumps(import_data)
+        import_file_bytes = io.BytesIO(import_file_content.encode('utf-8'))
+
+        response = self.client.post(
+            url_for('api_resources.import_resources_admin'),
+            data={'file': (import_file_bytes, 'import_mixed.json')},
+            content_type='multipart/form-data'
+        )
+        self.assertEqual(response.status_code, 200, f"Import request failed: {response.get_json()}")
+        response_json = response.get_json()
+
+        self.assertEqual(response_json['created'], 1)
+        self.assertEqual(response_json['updated'], 1)
+        self.assertEqual(response_json['errors'], [])
+
+        # DB Assertions
+        res201_updated = db.session.get(Resource, 201)
+        self.assertIsNotNone(res201_updated)
+        self.assertEqual(res201_updated.name, "Existing R1 Updated")
+        self.assertEqual(res201_updated.capacity, 50)
+        self.assertEqual(res201_updated.status, "published")
+
+        res103_new = db.session.get(Resource, 103)
+        self.assertIsNotNone(res103_new)
+        self.assertEqual(res103_new.name, "Brand New Resource")
+        self.assertEqual(res103_new.tags, "new_mixed_test")
+
+        self.logout()
+
+    def test_import_new_resource_with_invalid_id(self):
+        admin_user = self._create_admin_user(username="admin_import_invalid_id", email_ext="import_invalid_id")
+        self.login(admin_user.username, "adminapipass")
+
+        import_data = [
+            {
+                "id": "invalid_id_string", # Non-integer ID
+                "name": "Resource With Invalid ID",
+                "capacity": 10
+            },
+            {
+                "id": 105, # Valid new resource for comparison
+                "name": "Valid New Resource After Invalid",
+                "capacity": 5
+            }
+        ]
+        import_file_content = json.dumps(import_data)
+        import_file_bytes = io.BytesIO(import_file_content.encode('utf-8'))
+
+        response = self.client.post(
+            url_for('api_resources.import_resources_admin'),
+            data={'file': (import_file_bytes, 'import_invalid.json')},
+            content_type='multipart/form-data'
+        )
+        self.assertEqual(response.status_code, 207, f"Import request status code was not 207: {response.get_json()}")
+        response_json = response.get_json()
+
+        self.assertEqual(response_json['created'], 1) # Only the valid one should be created
+        self.assertEqual(response_json['updated'], 0)
+        self.assertIsInstance(response_json['errors'], list)
+        self.assertEqual(len(response_json['errors']), 1)
+        self.assertIn("has a non-integer ID. Cannot create.", response_json['errors'][0])
+        self.assertIn("invalid_id_string", response_json['errors'][0])
+
+
+        # DB Assertions
+        res_invalid = Resource.query.filter_by(name="Resource With Invalid ID").first()
+        self.assertIsNone(res_invalid, "Resource with invalid ID string should not have been created by name.")
+        # Check if a resource with a numerically interpreted ID was created by mistake (should not happen)
+        # This depends on how SQLAlchemy handles get() with non-integer, but our code should prevent it.
+        # res_invalid_num_id = db.session.get(Resource, "invalid_id_string") # This would likely error in get()
+        # self.assertIsNone(res_invalid_num_id)
+
+
+        res105_valid = db.session.get(Resource, 105)
+        self.assertIsNotNone(res105_valid)
+        self.assertEqual(res105_valid.name, "Valid New Resource After Invalid")
+
+        self.logout()
+
+    def test_import_new_resource_with_non_existent_role(self):
+        admin_user = self._create_admin_user(username="admin_import_bad_role", email_ext="import_bad_role")
+        self.login(admin_user.username, "adminapipass")
+
+        # Setup: Create one existing Role
+        existing_role = Role(name="Existing Role For Import")
+        db.session.add(existing_role)
+        db.session.commit()
+        existing_role_id = existing_role.id
+        non_existent_role_id = 9999 # Assumed not to exist
+
+        import_data = [
+            {
+                "id": 104,
+                "name": "New Resource With Mixed Roles",
+                "capacity": 8,
+                "roles": [{"id": existing_role_id}, {"id": non_existent_role_id}]
+            }
+        ]
+        import_file_content = json.dumps(import_data)
+        import_file_bytes = io.BytesIO(import_file_content.encode('utf-8'))
+
+        response = self.client.post(
+            url_for('api_resources.import_resources_admin'),
+            data={'file': (import_file_bytes, 'import_roles.json')},
+            content_type='multipart/form-data'
+        )
+
+        self.assertEqual(response.status_code, 207, f"Import request status code was not 207: {response.get_json()}")
+        response_json = response.get_json()
+
+        self.assertEqual(response_json['created'], 1)
+        self.assertEqual(response_json['updated'], 0)
+        self.assertEqual(response_json['errors'], [])
+        self.assertIsInstance(response_json['warnings'], list)
+        self.assertEqual(len(response_json['warnings']), 1)
+        self.assertIn(f"Role ID {non_existent_role_id} from backup not found", response_json['warnings'][0])
+
+        # DB Assertions
+        res104 = db.session.get(Resource, 104)
+        self.assertIsNotNone(res104)
+        self.assertEqual(res104.name, "New Resource With Mixed Roles")
+        self.assertEqual(len(res104.roles), 1, "Resource should only have one role assigned.")
+        self.assertEqual(res104.roles[0].id, existing_role_id, "The assigned role is not the existing one.")
+
         self.logout()
 
 
