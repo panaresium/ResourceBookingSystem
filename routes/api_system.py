@@ -454,10 +454,28 @@ def api_one_click_backup():
                 update_task_log(task_id_param, "Gathering resource configuration data...", level="info")
                 resource_config_data = _get_resource_configurations_data()
                 update_task_log(task_id_param, f"Resource configuration data gathered. Found {len(resource_config_data)} resources.", level="info")
+                # Detailed logging for resource_config_data
+                if isinstance(resource_config_data, list):
+                    update_task_log(task_id_param, f"API: Type of resource_config_data is list, length: {len(resource_config_data)}", level='DEBUG')
+                    if resource_config_data:
+                        update_task_log(task_id_param, f"API: First resource item (summary): {str(resource_config_data[0])[:200]}...", level='DEBUG')
+                else:
+                    update_task_log(task_id_param, f"API: Type of resource_config_data is {type(resource_config_data)}, value: {str(resource_config_data)[:200]}...", level='DEBUG')
 
                 update_task_log(task_id_param, "Gathering user configuration data...", level="info")
                 user_config_data = _get_user_configurations_data()
                 update_task_log(task_id_param, f"User configuration data gathered. Found {len(user_config_data.get('users', []))} users and {len(user_config_data.get('roles', []))} roles.", level="info")
+                # Detailed logging for user_config_data
+                if isinstance(user_config_data, dict):
+                    users_count = len(user_config_data.get('users', []))
+                    roles_count = len(user_config_data.get('roles', []))
+                    update_task_log(task_id_param, f"API: Type of user_config_data is dict. Users: {users_count}, Roles: {roles_count}", level='DEBUG')
+                    if user_config_data.get('users'):
+                        update_task_log(task_id_param, f"API: First user item (summary): {str(user_config_data['users'][0])[:200]}...", level='DEBUG')
+                    if user_config_data.get('roles'):
+                        update_task_log(task_id_param, f"API: First role item (summary): {str(user_config_data['roles'][0])[:200]}...", level='DEBUG')
+                else:
+                    update_task_log(task_id_param, f"API: Type of user_config_data is {type(user_config_data)}, value: {str(user_config_data)[:200]}...", level='DEBUG')
 
                 actual_success_flag = create_full_backup(
                     timestamp_str,
@@ -790,28 +808,50 @@ def api_selective_restore():
                                 with open(downloaded_cfg_path, 'r', encoding='utf-8') as f:
                                     json_data = json.load(f)
 
-                                import_result = comp_details['import_func'](json_data)
+                                summary_dict, status_code = comp_details['import_func'](json_data)
 
-                                if import_result is True:
-                                    actions_summary.append(f"{comp_details['name']} restored and applied.")
-                                    update_task_log(task_id_param, f"{comp_details['name']} applied successfully.", level="SUCCESS")
-                                    try:
-                                        os.remove(downloaded_cfg_path)
-                                    except OSError as e_remove:
-                                        update_task_log(task_id_param, f"Warning: Could not remove temporary file {downloaded_cfg_path}: {e_remove}", level="WARNING")
-                                else:
+                                component_apply_message = summary_dict.get('message', f"Applying {comp_details['name']} completed.")
+                                component_errors = summary_dict.get('errors', [])
+                                component_warnings = summary_dict.get('warnings', [])
+
+                                # Check status_code for success (2xx implies success, potentially with warnings)
+                                if status_code < 300:
+                                    actions_summary.append(f"{comp_details['name']} processed: {component_apply_message}")
+
+                                    log_level_for_component = "SUCCESS" # Assume success initially
+
+                                    if component_errors: # If the import function itself reported errors in its summary
+                                        overall_success = False # Mark overall backup as failed
+                                        log_level_for_component = "ERROR"
+                                        errors_list.append(f"{comp_details['name']} apply reported errors: {component_apply_message}. Details: {component_errors}")
+                                    elif component_warnings: # If there are warnings but no errors
+                                        log_level_for_component = "WARNING"
+                                        # Not necessarily setting overall_success = False for just warnings, depends on desired strictness.
+                                        # For now, warnings don't fail the overall_success of the selective restore.
+
+                                    update_task_log(task_id_param,
+                                                    f"{comp_details['name']} apply finished. Status Code: {status_code}. Message: {component_apply_message}",
+                                                    detail=f"Errors reported by import: {component_errors}, Warnings: {component_warnings}",
+                                                    level=log_level_for_component)
+
+                                    if not component_errors: # Only remove temp file if the import function reported no errors in its summary
+                                        try:
+                                            if os.path.exists(downloaded_cfg_path): # Check if file exists before trying to remove
+                                                os.remove(downloaded_cfg_path)
+                                        except OSError as e_remove:
+                                            update_task_log(task_id_param, f"Warning: Could not remove temporary config file {downloaded_cfg_path}: {e_remove}", level="WARNING")
+                                    else:
+                                        update_task_log(task_id_param, f"Downloaded config file {downloaded_cfg_path} kept for inspection due to import errors.", level="WARNING")
+
+                                else: # status_code >= 300 indicates a failure reported by the import function's status_code
                                     overall_success = False
-                                    error_message_from_import = import_result.get('message', f"Apply failed for {comp_details['name']}")
-                                    detailed_errors_from_import = import_result.get('errors', [])
-                                    detailed_warnings_from_import = import_result.get('warnings', [])
-
-                                    full_error_details = f"Errors: {'; '.join(detailed_errors_from_import) if detailed_errors_from_import else 'None'}."
-                                    if detailed_warnings_from_import:
-                                        full_error_details += f" Warnings: {'; '.join(detailed_warnings_from_import)}."
-
-                                    errors_list.append(f"{comp_details['name']} apply failed: {error_message_from_import}. {full_error_details}")
-                                    update_task_log(task_id_param, f"Failed to apply downloaded {comp_details['name']}: {error_message_from_import}", detail=full_error_details, level="ERROR")
-                                    update_task_log(task_id_param, f"Downloaded file {downloaded_cfg_path} kept for inspection due to import failure.", level="WARNING")
+                                    errors_list.append(f"{comp_details['name']} apply failed with status {status_code}: {component_apply_message}. Errors: {component_errors}")
+                                    update_task_log(task_id_param,
+                                                    f"Failed to apply downloaded {comp_details['name']}. Status Code: {status_code}. Message: {component_apply_message}",
+                                                    detail=f"Errors reported by import: {component_errors}, Warnings: {component_warnings}",
+                                                    level="ERROR")
+                                    if os.path.exists(downloaded_cfg_path): # Check if file exists before logging
+                                        update_task_log(task_id_param, f"Downloaded config file {downloaded_cfg_path} kept for inspection due to import failure.", level="WARNING")
                             except FileNotFoundError:
                                 overall_success = False
                                 errors_list.append(f"{comp_details['name']} apply error: Downloaded file {downloaded_cfg_path} not found.")
