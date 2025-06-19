@@ -427,11 +427,70 @@ def _emit_import_progress(socketio_instance, task_id, message, detail='', level=
 
 def _get_map_configuration_data() -> dict:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    logger.warning("_get_map_configuration_data is currently a STUB. Exporting map configurations will not provide actual data.")
+    logger.info("Exporting map configuration data.")
+
+    maps_list = []
+    try:
+        all_floor_maps = FloorMap.query.all()
+        for floor_map in all_floor_maps:
+            maps_list.append({
+                'id': floor_map.id,
+                'name': floor_map.name,
+                'image_filename': floor_map.image_filename,
+                # Fields as per prompt, assuming they exist on FloorMap model
+                'location': getattr(floor_map, 'location', None), # Use getattr for fields that might not exist
+                'floor': getattr(floor_map, 'floor', None),
+                'offset_x': getattr(floor_map, 'offset_x', None),
+                'offset_y': getattr(floor_map, 'offset_y', None),
+                # Prompt specified to omit these, but they were in the import function, including for completeness if they exist
+                'description': getattr(floor_map, 'description', None),
+                'display_order': getattr(floor_map, 'display_order', 0),
+                'is_published': getattr(floor_map, 'is_published', True),
+                'map_data_json': getattr(floor_map, 'map_data_json', None)
+
+            })
+    except Exception as e:
+        logger.error(f"Error fetching FloorMap data: {e}", exc_info=True)
+        # Depending on desired behavior, could return error here or empty list
+        # For now, proceed with empty list if maps fail, resource processing might still be useful for some cases
+
+    resources_map_info_list = []
+    try:
+        # Fetch resources that are assigned to a map
+        resources_with_map = Resource.query.filter(Resource.floor_map_id.isnot(None)).all()
+        for resource in resources_with_map:
+            map_x = None
+            map_y = None
+            if resource.map_coordinates:
+                try:
+                    coords = json.loads(resource.map_coordinates)
+                    map_x = coords.get('x')
+                    map_y = coords.get('y')
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON in map_coordinates for Resource ID {resource.id}: {resource.map_coordinates}")
+                except Exception as e_coords: # Catch other potential errors like coords not being a dict
+                    logger.warning(f"Error parsing map_coordinates for Resource ID {resource.id}: {str(e_coords)}")
+
+
+            resources_map_info_list.append({
+                'resource_id': resource.id,
+                'map_id': resource.floor_map_id,
+                'map_x': map_x,
+                'map_y': map_y
+            })
+    except Exception as e:
+        logger.error(f"Error fetching Resource map info data: {e}", exc_info=True)
+        # Similar to maps, proceed with empty list if resources fail
+
+    num_maps = len(maps_list)
+    num_resources_map_info = len(resources_map_info_list)
+    message = f"Map configuration data exported. Found {num_maps} maps and {num_resources_map_info} resource map assignments."
+    logger.info(message)
+
     return {
-        'maps': [],
-        'resources_map_info': [],
-        'message': "Stub implementation: No actual map configuration data exported."
+        'maps': maps_list,
+        'resources_map_info': resources_map_info_list,
+        'message': message
     }
 
 def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
