@@ -752,8 +752,65 @@ def _get_map_configuration_data_zip():
 
 def _get_resource_configurations_data() -> list:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    logger.warning("_get_resource_configurations_data is currently a STUB. Exporting resource configurations will not provide actual data.")
-    return []
+    logger.info("Starting export of resource configurations.")
+
+    resources_export_list = []
+    try:
+        all_resources = Resource.query.all()
+        logger.info(f"Found {len(all_resources)} resources to export.")
+
+        for resource in all_resources:
+            current_map_coords_dict = {}
+            if resource.map_coordinates:
+                try:
+                    current_map_coords_dict = json.loads(resource.map_coordinates)
+                    if not isinstance(current_map_coords_dict, dict):
+                        logger.warning(f"Resource ID {resource.id}: map_coordinates was not a JSON object, re-initializing. Original: {resource.map_coordinates}")
+                        current_map_coords_dict = {} # Ensure it's a dict
+                except json.JSONDecodeError:
+                    logger.warning(f"Resource ID {resource.id}: map_coordinates JSON is invalid, re-initializing. Original: {resource.map_coordinates}")
+                    current_map_coords_dict = {} # Ensure it's a dict
+
+            # Get role IDs from the many-to-many relationship
+            # This list of role IDs represents the general booking permissions for the resource,
+            # not necessarily map-specific permissions.
+            # For the export, we are now embedding the resource's general role associations
+            # into the 'allowed_role_ids' field within 'map_coordinates' if it's being used as the primary
+            # source for such role definitions on import.
+            # This aligns with the idea that map_coordinates might become the sole source for these IDs.
+            role_ids_for_export = [role.id for role in resource.roles]
+            current_map_coords_dict['allowed_role_ids'] = role_ids_for_export
+
+            resource_dict = {
+                'id': resource.id,
+                'name': resource.name,
+                'status': resource.status,
+                'capacity': resource.capacity,
+                'equipment': resource.equipment,
+                'tags': resource.tags,
+                'booking_restriction': resource.booking_restriction,
+                'published_at': resource.published_at.isoformat() if resource.published_at else None,
+                'allowed_user_ids': resource.allowed_user_ids, # Already a JSON string or None
+                'is_under_maintenance': resource.is_under_maintenance,
+                'maintenance_until': resource.maintenance_until.isoformat() if resource.maintenance_until else None,
+                'floor_map_id': resource.floor_map_id,
+                'map_coordinates': current_map_coords_dict, # This is now a dictionary
+                # 'map_allowed_role_ids': json.dumps(role_ids_for_export) if role_ids_for_export else None, # No longer needed as separate field if embedded
+                # The 'roles' field (list of role dicts {'id': role.id, 'name': role.name}) for general role assignment
+                # is handled by the import function based on the 'roles' key in the input data,
+                # which it expects to be a list of role dicts, not just IDs.
+                # For this export, we should provide that structure if we want to re-import roles correctly.
+                'roles': [{'id': role.id, 'name': role.name} for role in resource.roles]
+            }
+            resources_export_list.append(resource_dict)
+
+        logger.info(f"Successfully prepared {len(resources_export_list)} resources for export.")
+    except Exception as e:
+        logger.error(f"Error during resource configuration export: {e}", exc_info=True)
+        # Depending on policy, could return empty list or raise error
+        # For now, return what has been processed so far, or empty if error was early
+
+    return resources_export_list
 
 def _import_resource_configurations_data(resources_data_list: list): # Return type will be bool or dict
     logger = current_app.logger if current_app else logging.getLogger(__name__)
@@ -807,40 +864,63 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
                     resource.allowed_user_ids = allowed_users_data
 
                 resource.is_under_maintenance = resource_data.get('is_under_maintenance', resource.is_under_maintenance)
-
                 maintenance_until_str = resource_data.get('maintenance_until')
-                resource.maintenance_until = _parse_iso_datetime(maintenance_until_str) # _parse_iso_datetime handles None
+                resource.maintenance_until = _parse_iso_datetime(maintenance_until_str)
 
-                # Handle map_coordinates
-                map_coordinates_data = resource_data.get('map_coordinates')
-                if isinstance(map_coordinates_data, dict):
-                    resource.map_coordinates = json.dumps(map_coordinates_data)
-                elif isinstance(map_coordinates_data, str):
-                    warnings.append(f"Resource ID {backup_id}: 'map_coordinates' was a string. Using as is. Consider using a dictionary for import.")
-                    resource.map_coordinates = map_coordinates_data
-                elif map_coordinates_data is None:
+                # Handle floor_map_id
+                resource.floor_map_id = resource_data.get('floor_map_id', resource.floor_map_id)
+
+                # Handle map_coordinates and resource.roles synchronization
+                role_ids_for_relationship = None
+                map_coords_input_data = resource_data.get('map_coordinates')
+
+                if isinstance(map_coords_input_data, dict):
+                    # Make a copy to avoid modifying the input dict if it's reused
+                    map_coords_to_store = map_coords_input_data.copy()
+                    allowed_role_ids = map_coords_to_store.pop('allowed_role_ids', None) # Remove from dict before storing
+
+                    if allowed_role_ids is not None: # Key was present
+                        if isinstance(allowed_role_ids, list):
+                            role_ids_for_relationship = allowed_role_ids
+                        else:
+                            warnings.append(f"Resource ID {backup_id}: 'allowed_role_ids' in 'map_coordinates' is not a list. Type: {type(allowed_role_ids)}. Roles will be cleared.")
+                            role_ids_for_relationship = [] # Clear roles due to malformed data
+                    # If 'allowed_role_ids' key was missing, role_ids_for_relationship remains None -> roles cleared
+
+                    resource.map_coordinates = json.dumps(map_coords_to_store) # Store the dict without allowed_role_ids
+                elif map_coords_input_data is None:
                     resource.map_coordinates = None
-                else:
-                    warnings.append(f"Resource ID {backup_id}: 'map_coordinates' data is not a dictionary, string, or None. Type: {type(map_coordinates_data)}. Skipping map_coordinates.")
-                    # resource.map_coordinates remains unchanged or could be set to None explicitly
-                    # resource.map_coordinates = None
+                    role_ids_for_relationship = [] # Clear roles
+                else: # String or other type
+                    resource.map_coordinates = str(map_coords_input_data) # Store as string
+                    warnings.append(f"Resource ID {backup_id}: 'map_coordinates' was a {type(map_coords_input_data)}. Stored as string. Roles cannot be parsed and will be cleared.")
+                    role_ids_for_relationship = [] # Clear roles as we can't parse them
 
-                # Handle Roles (Many-to-Many)
-                backed_up_role_ids_data = resource_data.get('roles', [])
-                if backed_up_role_ids_data is not None: # Check if 'roles' key was present
-                    backed_up_role_ids = {role_info.get('id') for role_info in backed_up_role_ids_data if role_info.get('id') is not None}
+                # Update resource.roles relationship
+                if role_ids_for_relationship is not None: # Includes empty list
+                    valid_roles_for_assignment = []
+                    if role_ids_for_relationship: # If list is not empty
+                        # Filter for valid integer IDs before querying
+                        valid_query_ids = [r_id for r_id in role_ids_for_relationship if isinstance(r_id, int)]
+                        if len(valid_query_ids) != len(role_ids_for_relationship):
+                            warnings.append(f"Resource ID {backup_id}: Some role IDs in 'allowed_role_ids' were not integers and were ignored.")
 
-                    if backed_up_role_ids: # Only query if there are IDs to look for
-                        current_roles_in_db = Role.query.filter(Role.id.in_(backed_up_role_ids)).all()
-                        found_role_ids_in_db = {role.id for role in current_roles_in_db}
+                        if valid_query_ids:
+                            current_roles_in_db = Role.query.filter(Role.id.in_(valid_query_ids)).all()
+                            found_role_ids_in_db = {role.id for role in current_roles_in_db}
+                            for r_id in valid_query_ids:
+                                if r_id not in found_role_ids_in_db:
+                                    warnings.append(f"Resource ID {backup_id}: Role ID {r_id} from 'allowed_role_ids' not found in database. Skipping.")
+                            valid_roles_for_assignment = current_roles_in_db
+                    resource.roles = valid_roles_for_assignment # Assign (empty list if no valid roles or empty input)
+                # If role_ids_for_relationship is None (e.g. allowed_role_ids key was missing), this block is skipped,
+                # and roles should be cleared. Let's ensure this happens.
+                elif role_ids_for_relationship is None: # Explicitly clear if key was missing
+                     resource.roles = []
 
-                        for backed_up_id in backed_up_role_ids:
-                            if backed_up_id not in found_role_ids_in_db:
-                                warnings.append(f"For Resource ID {backup_id}, Role ID {backed_up_id} from backup not found in database. Skipping assignment of this role.")
-                        resource.roles = current_roles_in_db # Assign the list of Role objects found in DB
-                    else: # Empty list of roles in backup means remove all roles
-                        resource.roles = []
-                # If 'roles' key is missing from backup, existing roles are preserved by not touching resource.roles
+
+                # Top-level 'roles' field from resource_data is now ignored for populating resource.roles.
+                # The 'map_allowed_role_ids' field is also not directly used for populating resource.roles here.
 
                 db.session.add(resource)
                 resources_updated += 1
@@ -852,67 +932,66 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
                     continue
 
                 new_resource = Resource()
-                new_resource.id = backup_id # Set ID from backup_id
+                new_resource.id = backup_id
 
                 new_resource.name = resource_data.get('name')
                 new_resource.capacity = resource_data.get('capacity')
                 new_resource.equipment = resource_data.get('equipment')
-                new_resource.status = resource_data.get('status', 'draft') # Default to 'draft'
-
+                new_resource.status = resource_data.get('status', 'draft')
                 tags_data = resource_data.get('tags')
-                if isinstance(tags_data, list):
-                    new_resource.tags = ",".join(tags_data)
-                elif tags_data is None:
-                    new_resource.tags = None
-                else:
-                    new_resource.tags = tags_data
-
+                if isinstance(tags_data, list): new_resource.tags = ",".join(tags_data)
+                elif tags_data is None: new_resource.tags = None
+                else: new_resource.tags = tags_data
                 new_resource.booking_restriction = resource_data.get('booking_restriction')
-
-                published_at_str = resource_data.get('published_at')
-                new_resource.published_at = _parse_iso_datetime(published_at_str)
-
+                new_resource.published_at = _parse_iso_datetime(resource_data.get('published_at'))
                 allowed_users_data = resource_data.get('allowed_user_ids')
-                if isinstance(allowed_users_data, list):
-                    new_resource.allowed_user_ids = json.dumps(allowed_users_data)
-                elif allowed_users_data is None:
-                    new_resource.allowed_user_ids = None
-                else:
-                    new_resource.allowed_user_ids = allowed_users_data
+                if isinstance(allowed_users_data, list): new_resource.allowed_user_ids = json.dumps(allowed_users_data)
+                elif allowed_users_data is None: new_resource.allowed_user_ids = None
+                else: new_resource.allowed_user_ids = allowed_users_data
+                new_resource.is_under_maintenance = resource_data.get('is_under_maintenance', False)
+                new_resource.maintenance_until = _parse_iso_datetime(resource_data.get('maintenance_until'))
 
-                new_resource.is_under_maintenance = resource_data.get('is_under_maintenance', False) # Default to False
+                # Handle floor_map_id for new resource
+                new_resource.floor_map_id = resource_data.get('floor_map_id')
 
-                maintenance_until_str = resource_data.get('maintenance_until')
-                new_resource.maintenance_until = _parse_iso_datetime(maintenance_until_str)
+                # Handle map_coordinates and resource.roles synchronization for new resource
+                role_ids_for_relationship_new = None
+                map_coords_input_data_new = resource_data.get('map_coordinates')
 
-                # Handle map_coordinates for new resource
-                map_coordinates_data_new = resource_data.get('map_coordinates')
-                if isinstance(map_coordinates_data_new, dict):
-                    new_resource.map_coordinates = json.dumps(map_coordinates_data_new)
-                elif isinstance(map_coordinates_data_new, str):
-                    warnings.append(f"New Resource (Backup ID {backup_id}): 'map_coordinates' was a string. Using as is. Consider using a dictionary for import.")
-                    new_resource.map_coordinates = map_coordinates_data_new
-                elif map_coordinates_data_new is None:
+                if isinstance(map_coords_input_data_new, dict):
+                    map_coords_to_store_new = map_coords_input_data_new.copy()
+                    allowed_role_ids_new = map_coords_to_store_new.pop('allowed_role_ids', None)
+
+                    if allowed_role_ids_new is not None:
+                        if isinstance(allowed_role_ids_new, list):
+                            role_ids_for_relationship_new = allowed_role_ids_new
+                        else:
+                            warnings.append(f"New Resource (Backup ID {backup_id}): 'allowed_role_ids' in 'map_coordinates' is not a list. Type: {type(allowed_role_ids_new)}. Roles will be empty.")
+                            role_ids_for_relationship_new = []
+                    new_resource.map_coordinates = json.dumps(map_coords_to_store_new)
+                elif map_coords_input_data_new is None:
                     new_resource.map_coordinates = None
-                else:
-                    warnings.append(f"New Resource (Backup ID {backup_id}): 'map_coordinates' data is not a dictionary, string, or None. Type: {type(map_coordinates_data_new)}. Skipping map_coordinates.")
-                    # new_resource.map_coordinates = None
+                    role_ids_for_relationship_new = []
+                else: # String or other
+                    new_resource.map_coordinates = str(map_coords_input_data_new)
+                    warnings.append(f"New Resource (Backup ID {backup_id}): 'map_coordinates' was a {type(map_coords_input_data_new)}. Stored as string. Roles will be empty.")
+                    role_ids_for_relationship_new = []
 
-                # Handle Roles (Many-to-Many) for new resource
-                backed_up_role_ids_data = resource_data.get('roles', []) # Default to empty list
-                new_resource_roles = []
-                if backed_up_role_ids_data is not None: # Check if 'roles' key was present
-                    backed_up_role_ids = {role_info.get('id') for role_info in backed_up_role_ids_data if role_info.get('id') is not None}
+                new_resource_assigned_roles = []
+                if role_ids_for_relationship_new is not None: # Includes empty list
+                    if role_ids_for_relationship_new:
+                        valid_query_ids_new = [r_id for r_id in role_ids_for_relationship_new if isinstance(r_id, int)]
+                        if len(valid_query_ids_new) != len(role_ids_for_relationship_new):
+                             warnings.append(f"New Resource (Backup ID {backup_id}): Some role IDs in 'allowed_role_ids' were not integers and were ignored.")
+                        if valid_query_ids_new:
+                            current_roles_in_db_new = Role.query.filter(Role.id.in_(valid_query_ids_new)).all()
+                            found_role_ids_in_db_new = {role.id for role in current_roles_in_db_new}
+                            for r_id in valid_query_ids_new:
+                                if r_id not in found_role_ids_in_db_new:
+                                    warnings.append(f"New Resource (Backup ID {backup_id}): Role ID {r_id} from 'allowed_role_ids' not found in database. Skipping.")
+                            new_resource_assigned_roles = current_roles_in_db_new
+                new_resource.roles = new_resource_assigned_roles
 
-                    if backed_up_role_ids:
-                        current_roles_in_db = Role.query.filter(Role.id.in_(backed_up_role_ids)).all()
-                        found_role_ids_in_db = {role.id for role in current_roles_in_db}
-
-                        for backed_up_id_role in backed_up_role_ids:
-                            if backed_up_id_role not in found_role_ids_in_db:
-                                warnings.append(f"For new Resource (Backup ID {backup_id}), Role ID {backed_up_id_role} from backup not found in database. Skipping assignment of this role.")
-                        new_resource_roles = current_roles_in_db
-                new_resource.roles = new_resource_roles
 
                 db.session.add(new_resource)
                 created_count += 1
