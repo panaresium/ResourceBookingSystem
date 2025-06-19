@@ -628,6 +628,76 @@ class TestPastBookingLogic(AppTests):
         self.assertEqual(response.status_code, 201, response.get_json())
         self.logout()
 
+    def test_import_resources_admin_success(self):
+        # Setup: Create an admin user and log in
+        admin_user = self._create_admin_user(username="admin_import_test", email_ext="import_test")
+        login_response = self.login(admin_user.username, "adminapipass") # Assuming password based on _create_admin_user
+        self.assertEqual(login_response.status_code, 200)
+
+        # Setup: Create a resource to be updated by the import
+        # No app_with_db fixture in unittest, use self.app_context or app.app_context()
+        with app.app_context():
+            initial_resource = Resource(name="TestResourceForImport", capacity=10, status="draft", floor_map_id=self.floor_map.id)
+            db.session.add(initial_resource)
+            db.session.commit()
+            resource_id_to_update = initial_resource.id
+
+        # Prepare import data that will update the existing resource
+        import_data = [
+            {
+                "id": resource_id_to_update, # Target the existing resource
+                "name": "TestResourceUpdatedName",
+                "capacity": 20,
+                "equipment": "New Projector",
+                "status": "published", # Ensure this is a valid status
+                "tags": "updated, test",
+                "booking_restriction": None, # Assuming 'none' is not a defined value, use None or valid one
+                "published_at": datetime.utcnow().isoformat() + "Z", # Example, ensure format is correct
+                "allowed_user_ids": None,
+                "roles": [],
+                "is_under_maintenance": False,
+                "maintenance_until": None
+            }
+        ]
+        import_file_content = json.dumps(import_data)
+        # Need to import io
+        import io
+        import_file_bytes = io.BytesIO(import_file_content.encode('utf-8'))
+
+        # Execution: Make the POST request
+        # For unittest, client is self.client. Headers might need to be handled if login() doesn't set session cookies
+        # Assuming login() sets up session cookies correctly for subsequent requests by self.client
+        response = self.client.post(
+            '/api/admin/resources/import', # Use url_for if preferred and available in this context
+            # headers=admin_auth_header, # Not directly available, rely on session from login
+            data={'file': (import_file_bytes, 'import.json')},
+            content_type='multipart/form-data'
+        )
+
+        # Assertion: Check the response
+        self.assertEqual(response.status_code, 200, f"Import request failed: {response.get_json()}")
+        response_json = response.get_json()
+
+        # The message from _import_resource_configurations_data for 1 processed, 1 updated, 0 errors, 0 warnings
+        self.assertEqual(response_json['message'], "Resources processed: 1 (Updated: 1).")
+        self.assertEqual(response_json['created'], 0)
+        self.assertEqual(response_json['updated'], 1)
+        self.assertEqual(response_json['errors'], [])
+        # Check warnings if applicable, e.g. not present or empty
+        self.assertTrue('warnings' not in response_json or response_json['warnings'] == [], "Warnings should be empty or not present")
+
+
+        # Optional: Verify the resource was actually updated in the DB
+        with app.app_context():
+            updated_resource = db.session.get(Resource, resource_id_to_update)
+            self.assertIsNotNone(updated_resource)
+            self.assertEqual(updated_resource.name, "TestResourceUpdatedName")
+            self.assertEqual(updated_resource.capacity, 20)
+            self.assertEqual(updated_resource.equipment, "New Projector")
+            self.assertEqual(updated_resource.status, "published")
+
+        self.logout()
+
 
 class TestUpdateBookingConflicts(AppTests):
     def _create_initial_booking(self, user_name, resource_id, start_offset_hours, duration_hours=1, title="Initial Booking", status="approved"):
