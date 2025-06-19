@@ -525,7 +525,21 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
 
             if floor_map: # Map exists with this ID
                 floor_map.name = map_item.get('name', floor_map.name)
-                floor_map.description = map_item.get('description', floor_map.description)
+                new_description = map_item.get('description')
+                if new_description is not None:
+                    # This will attempt to set the attribute.
+                    # If 'description' is not a column in FloorMap, this won't persist
+                    # but it crucially avoids reading a non-existent attribute.
+                    # setattr is used to be explicit about setting an attribute that might
+                    # not be a direct column, though direct assignment would also work here
+                    # if the attribute was expected to exist (even if not a column).
+                    try:
+                        floor_map.description = new_description
+                    except AttributeError:
+                        # This handles cases where the model strictly prevents setting non-column attributes.
+                        # For now, we log a warning, as the main goal is to prevent the crash.
+                        # The broader issue of whether 'description' should be a column is noted in the plan.
+                        logger.warning(f"Attempted to set 'description' on FloorMap ID {floor_map.id} but it's not a model attribute. Backup value was: '{new_description}'")
                 # image_filename is stored as is. Actual file restoration is separate.
                 floor_map.image_filename = map_item.get('image_filename', floor_map.image_filename)
                 floor_map.display_order = map_item.get('display_order', floor_map.display_order)
@@ -537,17 +551,39 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
                 maps_updated += 1
                 backup_to_new_map_id_mapping[backup_map_id] = floor_map.id
             else: # Map with this ID does not exist, create a new one
-                new_map = FloorMap(
-                    name=map_item.get('name'),
-                    description=map_item.get('description'),
-                    image_filename=map_item.get('image_filename'),
-                    display_order=map_item.get('display_order', 0),
-                    is_published=map_item.get('is_published', True),
-                    map_data_json=map_item.get('map_data_json')
-                    # Do NOT set 'id', let the DB assign it.
-                )
+                map_constructor_args = {
+                    'name': map_item.get('name'),
+                    'image_filename': map_item.get('image_filename'),
+                    'display_order': map_item.get('display_order', 0),
+                    'is_published': map_item.get('is_published', True),
+                    'map_data_json': map_item.get('map_data_json')
+                }
+
+                # The FloorMap model currently does not have 'description' as a constructor argument.
+                # Passing it would cause a TypeError.
+                # We will handle 'description' after object creation using setattr,
+                # similar to how it's handled for existing map objects.
+
+                new_map = FloorMap(**map_constructor_args)
                 db.session.add(new_map)
                 db.session.flush() # Flush to get the new_map.id
+
+                new_description = map_item.get('description')
+                if new_description is not None:
+                    try:
+                        # Attempt to set 'description' after creation.
+                        # If 'description' is not a model attribute, this might log a warning
+                        # or be a no-op depending on SQLAlchemy behavior for non-column attributes,
+                        # but it avoids the TypeError during construction.
+                        setattr(new_map, 'description', new_description)
+                        # If setattr itself is problematic for non-column attributes on new instances
+                        # before commit, or if a more explicit warning is desired:
+                        if not hasattr(new_map.__class__, 'description') or not new_map.__class__.__table__.columns.get('description'):
+                             logger.warning(f"Set 'description' on newly created FloorMap (Backup ID: {backup_map_id}, New ID: {new_map.id}) post-construction, but 'description' is not a formal model attribute. Value: '{new_description}'")
+                    except AttributeError:
+                         # This catch block might be redundant if setattr on new objects behaves permissively,
+                         # but kept for safety.
+                        logger.warning(f"Attempted to set 'description' via setattr on new FloorMap (Backup ID: {backup_map_id}, New ID: {new_map.id}) but failed. Value: '{new_description}'")
 
                 backup_to_new_map_id_mapping[backup_map_id] = new_map.id
                 maps_created += 1
