@@ -559,7 +559,27 @@ def restore_full_backup(backup_timestamp, task_id=None, dry_run=False):
 
 
 def create_full_backup(timestamp_str, map_config_data=None, resource_configs_data=None, user_configs_data=None, task_id=None):
-    # ... (original implementation, using new _emit_progress) ...
+    _emit_progress(task_id, f"AzureBackup: Received map_config_data type: {type(map_config_data)}", level='DEBUG')
+    # Detailed logging for resource_configs_data
+    if isinstance(resource_configs_data, list):
+        _emit_progress(task_id, f"AzureBackup: Received resource_configs_data type: list, length: {len(resource_configs_data)}", level='DEBUG')
+        if resource_configs_data:
+            _emit_progress(task_id, f"AzureBackup: First received resource item (summary): {str(resource_configs_data[0])[:200]}...", level='DEBUG')
+    else:
+        _emit_progress(task_id, f"AzureBackup: Received resource_configs_data type: {type(resource_configs_data)}, value: {str(resource_configs_data)[:200]}...", level='DEBUG')
+
+    # Detailed logging for user_configs_data
+    if isinstance(user_configs_data, dict):
+        users_count = len(user_configs_data.get('users', []))
+        roles_count = len(user_configs_data.get('roles', []))
+        _emit_progress(task_id, f"AzureBackup: Received user_configs_data type: dict. Users: {users_count}, Roles: {roles_count}", level='DEBUG')
+        if user_configs_data.get('users'):
+            _emit_progress(task_id, f"AzureBackup: First received user item (summary): {str(user_configs_data['users'][0])[:200]}...", level='DEBUG')
+        if user_configs_data.get('roles'):
+            _emit_progress(task_id, f"AzureBackup: First received role item (summary): {str(user_configs_data['roles'][0])[:200]}...", level='DEBUG')
+    else:
+        _emit_progress(task_id, f"AzureBackup: Received user_configs_data type: {type(user_configs_data)}, value: {str(user_configs_data)[:200]}...", level='DEBUG')
+
     overall_success = True
     backed_up_items = []
     _emit_progress(task_id, "Attempting to initialize Azure service client for backup...", level='INFO')
@@ -603,6 +623,7 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             (user_configs_data, "user_configs", USER_CONFIG_FILENAME_PREFIX)
         ]
         for config_data, name, prefix in configs_to_backup:
+            _emit_progress(task_id, f"AzureBackup: Checking config component '{name}'. Data is None: {config_data is None}. Data is empty (if applicable): {not config_data if isinstance(config_data, (list, dict)) else 'N/A'}", level='DEBUG')
             if not config_data: _emit_progress(task_id, f"{name} data empty, skipping.", level='INFO'); continue
             tmp_path = None
             try:
