@@ -841,13 +841,13 @@
                 drawnAreas = resources.filter(r => r.map_coordinates && r.floor_map_id == mapId)
                                      .map(r => {
                                          let roleIds = [];
-                                         // Prioritize the top-level r.map_allowed_role_ids which should be a list of IDs
-                                         if (r.map_allowed_role_ids && Array.isArray(r.map_allowed_role_ids)) {
-                                             roleIds = r.map_allowed_role_ids;
+                                         if (Array.isArray(r.roles)) {
+                                             roleIds = r.roles.map(role => role.id);
+                                         } else if (r.map_coordinates && Array.isArray(r.map_coordinates.allowed_role_ids)) {
+                                             roleIds = r.map_coordinates.allowed_role_ids;
+                                         } else {
+                                             roleIds = []; // Default to empty array
                                          }
-                                         // No fallback to r.roles or r.map_coordinates.allowed_role_ids is needed here,
-                                         // as map_allowed_role_ids is the canonical source for area-specific roles.
-                                         // If it's not present or not an array, roleIds will remain empty, which is correct.
                                          return { // Adapt to the expected structure for drawing
                                              resource_id: r.id,
                                              name: r.name, // For potential display on canvas later
