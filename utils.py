@@ -773,8 +773,102 @@ def _get_map_configuration_data_zip():
 
 def _get_resource_configurations_data() -> list:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    logger.warning("_get_resource_configurations_data is currently a STUB. Exporting resource configurations will not provide actual data.")
-    return []
+    logger.info("Starting export of resource configurations data.")
+    all_resources_data = []
+
+    try:
+        resources = Resource.query.all()
+        logger.info(f"Found {len(resources)} resources to process.")
+
+        for resource in resources:
+            resource_config = {
+                'id': resource.id,
+                'name': resource.name,
+                'capacity': resource.capacity,
+                'equipment': resource.equipment,
+                'status': resource.status,
+                'booking_restriction': resource.booking_restriction,
+                'image_filename': resource.image_filename,
+                'is_under_maintenance': resource.is_under_maintenance,
+                'max_recurrence_count': resource.max_recurrence_count,
+                'scheduled_status': resource.scheduled_status,
+                'floor_map_id': resource.floor_map_id,
+                'current_pin': resource.current_pin,
+            }
+
+            # Handle tags (ensure string)
+            if isinstance(resource.tags, list):
+                resource_config['tags'] = ",".join(resource.tags)
+            else:
+                resource_config['tags'] = resource.tags
+
+            # Handle maintenance_until (ISO format if datetime)
+            if isinstance(resource.maintenance_until, datetime):
+                resource_config['maintenance_until'] = resource.maintenance_until.isoformat()
+            else:
+                resource_config['maintenance_until'] = resource.maintenance_until
+
+            # Handle scheduled_status_at (ISO format if datetime)
+            if isinstance(resource.scheduled_status_at, datetime):
+                resource_config['scheduled_status_at'] = resource.scheduled_status_at.isoformat()
+            else:
+                resource_config['scheduled_status_at'] = resource.scheduled_status_at
+
+            # Handle map_coordinates (JSON string if complex)
+            if isinstance(resource.map_coordinates, (dict, list)):
+                try:
+                    resource_config['map_coordinates'] = json.dumps(resource.map_coordinates)
+                except TypeError:
+                    logger.warning(f"Could not serialize map_coordinates for resource {resource.id} to JSON. Storing as string.")
+                    resource_config['map_coordinates'] = str(resource.map_coordinates)
+            else:
+                resource_config['map_coordinates'] = resource.map_coordinates # Assume already string or None
+
+            # Handle map_allowed_role_ids (JSON string if list/dict)
+            if isinstance(resource.map_allowed_role_ids, (list, dict)):
+                try:
+                    resource_config['map_allowed_role_ids'] = json.dumps(resource.map_allowed_role_ids)
+                except TypeError:
+                    logger.warning(f"Could not serialize map_allowed_role_ids for resource {resource.id} to JSON. Storing as string.")
+                    resource_config['map_allowed_role_ids'] = str(resource.map_allowed_role_ids)
+            else:
+                # If it's already a string (intended to be JSON), or None, keep as is.
+                # If it's some other type, it might need specific handling or will be stored as its string representation.
+                resource_config['map_allowed_role_ids'] = resource.map_allowed_role_ids
+
+
+            # ResourcePINs
+            resource_pins_list = []
+            for pin_obj in resource.pins: # Assuming 'pins' is the relationship name
+                resource_pins_list.append({
+                    'id': pin_obj.id,
+                    'pin_value': pin_obj.pin_value,
+                    'is_active': pin_obj.is_active,
+                    'created_at': pin_obj.created_at.isoformat() if pin_obj.created_at else None,
+                    'notes': pin_obj.notes
+                })
+            resource_config['resource_pins'] = resource_pins_list
+
+            # Associated Roles
+            associated_roles_list = []
+            for role_obj in resource.roles: # Assuming 'roles' is the relationship name
+                associated_roles_list.append({
+                    'id': role_obj.id,
+                    'name': role_obj.name
+                })
+            resource_config['associated_roles'] = associated_roles_list
+
+            all_resources_data.append(resource_config)
+
+        logger.info(f"Successfully processed {len(all_resources_data)} resources for export.")
+
+    except Exception as e:
+        logger.error(f"Error during resource configurations data export: {e}", exc_info=True)
+        # Depending on desired behavior, could raise e or return partially collected data or empty list
+        # For now, returning what has been collected so far, or empty if error was early.
+        # Consider adding a specific error state to the return if needed by the caller.
+
+    return all_resources_data
 
 def _import_resource_configurations_data(resources_data_list: list): # Return type will be bool or dict
     logger = current_app.logger if current_app else logging.getLogger(__name__)
@@ -1109,11 +1203,87 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
 
 def _get_user_configurations_data() -> dict:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    logger.warning("_get_user_configurations_data is currently a STUB. Exporting user configurations will not provide actual data.")
+    logger.info("Starting export of user and role configurations data.")
+
+    all_roles_data = []
+    all_users_data = []
+
+    # Export Roles
+    try:
+        roles = Role.query.all()
+        logger.info(f"Found {len(roles)} roles to process.")
+        for role in roles:
+            role_config = {
+                'id': role.id,
+                'name': role.name,
+                'description': getattr(role, 'description', None) # Use getattr if description might not exist
+            }
+
+            permissions_data = getattr(role, 'permissions', None)
+            if isinstance(permissions_data, str):
+                # Assuming comma-separated if string, otherwise might need json.loads if it's a JSON string
+                try:
+                    # Attempt to parse as JSON first, as it's a common way to store lists in a string field
+                    parsed_permissions = json.loads(permissions_data)
+                    if isinstance(parsed_permissions, list):
+                        role_config['permissions'] = parsed_permissions
+                    else:
+                        # If not a list after parsing, treat as a single permission or fallback
+                        logger.warning(f"Permissions for role {role.id} ('{role.name}') was a JSON string but not a list. Storing as is.")
+                        role_config['permissions'] = [str(permissions_data)] # Fallback to list with the string
+                except json.JSONDecodeError:
+                    # If not valid JSON, then assume comma-separated
+                    role_config['permissions'] = [p.strip() for p in permissions_data.split(',') if p.strip()]
+            elif isinstance(permissions_data, list):
+                role_config['permissions'] = permissions_data
+            elif permissions_data is None:
+                role_config['permissions'] = []
+            else:
+                logger.warning(f"Permissions for role {role.id} ('{role.name}') is of unexpected type: {type(permissions_data)}. Storing as string list.")
+                role_config['permissions'] = [str(permissions_data)] # Fallback
+
+            all_roles_data.append(role_config)
+        logger.info(f"Successfully processed {len(all_roles_data)} roles.")
+    except Exception as e:
+        logger.error(f"Error during role configurations data export: {e}", exc_info=True)
+        # Continue to user export even if roles fail, or handle error as per requirements
+
+    # Export Users
+    try:
+        users = User.query.all()
+        logger.info(f"Found {len(users)} users to process.")
+        for user in users:
+            user_config = {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'is_admin': user.is_admin,
+                # Use getattr for fields that might not be present on all User model versions
+                'first_name': getattr(user, 'first_name', None),
+                'last_name': getattr(user, 'last_name', None),
+                'phone': getattr(user, 'phone', None),
+                'section': getattr(user, 'section', None),
+                'department': getattr(user, 'department', None),
+                'position': getattr(user, 'position', None),
+                'is_active': getattr(user, 'is_active', True) # Default to True if not present
+            }
+
+            # Assigned Role IDs
+            user_config['assigned_role_ids'] = [role.id for role in user.roles]
+
+            all_users_data.append(user_config)
+        logger.info(f"Successfully processed {len(all_users_data)} users.")
+    except Exception as e:
+        logger.error(f"Error during user configurations data export: {e}", exc_info=True)
+
+    num_roles_exported = len(all_roles_data)
+    num_users_exported = len(all_users_data)
+    logger.info(f"User and role configurations data export completed. Exported {num_users_exported} users and {num_roles_exported} roles.")
+
     return {
-        'users': [],
-        'roles': [],
-        'message': "Stub implementation: No actual user configuration data exported."
+        'users': all_users_data,
+        'roles': all_roles_data,
+        'message': f"Exported {num_users_exported} users and {num_roles_exported} roles."
     }
 
 def _import_user_configurations_data(user_config_data: dict): # Return type will be bool or dict
