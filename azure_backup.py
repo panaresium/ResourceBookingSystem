@@ -881,123 +881,95 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
     return overall_success
 
 # --- delete_backup_set Implementation ---
+def _recursively_delete_share_directory(share_client: ShareClient, dir_full_path_on_share: str, task_id: str = None) -> bool:
+    """
+    Recursively deletes a directory and all its contents (files and subdirectories) on an Azure File Share.
+    Args:
+        share_client: The ShareClient for the Azure File Share.
+        dir_full_path_on_share: The full path of the directory to delete, relative to the share root.
+        task_id: Optional task ID for progress logging.
+    Returns:
+        True if deletion was successful or directory didn't exist, False otherwise.
+    """
+    _emit_progress(task_id, f"Attempting to recursively delete directory: '{dir_full_path_on_share}'", level='DEBUG')
+    try:
+        dir_client = share_client.get_directory_client(dir_full_path_on_share)
+        if not _client_exists(dir_client):
+            _emit_progress(task_id, f"Directory '{dir_full_path_on_share}' not found. Nothing to delete.", level='INFO')
+            return True
+
+        items = list(dir_client.list_directories_and_files()) # List all items before starting deletion
+        _emit_progress(task_id, f"Found {len(items)} items in '{dir_full_path_on_share}'.", level='DEBUG')
+
+        for item in items:
+            item_path = f"{dir_full_path_on_share}/{item['name']}"
+            if item['is_directory']:
+                if not _recursively_delete_share_directory(share_client, item_path, task_id):
+                    # If recursive call fails, propagate failure
+                    _emit_progress(task_id, f"Failed to delete subdirectory '{item_path}'. Aborting deletion of '{dir_full_path_on_share}'.", level='ERROR')
+                    return False
+            else: # It's a file
+                _emit_progress(task_id, f"Deleting file: '{item_path}'", level='DEBUG')
+                file_client = share_client.get_file_client(item_path)
+                if _client_exists(file_client): # Should exist as it was just listed
+                    file_client.delete_file()
+                else: # Should not happen if listing is consistent
+                     _emit_progress(task_id, f"File '{item_path}' listed but not found during deletion attempt. Skipping.", level='WARNING')
+
+
+        # After all contents are deleted, delete the directory itself
+        _emit_progress(task_id, f"All contents of '{dir_full_path_on_share}' deleted. Deleting directory itself.", level='DEBUG')
+        dir_client.delete_directory()
+        _emit_progress(task_id, f"Successfully deleted directory: '{dir_full_path_on_share}'", level='INFO')
+        return True
+
+    except ResourceNotFoundError: # Should ideally be caught by _client_exists, but good for safety
+        _emit_progress(task_id, f"Directory '{dir_full_path_on_share}' became not found during deletion process.", level='WARNING')
+        return True # If it's gone, it's effectively deleted
+    except Exception as e:
+        _emit_progress(task_id, f"Error recursively deleting directory '{dir_full_path_on_share}': {str(e)}", level='ERROR')
+        logger.error(f"[Task {task_id}] Error recursively deleting directory '{dir_full_path_on_share}': {e}", exc_info=True)
+        return False
+
 def delete_backup_set(backup_timestamp, task_id=None):
     logger.info(f"[Task {task_id}] Initiating deletion for backup set with timestamp: {backup_timestamp}")
     _emit_progress(task_id, f"Starting deletion of backup set: {backup_timestamp}", level="INFO")
 
-    overall_success = True
-    service_client = None
     try:
         service_client = _get_service_client()
     except RuntimeError as e:
-        _emit_progress(task_id, "Failed to initialize Azure service client.", detail=str(e), level="ERROR")
+        _emit_progress(task_id, "Failed to initialize Azure service client for deletion.", detail=str(e), level="ERROR")
         return False
 
-    db_share_name = os.environ.get('AZURE_DB_SHARE', 'db-backups')
-    config_share_name = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
-    media_share_name = os.environ.get('AZURE_MEDIA_SHARE', 'media-backups')
+    system_backup_share_name = os.environ.get('AZURE_SYSTEM_BACKUP_SHARE', 'system-backups')
+    share_client = service_client.get_share_client(system_backup_share_name)
 
-    deleted_components = []
-    failed_components = []
+    if not _client_exists(share_client):
+        _emit_progress(task_id, f"System backup share '{system_backup_share_name}' not found. Cannot delete backup set.", level="ERROR")
+        return False
 
-    def _delete_file_if_exists_local(share_client, file_path, component_name):
-        nonlocal overall_success # To modify overall_success from outer scope
-        try:
-            file_client = share_client.get_file_client(file_path)
-            if _client_exists(file_client):
-                _emit_progress(task_id, f"Deleting {component_name} file: {file_path} from share {share_client.share_name}", level="INFO")
-                file_client.delete_file()
-                _emit_progress(task_id, f"Successfully deleted {component_name} file: {file_path}", level="INFO")
-                deleted_components.append(f"{component_name}: {file_path}")
-                return True
-            else:
-                _emit_progress(task_id, f"{component_name} file not found: {file_path}", level="INFO")
-                deleted_components.append(f"{component_name}: {file_path} (not found)")
-                return True
-        except Exception as e:
-            logger.error(f"[Task {task_id}] Error deleting {component_name} file {file_path}: {e}", exc_info=True)
-            _emit_progress(task_id, f"Error deleting {component_name} file: {file_path}", detail=str(e), level="ERROR")
-            failed_components.append(f"{component_name}: {file_path}")
-            overall_success = False
-            return False
+    target_backup_set_path = f"{FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_timestamp}"
+    _emit_progress(task_id, f"Target backup set directory for deletion: '{target_backup_set_path}' on share '{system_backup_share_name}'.", level="INFO")
 
-    def _delete_directory_recursive_local(share_client, dir_path, component_name_prefix):
-        nonlocal overall_success
-        try:
-            dir_client = share_client.get_directory_client(dir_path)
-            if not _client_exists(dir_client):
-                _emit_progress(task_id, f"{component_name_prefix} directory not found: {dir_path}", level="INFO")
-                deleted_components.append(f"{component_name_prefix} directory: {dir_path} (not found)")
-                return True
+    dir_client = share_client.get_directory_client(target_backup_set_path)
+    if not _client_exists(dir_client):
+        _emit_progress(task_id, f"Backup set directory '{target_backup_set_path}' not found. Considered already deleted.", level='INFO')
+        return True
 
-            _emit_progress(task_id, f"Deleting contents of {component_name_prefix} directory: {dir_path}...", level="INFO")
-            for item in dir_client.list_directories_and_files():
-                item_path = f"{dir_path}/{item['name']}"
-                if item['is_directory']:
-                    _delete_directory_recursive_local(share_client, item_path, f"{component_name_prefix} subdirectory")
-                else:
-                    _delete_file_if_exists_local(share_client, item_path, f"{component_name_prefix} file")
-
-            _emit_progress(task_id, f"Deleting {component_name_prefix} directory itself: {dir_path}", level="INFO")
-            dir_client.delete_directory()
-            _emit_progress(task_id, f"Successfully deleted {component_name_prefix} directory: {dir_path}", level="INFO")
-            deleted_components.append(f"{component_name_prefix} directory: {dir_path}")
-            return True
-        except Exception as e:
-            logger.error(f"[Task {task_id}] Error deleting {component_name_prefix} directory {dir_path}: {e}", exc_info=True)
-            _emit_progress(task_id, f"Error deleting {component_name_prefix} directory {dir_path}", detail=str(e), level="ERROR")
-            failed_components.append(f"{component_name_prefix} directory: {dir_path}")
-            overall_success = False
-            return False
-
-    _emit_progress(task_id, "Processing database and manifest files for deletion...", level="INFO")
     try:
-        db_share_client = service_client.get_share_client(db_share_name)
-        if _client_exists(db_share_client):
-            db_file = f"{DB_BACKUPS_DIR}/{DB_FILENAME_PREFIX}{backup_timestamp}.db"
-            manifest_file = f"{DB_BACKUPS_DIR}/backup_manifest_{backup_timestamp}.json"
-            _delete_file_if_exists_local(db_share_client, db_file, "Database backup")
-            _delete_file_if_exists_local(db_share_client, manifest_file, "Backup manifest")
+        success = _recursively_delete_share_directory(share_client, target_backup_set_path, task_id)
+        if success:
+            _emit_progress(task_id, f"Successfully deleted backup set '{target_backup_set_path}'.", level='SUCCESS')
+            logger.info(f"[Task {task_id}] Successfully deleted backup set '{target_backup_set_path}'.")
         else:
-            _emit_progress(task_id, f"Database share '{db_share_name}' not found. Skipping.", level="WARNING")
+            _emit_progress(task_id, f"Deletion of backup set '{target_backup_set_path}' failed or completed with errors.", level='ERROR')
+            logger.error(f"[Task {task_id}] Deletion of backup set '{target_backup_set_path}' failed.")
+        return success
     except Exception as e:
-        _emit_progress(task_id, f"Error accessing DB share '{db_share_name}'.", detail=str(e), level="ERROR"); overall_success = False; failed_components.append(f"DB Share: {db_share_name}")
-
-    _emit_progress(task_id, "Processing configuration files for deletion...", level="INFO")
-    try:
-        config_share_client = service_client.get_share_client(config_share_name)
-        if _client_exists(config_share_client):
-            map_config_file = f"{CONFIG_BACKUPS_DIR}/{MAP_CONFIG_FILENAME_PREFIX}{backup_timestamp}.json"
-            resource_config_file = f"{CONFIG_BACKUPS_DIR}/{RESOURCE_CONFIG_FILENAME_PREFIX}{backup_timestamp}.json"
-            user_config_file = f"{CONFIG_BACKUPS_DIR}/{USER_CONFIG_FILENAME_PREFIX}{backup_timestamp}.json"
-            _delete_file_if_exists_local(config_share_client, map_config_file, "Map config")
-            _delete_file_if_exists_local(config_share_client, resource_config_file, "Resource configs")
-            _delete_file_if_exists_local(config_share_client, user_config_file, "User configs")
-        else:
-            _emit_progress(task_id, f"Config share '{config_share_name}' not found. Skipping.", level="WARNING")
-    except Exception as e:
-        _emit_progress(task_id, f"Error accessing Config share '{config_share_name}'.", detail=str(e), level="ERROR"); overall_success = False; failed_components.append(f"Config Share: {config_share_name}")
-
-    _emit_progress(task_id, "Processing media files for deletion...", level="INFO")
-    try:
-        media_share_client = service_client.get_share_client(media_share_name)
-        if _client_exists(media_share_client):
-            media_backup_dir_for_timestamp = f"{MEDIA_BACKUPS_DIR_BASE}/backup_{backup_timestamp}"
-            _delete_directory_recursive_local(media_share_client, media_backup_dir_for_timestamp, "Media backup")
-        else:
-            _emit_progress(task_id, f"Media share '{media_share_name}' not found. Skipping.", level="WARNING")
-    except Exception as e:
-        _emit_progress(task_id, f"Error accessing Media share '{media_share_name}'.", detail=str(e), level="ERROR"); overall_success = False; failed_components.append(f"Media Share: {media_share_name}")
-
-    if overall_success:
-        _emit_progress(task_id, f"Successfully processed deletion for backup set {backup_timestamp}.", level="SUCCESS")
-        logger.info(f"[Task {task_id}] Deletion process for {backup_timestamp} completed. Success: True. Processed: {deleted_components}")
-    else:
-        _emit_progress(task_id, f"Deletion for backup set {backup_timestamp} completed with errors.", detail=f"Failed: {failed_components}", level="ERROR")
-        logger.error(f"[Task {task_id}] Deletion for {backup_timestamp} completed. Success: False. Failed: {failed_components}. Processed: {deleted_components}")
-
-    return overall_success
-
+        # This catch block might be redundant if _recursively_delete_share_directory handles its exceptions and returns False
+        _emit_progress(task_id, f"An unexpected error occurred during deletion of backup set '{target_backup_set_path}': {str(e)}", level='ERROR')
+        logger.error(f"[Task {task_id}] Unexpected error deleting backup set '{target_backup_set_path}': {e}", exc_info=True)
+        return False
 
 # --- Other placeholder functions with updated signatures ---
 def verify_backup_set(backup_timestamp, task_id=None):
