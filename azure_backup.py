@@ -984,129 +984,106 @@ def verify_backup_set(backup_timestamp, task_id=None):
     except RuntimeError as e:
         _emit_progress(task_id, "Failed to initialize Azure service client.", detail=str(e), level="ERROR")
         return {'status': 'failed_precondition', 'message': str(e), 'checks': checks, 'errors': [str(e)]}
-    except Exception as e:
+    except Exception as e: # General catch for other init errors
         _emit_progress(task_id, "Unexpected error initializing Azure service client.", detail=str(e), level="ERROR")
-        return {'status': 'failed_precondition', 'message': f"Unexpected error: {str(e)}", 'checks': checks, 'errors': [f"Unexpected error: {str(e)}"]}
+        return {'status': 'failed_precondition', 'message': f"Unexpected error during client init: {str(e)}", 'checks': checks, 'errors': [f"Unexpected init error: {str(e)}"]}
 
-    db_share_name = os.environ.get('AZURE_DB_SHARE', 'db-backups')
+    system_backup_share_name = os.environ.get('AZURE_SYSTEM_BACKUP_SHARE', 'system-backups')
+    share_client = service_client.get_share_client(system_backup_share_name)
+
+    if not _client_exists(share_client):
+        _emit_progress(task_id, f"System backup share '{system_backup_share_name}' does not exist.", level="ERROR")
+        errors.append(f"System backup share '{system_backup_share_name}' does not exist.")
+        return {'status': 'failed_precondition', 'message': f"System backup share '{system_backup_share_name}' not found.", 'checks': checks, 'errors': errors}
+
     manifest_filename = f"backup_manifest_{backup_timestamp}.json"
-    manifest_remote_path = f"{DB_BACKUPS_DIR}/{manifest_filename}"
+    # Path to the manifest file within the specific backup_<timestamp> directory
+    manifest_full_path_on_share = f"{FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_timestamp}/{COMPONENT_SUBDIR_MANIFEST}/{manifest_filename}"
+
     manifest_local_temp_path = None
+    manifest_data = None
 
     try:
-        db_share_client = service_client.get_share_client(db_share_name)
-        if not _client_exists(db_share_client):
-            _emit_progress(task_id, f"DB Share '{db_share_name}' does not exist.", level="ERROR")
-            errors.append(f"DB Share '{db_share_name}' does not exist.")
-            return {'status': 'failed_precondition', 'message': f"DB Share '{db_share_name}' not found.", 'checks': checks, 'errors': errors}
-
-        _emit_progress(task_id, f"Attempting to download manifest: {manifest_remote_path}", level="INFO")
+        _emit_progress(task_id, f"Attempting to download manifest: '{manifest_full_path_on_share}' from share '{system_backup_share_name}'.", level="INFO")
         with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp_file:
             manifest_local_temp_path = tmp_file.name
 
-        if download_file(db_share_client, manifest_remote_path, manifest_local_temp_path):
-            _emit_progress(task_id, "Manifest downloaded successfully.", detail=f"Path: {manifest_local_temp_path}", level="INFO")
-            checks.append({"component": "Manifest", "name": manifest_filename, "status": "Downloaded"})
+        if download_file(share_client, manifest_full_path_on_share, manifest_local_temp_path):
+            _emit_progress(task_id, "Manifest downloaded successfully.", detail=f"Local path: {manifest_local_temp_path}", level="INFO")
+            checks.append({"component": "Manifest", "name": manifest_filename, "status": "Downloaded", "path_on_share": manifest_full_path_on_share})
+
+            with open(manifest_local_temp_path, 'r', encoding='utf-8') as f:
+                manifest_data = json.load(f)
+            _emit_progress(task_id, "Manifest parsed successfully.", level="INFO")
+            checks.append({"component": "Manifest", "name": manifest_filename, "status": "Parsed"})
         else:
-            _emit_progress(task_id, "Failed to download manifest.", detail=f"Path: {manifest_remote_path}", level="ERROR")
-            errors.append(f"Failed to download manifest: {manifest_filename}")
-            # If manifest download fails, we cannot proceed with further checks based on it.
-            return {'status': 'failed_precondition', 'message': 'Failed to download manifest.', 'checks': checks, 'errors': errors}
+            _emit_progress(task_id, "Failed to download manifest.", detail=f"Share path: {manifest_full_path_on_share}", level="ERROR")
+            errors.append(f"Failed to download manifest: {manifest_filename} from {manifest_full_path_on_share}")
+            return {'status': 'failed_precondition', 'message': 'Failed to download manifest, cannot verify backup set.', 'checks': checks, 'errors': errors}
 
-        with open(manifest_local_temp_path, 'r') as f:
-            manifest_data = json.load(f)
-        _emit_progress(task_id, "Manifest parsed successfully.", level="INFO")
-        checks.append({"component": "Manifest", "name": manifest_filename, "status": "Parsed"})
-
-    except json.JSONDecodeError as e:
-        _emit_progress(task_id, "Failed to parse manifest JSON.", detail=str(e), level="ERROR")
-        errors.append(f"Failed to parse manifest JSON: {str(e)}")
-        status = 'errors_found' # Or 'failed_precondition' if considered critical
-        # Return early as component checks depend on a valid manifest
+    except json.JSONDecodeError as e_json:
+        _emit_progress(task_id, "Failed to parse manifest JSON.", detail=str(e_json), level="ERROR")
+        errors.append(f"Failed to parse manifest JSON: {str(e_json)}")
+        status = 'errors_found'
         return {'status': status, 'message': 'Failed to parse manifest.', 'checks': checks, 'errors': errors}
-    except Exception as e:
-        _emit_progress(task_id, "Error during manifest processing.", detail=str(e), level="ERROR")
-        errors.append(f"Error during manifest processing: {str(e)}")
-        status = 'errors_found' # Or 'failed_precondition'
-        return {'status': status, 'message': f'Error processing manifest: {str(e)}', 'checks': checks, 'errors': errors}
+    except Exception as e_manifest_proc:
+        _emit_progress(task_id, "Error during manifest processing (download/parse).", detail=str(e_manifest_proc), level="ERROR")
+        errors.append(f"Error during manifest processing: {str(e_manifest_proc)}")
+        status = 'errors_found'
+        return {'status': status, 'message': f'Error processing manifest: {str(e_manifest_proc)}', 'checks': checks, 'errors': errors}
     finally:
         if manifest_local_temp_path and os.path.exists(manifest_local_temp_path):
             os.remove(manifest_local_temp_path)
 
     # Iterate through components in the manifest
+    current_backup_root_on_share = f"{FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_timestamp}"
+
     for component in manifest_data.get("components", []):
         component_type = component.get("type")
-        component_name = component.get("name", component.get("filename", component.get("base_dir"))) # Meaningful name for logs
-        share_name = component.get("share")
+        component_name_in_manifest = component.get("name", component.get("original_filename", "Unknown Component"))
+        path_in_backup_set = component.get("path_in_backup") # e.g., "database/site_....db" or "media/"
 
-        if not share_name:
-            _emit_progress(task_id, f"Missing 'share' for component: {component_name}", level="ERROR")
-            errors.append(f"Missing 'share' for component: {component_name}")
+        if not path_in_backup_set:
+            _emit_progress(task_id, f"Component '{component_name_in_manifest}' in manifest is missing 'path_in_backup'. Skipping.", level="ERROR")
+            errors.append(f"Invalid manifest: component '{component_name_in_manifest}' missing 'path_in_backup'.")
             status = 'errors_found'
             continue
 
+        component_full_path_on_share = f"{current_backup_root_on_share}/{path_in_backup_set}"
+
+        item_exists = False
+        _emit_progress(task_id, f"Verifying component: '{component_name_in_manifest}' (Type: {component_type}) at path '{component_full_path_on_share}' in share '{system_backup_share_name}'", level="INFO")
+
         try:
-            share_client = service_client.get_share_client(share_name)
-            if not _client_exists(share_client):
-                _emit_progress(task_id, f"Share '{share_name}' for component '{component_name}' does not exist.", level="ERROR")
-                errors.append(f"Share '{share_name}' for component '{component_name}' does not exist.")
-                status = 'errors_found'
-                checks.append({"component": component_type, "name": component_name, "share": share_name, "status": "Share not found"})
-                continue
-
-            item_exists = False
-            if component_type == "database" or component_type == "config":
-                filename = component.get("filename")
-                if not filename:
-                    _emit_progress(task_id, f"Missing 'filename' for {component_type} component: {component_name}", level="ERROR")
-                    errors.append(f"Missing 'filename' for {component_type} component: {component_name}")
-                    status = 'errors_found'
-                    continue
-
-                # Construct path based on component type
-                if component_type == "database":
-                    remote_path = f"{DB_BACKUPS_DIR}/{filename}"
-                elif component_type == "config":
-                    remote_path = f"{CONFIG_BACKUPS_DIR}/{filename}"
-                else: # Should not happen if manifest is well-formed
-                    remote_path = filename # Fallback, though potentially incorrect
-
-                file_client = share_client.get_file_client(remote_path)
-                item_exists = _client_exists(file_client)
-                _emit_progress(task_id, f"Checking file: {remote_path} in share {share_name}", level="INFO")
-
-            elif component_type == "media":
-                base_dir = component.get("base_dir")
-                if not base_dir:
-                    _emit_progress(task_id, f"Missing 'base_dir' for media component: {component_name}", level="ERROR")
-                    errors.append(f"Missing 'base_dir' for media component: {component_name}")
-                    status = 'errors_found'
-                    continue
-
-                dir_client = share_client.get_directory_client(base_dir)
+            if component_type == "media": # 'media' components point to a directory
+                # For media, path_in_backup is typically the media subdirectory, e.g., "media/"
+                # The manifest might store sub-paths like "media/floor_map_uploads" if needed for more granularity
+                # Assuming path_in_backup for media is like "media/"
+                dir_client = share_client.get_directory_client(component_full_path_on_share)
                 item_exists = _client_exists(dir_client)
-                _emit_progress(task_id, f"Checking directory: {base_dir} in share {share_name}", level="INFO")
-
+            elif component_type == "database" or component_type == "config": # These point to files
+                file_client = share_client.get_file_client(component_full_path_on_share)
+                item_exists = _client_exists(file_client)
             else:
-                _emit_progress(task_id, f"Unknown component type: {component_type} for {component_name}", level="WARNING")
-                errors.append(f"Unknown component type: {component_type} for {component_name}")
+                _emit_progress(task_id, f"Unknown component type '{component_type}' in manifest for '{component_name_in_manifest}'. Skipping verification.", level="WARNING")
+                errors.append(f"Unknown component type '{component_type}' for {component_name_in_manifest}")
                 status = 'errors_found'
                 continue
 
             if item_exists:
-                _emit_progress(task_id, f"Component '{component_name}' verified successfully in share '{share_name}'.", level="INFO")
-                checks.append({"component": component_type, "name": component_name, "share": share_name, "status": "Verified"})
+                _emit_progress(task_id, f"Component '{component_name_in_manifest}' verified successfully at '{component_full_path_on_share}'.", level="INFO")
+                checks.append({"component_type": component_type, "name": component_name_in_manifest, "path_in_backup": path_in_backup_set, "status": "Verified"})
             else:
-                _emit_progress(task_id, f"Component '{component_name}' not found in share '{share_name}'.", level="ERROR")
-                errors.append(f"Component '{component_name}' not found in share '{share_name}'. Path: {remote_path if component_type != 'media' else base_dir}")
+                _emit_progress(task_id, f"Component '{component_name_in_manifest}' NOT FOUND at '{component_full_path_on_share}'.", level="ERROR")
+                errors.append(f"Component '{component_name_in_manifest}' not found at '{component_full_path_on_share}'.")
                 status = 'errors_found'
-                checks.append({"component": component_type, "name": component_name, "share": share_name, "status": "Not Found"})
+                checks.append({"component_type": component_type, "name": component_name_in_manifest, "path_in_backup": path_in_backup_set, "status": "Not Found"})
 
-        except Exception as e:
-            _emit_progress(task_id, f"Error verifying component {component_name}: {str(e)}", level="ERROR")
-            errors.append(f"Error verifying component {component_name}: {str(e)}")
+        except Exception as e_comp_check:
+            _emit_progress(task_id, f"Error verifying component '{component_name_in_manifest}' at '{component_full_path_on_share}': {str(e_comp_check)}", level="ERROR")
+            errors.append(f"Error verifying component {component_name_in_manifest}: {str(e_comp_check)}")
             status = 'errors_found'
-            checks.append({"component": component_type, "name": component_name, "share": share_name, "status": "Error", "detail": str(e)})
+            checks.append({"component_type": component_type, "name": component_name_in_manifest, "path_in_backup": path_in_backup_set, "status": "Error", "detail": str(e_comp_check)})
 
     final_message = "Verification completed."
     if errors:
