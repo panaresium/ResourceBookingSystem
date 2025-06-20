@@ -44,12 +44,11 @@ from scheduler_tasks import (
 )
 # Conditional import for azure_backup
 try:
-    from azure_backup import restore_latest_backup_set_on_startup, backup_if_changed as azure_backup_if_changed, restore_incremental_bookings
+    from azure_backup import perform_startup_restore_sequence, backup_if_changed as azure_backup_if_changed
     azure_backup_available = True
 except ImportError:
-    restore_latest_backup_set_on_startup = None
-    azure_backup_if_changed = None # Keep for scheduler
-    restore_incremental_bookings = None # Add placeholder
+    perform_startup_restore_sequence = None
+    azure_backup_if_changed = None
     azure_backup_available = False
 
 # Imports for processing downloaded configs during startup restore
@@ -218,105 +217,32 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     #    if not app.logger.hasHandlers(): # Ensure app.logger has a handler for tests
     #        app.logger.addHandler(logging.StreamHandler())
 
-    # New logic for startup restore - SKIP IF TESTING
-    if not testing and azure_backup_available and callable(restore_latest_backup_set_on_startup):
-        try:
-            app.logger.info("Attempting to restore latest backup set from Azure on startup...")
-            # Pass app.logger to the function for consistent logging
-            downloaded_configs = restore_latest_backup_set_on_startup(app_logger=app.logger)
-
-            if downloaded_configs: # Check if restore returned any paths
-                app.logger.info(f"Startup restore downloaded config files: {downloaded_configs}")
-                with app.app_context(): # Ensure operations run within application context
-                    # db.init_app(app) should be called before this point so db operations can proceed.
-
-                    # Import resource configurations first
-                    resource_configs_path = downloaded_configs.get('resource_configs_path')
-                    if resource_configs_path and os.path.exists(resource_configs_path):
-                        app.logger.debug(f"Importing resource configurations from {resource_configs_path} on startup.")
-                        try:
-                            with open(resource_configs_path, 'r', encoding='utf-8') as f:
-                                resource_data_to_import = json.load(f)
-                            # db object is globally available from extensions.py and functions are called within app_context
-                            res_created, res_updated, res_errors = _import_resource_configurations_data(resource_data_to_import)
-                            app.logger.debug(f"Startup import of resource configs: {res_created} created, {res_updated} updated. Errors: {len(res_errors)}")
-                            if res_errors: app.logger.error(f"Startup resource import errors: {res_errors}")
-                            # add_audit_log needs user context or to handle being called by system
-                            add_audit_log(action="STARTUP_RESTORE_IMPORT", details=f"Resource configs imported: {res_created}c, {res_updated}u. Errors: {len(res_errors)}")
-                        except Exception as import_err:
-                            app.logger.exception(f"Error importing resource configurations on startup from {resource_configs_path}: {import_err}")
-                        finally:
-                            try: os.remove(resource_configs_path)
-                            except OSError as e_remove: app.logger.error(f"Error removing temp resource_configs file {resource_configs_path} on startup: {e_remove}")
-
-                    # Import map configurations
-                    map_config_path = downloaded_configs.get('map_config_path')
-                    if map_config_path and os.path.exists(map_config_path):
-                        app.logger.debug(f"Importing map configuration from {map_config_path} on startup.")
-                        try:
-                            with open(map_config_path, 'r', encoding='utf-8') as f:
-                                map_data_to_import = json.load(f)
-                            import_summary, import_status_code = _import_map_configuration_data(map_data_to_import)
-                            app.logger.debug(f"Startup import of map config status {import_status_code}. Summary: {json.dumps(import_summary)}")
-                            add_audit_log(action="STARTUP_RESTORE_IMPORT", details=f"Map config imported. Status: {import_status_code}. Summary: {json.dumps(import_summary)}")
-                        except Exception as import_err:
-                            app.logger.exception(f"Error importing map configuration on startup from {map_config_path}: {import_err}")
-                        finally:
-                            try: os.remove(map_config_path)
-                            except OSError as e_remove: app.logger.error(f"Error removing temp map_config file {map_config_path} on startup: {e_remove}")
-
-                    # Import user configurations
-                    user_configs_path = downloaded_configs.get('user_configs_path')
-                    if user_configs_path and os.path.exists(user_configs_path):
-                        app.logger.debug(f"Importing user/role configurations from {user_configs_path} on startup.")
-                        try:
-                            with open(user_configs_path, 'r', encoding='utf-8') as f:
-                                user_data_to_import = json.load(f)
-                            # db object is globally available from extensions.py and functions are called within app_context
-                            r_created, r_updated, u_created, u_updated, u_errors = _import_user_configurations_data(user_data_to_import)
-                            app.logger.debug(f"Startup import of user/role configs: Roles({r_created}c, {r_updated}u), Users({u_created}c, {u_updated}u). Errors: {len(u_errors)}")
-                            if u_errors: app.logger.error(f"Startup user/role import errors: {u_errors}")
-                            add_audit_log(action="STARTUP_RESTORE_IMPORT", details=f"User/role configs imported. Roles({r_created}c, {r_updated}u), Users({u_created}c, {u_updated}u). Errors: {len(u_errors)}")
-                        except Exception as import_err:
-                            app.logger.exception(f"Error importing user/role configurations on startup from {user_configs_path}: {import_err}")
-                        finally:
-                            try: os.remove(user_configs_path)
-                            except OSError as e_remove: app.logger.error(f"Error removing temp user_configs file {user_configs_path} on startup: {e_remove}")
-            else:
-                app.logger.info("No configurations downloaded by startup restore, or restore did not run/succeed at downloading configs.")
-        except Exception as e:
-            app.logger.exception(f"Error during startup restore process (restore_latest_backup_set_on_startup call or subsequent logic): {e}")
-    else:
-        app.logger.info("Azure backup utilities not available (azure_backup or restore_latest_backup_set_on_startup not imported). Skipping startup restore from Azure.")
-
-    # New: Conditional restore of incremental booking backups - SKIP IF TESTING
-    if not testing and azure_backup_available and callable(restore_incremental_bookings):
-        app.logger.info("Checking configuration for automatic restore of incremental booking records on startup...")
-        scheduler_settings = load_scheduler_settings() # Load from utils.py
-        should_restore_bookings = scheduler_settings.get('auto_restore_booking_records_on_startup', False)
-
-        if should_restore_bookings:
-            app.logger.info("Attempting to restore incremental booking records on startup as configured...")
+    # New logic for startup restore sequence - SKIP IF TESTING
+    if not testing and azure_backup_available and callable(perform_startup_restore_sequence):
+        scheduler_settings = load_scheduler_settings() # load_scheduler_settings should already be imported
+        # Use the NEW setting name here
+        if scheduler_settings.get('auto_restore_full_system_on_startup', False):
+            app.logger.info("Configuration indicates automatic restore on startup. Attempting full system restore sequence...")
             try:
-                # Pass app instance directly. SocketIO and task_id are None for startup.
-                restore_summary = restore_incremental_bookings(app=app, socketio_instance=None, task_id=None)
-                app.logger.info(f"Incremental booking records restore attempt completed. Summary: {restore_summary}")
-                if restore_summary.get('status') not in ['success', 'success_no_files']:
-                     app.logger.warning(f"Incremental booking restore on startup finished with status: {restore_summary.get('status')}. Errors: {restore_summary.get('errors')}")
-                # Add an audit log for the attempt
-                with app.app_context():  # <<< WRAPPER ADDED
-                    add_audit_log(action="STARTUP_INCREMENTAL_BOOKING_RESTORE_ATTEMPT",
-                                  details=f"Status: {restore_summary.get('status')}, Files: {restore_summary.get('files_processed')}, Created: {restore_summary.get('bookings_created')}, Updated: {restore_summary.get('bookings_updated')}, Errors: {len(restore_summary.get('errors', []))}")
-            except Exception as e_incr_restore:
-                app.logger.exception(f"Error during startup incremental booking records restore: {e_incr_restore}")
-                with app.app_context():  # <<< WRAPPER ADDED
-                    add_audit_log(action="STARTUP_INCREMENTAL_BOOKING_RESTORE_ERROR", details=f"Exception: {str(e_incr_restore)}")
+                # Pass the app instance itself
+                restore_result = perform_startup_restore_sequence(app)
+                app.logger.info(f"Startup restore sequence completed. Status: {restore_result.get('status')}, Message: {restore_result.get('message')}")
+                if restore_result.get('status') != 'success':
+                    app.logger.error(f"Startup restore sequence did not complete successfully: {restore_result.get('message')}")
+            except Exception as e_startup_restore:
+                app.logger.exception(f"Critical error during perform_startup_restore_sequence: {e_startup_restore}")
         else:
-            app.logger.info("Automatic restore of incremental booking records on startup is disabled in settings.")
-    elif not testing and callable(load_scheduler_settings) and load_scheduler_settings().get('auto_restore_booking_records_on_startup', False):
-        # This case handles if setting is true, but azure_backup_available or restore_incremental_bookings is not.
-        app.logger.warning("Automatic restore of incremental booking records is configured, but Azure backup utilities (restore_incremental_bookings) are not available. Skipping.")
+            app.logger.info("Automatic restore on startup is disabled in settings. Skipping full system restore sequence.")
+    elif not testing: # Handles cases where azure_backup_available is False or perform_startup_restore_sequence is not callable
+        # Check setting to provide more specific log if restore is desired but not possible
+        scheduler_settings = load_scheduler_settings()
+        if scheduler_settings.get('auto_restore_full_system_on_startup', False):
+             app.logger.warning("Automatic restore on startup is ENABLED in settings, but restore utilities (perform_startup_restore_sequence) are not available/imported. Skipping restore.")
+        else:
+            # This will also catch cases where azure_backup_available is False.
+            app.logger.info("Startup restore skipped: either disabled in settings or Azure backup utilities (perform_startup_restore_sequence) are not available.")
 
+    # Old incremental booking restore block is removed.
 
     # 3. Initialize Extensions
     # db.init_app(app) has been moved to earlier in the factory function
