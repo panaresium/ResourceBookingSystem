@@ -301,7 +301,8 @@ def _get_service_client():
     if not connection_string:
         raise RuntimeError('AZURE_STORAGE_CONNECTION_STRING environment variable is required')
     if ShareServiceClient is None:
-        raise RuntimeError('azure-storage-file-share package is not installed')
+        logger.error("Azure SDK (azure-storage-file-share) not installed. This is required for Azure backup/restore functionality.")
+        raise RuntimeError('azure-storage-file-share package is not installed. Please install it to use Azure features.')
     return ShareServiceClient.from_connection_string(connection_string)
 
 def _client_exists(client):
@@ -1227,7 +1228,10 @@ def perform_startup_restore_sequence(app_for_context):
                         app_logger.info(f"Attempting to replace live database at '{live_db_path}' with downloaded backup '{local_db_path}'.")
                         shutil.copyfile(local_db_path, live_db_path)
                         app_logger.info("Database successfully restored.")
-                        add_audit_log("System Restore", f"Database restored from startup sequence using backup {latest_backup_timestamp}.")
+                        try:
+                            add_audit_log("System Restore", f"Database restored from startup sequence using backup {latest_backup_timestamp}.")
+                        except Exception as e_audit:
+                            app_logger.warning(f"Could not write audit log for system restore (db): {e_audit}")
                     except Exception as e_db_restore:
                         msg = f"Error replacing live database: {e_db_restore}"
                         app_logger.error(msg, exc_info=True)
@@ -1271,7 +1275,10 @@ def perform_startup_restore_sequence(app_for_context):
                     app_logger.info(f"Attempting to replace live scheduler settings at '{live_scheduler_path}' with downloaded backup '{local_scheduler_path}'.")
                     shutil.copyfile(local_scheduler_path, live_scheduler_path)
                     app_logger.info("Scheduler settings successfully restored.")
-                    add_audit_log("System Restore", f"Scheduler settings restored from startup sequence using backup {latest_backup_timestamp}.")
+                    try:
+                        add_audit_log("System Restore", f"Scheduler settings restored from startup sequence using backup {latest_backup_timestamp}.")
+                    except Exception as e_audit:
+                        app_logger.warning(f"Could not write audit log for system restore (scheduler_settings): {e_audit}")
                 except Exception as e_sched_restore:
                     app_logger.error(f"Error replacing live scheduler settings: {e_sched_restore}", exc_info=True)
                     if "message" in restore_status: restore_status["message"] += f"; Error during scheduler settings restore: {e_sched_restore}"
