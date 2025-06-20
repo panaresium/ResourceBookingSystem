@@ -1096,7 +1096,7 @@ def verify_backup_set(backup_timestamp, task_id=None):
     _emit_progress(task_id, final_message, detail=f"Checks: {len(checks)}, Errors: {len(errors)}", level="SUCCESS" if status == 'verified' else "ERROR")
     return {'status': status, 'message': final_message, 'checks': checks, 'errors': errors}
 
-def restore_database_component(backup_timestamp, db_share_client, dry_run=False, task_id=None):
+def restore_database_component(share_client: ShareClient, full_db_path_on_share: str, task_id: str = None, dry_run: bool = False):
     """
     Restores (downloads) the database component from a backup.
 
@@ -1109,7 +1109,7 @@ def restore_database_component(backup_timestamp, db_share_client, dry_run=False,
     Returns:
         tuple: (success_status, message, downloaded_file_path, error_detail)
     """
-    # Extract a base filename for the local temp file, e.g., "site_XYZ.db"
+    # Ensure full_db_path_on_share (from signature) is used for os.path.basename()
     db_filename_on_share = os.path.basename(full_db_path_on_share) if full_db_path_on_share else "database.db"
     local_temp_db_filename = f"downloaded_{db_filename_on_share}" # e.g., downloaded_site_XYZ.db
 
@@ -1128,11 +1128,11 @@ def restore_database_component(backup_timestamp, db_share_client, dry_run=False,
     _emit_progress(task_id, f"Attempting to download database backup from '{full_db_path_on_share}' to '{local_temp_db_path}'.", level='INFO')
 
     try:
-        if not share_client:
+        if not share_client: # Corrected to use share_client from signature
             _emit_progress(task_id, "Azure Share client not available/provided for database restore.", level='ERROR')
             return False, "Azure Share client not available.", None, "Share client was None."
 
-        download_success = download_file(share_client, full_db_path_on_share, local_temp_db_path)
+        download_success = download_file(share_client, full_db_path_on_share, local_temp_db_path) # Uses share_client
 
         if download_success:
             _emit_progress(task_id, f"Database backup downloaded successfully to '{local_temp_db_path}'.", level='SUCCESS')
@@ -1143,7 +1143,7 @@ def restore_database_component(backup_timestamp, db_share_client, dry_run=False,
             return False, error_msg, None, error_msg
 
     except ResourceNotFoundError:
-        error_msg = f"Database backup file '{full_db_path_on_share}' not found in Azure share '{share_client.share_name}'."
+        error_msg = f"Database backup file '{full_db_path_on_share}' not found in Azure share '{getattr(share_client, 'share_name', 'UnknownShare')}'." # Use getattr for share_name
         _emit_progress(task_id, error_msg, level='ERROR')
         return False, error_msg, None, error_msg
     except HttpResponseError as e:
@@ -1157,7 +1157,7 @@ def restore_database_component(backup_timestamp, db_share_client, dry_run=False,
         return False, error_msg, None, str(e)
 
 def download_map_config_component(share_client: ShareClient, full_path_on_share: str, task_id: str = None, dry_run: bool = False):
-    # This function will be refactored to use download_file directly
+    # This function uses download_file directly, os.path.basename(full_path_on_share) is correct.
     if dry_run:
         _emit_progress(task_id, "DRY RUN: Simulating map configuration component download.", level='INFO')
         # Caller needs to determine the local filename based on full_path_on_share if needed for simulation consistency
