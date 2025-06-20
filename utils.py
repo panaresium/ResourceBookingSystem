@@ -333,6 +333,41 @@ def save_scheduler_settings(settings_dict):
     except IOError as e:
         logger.error(f"Error saving scheduler settings: {e}")
 
+def save_scheduler_settings_from_json_data(settings_data: dict) -> tuple[dict, int]:
+    """
+    Saves the provided dictionary of scheduler settings to the local
+    scheduler_settings.json file.
+    Args:
+        settings_data: A Python dictionary containing the scheduler settings.
+    Returns:
+        A tuple containing a summary dictionary and an HTTP-like status code.
+        Example: ({'message': '...', 'errors': [], 'warnings': []}, 200)
+    """
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
+    logger.info(f"Attempting to save scheduler settings from provided JSON data to {SCHEDULER_SETTINGS_FILE_PATH}")
+
+    if not isinstance(settings_data, dict):
+        err_msg = "Invalid settings_data format: Must be a dictionary."
+        logger.error(err_msg)
+        return ({'message': err_msg, 'errors': [err_msg], 'warnings': []}, 400)
+
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True) # Ensure the data directory exists
+        with open(SCHEDULER_SETTINGS_FILE_PATH, 'w', encoding='utf-8') as f:
+            json.dump(settings_data, f, indent=4) # Using indent=4 for consistency if it matters
+
+        success_msg = "Scheduler settings applied successfully from backup."
+        logger.info(success_msg)
+        return ({'message': success_msg, 'errors': [], 'warnings': []}, 200)
+    except IOError as e:
+        error_msg = f"Failed to save scheduler settings from backup due to IOError: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return ({'message': error_msg, 'errors': [str(e)], 'warnings': []}, 500)
+    except Exception as e: # Catch any other unexpected errors
+        error_msg = f"An unexpected error occurred while saving scheduler settings from backup: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return ({'message': error_msg, 'errors': [str(e)], 'warnings': []}, 500)
+
 def add_audit_log(action: str, details: str, user_id: int = None, username: str = None):
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     try:
