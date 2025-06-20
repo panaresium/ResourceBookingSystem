@@ -1323,6 +1323,7 @@ def _get_user_configurations_data() -> dict:
 
 def _import_user_configurations_data(user_config_data: dict): # Return type will be bool or dict
     logger = current_app.logger if current_app else logging.getLogger(__name__)
+    logger.info(f"Importing user and role configurations. Processing {len(user_config_data.get('roles', []))} roles and {len(user_config_data.get('users', []))} users.")
 
     roles_data = user_config_data.get('roles', [])
     users_data = user_config_data.get('users', [])
@@ -1335,7 +1336,8 @@ def _import_user_configurations_data(user_config_data: dict): # Return type will
 
     errors = []
     warnings = []
-    backup_to_new_role_id_mapping = {} # Maps backup role ID to current DB role ID
+    # This mapping is crucial if user's role assignments depend on role IDs that might change if roles are recreated by name.
+    backup_to_new_role_id_mapping = {}
 
     # Process Roles
     for role_item in roles_data:
@@ -1345,45 +1347,48 @@ def _import_user_configurations_data(user_config_data: dict): # Return type will
 
         if backup_role_id is None or role_name is None:
             errors.append(f"Role item found with missing 'id' or 'name': {role_item}")
+            logger.warning(f"Skipping role item due to missing ID or name: {role_item}")
             continue
 
         try:
-            # New robust permissions handling
+            # Robust handling for permissions
             permissions_data = role_item.get('permissions') # Get the raw data
             permissions_list = [] # Default to empty list
 
             if isinstance(permissions_data, list):
-                permissions_list = permissions_data  # Already a list, use directly
+                permissions_list = [str(p) for p in permissions_data if p is not None]  # Ensure all are strings
             elif isinstance(permissions_data, str):
-                try:
-                    # Attempt to parse if it's a JSON string representing a list
-                    loaded_perms = json.loads(permissions_data)
-                    if isinstance(loaded_perms, list):
-                        permissions_list = loaded_perms
-                    else:
-                        # Was a valid JSON string, but not a list (e.g., just a string like "view_users")
-                        warnings.append(f"Permissions for Role ID {backup_role_id} ('{role_name}') was a JSON string but not a list: '{permissions_data}'. Treating as a single permission.")
-                        permissions_list = [str(loaded_perms)] # Treat as a single permission
-                except json.JSONDecodeError:
-                    # Not a valid JSON string, assume comma-separated or single literal string
-                    warnings.append(f"Permissions string for Role ID {backup_role_id} ('{role_name}') is not valid JSON: '{permissions_data}'. Attempting to split by comma or use as single permission.")
-                    permissions_list = [p.strip() for p in permissions_data.split(',') if p.strip()]
-                    if not permissions_list and permissions_data.strip(): # Non-empty string, didn't split, not just whitespace
-                        permissions_list = [permissions_data.strip()] # Treat as a single permission string
+                if not permissions_data.strip(): # Handle empty string case
+                    permissions_list = []
+                else:
+                    try:
+                        loaded_perms = json.loads(permissions_data)
+                        if isinstance(loaded_perms, list):
+                            permissions_list = [str(p) for p in loaded_perms if p is not None]
+                        else:
+                            warnings.append(f"Permissions for Role ID {backup_role_id} ('{role_name}') was a JSON string but not a list: '{permissions_data}'. Treating as a single permission.")
+                            permissions_list = [str(loaded_perms)]
+                    except json.JSONDecodeError:
+                        warnings.append(f"Permissions string for Role ID {backup_role_id} ('{role_name}') is not valid JSON: '{permissions_data}'. Attempting to split by comma or use as single permission.")
+                        permissions_list = [p.strip() for p in permissions_data.split(',') if p.strip()]
+                        if not permissions_list and permissions_data.strip():
+                            permissions_list = [permissions_data.strip()]
             elif permissions_data is None:
-                permissions_list = [] # Explicitly no permissions
-            else: # Unexpected data type
+                permissions_list = []
+            else:
                 warnings.append(f"Permissions for Role ID {backup_role_id} ('{role_name}') is of unexpected type: {type(permissions_data)}. Defaulting to empty list.")
                 permissions_list = []
 
-            # Ensure all items in permissions_list are strings, as Role.permissions likely expects List[str]
-            permissions_list = [str(p) for p in permissions_list]
-            # End new robust permissions handling
+            # Ensure all items in permissions_list are strings (already done above for lists, good to be sure)
+            permissions_list = [str(p) for p in permissions_list if p is not None]
+
 
             role = db.session.get(Role, backup_role_id)
 
             if role: # Role exists by ID
                 role.name = role_name
+                # Assuming Role.description and Role.permissions are attributes that can be set
+                role.description = role_item.get('description', role.description)
                 role.permissions = permissions_list
                 db.session.add(role)
                 roles_updated += 1
@@ -1392,23 +1397,31 @@ def _import_user_configurations_data(user_config_data: dict): # Return type will
                 role_by_name = Role.query.filter_by(name=role_name).first()
                 if role_by_name:
                     warnings.append(f"Role with backup ID {backup_role_id} not found, but role with name '{role_name}' (ID: {role_by_name.id}) exists. Updating existing role by name.")
+                    role_by_name.description = role_item.get('description', role_by_name.description)
                     role_by_name.permissions = permissions_list
                     db.session.add(role_by_name)
                     roles_updated += 1
                     backup_to_new_role_id_mapping[backup_role_id] = role_by_name.id
                 else: # Create new role
-                    new_role = Role(name=role_name, permissions=permissions_list)
+                    logger.info(f"Role with backup ID {backup_role_id} ('{role_name}') not found by ID or name. Creating as new role.")
+                    new_role = Role(
+                        name=role_name,
+                        description=role_item.get('description'),
+                        permissions=permissions_list
+                    )
+                    # If backup_role_id is intended to be preserved for new roles (and is unique)
+                    # new_role.id = backup_role_id # This might require careful handling if IDs are auto-incrementing
                     db.session.add(new_role)
-                    db.session.flush()
+                    db.session.flush() # To get new_role.id if it's auto-generated
                     backup_to_new_role_id_mapping[backup_role_id] = new_role.id
                     roles_created += 1
-                    warnings.append(f"Role with backup ID {backup_role_id} ('{role_name}') not found. Created as new role with ID {new_role.id}.")
         except Exception as e_role:
             error_msg = f"Error processing role (Backup ID: {backup_role_id}, Name: {role_name}): {str(e_role)}"
             errors.append(error_msg)
             logger.error(error_msg, exc_info=True)
 
-    # Process Users (Update existing only)
+    # Process Users (Update existing only, or create if not found - current log says "Skipped (user creation from backup is not supported)")
+    # For now, stick to update-only or skip-if-not-found for users as per previous logs.
     for user_item in users_data:
         users_processed += 1
         backup_user_id = user_item.get('id')
@@ -1416,40 +1429,51 @@ def _import_user_configurations_data(user_config_data: dict): # Return type will
 
         if backup_user_id is None or username is None:
             errors.append(f"User item found with missing 'id' or 'username': {user_item}")
+            logger.warning(f"Skipping user item due to missing ID or name: {user_item}")
             continue
 
         try:
             user = db.session.get(User, backup_user_id)
 
             if user:
-                user.username = username
+                user.username = username # Update username
                 user.email = user_item.get('email', user.email)
                 user.is_admin = user_item.get('is_admin', user.is_admin)
-                user.status = user_item.get('status', user.status)
-                # Password hash is intentionally NOT updated from backup.
 
-                backed_up_user_role_ids_data = user_item.get('role_ids', [])
-                if backed_up_user_role_ids_data is not None:
-                    backed_up_user_role_ids = {role_id for role_id in backed_up_user_role_ids_data if role_id is not None}
-                    actual_db_roles = []
+                # Update other User fields from backup if they exist in user_item
+                # Using getattr to avoid errors if fields are missing from backup JSON for some reason
+                user.first_name = getattr(user_item, 'first_name', user.first_name)
+                user.last_name = getattr(user_item, 'last_name', user.last_name)
+                user.phone = getattr(user_item, 'phone', user.phone)
+                user.section = getattr(user_item, 'section', user.section)
+                user.department = getattr(user_item, 'department', user.department)
+                user.position = getattr(user_item, 'position', user.position)
+                user.is_active = user_item.get('is_active', user.is_active) # .get() for bools is fine
 
+                # Password hash is intentionally NOT updated from backup for security.
+
+                # Handle user roles
+                backed_up_user_role_ids = user_item.get('assigned_role_ids', []) # From backup JSON
+                actual_db_roles_for_user = []
+                if isinstance(backed_up_user_role_ids, list):
                     for b_role_id in backed_up_user_role_ids:
                         actual_db_role_id = backup_to_new_role_id_mapping.get(b_role_id)
                         if actual_db_role_id:
                             role_obj = db.session.get(Role, actual_db_role_id)
                             if role_obj:
-                                actual_db_roles.append(role_obj)
+                                actual_db_roles_for_user.append(role_obj)
                             else:
                                 warnings.append(f"For User '{username}' (Backup ID {backup_user_id}), mapped Role ID {actual_db_role_id} (from backup Role ID {b_role_id}) not found in DB. Skipping assignment.")
-                        else:
+                        elif b_role_id is not None: # Only warn if it was a non-null ID that couldn't be mapped
                             warnings.append(f"For User '{username}' (Backup ID {backup_user_id}), backup Role ID {b_role_id} could not be mapped to a current Role ID. Skipping assignment.")
-                    user.roles = actual_db_roles
-                # If 'role_ids' key is missing, existing user roles are preserved.
+                user.roles = actual_db_roles
 
                 db.session.add(user)
                 users_updated += 1
             else:
-                warnings.append(f"User with backup ID {backup_user_id} ('{username}') not found in DB. Skipped (user creation from backup is not supported by this import).")
+                # User creation logic could be added here if desired, but current logs say it's skipped.
+                warnings.append(f"User with backup ID {backup_user_id} ('{username}') not found in DB. Skipped (user creation from backup is not currently supported by this import function).")
+
         except Exception as e_user:
             error_msg = f"Error processing user (Backup ID: {backup_user_id}, Username: {username}): {str(e_user)}"
             errors.append(error_msg)
@@ -1458,31 +1482,39 @@ def _import_user_configurations_data(user_config_data: dict): # Return type will
     status_code = 200
     try:
         db.session.commit()
-    except Exception as e:
+    except Exception as e_commit:
         db.session.rollback()
-        errors.append(f"Database commit error: {str(e)}")
-        logger.error(f"Database commit error during user configurations import: {e}", exc_info=True)
+        errors.append(f"Database commit error: {str(e_commit)}")
+        logger.error(f"Database commit error during user/role configurations import: {e_commit}", exc_info=True)
         status_code = 500
 
     final_message_parts = [
         f"Roles processed: {roles_processed} (Created: {roles_created}, Updated: {roles_updated}).",
-        f"Users processed: {users_processed} (Updated: {users_updated})."
+        f"Users processed: {users_processed} (Updated: {users_updated})." # Assuming creation is not supported based on logs
     ]
     if warnings:
         final_message_parts.append(f"Warnings: {'; '.join(warnings)}")
     if errors:
         final_message_parts.append(f"Errors: {'; '.join(errors)}")
-        if status_code == 200: status_code = 207
+        if status_code == 200: status_code = 207 # Partial success if data errors but commit worked
 
     final_message = " ".join(final_message_parts)
     logger.info(f"User configurations import result: {final_message}")
 
-    if not errors and status_code == 200:
-        return True
-    else:
-        return {'message': final_message, 'errors': errors, 'warnings': warnings, 'status_code': status_code,
-                'roles_processed': roles_processed, 'roles_created': roles_created, 'roles_updated': roles_updated,
-                'users_processed': users_processed, 'users_updated': users_updated}
+    # Standardize return type: dictionary with status and details
+    return {
+        'success': not errors and status_code < 400, # Consider success if no hard errors and status code is ok
+        'message': final_message,
+        'errors': errors,
+        'warnings': warnings,
+        'status_code': status_code,
+        'roles_processed': roles_processed,
+        'roles_created': roles_created,
+        'roles_updated': roles_updated,
+        'users_processed': users_processed,
+        'users_updated': users_updated
+        # 'users_created': 0 # Explicitly if not supported
+    }
 
 def _load_schedule_from_json():
     logger = current_app.logger if current_app else logging.getLogger(__name__)

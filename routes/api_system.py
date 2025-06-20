@@ -41,7 +41,6 @@ import utils # Added for selective restore of scheduler_settings
 azure_import_error_message = None
 
 # Conditional imports for Azure Backup functionality
-# Ensure download_booking_data_json_backup is imported
 try:
     print(f"DEBUG api_system.py: Attempting to import from azure_backup (again)...") # New debug
     from azure_backup import (
@@ -50,47 +49,36 @@ try:
         restore_full_backup,
         verify_backup_set,
         delete_backup_set,
-        _get_service_client, # For selective restore
-        _client_exists, # For selective restore
-        FLOOR_MAP_UPLOADS, # For selective restore media component
-        RESOURCE_UPLOADS,  # For selective restore media component
-        restore_database_component, # For selective restore
-        download_map_config_component, # For selective restore
-        download_resource_config_component, # For selective restore (New)
-        download_user_config_component, # For selective restore (New)
-        download_scheduler_settings_component, # Added for selective restore
-        restore_media_component, # For selective restore
-        # Imports for new booking restore functionalities
-        # list_available_booking_csv_backups, # Removed
-        # restore_bookings_from_csv_backup, # Removed
-        # TODO: Obsolete? Import commented out as 'list_available_incremental_booking_backups' is likely obsolete.
-        # list_available_incremental_booking_backups, # Keeping non-CSV legacy for now
-        # restore_incremental_bookings, # REMOVED Keeping non-CSV legacy for now
+        _get_service_client,
+        _client_exists,
+        FLOOR_MAP_UPLOADS,
+        RESOURCE_UPLOADS,
+        restore_database_component,
+        download_map_config_component,
+        download_resource_config_component,
+        download_user_config_component,
+        download_scheduler_settings_component,
+        restore_media_component,
         restore_bookings_from_full_db_backup,
-        backup_incremental_bookings, # Added for manual incremental backup
-        backup_full_bookings_json, # Added for manual full JSON booking export
-        restore_bookings_from_full_json_export, # For restoring from full JSON export
-        delete_incremental_booking_backup, # For deleting incremental JSON backups
-        # New Unified Booking Data Protection functions
-        # TODO: Obsolete? Import commented out as 'backup_full_booking_data_json_azure' is likely obsolete.
-        # backup_full_booking_data_json_azure, # For manual full backup trigger
-        list_booking_data_json_backups,    # For listing unified backups
-        # restore_booking_data_from_json_backup, # This is now primarily for full restore, called by orchestrator
-        delete_booking_data_json_backup,   # For deleting specific unified backups
-        restore_booking_data_to_point_in_time, # New orchestrator for PIT restore
-        download_booking_data_json_backup # For downloading unified backups
+        backup_incremental_bookings,
+        backup_full_bookings_json,
+        restore_bookings_from_full_json_export,
+        delete_incremental_booking_backup,
+        list_booking_data_json_backups,
+        delete_booking_data_json_backup,
+        restore_booking_data_to_point_in_time,
+        download_booking_data_json_backup
+        # Ensure list_available_full_booking_json_exports is NOT here
     )
-    import azure_backup # To access module-level constants if needed by moved functions
+    import azure_backup # This line can remain
     print(f"DEBUG api_system.py: Successfully imported from azure_backup (again). create_full_backup type: {type(create_full_backup)}") # New debug
 except (ImportError, RuntimeError) as e_detailed_azure_import: # Capture the exception instance
-    # Assign a descriptive error message to the global variable
     azure_import_error_message = f"Azure Storage connection might be missing or Azure SDK not installed. Error: {e_detailed_azure_import}"
     print(f"CRITICAL_DEBUG api_system.py: Caught ImportError or RuntimeError when importing from azure_backup. Exception type: {type(e_detailed_azure_import)}, Error: {e_detailed_azure_import}")
-    import traceback # Import traceback module
+    import traceback
     print("CRITICAL_DEBUG api_system.py: Full traceback of the import error:")
-    traceback.print_exc() # Print the full traceback for the caught error
+    traceback.print_exc()
 
-    # Assign None to all expected imports
     create_full_backup = None
     list_available_backups = None
     restore_full_backup = None
@@ -104,23 +92,19 @@ except (ImportError, RuntimeError) as e_detailed_azure_import: # Capture the exc
     download_map_config_component = None
     download_resource_config_component = None
     download_user_config_component = None
-    download_scheduler_settings_component = None # Added
+    download_scheduler_settings_component = None
     restore_media_component = None
-    # TODO: Obsolete? Usage of 'list_available_incremental_booking_backups' commented out.
-    # list_available_incremental_booking_backups = None
-    # restore_incremental_bookings = None # REMOVED
     restore_bookings_from_full_db_backup = None
     backup_incremental_bookings = None
     backup_full_bookings_json = None
     restore_bookings_from_full_json_export = None
     delete_incremental_booking_backup = None
-    # TODO: Obsolete? Assignment for 'backup_full_booking_data_json_azure' commented out.
-    # backup_full_booking_data_json_azure = None
     list_booking_data_json_backups = None
     delete_booking_data_json_backup = None
     restore_booking_data_to_point_in_time = None
     download_booking_data_json_backup = None
     azure_backup = None
+    # Ensure list_available_full_booking_json_exports = None is NOT here
 
 api_system_bp = Blueprint('api_system', __name__)
 
