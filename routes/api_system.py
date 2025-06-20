@@ -726,7 +726,7 @@ def api_selective_restore():
             # Unified share client
             system_share_client = None
             manifest_data = None
-            handled_in_selective_restore = [] # Keep track of components processed by new media logic
+            handled_in_selective_restore = [] # Initialize list to track handled media components
 
             try:
                 # Check if essential Azure functions are available
@@ -905,31 +905,37 @@ def api_selective_restore():
                             update_task_log(task_id_param, f"{comp_details['display_name']} download failed: {cfg_msg or cfg_err}", level="ERROR")
 
 
-                # --- Media Component Path Finding (must happen before config loop if media is handled first) ---
-                media_manifest_component = next((comp for comp in manifest_data.get('components', []) if comp.get('type') == 'media'), None)
+                # --- Media Component Path Finding ---
+                media_manifest_entry = next((comp for comp in manifest_data.get('components', []) if comp.get('type') == 'media'), None)
                 media_base_path_in_backup = None
-                if media_manifest_component:
-                    media_base_path_in_backup = media_manifest_component.get('path_in_backup')
+                if media_manifest_entry:
+                    media_base_path_in_backup = media_manifest_entry.get('path_in_backup')
                     if media_base_path_in_backup: # Ensure it's not empty or None
-                        media_base_path_in_backup = media_base_path_in_backup.strip('/') # Store as "media"
-                        update_task_log(task_id_param, f"Found 'media' base component in manifest. Path in backup: '{media_base_path_in_backup}'", level="DEBUG")
+                        media_base_path_in_backup = media_base_path_in_backup.strip('/') # Store as "media" (example)
+                        update_task_log(task_id_param, f"Found 'media' component in manifest. Base path in backup: '{media_base_path_in_backup}'", level='DEBUG')
                     else:
-                        update_task_log(task_id_param, "Manifest 'media' component found, but 'path_in_backup' is empty or missing.", level="WARNING")
+                        # This case means 'media' type entry exists but its path_in_backup is missing/empty
+                        update_task_log(task_id_param, "Manifest 'media' component found, but its 'path_in_backup' is empty or missing. Media components cannot be restored.", level='ERROR')
+                        # Do not set media_base_path_in_backup, so subsequent checks for it will fail gracefully for selected media components.
                 else:
-                    update_task_log(task_id_param, "No 'media' base component found in manifest. Media restores will fail if selected.", level="WARNING")
+                    # This case means no 'media' type entry at all in manifest.
+                    update_task_log(task_id_param, "No 'media' component entry found in manifest. Media components cannot be restored if selected.", level='WARNING')
 
 
                 # --- Media Restore (Floor Maps) ---
                 if "floor_maps" in components_param:
                     update_task_log(task_id_param, "Processing 'Floor Maps' media component restore.", level="info")
-                    if not media_base_path_in_backup:
-                        err_msg = "Floor Maps selected for restore, but no 'media' base entry with a valid path found in manifest. Cannot determine source path."
+                    if not media_base_path_in_backup: # Check if the base path was found
+                        err_msg = "Cannot restore 'floor_maps': Main 'media' component entry (with a valid path) not found in backup manifest."
                         update_task_log(task_id_param, err_msg, level="ERROR")
                         overall_success = False; errors_list.append(err_msg)
                     else:
-                        floor_maps_specific_subdir = os.path.basename(azure_backup.FLOOR_MAP_UPLOADS) # e.g., "floor_map_uploads"
-                        azure_component_path_on_share = f"{azure_backup.FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_ts_param}/{media_base_path_in_backup}/{floor_maps_specific_subdir}"
-                        update_task_log(task_id_param, f"Floor Maps Azure source path: {azure_component_path_on_share}", level="DEBUG")
+                        floor_maps_specific_subdir_name = os.path.basename(azure_backup.FLOOR_MAP_UPLOADS) # e.g., "floor_map_uploads"
+                        # Construct path like "media/floor_map_uploads"
+                        full_path_to_floor_maps_dir_in_backup = f"{media_base_path_in_backup}/{floor_maps_specific_subdir_name}"
+                        # Construct full Azure path
+                        azure_component_path_on_share = f"{azure_backup.FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_ts_param}/{full_path_to_floor_maps_dir_in_backup}"
+                        update_task_log(task_id_param, f"Constructed Azure path for floor_maps: {azure_component_path_on_share}", level='DEBUG')
 
                         media_success, media_msg, media_err = azure_backup.restore_media_component(
                             system_share_client,
@@ -950,14 +956,15 @@ def api_selective_restore():
                 # --- Media Restore (Resource Uploads) ---
                 if "resource_uploads" in components_param:
                     update_task_log(task_id_param, "Processing 'Resource Uploads' media component restore.", level="info")
-                    if not media_base_path_in_backup:
-                        err_msg = "Resource Uploads selected for restore, but no 'media' base entry with a valid path found in manifest. Cannot determine source path."
+                    if not media_base_path_in_backup: # Check if the base path was found
+                        err_msg = "Cannot restore 'resource_uploads': Main 'media' component entry (with a valid path) not found in backup manifest."
                         update_task_log(task_id_param, err_msg, level="ERROR")
                         overall_success = False; errors_list.append(err_msg)
                     else:
-                        resource_uploads_specific_subdir = os.path.basename(azure_backup.RESOURCE_UPLOADS) # e.g., "resource_uploads"
-                        azure_component_path_on_share = f"{azure_backup.FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_ts_param}/{media_base_path_in_backup}/{resource_uploads_specific_subdir}"
-                        update_task_log(task_id_param, f"Resource Uploads Azure source path: {azure_component_path_on_share}", level="DEBUG")
+                        resource_uploads_specific_subdir_name = os.path.basename(azure_backup.RESOURCE_UPLOADS) # e.g., "resource_uploads"
+                        full_path_to_resource_uploads_dir_in_backup = f"{media_base_path_in_backup}/{resource_uploads_specific_subdir_name}"
+                        azure_component_path_on_share = f"{azure_backup.FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_ts_param}/{full_path_to_resource_uploads_dir_in_backup}"
+                        update_task_log(task_id_param, f"Constructed Azure path for resource_uploads: {azure_component_path_on_share}", level='DEBUG')
 
                         media_success, media_msg, media_err = azure_backup.restore_media_component(
                             system_share_client,
