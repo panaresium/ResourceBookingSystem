@@ -69,7 +69,6 @@ try:
         restore_bookings_from_full_db_backup,
         backup_incremental_bookings, # Added for manual incremental backup
         backup_full_bookings_json, # Added for manual full JSON booking export
-        list_available_full_booking_json_exports, # For listing full JSON exports
         restore_bookings_from_full_json_export, # For restoring from full JSON export
         delete_incremental_booking_backup, # For deleting incremental JSON backups
         # New Unified Booking Data Protection functions
@@ -113,7 +112,6 @@ except (ImportError, RuntimeError) as e_detailed_azure_import: # Capture the exc
     restore_bookings_from_full_db_backup = None
     backup_incremental_bookings = None
     backup_full_bookings_json = None
-    list_available_full_booking_json_exports = None
     restore_bookings_from_full_json_export = None
     delete_incremental_booking_backup = None
     # TODO: Obsolete? Assignment for 'backup_full_booking_data_json_azure' commented out.

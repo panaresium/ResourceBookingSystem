@@ -1348,17 +1348,37 @@ def _import_user_configurations_data(user_config_data: dict): # Return type will
             continue
 
         try:
-            permissions_json_str = role_item.get('permissions', '[]')
-            try:
-                permissions_list = json.loads(permissions_json_str)
-                if not isinstance(permissions_list, list):
-                    raise ValueError("Permissions data is not a list.")
-            except json.JSONDecodeError as jde:
-                errors.append(f"Error decoding permissions JSON for Role ID {backup_role_id} ('{role_name}'): {str(jde)}. Permissions raw: '{permissions_json_str}'")
-                continue
-            except ValueError as ve:
-                errors.append(f"Invalid permissions format for Role ID {backup_role_id} ('{role_name}'): {str(ve)}. Permissions raw: '{permissions_json_str}'")
-                continue
+            # New robust permissions handling
+            permissions_data = role_item.get('permissions') # Get the raw data
+            permissions_list = [] # Default to empty list
+
+            if isinstance(permissions_data, list):
+                permissions_list = permissions_data  # Already a list, use directly
+            elif isinstance(permissions_data, str):
+                try:
+                    # Attempt to parse if it's a JSON string representing a list
+                    loaded_perms = json.loads(permissions_data)
+                    if isinstance(loaded_perms, list):
+                        permissions_list = loaded_perms
+                    else:
+                        # Was a valid JSON string, but not a list (e.g., just a string like "view_users")
+                        warnings.append(f"Permissions for Role ID {backup_role_id} ('{role_name}') was a JSON string but not a list: '{permissions_data}'. Treating as a single permission.")
+                        permissions_list = [str(loaded_perms)] # Treat as a single permission
+                except json.JSONDecodeError:
+                    # Not a valid JSON string, assume comma-separated or single literal string
+                    warnings.append(f"Permissions string for Role ID {backup_role_id} ('{role_name}') is not valid JSON: '{permissions_data}'. Attempting to split by comma or use as single permission.")
+                    permissions_list = [p.strip() for p in permissions_data.split(',') if p.strip()]
+                    if not permissions_list and permissions_data.strip(): # Non-empty string, didn't split, not just whitespace
+                        permissions_list = [permissions_data.strip()] # Treat as a single permission string
+            elif permissions_data is None:
+                permissions_list = [] # Explicitly no permissions
+            else: # Unexpected data type
+                warnings.append(f"Permissions for Role ID {backup_role_id} ('{role_name}') is of unexpected type: {type(permissions_data)}. Defaulting to empty list.")
+                permissions_list = []
+
+            # Ensure all items in permissions_list are strings, as Role.permissions likely expects List[str]
+            permissions_list = [str(p) for p in permissions_list]
+            # End new robust permissions handling
 
             role = db.session.get(Role, backup_role_id)
 
