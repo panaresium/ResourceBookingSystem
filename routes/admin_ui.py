@@ -160,7 +160,7 @@ def serve_backup_booking_data_page():
 def serve_backup_settings_page():
     current_app.logger.info(f"User {current_user.username} accessed Backup General Settings page.")
     scheduler_settings = load_scheduler_settings()
-    auto_restore_booking_records_on_startup = scheduler_settings.get('auto_restore_booking_records_on_startup', False)
+    auto_restore_full_system_on_startup = scheduler_settings.get('auto_restore_full_system_on_startup', False) # MODIFIED KEY
     booking_settings = BookingSettings.query.first()
     if not booking_settings:
         current_app.logger.info("No BookingSettings found, creating default with global_time_offset_hours = 0.")
@@ -170,7 +170,7 @@ def serve_backup_settings_page():
         except Exception as e: db.session.rollback(); current_app.logger.error(f"Error committing default BookingSettings: {e}", exc_info=True)
     global_time_offset_hours = booking_settings.global_time_offset_hours if booking_settings else 0
     if global_time_offset_hours is None: global_time_offset_hours = 0; current_app.logger.warning("global_time_offset_hours was None, defaulted to 0.")
-    return render_template('admin/backup_settings.html', auto_restore_booking_records_on_startup=auto_restore_booking_records_on_startup, global_time_offset_hours=global_time_offset_hours)
+    return render_template('admin/backup_settings.html', auto_restore_full_system_on_startup=auto_restore_full_system_on_startup, global_time_offset_hours=global_time_offset_hours) # MODIFIED VARIABLE
 
 # LEGACY - Azure CSV Restore Route - Body fully commented out.
 # LEGACY CSV Routes are fully removed.
@@ -255,23 +255,23 @@ def save_booking_data_protection_schedule():
     # ... (implementation as provided) ...
     return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
 
-@admin_ui_bp.route('/settings/startup/auto_restore_bookings', methods=['POST'])
+@admin_ui_bp.route('/settings/startup/auto_restore_bookings', methods=['POST'], endpoint='save_auto_restore_booking_records_settings') # ADDED ENDPOINT
 @login_required
 @permission_required('manage_system')
-def save_auto_restore_booking_records_settings():
+def save_auto_restore_full_system_settings(): # RENAMED FUNCTION
     logger = current_app.logger
     try:
         # Checkbox value is 'true' if checked, otherwise not present in form data
-        auto_restore_enabled_str = request.form.get('auto_restore_booking_records_enabled')
+        auto_restore_enabled_str = request.form.get('auto_restore_full_system_enabled') # MODIFIED FORM FIELD
         auto_restore_enabled_bool = auto_restore_enabled_str == 'true'
 
         scheduler_settings = load_scheduler_settings()
-        scheduler_settings['auto_restore_booking_records_on_startup'] = auto_restore_enabled_bool
+        scheduler_settings['auto_restore_full_system_on_startup'] = auto_restore_enabled_bool # MODIFIED KEY
         save_scheduler_settings(scheduler_settings)
 
         flash(_('Startup behavior settings saved successfully.'), 'success')
-        add_audit_log(action='Update Startup Behavior Settings', details=f'Automatic booking restore on startup set to {auto_restore_enabled_bool}')
-        logger.info(f"Startup behavior settings (auto_restore_booking_records_on_startup) set to {auto_restore_enabled_bool} by user {current_user.username}.")
+        add_audit_log(action='Update Startup Behavior Settings', details=f'Automatic full system restore on startup set to {auto_restore_enabled_bool}') # MODIFIED AUDIT LOG
+        logger.info(f"Startup behavior settings (auto_restore_full_system_on_startup) set to {auto_restore_enabled_bool} by user {current_user.username}.") # MODIFIED LOG MESSAGE
 
     except Exception as e:
         flash(_('Error saving startup behavior settings: %(error)s', error=str(e)), 'error')

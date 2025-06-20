@@ -9,9 +9,13 @@ import re
 import time
 import csv
 import shutil
+import tempfile # Added
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError, ServiceRequestError
 
+# Ensure os, json, logging, re, datetime, timezone, time are available (already imported or standard)
 from models import Booking, db
+# From utils import _import_map_configuration_data, _import_resource_configurations_data, _import_user_configurations_data, add_audit_log
+from utils import _import_map_configuration_data, _import_resource_configurations_data, _import_user_configurations_data, add_audit_log # Added
 from extensions import db # Ensure db is imported from extensions (already imported via models)
 from utils import update_task_log # Ensure this is imported from utils
 from datetime import datetime, time, timezone # Ensure these are imported (datetime, time were already there, timezone might be new)
@@ -1351,6 +1355,7 @@ def restore_incremental_bookings(app, task_id=None):
     logger.warning(f"Placeholder 'restore_incremental_bookings', task_id: {task_id}.")
     _emit_progress(task_id, "Incremental booking restore not implemented.", level='WARNING')
     return {'status': 'not_implemented', 'message': 'Not implemented'}
+"""
 
 def restore_bookings_from_full_db_backup(app, timestamp_str, task_id=None):
     logger.warning(f"Placeholder 'restore_bookings_from_full_db_backup' for {timestamp_str}, task_id: {task_id}.")
@@ -1489,6 +1494,215 @@ def delete_incremental_booking_backup(filename, backup_type=None, task_id=None):
     logger.warning(f"Placeholder 'delete_incremental_booking_backup' for {filename}, task_id: {task_id}.")
     _emit_progress(task_id, "Delete incremental booking backup not implemented.", level='WARNING')
     return False
+
+def perform_startup_restore_sequence(app_for_context):
+    """
+    Performs a full system restore from the latest Azure backup set on application startup.
+    This includes database, configurations (map, resource, user), and scheduler settings.
+    """
+    app_logger = app_for_context.logger
+    app_logger.info("Initiating startup restore sequence from Azure.")
+    local_temp_dir = None
+    restore_status = {"status": "failure", "message": "Startup restore sequence initiated but not completed."}
+
+    try:
+        local_temp_dir = tempfile.mkdtemp(prefix="startup_restore_")
+        app_logger.info(f"Created temporary directory for downloads: {local_temp_dir}")
+
+        system_backup_share_name = os.environ.get('AZURE_SYSTEM_BACKUP_SHARE', 'system-backups')
+        service_client = _get_service_client()
+        share_client = service_client.get_share_client(system_backup_share_name)
+
+        if not _client_exists(share_client):
+            msg = f"Azure share '{system_backup_share_name}' not found. Cannot perform startup restore."
+            app_logger.error(msg)
+            restore_status["message"] = msg
+            return restore_status
+
+        app_logger.info(f"Successfully connected to Azure share '{system_backup_share_name}'.")
+
+        available_backups = list_available_backups() # Uses the same share_client logic internally
+        if not available_backups:
+            msg = "No backup sets found in Azure. Skipping startup restore."
+            app_logger.info(msg)
+            restore_status["status"] = "success" # No error, just nothing to restore
+            restore_status["message"] = msg
+            return restore_status
+
+        latest_backup_timestamp = available_backups[0] # list_available_backups returns sorted list
+        app_logger.info(f"Latest backup timestamp found: {latest_backup_timestamp}")
+
+        backup_root_on_share = f"{FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{latest_backup_timestamp}"
+        manifest_filename = f"backup_manifest_{latest_backup_timestamp}.json"
+        manifest_path_on_share = f"{backup_root_on_share}/{COMPONENT_SUBDIR_MANIFEST}/{manifest_filename}"
+        local_manifest_path = os.path.join(local_temp_dir, manifest_filename)
+
+        app_logger.info(f"Downloading manifest: {manifest_path_on_share}")
+        if not download_file(share_client, manifest_path_on_share, local_manifest_path):
+            msg = f"Failed to download manifest file '{manifest_path_on_share}'. Startup restore aborted."
+            app_logger.error(msg)
+            restore_status["message"] = msg
+            return restore_status
+
+        app_logger.info(f"Manifest downloaded to {local_manifest_path}. Parsing...")
+        with open(local_manifest_path, 'r', encoding='utf-8') as f_manifest:
+            manifest_data = json.load(f_manifest)
+
+        downloaded_component_paths = {} # To store local paths of downloaded components
+
+        for component in manifest_data.get("components", []):
+            comp_type = component.get("type")
+            comp_name = component.get("name", "Unknown")
+            comp_path_in_backup = component.get("path_in_backup") # Relative path from backup_root_on_share
+            comp_original_filename = component.get("original_filename", os.path.basename(comp_path_in_backup) if comp_path_in_backup else "unknown_file")
+
+            if not comp_path_in_backup:
+                app_logger.warning(f"Component '{comp_name}' in manifest has no path. Skipping.")
+                continue
+
+            full_path_on_share = f"{backup_root_on_share}/{comp_path_in_backup}"
+            local_download_path = os.path.join(local_temp_dir, comp_original_filename)
+
+            app_logger.info(f"Downloading component: {comp_name} (Type: {comp_type}) from {full_path_on_share}")
+            if download_file(share_client, full_path_on_share, local_download_path):
+                app_logger.info(f"Successfully downloaded {comp_name} to {local_download_path}")
+                # Store by a key that helps identify it for restoration
+                # For configs, use 'name'; for DB/scheduler, use 'type'
+                key_for_paths = comp_name if comp_type == "config" else comp_type
+                downloaded_component_paths[key_for_paths] = local_download_path
+            else:
+                msg = f"Failed to download component '{comp_name}' from '{full_path_on_share}'. Startup restore might be incomplete."
+                app_logger.error(msg)
+                # Decide if this is fatal or continue with other components
+                # For now, let's make it fatal for critical components like DB
+                if comp_type == "database":
+                    restore_status["message"] = msg
+                    return restore_status
+                # For other components, log and continue, but final status will be partial/failed.
+                restore_status["message"] = msg # Update message with the latest error
+
+        # --- Perform Restore Operations using app_context ---
+        with app_for_context.app_context():
+            app_logger.info("Entering app_context for restore operations.")
+
+            # 1. Restore Database
+            if "database" in downloaded_component_paths:
+                local_db_path = downloaded_component_paths["database"]
+                live_db_uri = app_for_context.config.get('SQLALCHEMY_DATABASE_URI', '')
+                if live_db_uri.startswith('sqlite:///'):
+                    live_db_path = live_db_uri.replace('sqlite:///', '', 1)
+                    # Ensure the target directory for the live DB exists
+                    live_db_dir = os.path.dirname(live_db_path)
+                    if not os.path.exists(live_db_dir): os.makedirs(live_db_dir, exist_ok=True)
+
+                    try:
+                        app_logger.info(f"Attempting to replace live database at '{live_db_path}' with downloaded backup '{local_db_path}'.")
+                        shutil.copyfile(local_db_path, live_db_path)
+                        app_logger.info("Database successfully restored.")
+                        add_audit_log("System Restore", f"Database restored from startup sequence using backup {latest_backup_timestamp}.")
+                    except Exception as e_db_restore:
+                        msg = f"Error replacing live database: {e_db_restore}"
+                        app_logger.error(msg, exc_info=True)
+                        restore_status["message"] = msg
+                        return restore_status # DB restore is critical
+                else:
+                    app_logger.warning(f"Database URI '{live_db_uri}' is not SQLite. Skipping database restore from file.")
+            else:
+                app_logger.warning("Database component not found in downloaded files. Skipping database restore.")
+
+
+            # 2. Restore Configurations (Map, Resource, User)
+            config_types_map = {
+                "map_config": (_import_map_configuration_data, "Map Configuration"),
+                "resource_configs": (_import_resource_configurations_data, "Resource Configurations"),
+                "user_configs": (_import_user_configurations_data, "User Configurations")
+            }
+
+            for config_key, (import_func, log_name) in config_types_map.items():
+                if config_key in downloaded_component_paths:
+                    local_config_path = downloaded_component_paths[config_key]
+                    app_logger.info(f"Attempting to restore {log_name} from {local_config_path}")
+                    try:
+                        with open(local_config_path, 'r', encoding='utf-8') as f_config:
+                            config_data = json.load(f_config)
+
+                        # The import functions expect Flask app and db, which are available in app_context
+                        # They also internally call add_audit_log
+                        import_result = import_func(config_data, app_for_context, db)
+
+                        if import_result.get("success", False) or "successfully imported" in import_result.get("message", "").lower() : # Check for positive indicators
+                            app_logger.info(f"{log_name} restored successfully. Message: {import_result.get('message', 'No message.')}")
+                            # Audit log is handled by the import_func
+                        else:
+                            app_logger.error(f"Failed to restore {log_name}. Errors: {import_result.get('errors', 'Unknown error')}")
+                            if "message" in restore_status: # Append if message already exists
+                                restore_status["message"] += f"; Failed to restore {log_name}"
+                            else:
+                                restore_status["message"] = f"Failed to restore {log_name}"
+                            # Depending on criticality, may set overall status to failure here
+                    except Exception as e_config_restore:
+                        app_logger.error(f"Error restoring {log_name}: {e_config_restore}", exc_info=True)
+                        if "message" in restore_status:
+                             restore_status["message"] += f"; Error during {log_name} restore: {e_config_restore}"
+                        else:
+                            restore_status["message"] = f"Error during {log_name} restore: {e_config_restore}"
+                else:
+                    app_logger.info(f"{log_name} component not found in downloaded files. Skipping its restore.")
+
+            # 3. Restore Scheduler Settings
+            if "scheduler_settings" in downloaded_component_paths:
+                local_scheduler_path = downloaded_component_paths["scheduler_settings"]
+                # Determine live path from app config or default
+                data_dir_path = app_for_context.config.get('DATA_DIR', os.path.join(os.path.dirname(__file__), '..', 'data')) # Assuming app_factory structure
+                live_scheduler_path = os.path.join(data_dir_path, 'scheduler_settings.json')
+
+                live_scheduler_dir = os.path.dirname(live_scheduler_path)
+                if not os.path.exists(live_scheduler_dir): os.makedirs(live_scheduler_dir, exist_ok=True)
+
+                try:
+                    app_logger.info(f"Attempting to replace live scheduler settings at '{live_scheduler_path}' with downloaded backup '{local_scheduler_path}'.")
+                    shutil.copyfile(local_scheduler_path, live_scheduler_path)
+                    app_logger.info("Scheduler settings successfully restored.")
+                    add_audit_log("System Restore", f"Scheduler settings restored from startup sequence using backup {latest_backup_timestamp}.")
+                except Exception as e_sched_restore:
+                    app_logger.error(f"Error replacing live scheduler settings: {e_sched_restore}", exc_info=True)
+                    if "message" in restore_status:
+                         restore_status["message"] += f"; Error during scheduler settings restore: {e_sched_restore}"
+                    else:
+                        restore_status["message"] = f"Error during scheduler settings restore: {e_sched_restore}"
+            else:
+                app_logger.info("Scheduler settings component not found in downloaded files. Skipping its restore.")
+
+            # If we reached here and message is still the initial one, it means no major errors.
+            if restore_status["message"] == "Startup restore sequence initiated but not completed.":
+                 restore_status["status"] = "success"
+                 restore_status["message"] = f"Startup restore sequence completed successfully from backup {latest_backup_timestamp}."
+                 app_logger.info(restore_status["message"])
+            elif restore_status.get("status") != "failure": # If message was updated but not to failure
+                 restore_status["status"] = "partial_success" # Or some other indicator of non-critical failures
+                 app_logger.warning(f"Startup restore sequence completed with some non-critical issues: {restore_status['message']}")
+
+
+        # End of app_context operations
+        app_logger.info("Exited app_context for restore operations.")
+
+    except RuntimeError as e_runtime: # e.g. Azure SDK not installed
+        app_logger.error(f"RuntimeError during startup restore: {e_runtime}", exc_info=True)
+        restore_status["message"] = f"Runtime error: {e_runtime}"
+    except Exception as e_main:
+        app_logger.error(f"An unexpected critical error occurred during startup restore sequence: {e_main}", exc_info=True)
+        restore_status["message"] = f"Unexpected critical error: {e_main}"
+    finally:
+        if local_temp_dir and os.path.exists(local_temp_dir):
+            try:
+                shutil.rmtree(local_temp_dir)
+                app_logger.info(f"Successfully cleaned up temporary directory: {local_temp_dir}")
+            except Exception as e_cleanup:
+                app_logger.error(f"Failed to clean up temporary directory {local_temp_dir}: {e_cleanup}", exc_info=True)
+
+    app_logger.info(f"Startup restore final status: {restore_status['status']}, Message: {restore_status['message']}")
+    return restore_status
+
 
 # ... (rest of the file, e.g., download_booking_data_json_backup, etc.)
 # Ensure all functions from the original file that are still needed are present.
