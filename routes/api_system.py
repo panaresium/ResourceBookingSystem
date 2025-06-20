@@ -65,7 +65,7 @@ try:
         # restore_bookings_from_csv_backup, # Removed
         # TODO: Obsolete? Import commented out as 'list_available_incremental_booking_backups' is likely obsolete.
         # list_available_incremental_booking_backups, # Keeping non-CSV legacy for now
-        restore_incremental_bookings, # Keeping non-CSV legacy for now
+        # restore_incremental_bookings, # REMOVED Keeping non-CSV legacy for now
         restore_bookings_from_full_db_backup,
         backup_incremental_bookings, # Added for manual incremental backup
         backup_full_bookings_json, # Added for manual full JSON booking export
@@ -109,7 +109,7 @@ except (ImportError, RuntimeError) as e_detailed_azure_import: # Capture the exc
     restore_media_component = None
     # TODO: Obsolete? Usage of 'list_available_incremental_booking_backups' commented out.
     # list_available_incremental_booking_backups = None
-    restore_incremental_bookings = None
+    # restore_incremental_bookings = None # REMOVED
     restore_bookings_from_full_db_backup = None
     backup_incremental_bookings = None
     backup_full_bookings_json = None
