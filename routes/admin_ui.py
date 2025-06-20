@@ -179,7 +179,59 @@ def serve_backup_settings_page():
 @login_required
 @permission_required('manage_system')
 def save_full_backup_schedule_settings():
-    # ... (implementation as provided) ...
+    try:
+        is_enabled = request.form.get('full_backup_enabled') == 'true'
+
+        scheduler_settings = load_scheduler_settings()
+        if 'full_backup' not in scheduler_settings:
+            scheduler_settings['full_backup'] = DEFAULT_FULL_BACKUP_SCHEDULE.copy()
+
+        scheduler_settings['full_backup']['is_enabled'] = is_enabled
+
+        schedule_type = request.form.get('full_backup_schedule_type', 'daily')
+        time_of_day = request.form.get('full_backup_time_of_day')
+        day_of_week_str = request.form.get('full_backup_day_of_week')
+        interval_value_str = request.form.get('full_backup_interval_value')
+        interval_unit = request.form.get('full_backup_interval_unit', 'minutes')
+
+        scheduler_settings['full_backup']['schedule_type'] = schedule_type
+
+        if schedule_type == 'daily' or schedule_type == 'weekly':
+            scheduler_settings['full_backup']['time_of_day'] = time_of_day
+            if schedule_type == 'weekly':
+                try:
+                    day_of_week = int(day_of_week_str)
+                    scheduler_settings['full_backup']['day_of_week'] = day_of_week
+                except (ValueError, TypeError):
+                    current_app.logger.warning(f"Invalid day_of_week value: {day_of_week_str}. Skipping update for day_of_week.")
+            # Remove interval settings if they exist
+            scheduler_settings['full_backup'].pop('interval_value', None)
+            scheduler_settings['full_backup'].pop('interval_unit', None)
+        elif schedule_type == 'interval':
+            interval_value = 60 # Default value
+            try:
+                interval_value = int(interval_value_str)
+                if interval_value < 1:
+                    current_app.logger.warning(f"Interval value must be at least 1. Received {interval_value}. Defaulting to 60.")
+                    interval_value = 60
+            except (ValueError, TypeError):
+                current_app.logger.warning(f"Invalid interval_value: {interval_value_str}. Defaulting to 60.")
+
+            scheduler_settings['full_backup']['interval_value'] = interval_value
+            scheduler_settings['full_backup']['interval_unit'] = interval_unit
+            # Remove daily/weekly settings if they exist
+            scheduler_settings['full_backup'].pop('time_of_day', None)
+            scheduler_settings['full_backup'].pop('day_of_week', None)
+
+        save_scheduler_settings(scheduler_settings)
+        add_audit_log(action='Update Full Backup Schedule', details=f'Updated full backup schedule settings. Enabled: {is_enabled}, Type: {schedule_type}')
+        flash(_('Full backup schedule settings saved successfully.'), 'success')
+        current_app.logger.info(f"Full backup schedule settings saved by {current_user.username}. Enabled: {is_enabled}, Type: {schedule_type}")
+
+    except Exception as e:
+        current_app.logger.error(f"Error saving full backup schedule settings: {e}", exc_info=True)
+        flash(_('An error occurred while saving full backup schedule settings: %(error)s', error=str(e)), 'error')
+
     return redirect(url_for('admin_ui.serve_backup_system_page'))
 
 # LEGACY - This route was for the old CSV schedule, now handled by booking_data_protection_schedule or removed.
