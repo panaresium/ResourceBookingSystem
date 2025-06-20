@@ -46,10 +46,19 @@ from scheduler_tasks import (
 try:
     from azure_backup import perform_startup_restore_sequence, backup_if_changed as azure_backup_if_changed
     azure_backup_available = True
-except ImportError:
+except ImportError as e_import_azure: # Capture the exception
+    # app.logger might not be fully configured here, using standard logging for this critical import failure.
+    # However, create_app calls app.logger.error very early, so it should be available.
+    logging.getLogger(__name__).warning(f"Failed to import Azure backup utilities (perform_startup_restore_sequence or backup_if_changed) from azure_backup.py. Azure features may be unavailable. Error: {e_import_azure}")
     perform_startup_restore_sequence = None
     azure_backup_if_changed = None
     azure_backup_available = False
+
+# New diagnostic logging block
+# Assuming app.logger is available after the create_app's initial error log.
+# If app_factory is imported before create_app() is called and fully configured, these might not show as expected.
+# For safety, these logs are now inside create_app, after app.logger is more likely to be configured.
+# This section will be moved into create_app() later if direct logging here is problematic.
 
 # Imports for processing downloaded configs during startup restore
 from utils import (
@@ -216,6 +225,31 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     # Previous problematic lines:
     #    if not app.logger.hasHandlers(): # Ensure app.logger has a handler for tests
     #        app.logger.addHandler(logging.StreamHandler())
+
+    # Moved Azure diagnostic logs here, after app.logger is more reliably configured.
+    if 'app' in locals() and hasattr(app, 'logger'): # Check if app and app.logger exist
+        app.logger.info(f"DIAGNOSTIC: After azure_backup import attempt: azure_backup_available = {azure_backup_available}")
+        if azure_backup_available:
+            # For 'perform_startup_restore_sequence'
+            if 'perform_startup_restore_sequence' in globals() and perform_startup_restore_sequence is not None: # Check globals() as it's imported at module level
+                app.logger.info(f"DIAGNOSTIC: perform_startup_restore_sequence type = {type(perform_startup_restore_sequence)}")
+                app.logger.info(f"DIAGNOSTIC: perform_startup_restore_sequence is callable = {callable(perform_startup_restore_sequence)}")
+            else:
+                app.logger.info("DIAGNOSTIC: perform_startup_restore_sequence is None or not defined in global scope (likely due to import issue).")
+
+            # For 'backup_if_changed'
+            if 'backup_if_changed' in globals() and backup_if_changed is not None: # Check globals()
+                app.logger.info(f"DIAGNOSTIC: backup_if_changed type = {type(backup_if_changed)}")
+                app.logger.info(f"DIAGNOSTIC: backup_if_changed is callable = {callable(backup_if_changed)}")
+            else:
+                app.logger.info("DIAGNOSTIC: backup_if_changed is None or not defined in global scope (likely due to import issue).")
+        else:
+            # This case is when the ImportError itself happened. The error is logged in the except block.
+            app.logger.info("DIAGNOSTIC: azure_backup_available is False (ImportError likely occurred), utilities not loaded.")
+    else:
+        # Fallback to standard logging if app.logger is not yet available (e.g. if this code runs too early)
+        logging.info(f"DIAGNOSTIC (std_log): After azure_backup import attempt: azure_backup_available = {azure_backup_available}")
+
 
     # Determine startup restore behavior
     should_attempt_restore = None
