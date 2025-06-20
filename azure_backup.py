@@ -1139,20 +1139,6 @@ def backup_full_bookings_json(app, task_id=None):
         _emit_progress(task_id, "An unexpected error occurred during the backup process.", detail=str(e), level='ERROR')
         return False
 
-def list_available_full_booking_json_exports():
-    logger.warning("Placeholder 'list_available_full_booking_json_exports'. Not implemented.")
-    return []
-
-def restore_bookings_from_full_json_export(app, filename, task_id=None):
-    logger.warning(f"Placeholder 'restore_bookings_from_full_json_export' for {filename}, task_id: {task_id}.")
-    _emit_progress(task_id, "Booking restore from JSON export not implemented.", level='WARNING')
-    return {'status': 'not_implemented', 'message': 'Not implemented'}
-
-def delete_incremental_booking_backup(filename, backup_type=None, task_id=None):
-    logger.warning(f"Placeholder 'delete_incremental_booking_backup' for {filename}, task_id: {task_id}.")
-    _emit_progress(task_id, "Delete incremental booking backup not implemented.", level='WARNING')
-    return False
-
 def backup_if_changed(app=None):
     """
     Placeholder for the original backup_if_changed function.
@@ -1224,23 +1210,43 @@ def perform_startup_restore_sequence(app_for_context):
             comp_name = component.get("name", "Unknown")
             comp_path_in_backup = component.get("path_in_backup")
             comp_original_filename = component.get("original_filename", os.path.basename(comp_path_in_backup) if comp_path_in_backup else "unknown_file")
+
             if not comp_path_in_backup:
                 app_logger.warning(f"Component '{comp_name}' in manifest has no path. Skipping.")
                 continue
+
+            # Check for the specific media directory component
+            # COMPONENT_SUBDIR_MEDIA is defined as "media" at the module level.
+            if comp_type == "media" and comp_path_in_backup == COMPONENT_SUBDIR_MEDIA:
+                app_logger.info(f"Skipping download of top-level media directory component ('{comp_path_in_backup}'). Full media restore (recursive directory download) is not implemented in this startup sequence. Individual media files are not restored by this step.")
+                continue # Skip to the next component in the manifest
+
             full_path_on_share = f"{backup_root_on_share}/{comp_path_in_backup}"
+            # For non-media-directory components, use comp_original_filename for local download.
             local_download_path = os.path.join(local_temp_dir, comp_original_filename)
+
             app_logger.info(f"Downloading component: {comp_name} (Type: {comp_type}) from {full_path_on_share}")
             if download_file(share_client, full_path_on_share, local_download_path):
                 app_logger.info(f"Successfully downloaded {comp_name} to {local_download_path}")
-                key_for_paths = comp_name if comp_type == "config" else comp_type
+                key_for_paths = comp_name if comp_type == "config" else comp_type # Example: use 'map_config' as key
                 downloaded_component_paths[key_for_paths] = local_download_path
             else:
-                msg = f"Failed to download component '{comp_name}' from '{full_path_on_share}'. Startup restore might be incomplete."
+                # This 'else' block will now only be hit for non-media directory components, or if media files were individually listed
+                msg = f"Failed to download component '{comp_name}' (Type: {comp_type}) from '{full_path_on_share}'. Startup restore might be incomplete."
                 app_logger.error(msg)
                 if comp_type == "database":
                     restore_status["message"] = msg
+                    # Clean up temp dir before returning
+                    if local_temp_dir and os.path.exists(local_temp_dir): # Added cleanup
+                        shutil.rmtree(local_temp_dir) # Added cleanup
                     return restore_status
-                restore_status["message"] = msg
+                # For other non-critical components, add to message but continue
+                if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
+                    restore_status["message"] += f"; {msg}"
+                else:
+                    restore_status["message"] = msg
+                # No 'return restore_status' here for non-DB components, let it try others.
+
         with app_for_context.app_context():
             app_logger.info("Entering app_context for restore operations.")
             if "database" in downloaded_component_paths:
@@ -1278,17 +1284,58 @@ def perform_startup_restore_sequence(app_for_context):
                     try:
                         with open(local_config_path, 'r', encoding='utf-8') as f_config:
                             config_data = json.load(f_config)
-                        import_result = import_func(config_data, app_for_context, db)
-                        if import_result.get("success", False) or "successfully imported" in import_result.get("message", "").lower() :
-                            app_logger.info(f"{log_name} restored successfully. Message: {import_result.get('message', 'No message.')}")
+
+                        import_successful = False
+                        message = "Import result not processed."
+                        errors_detail = "N/A"
+
+                        # Call import_func with only config_data
+                        raw_import_result = import_func(config_data)
+
+                        if config_key == "map_config":
+                            # Expects: (summary_dict, status_code)
+                            summary_dict, status_code = raw_import_result
+                            import_successful = status_code == 200 or status_code == 207 # 207 is partial success
+                            message = summary_dict.get('message', 'Map import status code: ' + str(status_code))
+                            if not import_successful: errors_detail = str(summary_dict.get('errors', []))
+                        elif config_key == "resource_configs":
+                            # Expects: (updated_count, created_count, errors, warnings, status_code, final_message)
+                            res_updated, res_created, res_errors, res_warnings, status_code, msg = raw_import_result
+                            import_successful = status_code == 200 or status_code == 207
+                            message = msg
+                            if not import_successful: errors_detail = str(res_errors)
+                            if res_warnings: message += " Warnings: " + str(res_warnings)
+                        elif config_key == "user_configs":
+                            # Expects: True or error dict
+                            if isinstance(raw_import_result, bool) and raw_import_result:
+                                import_successful = True
+                                message = f"{log_name} import reported success (True)."
+                            elif isinstance(raw_import_result, dict): # Error dictionary
+                                import_successful = False
+                                message = raw_import_result.get('message', f"{log_name} import failed.")
+                                errors_detail = str(raw_import_result.get('errors', []))
+                            else: # Unexpected return type
+                                import_successful = False
+                                message = f"{log_name} import returned unexpected data type: {type(raw_import_result)}."
+                                errors_detail = str(raw_import_result)
+
+                        if import_successful:
+                            app_logger.info(f"{log_name} processed. Message: {message}")
                         else:
-                            app_logger.error(f"Failed to restore {log_name}. Errors: {import_result.get('errors', 'Unknown error')}")
-                            if "message" in restore_status: restore_status["message"] += f"; Failed to restore {log_name}"
-                            else: restore_status["message"] = f"Failed to restore {log_name}"
+                            app_logger.error(f"Failed to restore {log_name}. Details: {errors_detail}. Full message: {message}")
+                            # Update overall restore_status message
+                            if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
+                                restore_status["message"] += f"; Failed to process {log_name}: {errors_detail}"
+                            else:
+                                restore_status["message"] = f"Failed to process {log_name}: {errors_detail}"
+                            # Consider setting overall_success flag here if needed by broader logic
+
                     except Exception as e_config_restore:
-                        app_logger.error(f"Error restoring {log_name}: {e_config_restore}", exc_info=True)
-                        if "message" in restore_status: restore_status["message"] += f"; Error during {log_name} restore: {e_config_restore}"
-                        else: restore_status["message"] = f"Error during {log_name} restore: {e_config_restore}"
+                        app_logger.error(f"Error during {log_name} import stage: {e_config_restore}", exc_info=True)
+                        if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
+                            restore_status["message"] += f"; Error during {log_name} import stage: {str(e_config_restore)}"
+                        else:
+                             restore_status["message"] = f"Error during {log_name} import stage: {str(e_config_restore)}"
                 else:
                     app_logger.info(f"{log_name} component not found in downloaded files. Skipping its restore.")
             if "scheduler_settings" in downloaded_component_paths:
@@ -1334,5 +1381,3 @@ def perform_startup_restore_sequence(app_for_context):
                 app_logger.error(f"Failed to clean up temporary directory {local_temp_dir}: {e_cleanup}", exc_info=True)
     app_logger.info(f"Startup restore final status: {restore_status['status']}, Message: {restore_status['message']}")
     return restore_status
-
-[end of azure_backup.py]
