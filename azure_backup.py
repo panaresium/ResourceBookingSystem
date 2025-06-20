@@ -1153,6 +1153,32 @@ def delete_incremental_booking_backup(filename, backup_type=None, task_id=None):
     _emit_progress(task_id, "Delete incremental booking backup not implemented.", level='WARNING')
     return False
 
+def backup_if_changed(app=None):
+    """
+    Placeholder for the original backup_if_changed function.
+    This function was intended to check for changes in critical files
+    and trigger a new backup if changes were detected.
+    Currently, it only logs that it's a placeholder and does nothing.
+    """
+    # Attempt to get a logger, using app.logger if app is provided, else module logger
+    current_logger = None
+    if app and hasattr(app, 'logger'):
+        current_logger = app.logger
+    else:
+        # Fallback to module-level logger if app or app.logger is not available
+        # This ensures logging still occurs if called outside app context or very early.
+        current_logger = logger
+
+    current_logger.info("Scheduler: `backup_if_changed` (Azure legacy) called. This is currently a placeholder and performs no backup actions.")
+    # Original logic would involve:
+    # 1. Connecting to hash DB (e.g., HASH_DB).
+    # 2. Calculating current hashes for monitored files (e.g., local_db_path, config files).
+    # 3. Comparing with stored hashes.
+    # 4. If different, call create_full_backup() with appropriate parameters and update stored hashes.
+    # Note: create_full_backup requires timestamp_str and potentially config data.
+    # This placeholder will not attempt to gather that data.
+    return False # Indicate no backup was performed by this placeholder
+
 def perform_startup_restore_sequence(app_for_context):
     app_logger = app_for_context.logger
     app_logger.info("Initiating startup restore sequence from Azure.")

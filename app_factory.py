@@ -189,6 +189,30 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     app.logger.propagate = False
     logging.info("Ensured app.logger.propagate is False.")
 
+    # Placed inside create_app(), after app.logger is configured
+    app.logger.info(f"DIAGNOSTIC (inside create_app): Checking status of Azure utilities...")
+    app.logger.info(f"DIAGNOSTIC (inside create_app): Module-level azure_backup_available = {azure_backup_available}")
+
+    # Check for perform_startup_restore_sequence
+    if 'perform_startup_restore_sequence' in globals() and globals()['perform_startup_restore_sequence'] is not None:
+        pss_func = globals()['perform_startup_restore_sequence']
+        app.logger.info(f"DIAGNOSTIC (inside create_app): perform_startup_restore_sequence was found in globals. Type = {type(pss_func)}")
+        app.logger.info(f"DIAGNOSTIC (inside create_app): perform_startup_restore_sequence is callable = {callable(pss_func)}")
+    elif 'perform_startup_restore_sequence' in globals(): # It's in globals but is None
+        app.logger.info("DIAGNOSTIC (inside create_app): perform_startup_restore_sequence is in globals but is None (likely set to None in except ImportError block).")
+    else: # Not in globals at all
+        app.logger.info("DIAGNOSTIC (inside create_app): perform_startup_restore_sequence NOT FOUND in globals.")
+
+    # Check for backup_if_changed
+    if 'backup_if_changed' in globals() and globals()['backup_if_changed'] is not None:
+        bic_func = globals()['backup_if_changed']
+        app.logger.info(f"DIAGNOSTIC (inside create_app): backup_if_changed was found in globals. Type = {type(bic_func)}")
+        app.logger.info(f"DIAGNOSTIC (inside create_app): backup_if_changed is callable = {callable(bic_func)}")
+    elif 'backup_if_changed' in globals(): # It's in globals but is None
+        app.logger.info("DIAGNOSTIC (inside create_app): backup_if_changed is in globals but is None (likely set to None in except ImportError block).")
+    else: # Not in globals at all
+        app.logger.info("DIAGNOSTIC (inside create_app): backup_if_changed NOT FOUND in globals.")
+
     # Control verbosity of Azure SDK loggers based on app's log level
     azure_logger_names = [
         'azure.core.pipeline.policies.http_logging_policy',
@@ -225,31 +249,6 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     # Previous problematic lines:
     #    if not app.logger.hasHandlers(): # Ensure app.logger has a handler for tests
     #        app.logger.addHandler(logging.StreamHandler())
-
-    # Moved Azure diagnostic logs here, after app.logger is more reliably configured.
-    if 'app' in locals() and hasattr(app, 'logger'): # Check if app and app.logger exist
-        app.logger.info(f"DIAGNOSTIC: After azure_backup import attempt: azure_backup_available = {azure_backup_available}")
-        if azure_backup_available:
-            # For 'perform_startup_restore_sequence'
-            if 'perform_startup_restore_sequence' in globals() and perform_startup_restore_sequence is not None: # Check globals() as it's imported at module level
-                app.logger.info(f"DIAGNOSTIC: perform_startup_restore_sequence type = {type(perform_startup_restore_sequence)}")
-                app.logger.info(f"DIAGNOSTIC: perform_startup_restore_sequence is callable = {callable(perform_startup_restore_sequence)}")
-            else:
-                app.logger.info("DIAGNOSTIC: perform_startup_restore_sequence is None or not defined in global scope (likely due to import issue).")
-
-            # For 'backup_if_changed'
-            if 'backup_if_changed' in globals() and backup_if_changed is not None: # Check globals()
-                app.logger.info(f"DIAGNOSTIC: backup_if_changed type = {type(backup_if_changed)}")
-                app.logger.info(f"DIAGNOSTIC: backup_if_changed is callable = {callable(backup_if_changed)}")
-            else:
-                app.logger.info("DIAGNOSTIC: backup_if_changed is None or not defined in global scope (likely due to import issue).")
-        else:
-            # This case is when the ImportError itself happened. The error is logged in the except block.
-            app.logger.info("DIAGNOSTIC: azure_backup_available is False (ImportError likely occurred), utilities not loaded.")
-    else:
-        # Fallback to standard logging if app.logger is not yet available (e.g. if this code runs too early)
-        logging.info(f"DIAGNOSTIC (std_log): After azure_backup import attempt: azure_backup_available = {azure_backup_available}")
-
 
     # Determine startup restore behavior
     should_attempt_restore = None
