@@ -217,11 +217,28 @@ def create_app(config_object=config, testing=False): # Added testing parameter
     #    if not app.logger.hasHandlers(): # Ensure app.logger has a handler for tests
     #        app.logger.addHandler(logging.StreamHandler())
 
+    # Determine startup restore behavior
+    should_attempt_restore = None
+    if not testing: # Only evaluate restore logic if not testing
+        env_restore_setting = os.environ.get("ENABLE_AUTO_STARTUP_RESTORE", "").strip().lower()
+        if env_restore_setting == "true":
+            should_attempt_restore = True
+            app.logger.info("Startup restore behavior determined by environment variable ENABLE_AUTO_STARTUP_RESTORE: ENABLED.")
+        elif env_restore_setting == "false":
+            should_attempt_restore = False
+            app.logger.info("Startup restore behavior determined by environment variable ENABLE_AUTO_STARTUP_RESTORE: DISABLED.")
+        else:
+            app.logger.info("Environment variable ENABLE_AUTO_STARTUP_RESTORE not set or invalid. Falling back to scheduler_settings.json.")
+            scheduler_settings = load_scheduler_settings()
+            should_attempt_restore = scheduler_settings.get('auto_restore_full_system_on_startup', False)
+            if should_attempt_restore:
+                app.logger.info("Startup restore from scheduler_settings.json: ENABLED.")
+            else:
+                app.logger.info("Startup restore from scheduler_settings.json: DISABLED.")
+
     # New logic for startup restore sequence - SKIP IF TESTING
     if not testing and azure_backup_available and callable(perform_startup_restore_sequence):
-        scheduler_settings = load_scheduler_settings() # load_scheduler_settings should already be imported
-        # Use the NEW setting name here
-        if scheduler_settings.get('auto_restore_full_system_on_startup', False):
+        if should_attempt_restore:
             app.logger.info("Configuration indicates automatic restore on startup. Attempting full system restore sequence...")
             try:
                 # Pass the app instance itself
@@ -232,15 +249,13 @@ def create_app(config_object=config, testing=False): # Added testing parameter
             except Exception as e_startup_restore:
                 app.logger.exception(f"Critical error during perform_startup_restore_sequence: {e_startup_restore}")
         else:
-            app.logger.info("Automatic restore on startup is disabled in settings. Skipping full system restore sequence.")
-    elif not testing: # Handles cases where azure_backup_available is False or perform_startup_restore_sequence is not callable
-        # Check setting to provide more specific log if restore is desired but not possible
-        scheduler_settings = load_scheduler_settings()
-        if scheduler_settings.get('auto_restore_full_system_on_startup', False):
-             app.logger.warning("Automatic restore on startup is ENABLED in settings, but restore utilities (perform_startup_restore_sequence) are not available/imported. Skipping restore.")
-        else:
-            # This will also catch cases where azure_backup_available is False.
-            app.logger.info("Startup restore skipped: either disabled in settings or Azure backup utilities (perform_startup_restore_sequence) are not available.")
+            # This log covers cases where restore is disabled by either env var or settings file.
+            app.logger.info("Automatic restore on startup is disabled. Skipping full system restore sequence.")
+    elif not testing and should_attempt_restore: # Only warn if restore was desired but not possible due to missing utilities
+         app.logger.warning("Automatic restore on startup is ENABLED (by env var or settings), but restore utilities (perform_startup_restore_sequence) are not available/imported. Skipping restore.")
+    # No specific 'else' needed here if should_attempt_restore is false and utilities are unavailable,
+    # as the earlier log about being disabled covers it, or if testing is true, nothing here runs.
+
 
     # Old incremental booking restore block is removed.
 
