@@ -528,32 +528,54 @@ def download_file(share_client, file_path, dest_path):
 
 def list_available_backups():
     # ... (original implementation) ...
-    logger.info("Attempting to list available full system backups.")
+    logger.info("Attempting to list available full system backups from new unified structure.")
     try:
-        service_client = _get_service_client()
-        db_share_name = os.environ.get('AZURE_DB_SHARE', 'db-backups')
-        share_client = service_client.get_share_client(db_share_name)
-        if not _client_exists(share_client): return []
-        db_backup_dir_client = share_client.get_directory_client(DB_BACKUPS_DIR)
-        if not _client_exists(db_backup_dir_client): return []
-        timestamps = set()
-        manifest_pattern = re.compile(r"^backup_manifest_(?P<timestamp>\d{8}_\d{6})\.json$")
-        db_pattern = re.compile(rf"^{re.escape(DB_FILENAME_PREFIX)}(?P<timestamp>\d{8}_\d{6})\.db$")
-        for item in db_backup_dir_client.list_directories_and_files():
-            if item['is_directory']: continue
-            filename = item['name']
-            timestamp_str = None
-            manifest_match = manifest_pattern.match(filename)
-            if manifest_match: timestamp_str = manifest_match.group('timestamp')
-            else:
-                db_match = db_pattern.match(filename)
-                if db_match: timestamp_str = db_match.group('timestamp')
-            if timestamp_str:
-                try: datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S'); timestamps.add(timestamp_str)
-                except ValueError: logger.warning(f"Skipping file with invalid timestamp format: {filename}")
-        return sorted(list(timestamps), reverse=True)
+        system_backup_share_name = os.environ.get('AZURE_SYSTEM_BACKUP_SHARE', 'system-backups')
+        service_client = _get_service_client() # Assuming this is already defined and working
+
+        share_client = service_client.get_share_client(system_backup_share_name)
+        if not _client_exists(share_client):
+            logger.warning(f"System backup share '{system_backup_share_name}' not found.")
+            return []
+
+        # Get client for the base directory where all 'backup_<timestamp>' folders are stored
+        # FULL_SYSTEM_BACKUPS_BASE_DIR should be defined as a constant, e.g., "full_system_backups"
+        base_backup_sets_dir_client = share_client.get_directory_client(FULL_SYSTEM_BACKUPS_BASE_DIR)
+        if not _client_exists(base_backup_sets_dir_client):
+            logger.info(f"Base directory for full system backups ('{FULL_SYSTEM_BACKUPS_BASE_DIR}') not found in share '{system_backup_share_name}'. No backups to list.")
+            return []
+
+        available_timestamps = []
+        backup_dir_pattern = re.compile(r"^backup_(\d{8}_\d{6})$") # Pattern to match 'backup_YYYYMMDD_HHMMSS'
+
+        for item in base_backup_sets_dir_client.list_directories_and_files():
+            if item['is_directory']:
+                dir_name = item['name']
+                match = backup_dir_pattern.match(dir_name)
+                if match:
+                    timestamp_str = match.group(1)
+                    # Verify this backup set by checking for its manifest
+                    # COMPONENT_SUBDIR_MANIFEST should be "manifest"
+                    manifest_filename = f"backup_manifest_{timestamp_str}.json"
+                    # Path for ShareFileClient is relative to the share root
+                    full_manifest_path_on_share = f"{FULL_SYSTEM_BACKUPS_BASE_DIR}/{dir_name}/{COMPONENT_SUBDIR_MANIFEST}/{manifest_filename}"
+
+                    manifest_file_client = share_client.get_file_client(full_manifest_path_on_share)
+                    if _client_exists(manifest_file_client):
+                        try:
+                            # Validate timestamp format just in case
+                            datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
+                            available_timestamps.append(timestamp_str)
+                            logger.debug(f"Found valid backup set: {dir_name} with manifest at {full_manifest_path_on_share}.")
+                        except ValueError:
+                            logger.warning(f"Directory '{dir_name}' matches backup pattern but timestamp '{timestamp_str}' is invalid. Skipping.")
+                    else:
+                        logger.warning(f"Directory '{dir_name}' found, but its manifest '{full_manifest_path_on_share}' is missing. Skipping.")
+
+        return sorted(list(set(available_timestamps)), reverse=True)
+
     except Exception as e:
-        logger.error(f"Error listing available full system backups: {e}", exc_info=True)
+        logger.error(f"Error listing available full system backups from new structure: {e}", exc_info=True)
         return []
 
 def restore_full_backup(backup_timestamp, task_id=None, dry_run=False):
