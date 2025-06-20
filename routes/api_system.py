@@ -726,6 +726,7 @@ def api_selective_restore():
             # Unified share client
             system_share_client = None
             manifest_data = None
+            handled_in_selective_restore = [] # Keep track of components processed by new media logic
 
             try:
                 # Check if essential Azure functions are available
@@ -903,46 +904,152 @@ def api_selective_restore():
                             overall_success = False; errors_list.append(f"{comp_details['display_name']} download failed: {cfg_msg or cfg_err}")
                             update_task_log(task_id_param, f"{comp_details['display_name']} download failed: {cfg_msg or cfg_err}", level="ERROR")
 
-                # --- Media Restore ---
-                # Find the main "media" component entry in the manifest
-                media_component_manifest_entry = next((c for c in manifest_data["components"] if c.get("type") == "media" and c.get("name") == "media"), None)
 
-                if media_component_manifest_entry:
-                    # This is the path to the 'media/' directory in the backup (e.g., "media" or "media/")
-                    media_base_path_in_backup = media_component_manifest_entry.get("path_in_backup", "").strip('/')
+                # --- Media Component Path Finding (must happen before config loop if media is handled first) ---
+                media_manifest_component = next((comp for comp in manifest_data.get('components', []) if comp.get('type') == 'media'), None)
+                media_base_path_in_backup = None
+                if media_manifest_component:
+                    media_base_path_in_backup = media_manifest_component.get('path_in_backup')
+                    if media_base_path_in_backup: # Ensure it's not empty or None
+                        media_base_path_in_backup = media_base_path_in_backup.strip('/') # Store as "media"
+                        update_task_log(task_id_param, f"Found 'media' base component in manifest. Path in backup: '{media_base_path_in_backup}'", level="DEBUG")
+                    else:
+                        update_task_log(task_id_param, "Manifest 'media' component found, but 'path_in_backup' is empty or missing.", level="WARNING")
+                else:
+                    update_task_log(task_id_param, "No 'media' base component found in manifest. Media restores will fail if selected.", level="WARNING")
 
-                    media_types_to_restore = {
-                        "floor_maps": {"display_name": "Floor Maps", "local_target_dir_name": azure_backup.FLOOR_MAP_UPLOADS, "azure_subdir_name": "floor_map_uploads"}, # azure_subdir_name is relative to media_base_path_in_backup
-                        "resource_uploads": {"display_name": "Resource Uploads", "local_target_dir_name": azure_backup.RESOURCE_UPLOADS, "azure_subdir_name": "resource_uploads"}
-                    }
 
-                    for media_key, media_details in media_types_to_restore.items():
-                        if media_key in components_param: # components_param uses keys like "floor_maps"
-                            update_task_log(task_id_param, f"Processing {media_details['display_name']} media restore.", level="info")
+                # --- Media Restore (Floor Maps) ---
+                if "floor_maps" in components_param:
+                    update_task_log(task_id_param, "Processing 'Floor Maps' media component restore.", level="info")
+                    if not media_base_path_in_backup:
+                        err_msg = "Floor Maps selected for restore, but no 'media' base entry with a valid path found in manifest. Cannot determine source path."
+                        update_task_log(task_id_param, err_msg, level="ERROR")
+                        overall_success = False; errors_list.append(err_msg)
+                    else:
+                        floor_maps_specific_subdir = os.path.basename(azure_backup.FLOOR_MAP_UPLOADS) # e.g., "floor_map_uploads"
+                        azure_component_path_on_share = f"{azure_backup.FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_ts_param}/{media_base_path_in_backup}/{floor_maps_specific_subdir}"
+                        update_task_log(task_id_param, f"Floor Maps Azure source path: {azure_component_path_on_share}", level="DEBUG")
 
-                            # Construct the full path to the specific media type's directory on Azure
-                            # e.g., full_system_backups/backup_<ts>/media/floor_map_uploads
-                            azure_component_path_on_share = f"{azure_backup.FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_ts_param}/{media_base_path_in_backup}/{media_details['azure_subdir_name']}"
-                            update_task_log(task_id_param, f"{media_details['display_name']} path on share: {azure_component_path_on_share}", level="DEBUG")
+                        media_success, media_msg, media_err = azure_backup.restore_media_component(
+                            system_share_client,
+                            azure_component_path_on_share,
+                            azure_backup.FLOOR_MAP_UPLOADS, # Local target base directory name
+                            "Floor Maps", # Component display name for logging
+                            task_id=task_id_param,
+                            dry_run=dry_run_mode
+                        )
+                        if media_success:
+                            actions_summary.append(f"Floor Maps media restored/simulated: {media_msg}")
+                            update_task_log(task_id_param, f"Floor Maps media restore/simulation successful: {media_msg}", level="SUCCESS" if not dry_run_mode else "INFO")
+                        else:
+                            overall_success = False; errors_list.append(f"Floor Maps media restore failed: {media_msg or media_err}")
+                            update_task_log(task_id_param, f"Floor Maps media restore failed: {media_msg or media_err}", level="ERROR")
+                    handled_in_selective_restore.append("floor_maps")
 
-                            media_success, media_msg, media_err = azure_backup.restore_media_component(
-                                system_share_client, # Pass unified share client
-                                azure_component_path_on_share, # Full path to the media subdir on Azure (e.g. .../media/floor_map_uploads)
-                                media_details['local_target_dir_name'], # Base name of local target (e.g. "floor_map_uploads")
-                                media_details['display_name'], # For logging
-                                task_id=task_id_param,
-                                dry_run=dry_run_mode
-                            )
-                            if media_success:
-                                actions_summary.append(f"{media_details['display_name']} media restored/simulated.")
-                                update_task_log(task_id_param, f"{media_details['display_name']} media restore/simulation successful: {media_msg}", level="SUCCESS" if not dry_run_mode else "INFO")
-                            else:
-                                overall_success = False; errors_list.append(f"{media_details['display_name']} media restore failed: {media_msg or media_err}")
-                                update_task_log(task_id_param, f"{media_details['display_name']} media restore failed: {media_msg or media_err}", level="ERROR")
-                else: # No "media" component in manifest
-                    if "floor_maps" in components_param or "resource_uploads" in components_param:
-                         update_task_log(task_id_param, "Media components ('floor_maps' or 'resource_uploads') were selected for restore, but no main 'media' component entry was found in the backup manifest. Skipping media restore.", level="ERROR")
-                         overall_success = False; errors_list.append("Media component selected but 'media' base entry not found in manifest.")
+                # --- Media Restore (Resource Uploads) ---
+                if "resource_uploads" in components_param:
+                    update_task_log(task_id_param, "Processing 'Resource Uploads' media component restore.", level="info")
+                    if not media_base_path_in_backup:
+                        err_msg = "Resource Uploads selected for restore, but no 'media' base entry with a valid path found in manifest. Cannot determine source path."
+                        update_task_log(task_id_param, err_msg, level="ERROR")
+                        overall_success = False; errors_list.append(err_msg)
+                    else:
+                        resource_uploads_specific_subdir = os.path.basename(azure_backup.RESOURCE_UPLOADS) # e.g., "resource_uploads"
+                        azure_component_path_on_share = f"{azure_backup.FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_ts_param}/{media_base_path_in_backup}/{resource_uploads_specific_subdir}"
+                        update_task_log(task_id_param, f"Resource Uploads Azure source path: {azure_component_path_on_share}", level="DEBUG")
+
+                        media_success, media_msg, media_err = azure_backup.restore_media_component(
+                            system_share_client,
+                            azure_component_path_on_share,
+                            azure_backup.RESOURCE_UPLOADS, # Local target base directory name
+                            "Resource Uploads", # Component display name for logging
+                            task_id=task_id_param,
+                            dry_run=dry_run_mode
+                        )
+                        if media_success:
+                            actions_summary.append(f"Resource Uploads media restored/simulated: {media_msg}")
+                            update_task_log(task_id_param, f"Resource Uploads media restore/simulation successful: {media_msg}", level="SUCCESS" if not dry_run_mode else "INFO")
+                        else:
+                            overall_success = False; errors_list.append(f"Resource Uploads media restore failed: {media_msg or media_err}")
+                            update_task_log(task_id_param, f"Resource Uploads media restore failed: {media_msg or media_err}", level="ERROR")
+                    handled_in_selective_restore.append("resource_uploads")
+
+                # --- Configuration Components Restore (Ensure this loop skips handled media components) ---
+                config_component_map = {
+                    "map_config": {"import_func": _import_map_configuration_data, "name_in_manifest": "map_config", "display_name": "Map Configuration", "azure_func": azure_backup.download_map_config_component},
+                    "resource_configs": {"import_func": _import_resource_configurations_data, "name_in_manifest": "resource_configs", "display_name": "Resource Configurations", "azure_func": azure_backup.download_resource_config_component},
+                    "user_configs": {"import_func": _import_user_configurations_data, "name_in_manifest": "user_configs", "display_name": "User Configurations", "azure_func": azure_backup.download_user_config_component},
+                    "scheduler_settings": {"import_func": utils.save_scheduler_settings_from_json_data, "name_in_manifest": "scheduler_settings", "display_name": "Scheduler Settings", "azure_func": azure_backup.download_scheduler_settings_component}
+                }
+
+                for comp_key_internal, comp_details in config_component_map.items():
+                    if comp_key_internal not in components_param or comp_key_internal in handled_in_selective_restore: # Skip if not selected or already handled (e.g. media)
+                        if comp_key_internal in handled_in_selective_restore:
+                             update_task_log(task_id_param, f"Component '{comp_key_internal}' was handled by media restore logic, skipping in config loop.", level="DEBUG")
+                        continue # Skip this iteration
+
+                    update_task_log(task_id_param, f"Processing {comp_details['display_name']} component restore.", level="info")
+
+                    comp_manifest_entry = next((c for c in manifest_data["components"] if c.get("name") == comp_details["name_in_manifest"]), None)
+
+                    if not comp_manifest_entry or not comp_manifest_entry.get("path_in_backup"):
+                        update_task_log(task_id_param, f"{comp_details['display_name']} not found in manifest or 'path_in_backup' missing. Skipping.", level="ERROR")
+                        overall_success = False; errors_list.append(f"{comp_details['display_name']} not in manifest or path missing.")
+                        continue
+
+                    full_component_file_path_on_share = f"{azure_backup.FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_ts_param}/{comp_manifest_entry['path_in_backup']}"
+                    update_task_log(task_id_param, f"{comp_details['display_name']} path on share: {full_component_file_path_on_share}", level="DEBUG")
+
+                    cfg_success, cfg_msg, downloaded_cfg_path, cfg_err = comp_details['azure_func'](
+                        system_share_client, full_component_file_path_on_share, task_id=task_id_param, dry_run=dry_run_mode
+                    )
+
+                    if cfg_success and downloaded_cfg_path:
+                        update_task_log(task_id_param, f"{comp_details['display_name']} downloaded to '{downloaded_cfg_path}'. Attempting to apply...", level="INFO")
+                        if not dry_run_mode:
+                            try:
+                                with open(downloaded_cfg_path, 'r', encoding='utf-8') as f:
+                                    json_data_for_import = json.load(f)
+
+                                summary_dict, status_code = comp_details['import_func'](json_data_for_import)
+
+                                component_apply_message = summary_dict.get('message', f"Applying {comp_details['display_name']} completed.")
+                                component_errors = summary_dict.get('errors', [])
+                                component_warnings = summary_dict.get('warnings', [])
+
+                                if status_code < 300:
+                                    actions_summary.append(f"{comp_details['display_name']} processed: {component_apply_message}")
+                                    log_level_for_component = "SUCCESS"
+                                    if component_errors:
+                                        overall_success = False; log_level_for_component = "ERROR"; errors_list.append(f"{comp_details['display_name']} apply errors: {component_errors}")
+                                    elif component_warnings:
+                                        log_level_for_component = "WARNING"
+
+                                    update_task_log(task_id_param, f"{comp_details['display_name']} apply finished. Status: {status_code}. Msg: {component_apply_message}", detail=f"Errors: {component_errors}, Warnings: {component_warnings}", level=log_level_for_component)
+
+                                    if not component_errors and os.path.exists(downloaded_cfg_path):
+                                        os.remove(downloaded_cfg_path)
+                                    elif component_errors:
+                                        update_task_log(task_id_param, f"Downloaded file {downloaded_cfg_path} for {comp_details['display_name']} kept due to import errors.", level="WARNING")
+                                else:
+                                    overall_success = False; errors_list.append(f"{comp_details['display_name']} apply failed (status {status_code}): {component_errors}")
+                                    update_task_log(task_id_param, f"Failed to apply {comp_details['display_name']}. Status: {status_code}. Msg: {component_apply_message}", detail=f"Errors: {component_errors}, Warnings: {component_warnings}", level="ERROR")
+                                    if downloaded_cfg_path and os.path.exists(downloaded_cfg_path):
+                                        update_task_log(task_id_param, f"Downloaded file {downloaded_cfg_path} for {comp_details['display_name']} kept due to import failure.", level="WARNING")
+                            except Exception as e_apply:
+                                overall_success = False; errors_list.append(f"{comp_details['display_name']} apply exception: {str(e_apply)}")
+                                update_task_log(task_id_param, f"Error applying downloaded {comp_details['display_name']}: {str(e_apply)}", level="CRITICAL", detail=traceback.format_exc())
+                                if downloaded_cfg_path and os.path.exists(downloaded_cfg_path):
+                                    update_task_log(task_id_param, f"Downloaded file {downloaded_cfg_path} for {comp_details['display_name']} kept due to apply error.", level="WARNING")
+                        else:
+                            actions_summary.append(f"{comp_details['display_name']} download simulated to {downloaded_cfg_path}. Import/apply step skipped in dry run.")
+                            update_task_log(task_id_param, f"{comp_details['display_name']} download simulated. Import/apply skipped in dry run.", level="INFO")
+                            if downloaded_cfg_path and os.path.exists(downloaded_cfg_path) and "simulated_downloaded" in downloaded_cfg_path :
+                                os.remove(downloaded_cfg_path)
+                    elif not cfg_success :
+                        overall_success = False; errors_list.append(f"{comp_details['display_name']} download failed: {cfg_msg or cfg_err}")
+                        update_task_log(task_id_param, f"{comp_details['display_name']} download failed: {cfg_msg or cfg_err}", level="ERROR")
 
                 # Finalization
                 if dry_run_mode:
