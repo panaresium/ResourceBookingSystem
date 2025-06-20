@@ -377,7 +377,86 @@ def serve_booking_settings_page():
 @login_required
 @permission_required('manage_system')
 def update_booking_settings():
-    # ... (implementation as provided) ...
+    logger = current_app.logger
+
+    def _parse_int_field(field_name, default_value=None, min_val=None, max_val=None, nullable=False):
+        value_str = request.form.get(field_name)
+        if value_str is None or value_str == '':
+            return None if nullable else default_value
+        try:
+            value_int = int(value_str)
+            if min_val is not None and value_int < min_val:
+                logger.warning(f"Value for {field_name} ({value_int}) is below minimum ({min_val}). Clamping to {min_val}.")
+                return min_val
+            if max_val is not None and value_int > max_val:
+                logger.warning(f"Value for {field_name} ({value_int}) is above maximum ({max_val}). Clamping to {max_val}.")
+                return max_val
+            return value_int
+        except ValueError:
+            logger.warning(f"Invalid integer value for {field_name}: '{value_str}'. Using default: {default_value}.")
+            return default_value
+
+    try:
+        settings = BookingSettings.query.first()
+        if not settings:
+            logger.info("No BookingSettings found, creating a new instance.")
+            settings = BookingSettings()
+            db.session.add(settings)
+
+        # Update fields
+        settings.allow_past_bookings = 'allow_past_bookings' in request.form
+
+        if settings.allow_past_bookings:
+            settings.past_booking_time_adjustment_hours = _parse_int_field('past_booking_time_adjustment_hours', default_value=0, min_val=0)
+        else:
+            settings.past_booking_time_adjustment_hours = 0 # Default to 0 if past bookings not allowed
+
+        settings.max_booking_days_in_future = _parse_int_field('max_booking_days_in_future', nullable=True, min_val=0)
+        settings.allow_multiple_resources_same_time = 'allow_multiple_resources_same_time' in request.form
+        settings.max_bookings_per_user = _parse_int_field('max_bookings_per_user', nullable=True, min_val=0)
+
+        settings.enable_check_in_out = 'enable_check_in_out' in request.form
+        if settings.enable_check_in_out:
+            settings.check_in_minutes_before = _parse_int_field('check_in_minutes_before', default_value=15, min_val=0)
+            settings.check_in_minutes_after = _parse_int_field('check_in_minutes_after', default_value=15, min_val=0)
+            settings.checkin_reminder_minutes_before = _parse_int_field('checkin_reminder_minutes_before', default_value=30, min_val=0)
+            settings.resource_checkin_url_requires_login = 'resource_checkin_url_requires_login' in request.form
+            settings.allow_check_in_without_pin = 'allow_check_in_without_pin' in request.form
+            settings.enable_auto_checkout = 'enable_auto_checkout' in request.form
+            if settings.enable_auto_checkout:
+                 settings.auto_checkout_delay_minutes = _parse_int_field('auto_checkout_delay_minutes', default_value=60, min_val=1)
+            else:
+                 settings.auto_checkout_delay_minutes = 60 # Default if auto checkout is disabled
+            settings.auto_release_if_not_checked_in_minutes = _parse_int_field('auto_release_if_not_checked_in_minutes', nullable=True, min_val=0)
+        else: # Defaults if check-in/out is disabled
+            settings.check_in_minutes_before = 15
+            settings.check_in_minutes_after = 15
+            settings.checkin_reminder_minutes_before = 30
+            settings.resource_checkin_url_requires_login = False
+            settings.allow_check_in_without_pin = False
+            settings.enable_auto_checkout = False
+            settings.auto_checkout_delay_minutes = 60
+            settings.auto_release_if_not_checked_in_minutes = None
+
+
+        settings.pin_auto_generation_enabled = 'pin_auto_generation_enabled' in request.form
+        if settings.pin_auto_generation_enabled:
+            settings.pin_length = _parse_int_field('pin_length', default_value=6, min_val=4, max_val=32)
+            settings.pin_allow_manual_override = 'pin_allow_manual_override' in request.form
+        else: # Defaults if PIN auto-generation is disabled
+            settings.pin_length = 6
+            settings.pin_allow_manual_override = False
+
+        db.session.commit()
+        add_audit_log(action='Update Booking Settings', details=f'Updated various booking settings by user {current_user.username}')
+        flash(_('Booking settings updated successfully.'), 'success')
+        logger.info(f"Booking settings updated by user {current_user.username}.")
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating booking settings: {e}", exc_info=True)
+        flash(_('Error updating booking settings: %(error)s', error=str(e)), 'error')
+
     return redirect(url_for('admin_ui.serve_booking_settings_page'))
 
 @admin_ui_bp.route('/analytics/')
