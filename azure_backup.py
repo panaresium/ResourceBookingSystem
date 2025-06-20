@@ -1334,5 +1334,3 @@ def perform_startup_restore_sequence(app_for_context):
                 app_logger.error(f"Failed to clean up temporary directory {local_temp_dir}: {e_cleanup}", exc_info=True)
     app_logger.info(f"Startup restore final status: {restore_status['status']}, Message: {restore_status['message']}")
     return restore_status
-
-[end of azure_backup.py]
