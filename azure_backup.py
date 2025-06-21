@@ -555,7 +555,7 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
                 backed_up_items.append({"type": "database", "filename": db_backup_filename, "path_in_backup": f"{COMPONENT_SUBDIR_DATABASE}/{db_backup_filename}"})
             else:
                 _emit_progress(task_id, "Database backup failed during upload.", detail=f"Target: {remote_db_file_path}", level='ERROR')
-            overall_success = False
+                overall_success = False # This is correct: if upload fails, overall_success is false.
     except Exception as e_db:
         _emit_progress(task_id, f"Database backup component failed with an unexpected error: {str(e_db)}", level='ERROR')
         overall_success = False
@@ -584,10 +584,12 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
                         _emit_progress(task_id, f"Configuration '{name}' backup successful.", detail=f"Uploaded to: {remote_config_file_path}", level='SUCCESS')
                         backed_up_items.append({"type": "config", "name": name, "filename": config_filename, "path_in_backup": f"{COMPONENT_SUBDIR_CONFIGURATIONS}/{config_filename}"})
                     else:
-                        _emit_progress(task_id, f"Configuration '{name}' backup failed during upload.", detail=f"Target: {remote_config_file_path}", level='ERROR')
+                        _emit_progress(task_id, f"Configuration '{name}' backup FAILED during upload. Setting overall_success to False.", detail=f"Target: {remote_config_file_path}", level='ERROR')
                         overall_success = False
                 finally:
                     if tmp_json_path and os.path.exists(tmp_json_path): os.remove(tmp_json_path)
+
+            # Scheduler Settings Backup
             scheduler_settings_local_path = os.path.join(DATA_DIR, 'scheduler_settings.json')
             _emit_progress(task_id, f"Checking for scheduler_settings.json at {scheduler_settings_local_path}", level='INFO')
             if os.path.exists(scheduler_settings_local_path):
@@ -598,99 +600,161 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
                     _emit_progress(task_id, "scheduler_settings.json backup successful.", level='SUCCESS')
                     backed_up_items.append({"type": "config", "name": "scheduler_settings", "filename": scheduler_filename, "path_in_backup": f"{COMPONENT_SUBDIR_CONFIGURATIONS}/{scheduler_filename}"})
                 else:
-                    _emit_progress(task_id, "scheduler_settings.json backup failed.", level='ERROR')
+                    _emit_progress(task_id, "scheduler_settings.json backup FAILED. Setting overall_success to False.", level='ERROR')
                     overall_success = False
             else:
                 _emit_progress(task_id, "scheduler_settings.json not found locally, skipping its backup.", level='WARNING')
         except Exception as e_cfg:
-            _emit_progress(task_id, f"Configuration files backup component failed with an unexpected error: {str(e_cfg)}", level='ERROR')
+            _emit_progress(task_id, f"Configuration files backup component FAILED with an unexpected error: {str(e_cfg)}. Setting overall_success to False.", level='ERROR')
             overall_success = False
-    if overall_success:
-        _emit_progress(task_id, "Starting media files backup component...", level='INFO')
-        azure_media_base_for_this_backup = f"{current_backup_root_path_on_share}/{COMPONENT_SUBDIR_MEDIA}"
+
+    print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Entered create_full_backup function.", flush=True) # DEBUG PRINT
+
+    # Main try-except block for the entire backup creation process
+    try:
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Entered main try block.", flush=True) # DEBUG PRINT
+        # DB Backup
+        _emit_progress(task_id, "Attempting DB Backup Component.", level='INFO')
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Attempting DB Backup Component.", flush=True) # DEBUG PRINT
+        remote_db_dir = f"{current_backup_root_path_on_share}/{COMPONENT_SUBDIR_DATABASE}"
+        _ensure_directory_exists(share_client, remote_db_dir)
+        local_db_path = os.path.join(DATA_DIR, 'site.db')
+        db_backup_filename = f"{DB_FILENAME_PREFIX}{timestamp_str}.db"
+        remote_db_file_path = f"{remote_db_dir}/{db_backup_filename}"
+        _emit_progress(task_id, f"Preparing to backup database from local path: {local_db_path}", level='DEBUG')
+        if not os.path.exists(local_db_path):
+            _emit_progress(task_id, f"Local database file not found at '{local_db_path}'. Critical DB backup failure.", level='ERROR')
+            return False
+
         try:
-            _ensure_directory_exists(share_client, azure_media_base_for_this_backup)
-            media_sources = [
-                {"name": "Floor Maps", "path": FLOOR_MAP_UPLOADS, "subdir_on_azure": "floor_map_uploads"},
-                {"name": "Resource Uploads", "path": RESOURCE_UPLOADS, "subdir_on_azure": "resource_uploads"}]
-            all_media_component_success = True
-            for src in media_sources:
-                _emit_progress(task_id, f"Processing media source: {src['name']}. Local path: '{src['path']}'", level='DEBUG')
-                is_local_dir = os.path.isdir(src["path"])
-                _emit_progress(task_id, f"Path '{src['path']}' is directory? {is_local_dir}", level='DEBUG')
-                if not is_local_dir:
-                    _emit_progress(task_id, f"Local path for {src['name']} ('{src['path']}') is not a directory or not found, skipping.", level='WARNING')
-                    continue
-                azure_target_dir_for_source = f"{azure_media_base_for_this_backup}/{src['subdir_on_azure']}"
-                _ensure_directory_exists(share_client, azure_target_dir_for_source)
-                files_in_local_source_path = []
-                try:
-                    files_in_local_source_path = os.listdir(src["path"])
-                    _emit_progress(task_id, f"Files/folders found in '{src['path']}': {files_in_local_source_path}", level='DEBUG')
-                except Exception as e_listdir:
-                    _emit_progress(task_id, f"Error listing directory '{src['path']}': {str(e_listdir)}", level='ERROR')
-                    all_media_component_success = False; continue
-                if not files_in_local_source_path:
-                    _emit_progress(task_id, f"No files/subdirectories in '{src['path']}' for {src['name']}, skipping.", level='INFO')
-                    continue
-                _emit_progress(task_id, f"Uploading items from {src['path']} to Azure directory {azure_target_dir_for_source} for {src['name']}...", level='INFO')
-                uploads_succeeded_count = 0; uploads_failed_count = 0
-                for filename_in_src in files_in_local_source_path:
-                    local_file_full_path = os.path.join(src["path"], filename_in_src)
-                    _emit_progress(task_id, f"Item: '{filename_in_src}'. Full local path: '{local_file_full_path}'", level='DEBUG')
-                    is_local_file = os.path.isfile(local_file_full_path)
-                    _emit_progress(task_id, f"Path '{local_file_full_path}' is file? {is_local_file}", level='DEBUG')
-                    if is_local_file:
-                        remote_file_path_on_azure = f"{azure_target_dir_for_source}/{filename_in_src}"
-                        if upload_file(share_client, local_file_full_path, remote_file_path_on_azure):
-                            uploads_succeeded_count += 1
-                        else:
-                            uploads_failed_count += 1; all_media_component_success = False
-                    else:
-                        _emit_progress(task_id, f"Skipping non-file item '{filename_in_src}' in {src['path']}.", level='INFO')
-                if uploads_failed_count > 0: _emit_progress(task_id, f"{src['name']} backup: {uploads_succeeded_count} uploaded, {uploads_failed_count} failed.", level='ERROR')
-                elif uploads_succeeded_count > 0: _emit_progress(task_id, f"{src['name']} backup: All {uploads_succeeded_count} file(s) uploaded successfully.", level='SUCCESS')
-                else: _emit_progress(task_id, f"{src['name']} backup: No actual files uploaded (source might be empty of files).", level='INFO')
-            if all_media_component_success:
-                 backed_up_items.append({"type": "media", "name": "media_files", "path_in_backup": COMPONENT_SUBDIR_MEDIA})
-            else:
-                overall_success = False
-                _emit_progress(task_id, "Media backup component completed with errors. Not all media files may have been backed up.", level='ERROR')
-        except Exception as e_media:
-            _emit_progress(task_id, f"Media backup component failed with an unexpected error: {str(e_media)}", level='ERROR')
-            overall_success = False
-    if overall_success:
-        _emit_progress(task_id, "Creating backup manifest...", level='INFO')
-        remote_manifest_dir = f"{current_backup_root_path_on_share}/{COMPONENT_SUBDIR_MANIFEST}"
-        try:
-            _ensure_directory_exists(share_client, remote_manifest_dir)
-            manifest_data = {"backup_timestamp": timestamp_str, "backup_version": "1.1_unified_structure", "components": []}
-            for item in backed_up_items:
-                component_entry = {"type": item["type"], "name": item.get("name", item.get("filename")), "path_in_backup": item["path_in_backup"]}
-                if item.get("filename"): component_entry["original_filename"] = item["filename"]
-                manifest_data["components"].append(component_entry)
-            tmp_manifest_path = None
+            db_file_size = os.path.getsize(local_db_path)
+            db_file_mtime = datetime.fromtimestamp(os.path.getmtime(local_db_path), tz=timezone.utc).isoformat()
+            _emit_progress(task_id, f"Local database file details: Size={db_file_size} bytes, Modified={db_file_mtime}", level='INFO')
+        except Exception as e_stat:
+            _emit_progress(task_id, f"Could not get local DB file stats: {str(e_stat)}", level='WARNING')
+
+        if not upload_file(share_client, local_db_path, remote_db_file_path):
+            _emit_progress(task_id, "Database backup FAILED during upload. Critical DB backup failure.", detail=f"Target: {remote_db_file_path}", level='ERROR')
+            return False
+        _emit_progress(task_id, "Database backup successful.", detail=f"Uploaded to: {remote_db_file_path}", level='SUCCESS')
+        backed_up_items.append({"type": "database", "filename": db_backup_filename, "path_in_backup": f"{COMPONENT_SUBDIR_DATABASE}/{db_backup_filename}"})
+        _emit_progress(task_id, "DB Backup Component finished successfully.", level='DEBUG')
+
+        # Config Files Backup
+        _emit_progress(task_id, "Attempting Config Files Backup Component.", level='INFO')
+        remote_config_dir = f"{current_backup_root_path_on_share}/{COMPONENT_SUBDIR_CONFIGURATIONS}"
+        _ensure_directory_exists(share_client, remote_config_dir)
+        configs_to_backup = [
+            (map_config_data, "map_config", MAP_CONFIG_FILENAME_PREFIX),
+            (resource_configs_data, "resource_configs", RESOURCE_CONFIG_FILENAME_PREFIX),
+            (user_configs_data, "user_configs", USER_CONFIG_FILENAME_PREFIX)
+        ]
+        for config_data, name, prefix in configs_to_backup:
+            if not config_data:
+                _emit_progress(task_id, f"Config '{name}' data is empty/None, skipping.", level='INFO')
+                continue
+            tmp_json_path = None
             try:
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', dir=DATA_DIR, encoding='utf-8') as tmp_mf:
-                    tmp_manifest_path = tmp_mf.name
-                    json.dump(manifest_data, tmp_mf, indent=4)
-                manifest_filename_on_share = f"backup_manifest_{timestamp_str}.json"
-                remote_manifest_file_path = f"{remote_manifest_dir}/{manifest_filename_on_share}"
-                if upload_file(share_client, tmp_manifest_path, remote_manifest_file_path):
-                    _emit_progress(task_id, "Manifest uploaded successfully.", detail=f"Uploaded to: {remote_manifest_file_path}", level='SUCCESS')
-                else:
-                    _emit_progress(task_id, "Manifest upload failed.", detail=f"Target: {remote_manifest_file_path}", level='ERROR')
-                    overall_success = False
-            finally:
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', dir=DATA_DIR, encoding='utf-8') as tmp_f:
+                    json.dump(config_data, tmp_f, indent=4)
+                    tmp_json_path = tmp_f.name
+                config_filename = f"{prefix}{timestamp_str}.json"
+                remote_config_file_path = f"{remote_config_dir}/{config_filename}"
+                if not upload_file(share_client, tmp_json_path, remote_config_file_path):
+                    _emit_progress(task_id, f"Config '{name}' backup FAILED during upload. Critical config backup failure.", level='ERROR')
+                    if tmp_json_path and os.path.exists(tmp_json_path): os.remove(tmp_json_path)
+                    return False
+                backed_up_items.append({"type": "config", "name": name, "filename": config_filename, "path_in_backup": f"{COMPONENT_SUBDIR_CONFIGURATIONS}/{config_filename}"})
+                _emit_progress(task_id, f"Config '{name}' backup successful.", level='SUCCESS')
+            finally: # Ensure temp file for this config is removed
+                if tmp_json_path and os.path.exists(tmp_json_path): os.remove(tmp_json_path)
+
+        scheduler_settings_local_path = os.path.join(DATA_DIR, 'scheduler_settings.json')
+        if os.path.exists(scheduler_settings_local_path):
+            scheduler_filename = f"{SCHEDULER_SETTINGS_FILENAME_PREFIX}{timestamp_str}.json"
+            remote_scheduler_file_path = f"{remote_config_dir}/{scheduler_filename}"
+            if not upload_file(share_client, scheduler_settings_local_path, remote_scheduler_file_path):
+                _emit_progress(task_id, "scheduler_settings.json backup FAILED. Critical config backup failure.", level='ERROR')
+                return False
+            backed_up_items.append({"type": "config", "name": "scheduler_settings", "filename": scheduler_filename, "path_in_backup": f"{COMPONENT_SUBDIR_CONFIGURATIONS}/{scheduler_filename}"})
+            _emit_progress(task_id, "scheduler_settings.json backup successful.", level='SUCCESS')
+        else:
+            _emit_progress(task_id, "scheduler_settings.json not found locally, skipping.", level='WARNING')
+        _emit_progress(task_id, "Config Files Backup Component finished successfully.", level='DEBUG')
+
+        # Media Backup
+        _emit_progress(task_id, "Attempting Media Backup Component.", level='INFO')
+        azure_media_base_for_this_backup = f"{current_backup_root_path_on_share}/{COMPONENT_SUBDIR_MEDIA}"
+        _ensure_directory_exists(share_client, azure_media_base_for_this_backup)
+        media_sources = [
+            {"name": "Floor Maps", "path": FLOOR_MAP_UPLOADS, "subdir_on_azure": "floor_map_uploads"},
+            {"name": "Resource Uploads", "path": RESOURCE_UPLOADS, "subdir_on_azure": "resource_uploads"}
+        ]
+        any_media_source_had_files = False
+        all_individual_media_uploads_succeeded = True
+        for src in media_sources:
+            # ... (media processing as in previous correct version, ensuring returns on failure)
+            if not os.path.isdir(src["path"]):
+                _emit_progress(task_id, f"Local path for {src['name']} ('{src['path']}') not dir. Skipping.", level='WARNING')
+                continue
+            azure_target_dir_for_source = f"{azure_media_base_for_this_backup}/{src['subdir_on_azure']}"
+            _ensure_directory_exists(share_client, azure_target_dir_for_source)
+            files_in_local_source_path = os.listdir(src["path"])
+            if not files_in_local_source_path:
+                _emit_progress(task_id, f"No files in '{src['path']}' for {src['name']}. Skipping.", level='INFO')
+                continue
+            any_media_source_had_files = True
+            for filename_in_src in files_in_local_source_path:
+                local_file_full_path = os.path.join(src["path"], filename_in_src)
+                if os.path.isfile(local_file_full_path):
+                    remote_file_path_on_azure = f"{azure_target_dir_for_source}/{filename_in_src}"
+                    if not upload_file(share_client, local_file_full_path, remote_file_path_on_azure):
+                        _emit_progress(task_id, f"Media file FAILED for '{filename_in_src}'. Critical media error.", level='ERROR')
+                        all_individual_media_uploads_succeeded = False; break
+            if not all_individual_media_uploads_succeeded: break
+        if not all_individual_media_uploads_succeeded:
+             _emit_progress(task_id, "Media backup FAILED due to file upload errors.", level='ERROR'); return False
+        if any_media_source_had_files:
+            backed_up_items.append({"type": "media", "name": "media_files", "path_in_backup": COMPONENT_SUBDIR_MEDIA})
+            _emit_progress(task_id, "Media backup component successful.", level='SUCCESS')
+        else:
+             _emit_progress(task_id, "Media backup: No media files found.", level='INFO')
+        _emit_progress(task_id, "Media Backup Component finished.", level='DEBUG')
+
+        # Manifest Backup
+        _emit_progress(task_id, "Attempting Manifest Backup Component.", level='INFO')
+        remote_manifest_dir = f"{current_backup_root_path_on_share}/{COMPONENT_SUBDIR_MANIFEST}"
+        _ensure_directory_exists(share_client, remote_manifest_dir)
+        manifest_data = {"backup_timestamp": timestamp_str, "backup_version": "1.1_unified_structure", "components": backed_up_items}
+        tmp_manifest_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', dir=DATA_DIR, encoding='utf-8') as tmp_mf:
+                tmp_manifest_path = tmp_mf.name
+                json.dump(manifest_data, tmp_mf, indent=4)
+            manifest_filename_on_share = f"backup_manifest_{timestamp_str}.json"
+            remote_manifest_file_path = f"{remote_manifest_dir}/{manifest_filename_on_share}"
+            if not upload_file(share_client, tmp_manifest_path, remote_manifest_file_path):
+                _emit_progress(task_id, "Manifest upload FAILED. Critical manifest error.", level='ERROR')
                 if tmp_manifest_path and os.path.exists(tmp_manifest_path): os.remove(tmp_manifest_path)
-        except Exception as e_manifest:
-            _emit_progress(task_id, "Error creating or uploading manifest.", detail=str(e_manifest), level='ERROR')
-            overall_success = False
-    if overall_success:
-        _emit_progress(task_id, "Full system backup completed successfully.", detail=f"Backup root: {current_backup_root_path_on_share}", level='SUCCESS')
-    else:
-        _emit_progress(task_id, "Full system backup completed with errors.", detail=f"Backup root (may be incomplete): {current_backup_root_path_on_share}", level='ERROR')
-    return overall_success
+                return False
+            _emit_progress(task_id, "Manifest uploaded successfully.", level='SUCCESS')
+        finally:
+            if tmp_manifest_path and os.path.exists(tmp_manifest_path): os.remove(tmp_manifest_path)
+        _emit_progress(task_id, "Manifest Backup Component finished successfully.", level='DEBUG')
+
+        _emit_progress(task_id, "All backup components processed. create_full_backup returning True.", level='SUCCESS')
+        return True
+
+    except Exception as e_main_backup_process:
+        import traceback
+        tb_str = traceback.format_exc()
+        exception_message = f"FATAL_EXCEPTION_IN_CREATE_FULL_BACKUP: {str(e_main_backup_process)}"
+        _emit_progress(task_id, exception_message, detail=tb_str, level='CRITICAL')
+        logger.critical(f"[Task {task_id}] {exception_message}\nTRACEBACK:\n{tb_str}")
+        final_return_value = False
+        _emit_progress(task_id, f"create_full_backup attempting to return {final_return_value} due to EXCEPTION_MAIN_TRY_BLOCK.", level='ERROR')
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Attempting to return {final_return_value} from EXCEPTION_MAIN_TRY_BLOCK.", flush=True)
+        return final_return_value
 
 def _recursively_delete_share_directory(share_client: ShareClient, dir_full_path_on_share: str, task_id: str = None) -> bool:
     _emit_progress(task_id, f"Attempting to recursively delete directory: '{dir_full_path_on_share}'", level='DEBUG')

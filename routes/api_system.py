@@ -462,17 +462,25 @@ def api_one_click_backup():
                 else:
                     update_task_log(task_id_param, f"API: Type of user_config_data is {type(user_config_data)}, value: {str(user_config_data)[:200]}...", level='DEBUG')
 
+                update_task_log(task_id_param, "APISYS: About to call create_full_backup.", level='INFO')
+                current_app.logger.info(f"[APISYS_DEBUG] Task {task_id_param}: About to call create_full_backup.")
+                current_app.logger.info(f"[APISYS_DEBUG] Task {task_id_param}: map_config_data type: {type(map_config_data)}, len: {len(map_config_data.get('maps', [])) if isinstance(map_config_data, dict) else 'N/A'}")
+                current_app.logger.info(f"[APISYS_DEBUG] Task {task_id_param}: resource_configs_data type: {type(resource_config_data)}, len: {len(resource_config_data) if isinstance(resource_config_data, list) else 'N/A'}")
+                current_app.logger.info(f"[APISYS_DEBUG] Task {task_id_param}: user_configs_data type: {type(user_config_data)}, users: {len(user_config_data.get('users',[])) if isinstance(user_config_data,dict) else 'N/A'}, roles: {len(user_config_data.get('roles',[])) if isinstance(user_config_data,dict) else 'N/A'}")
+
                 actual_success_flag = create_full_backup(
                     timestamp_str,
                     map_config_data=map_config_data,
-                    resource_configs_data=resource_config_data, # Pass new data
-                    user_configs_data=user_config_data,       # Pass new data
+                    resource_configs_data=resource_config_data,
+                    user_configs_data=user_config_data,
                     task_id=task_id_param
                 )
+                update_task_log(task_id_param, f"APISYS: create_full_backup returned: {actual_success_flag} (type: {type(actual_success_flag)})", level='INFO')
+                current_app.logger.info(f"[APISYS_DEBUG] Task {task_id_param}: create_full_backup returned: {actual_success_flag} (type: {type(actual_success_flag)})")
 
-                if actual_success_flag:
+                if actual_success_flag is True: # Explicitly check for True
                     final_message = f"Full system backup (timestamp {timestamp_str}) core components completed and uploaded successfully."
-                    update_task_log(task_id_param, final_message, level="success") # Log success of core backup first
+                    update_task_log(task_id_param, final_message, level="success")
 
                     # Add explicit booking backup
                     if backup_full_bookings_json:
