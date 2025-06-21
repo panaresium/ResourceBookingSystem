@@ -63,7 +63,7 @@ try:
         backup_incremental_bookings,
         backup_full_bookings_json,
         # restore_bookings_from_full_json_export, # REMOVED
-        delete_incremental_booking_backup,
+        # delete_incremental_booking_backup, # Removed unused import
         list_booking_data_json_backups,
         delete_booking_data_json_backup,
         restore_booking_data_to_point_in_time,
@@ -97,7 +97,7 @@ except (ImportError, RuntimeError) as e_detailed_azure_import: # Capture the exc
     backup_incremental_bookings = None
     backup_full_bookings_json = None
     # restore_bookings_from_full_json_export = None # REMOVED
-    delete_incremental_booking_backup = None
+    # delete_incremental_booking_backup = None # Removed corresponding None assignment
     list_booking_data_json_backups = None
     delete_booking_data_json_backup = None
     restore_booking_data_to_point_in_time = None
