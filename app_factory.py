@@ -134,6 +134,8 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
     # Initialize DB early
     db.init_app(app)
+    # Initialize Migrate immediately after DB and App, and before startup restore sequence
+    migrate.init_app(app, db)
 
     if testing:
         # EXTREMELY MINIMAL SETUP FOR TESTING when create_app(testing=True)
@@ -320,7 +322,7 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
     csrf.init_app(app)
     socketio.init_app(app) # Add message_queue from config
-    migrate.init_app(app, db)
+    # migrate.init_app(app, db) # MOVED EARLIER
 
     # login_manager and oauth are initialized within init_auth
 
