@@ -248,24 +248,31 @@ def create_app(config_object=config, testing=False): # Added testing parameter
                 app.logger.info("Startup restore from scheduler_settings.json: DISABLED.")
 
     # New logic for startup restore sequence - SKIP IF TESTING
-    if not testing and azure_backup_available and callable(perform_startup_restore_sequence):
+    # THIS BLOCK IS NOW REMOVED. Restoration is handled by init_setup.py
+    # if not testing and azure_backup_available and callable(perform_startup_restore_sequence):
+    #     if should_attempt_restore:
+    #         app.logger.info("Configuration indicates automatic restore on startup. Attempting full system restore sequence...")
+    #         try:
+    #             # Pass the app instance itself
+    #             restore_result = perform_startup_restore_sequence(app)
+    #             app.logger.info(f"Startup restore sequence completed. Status: {restore_result.get('status')}, Message: {restore_result.get('message')}")
+    #             if restore_result.get('status') != 'success':
+    #                 app.logger.error(f"Startup restore sequence did not complete successfully: {restore_result.get('message')}")
+    #         except Exception as e_startup_restore:
+    #             app.logger.exception(f"Critical error during perform_startup_restore_sequence: {e_startup_restore}")
+    #     else:
+    #         # This log covers cases where restore is disabled by either env var or settings file.
+    #         app.logger.info("Automatic restore on startup is disabled. Skipping full system restore sequence.")
+    # elif not testing and should_attempt_restore: # Only warn if restore was desired but not possible due to missing utilities
+    #      app.logger.warning("Automatic restore on startup is ENABLED (by env var or settings), but restore utilities (perform_startup_restore_sequence) are not available/imported. Skipping restore.")
+    # # No specific 'else' needed here if should_attempt_restore is false and utilities are unavailable,
+    # # as the earlier log about being disabled covers it, or if testing is true, nothing here runs.
+
+    if not testing:
         if should_attempt_restore:
-            app.logger.info("Configuration indicates automatic restore on startup. Attempting full system restore sequence...")
-            try:
-                # Pass the app instance itself
-                restore_result = perform_startup_restore_sequence(app)
-                app.logger.info(f"Startup restore sequence completed. Status: {restore_result.get('status')}, Message: {restore_result.get('message')}")
-                if restore_result.get('status') != 'success':
-                    app.logger.error(f"Startup restore sequence did not complete successfully: {restore_result.get('message')}")
-            except Exception as e_startup_restore:
-                app.logger.exception(f"Critical error during perform_startup_restore_sequence: {e_startup_restore}")
+            app.logger.info("NOTE: Automatic Azure restore on app startup is configured but has been MOVED to init_setup.py. Run 'python init_setup.py --restore-from-azure' or set ENABLE_AUTO_STARTUP_RESTORE for init_setup.py to perform the restore.")
         else:
-            # This log covers cases where restore is disabled by either env var or settings file.
-            app.logger.info("Automatic restore on startup is disabled. Skipping full system restore sequence.")
-    elif not testing and should_attempt_restore: # Only warn if restore was desired but not possible due to missing utilities
-         app.logger.warning("Automatic restore on startup is ENABLED (by env var or settings), but restore utilities (perform_startup_restore_sequence) are not available/imported. Skipping restore.")
-    # No specific 'else' needed here if should_attempt_restore is false and utilities are unavailable,
-    # as the earlier log about being disabled covers it, or if testing is true, nothing here runs.
+            app.logger.info("Automatic Azure restore on app startup is disabled (as determined by env vars or settings). This is the expected behavior if init_setup.py handles restoration.")
 
 
     # Old incremental booking restore block is removed.

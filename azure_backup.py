@@ -1185,64 +1185,112 @@ def perform_startup_restore_sequence(app_for_context):
         app_logger.info(f"Successfully connected to Azure share '{system_backup_share_name}'.")
         available_backups = list_available_backups()
         if not available_backups:
-            msg = "No backup sets found in Azure. Skipping startup restore."
+            msg = "No full system backup sets found in Azure. Skipping startup restore."
             app_logger.info(msg)
-            restore_status["status"] = "success"
+            # This is not an error, just no backups to restore.
+            restore_status["status"] = "success_no_action"
             restore_status["message"] = msg
-            raise Exception(msg)
+            # No need to raise Exception here, allow finally block to clean up temp dir.
+            return restore_status
 
         latest_backup_timestamp = available_backups[0]
-        app_logger.info(f"Latest backup timestamp found: {latest_backup_timestamp}")
+        app_logger.info(f"Latest full system backup timestamp found: {latest_backup_timestamp}")
+
+        # Construct paths based on the latest backup timestamp
         backup_root_on_share = f"{FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{latest_backup_timestamp}"
         manifest_filename = f"backup_manifest_{latest_backup_timestamp}.json"
         manifest_path_on_share = f"{backup_root_on_share}/{COMPONENT_SUBDIR_MANIFEST}/{manifest_filename}"
         local_manifest_path = os.path.join(local_temp_dir, manifest_filename)
-        app_logger.info(f"Downloading manifest: {manifest_path_on_share}")
+
+        app_logger.info(f"Attempting to download manifest: {manifest_path_on_share}")
         if not download_file(share_client, manifest_path_on_share, local_manifest_path):
             msg = f"Failed to download manifest file '{manifest_path_on_share}'. Startup restore aborted."
             app_logger.error(msg)
             restore_status["message"] = msg
-            raise Exception(msg)
+            raise Exception(msg) # Critical failure if manifest cannot be downloaded
 
         app_logger.info(f"Manifest downloaded to {local_manifest_path}. Parsing...")
         with open(local_manifest_path, 'r', encoding='utf-8') as f_manifest:
             manifest_data = json.load(f_manifest)
-        downloaded_component_paths = {}
+
+        downloaded_component_paths = {} # Store paths of successfully downloaded components
+
+        # Download all components listed in the manifest
         for component in manifest_data.get("components", []):
             comp_type = component.get("type")
-            comp_name = component.get("name", "Unknown")
-            comp_path_in_backup = component.get("path_in_backup")
-            comp_original_filename = component.get("original_filename", os.path.basename(comp_path_in_backup) if comp_path_in_backup else "unknown_file")
+            comp_name_in_manifest = component.get("name", "UnknownComponent") # Use 'name' from manifest
+            comp_path_in_backup_set = component.get("path_in_backup") # Relative path within the backup set
 
-            if not comp_path_in_backup:
-                app_logger.warning(f"Component '{comp_name}' in manifest has no path. Skipping.")
+            # original_filename is already part of path_in_backup_set if it's a file
+            # e.g. database/site_YYYYMMDD_HHMMSS.db or configurations/map_config_YYYYMMDD_HHMMSS.json
+            # For media, path_in_backup_set would be 'media/floor_map_uploads' or 'media/resource_uploads'
+
+            if not comp_path_in_backup_set:
+                app_logger.warning(f"Component '{comp_name_in_manifest}' (Type: {comp_type}) in manifest has no 'path_in_backup'. Skipping.")
                 continue
 
-            if comp_type == "media" and comp_path_in_backup == COMPONENT_SUBDIR_MEDIA:
-                app_logger.info(f"Skipping download of top-level media directory component ('{comp_path_in_backup}').")
-                continue
+            full_path_on_share = f"{backup_root_on_share}/{comp_path_in_backup_set}"
 
-            full_path_on_share = f"{backup_root_on_share}/{comp_path_in_backup}"
-            local_download_path = os.path.join(local_temp_dir, comp_original_filename)
+            # Determine local download path carefully
+            # For files, it's straightforward. For media (directories), we handle them differently.
+            if comp_type == "media": # This component entry is for a directory of media files
+                # The actual media files are not downloaded here, but their parent directory structure is noted.
+                # The restore_media_component function will handle listing and downloading individual files.
+                app_logger.info(f"Media component '{comp_name_in_manifest}' identified. Path on share: {full_path_on_share}. Individual files will be handled by media restore logic.")
+                # We can store the base path for media if needed, or rely on manifest structure for media restore.
+                # For now, let's assume restore_media_component will use this info.
+                # Example: downloaded_component_paths['media_floor_map_uploads_source_path'] = full_path_on_share
+                # However, the current structure seems to download individual files, not entire directories at this stage.
+                # The current loop downloads files. If a "media" component is just a directory path, it needs special handling.
+                # The manifest currently has: {"type": "media", "name": "media_files", "path_in_backup": "media"}
+                # This suggests the "media" component itself is a directory.
+                # Let's refine: if comp_type is "media", we expect comp_path_in_backup to be like "media/floor_map_uploads"
 
-            app_logger.info(f"Downloading component: {comp_name} (Type: {comp_type}) from {full_path_on_share}")
+                # The current manifest structure has a single "media" component with path "media".
+                # Individual media subdirectories (floor_map_uploads, resource_uploads) are not separate components.
+                # This means the media restoration step needs to handle these subdirectories.
+                # So, we skip the generic file download for the top-level "media" directory entry.
+                if comp_path_in_backup_set == COMPONENT_SUBDIR_MEDIA: # e.g. "media"
+                     app_logger.info(f"Top-level media directory component '{comp_path_in_backup_set}' noted. Actual file restoration will occur in media restore phase.")
+                     # We need to ensure restore_media_component handles the sub-folders like 'floor_map_uploads' and 'resource_uploads'
+                     # by iterating through them based on the 'media' component path.
+                     downloaded_component_paths[comp_type] = {"base_path_on_share": full_path_on_share} # Store base path for media
+                     continue # Skip generic file download for the media directory itself.
+                else: # Should not happen with current manifest, but good for robustness
+                     app_logger.warning(f"Unexpected media component path '{comp_path_in_backup_set}'. Expected '{COMPONENT_SUBDIR_MEDIA}'. Skipping generic download.")
+                     continue
+
+
+            # For non-media files (db, configs)
+            # Use the actual filename from the path for the local download name
+            local_filename_for_download = os.path.basename(comp_path_in_backup_set)
+            local_download_path = os.path.join(local_temp_dir, local_filename_for_download)
+
+            app_logger.info(f"Downloading component file: {comp_name_in_manifest} (Type: {comp_type}) from {full_path_on_share} to {local_download_path}")
             if download_file(share_client, full_path_on_share, local_download_path):
-                app_logger.info(f"Successfully downloaded {comp_name} to {local_download_path}")
-                key_for_paths = comp_name if comp_type == "config" else comp_type
-                downloaded_component_paths[key_for_paths] = local_download_path
+                app_logger.info(f"Successfully downloaded {comp_name_in_manifest} to {local_download_path}")
+                # Use a consistent key for downloaded_component_paths, e.g., the 'name' from manifest if unique, or type for db.
+                storage_key = comp_name_in_manifest if comp_type == "config" else comp_type # e.g. 'map_config' or 'database'
+                downloaded_component_paths[storage_key] = local_download_path
             else:
-                msg = f"Failed to download component '{comp_name}' (Type: {comp_type}) from '{full_path_on_share}'. Startup restore might be incomplete."
+                msg = f"Failed to download component file '{comp_name_in_manifest}' (Type: {comp_type}) from '{full_path_on_share}'. Startup restore might be incomplete."
                 app_logger.error(msg)
-                if comp_type == "database":
+                if comp_type == "database": # Database is critical
                     restore_status["message"] = msg
-                    raise Exception(msg)
+                    raise Exception(msg) # Abort if database download fails
+                # For other components, log error and continue (system might be partially restored)
                 if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
                     restore_status["message"] += f"; {msg}"
                 else:
                     restore_status["message"] = msg
+                # Update status to indicate partial failure if not already critical
+                if restore_status["status"] != "failure":
+                    restore_status["status"] = "partial_failure"
 
+
+        # Proceed with applying the downloaded components
         with app_for_context.app_context():
-            app_logger.info("Entering app_context for restore operations.")
+            app_logger.info("Entering app_context for applying restored components.")
             if "database" in downloaded_component_paths:
                 local_db_path = downloaded_component_paths["database"]
                 live_db_uri = app_for_context.config.get('SQLALCHEMY_DATABASE_URI', '')
@@ -1330,12 +1378,16 @@ def perform_startup_restore_sequence(app_for_context):
                         else:
                              restore_status["message"] = f"Error during {log_name} import stage: {str(e_config_restore)}"
                 else:
-                    app_logger.info(f"{log_name} component not found. Skipping its restore.")
+                    app_logger.info(f"{log_name} component not found in downloaded files. Skipping its restore.")
 
+            # Restore scheduler_settings.json
             if "scheduler_settings" in downloaded_component_paths:
                 local_scheduler_path = downloaded_component_paths["scheduler_settings"]
-                data_dir_path = app_for_context.config.get('DATA_DIR', os.path.join(os.path.dirname(__file__), '..', 'data'))
-                live_scheduler_path = os.path.join(data_dir_path, 'scheduler_settings.json')
+                # Correctly determine the live data directory using app config or a robust relative path
+                # DATA_DIR is module-level, ensure it's the correct one for the live app.
+                # Using app_for_context.config.get('DATA_DIR', DATA_DIR) is safer if DATA_DIR is configured in Flask.
+                # For now, assuming module-level DATA_DIR is appropriate.
+                live_scheduler_path = os.path.join(DATA_DIR, 'scheduler_settings.json') # DATA_DIR is BASE_DIR/data
                 live_scheduler_dir = os.path.dirname(live_scheduler_path)
                 if not os.path.exists(live_scheduler_dir): os.makedirs(live_scheduler_dir, exist_ok=True)
                 try:
@@ -1344,28 +1396,101 @@ def perform_startup_restore_sequence(app_for_context):
                     app_logger.info("Scheduler settings successfully restored.")
                     try:
                         add_audit_log("System Restore", f"Scheduler settings restored from startup sequence using backup {latest_backup_timestamp}.")
-                    except Exception as e_audit:
+                    except Exception as e_audit: # Should be specific to DB errors if logger/DB is not ready
                         app_logger.warning(f"Could not write audit log for system restore (scheduler_settings): {e_audit}")
                 except Exception as e_sched_restore:
                     app_logger.error(f"Error replacing live scheduler settings: {e_sched_restore}", exc_info=True)
-                    if "message" in restore_status: restore_status["message"] += f"; Error during scheduler settings restore: {e_sched_restore}"
-                    else: restore_status["message"] = f"Error during scheduler settings restore: {e_sched_restore}"
+                    # Update status and message for partial failure
+                    restore_status["status"] = "partial_failure"
+                    error_detail = f"Error during scheduler settings restore: {e_sched_restore}"
+                    if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
+                        restore_status["message"] += f"; {error_detail}"
+                    else:
+                        restore_status["message"] = error_detail
             else:
-                app_logger.info("Scheduler settings component not found. Skipping its restore.")
+                app_logger.info("Scheduler settings component not found in downloaded files. Skipping its restore.")
 
-            if restore_status["message"] == "Startup restore sequence initiated but not completed.":
-                 restore_status["status"] = "success"
-                 restore_status["message"] = f"Startup restore sequence completed successfully from backup {latest_backup_timestamp}."
-                 app_logger.info(restore_status["message"])
-            elif restore_status.get("status") != "failure":
-                 restore_status["status"] = "partial_success"
-                 app_logger.warning(f"Startup restore sequence completed with some non-critical issues: {restore_status['message']}")
-        app_logger.info("Exited app_context for restore operations.")
+            # Restore Media Files (Floor Maps and Resource Uploads)
+            if "media" in downloaded_component_paths and isinstance(downloaded_component_paths["media"], dict):
+                media_base_path_on_share = downloaded_component_paths["media"].get("base_path_on_share")
+                if media_base_path_on_share:
+                    media_sources_to_restore = [
+                        {"name": "Floor Maps",
+                         "azure_subdir": "floor_map_uploads", # Subdirectory name on Azure under the 'media' component path
+                         "local_target_dir": FLOOR_MAP_UPLOADS}, # Absolute local path
+                        {"name": "Resource Uploads",
+                         "azure_subdir": "resource_uploads",
+                         "local_target_dir": RESOURCE_UPLOADS}
+                    ]
+                    for media_src in media_sources_to_restore:
+                        azure_full_subdir_path = f"{media_base_path_on_share}/{media_src['azure_subdir']}"
+                        app_logger.info(f"Attempting to restore media for {media_src['name']} from Azure path '{azure_full_subdir_path}' to local '{media_src['local_target_dir']}'.")
+
+                        # Ensure local target directory exists and is empty (optional, but good for clean restore)
+                        if os.path.exists(media_src['local_target_dir']):
+                            app_logger.info(f"Clearing existing local media directory: {media_src['local_target_dir']}")
+                            try:
+                                shutil.rmtree(media_src['local_target_dir'])
+                            except Exception as e_rm:
+                                app_logger.error(f"Failed to clear local media directory {media_src['local_target_dir']}: {e_rm}")
+                                # Decide if this is critical enough to stop this part of media restore
+                        try:
+                            os.makedirs(media_src['local_target_dir'], exist_ok=True)
+                        except Exception as e_mkdir:
+                             app_logger.error(f"Failed to create local media directory {media_src['local_target_dir']}: {e_mkdir}")
+                             continue # Skip this media source if dir can't be made
+
+                        media_success, media_msg, media_err_detail = restore_media_component(
+                            share_client=share_client,
+                            azure_component_path_on_share=azure_full_subdir_path, # e.g., .../media/floor_map_uploads
+                            local_target_folder_base=media_src['local_target_dir'],
+                            media_component_name=media_src['name'],
+                            task_id=None # No task_id for startup sequence, using app_logger
+                        )
+                        if media_success:
+                            app_logger.info(f"{media_src['name']} restored successfully. {media_msg}")
+                        else:
+                            app_logger.error(f"Failed to restore {media_src['name']}. Message: {media_msg}. Details: {media_err_detail}")
+                            restore_status["status"] = "partial_failure"
+                            error_detail = f"Failed media restore for {media_src['name']}: {media_msg}"
+                            if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
+                                restore_status["message"] += f"; {error_detail}"
+                            else:
+                                 restore_status["message"] = error_detail
+                else:
+                    app_logger.warning("Media component base path not found in downloaded_component_paths. Skipping media files restore.")
+            else:
+                app_logger.info("Media component not found in downloaded_component_paths. Skipping media files restore.")
+
+
+            # Final status update based on accumulated results
+            if restore_status["message"] == "Startup restore sequence initiated but not completed." and restore_status["status"] == "failure":
+                 # This means no specific error message was set, but status remained 'failure' (e.g. critical DB download fail)
+                 # This should ideally be caught earlier, but as a fallback:
+                 restore_status["message"] = "A critical error occurred early in the restore process."
+
+            elif restore_status["status"] != "failure" and restore_status["status"] != "partial_failure":
+                 # If it's not 'failure' or 'partial_failure', and message is still default, it means all steps that ran were fine.
+                 if restore_status["message"] == "Startup restore sequence initiated but not completed.":
+                    restore_status["status"] = "success"
+                    restore_status["message"] = f"Startup restore sequence completed successfully from backup {latest_backup_timestamp}."
+                 # If message was updated by a non-critical step (e.g. DB download failed but others attempted)
+                 # and status is not failure, it might be partial_success.
+                 # This logic needs to be robust: if any critical step failed, status is "failure".
+                 # If any non-critical step failed, status is "partial_failure".
+                 # If all attempted steps succeeded, status is "success".
+
+            app_logger.info(f"Restore application process within app_context finished. Status: {restore_status['status']}, Message: {restore_status['message']}")
+        app_logger.info("Exited app_context for applying restored components.")
 
     except Exception as e_main:
-        app_logger.error(f"An error occurred during startup restore sequence: {e_main}", exc_info=True)
-        if restore_status["message"] == "Startup restore sequence initiated but not completed.":
-            restore_status["message"] = f"Error during restore: {e_main}"
+        app_logger.error(f"A critical error occurred during the startup restore sequence: {e_main}", exc_info=True)
+        # Ensure status reflects critical failure
+        restore_status["status"] = "failure"
+        if restore_status["message"] == "Startup restore sequence initiated but not completed." or not restore_status["message"]:
+            restore_status["message"] = f"Critical error during restore: {e_main}"
+        else: # Append if a message already exists
+            restore_status["message"] += f"; Critical error: {e_main}"
     finally:
         if local_temp_dir and os.path.exists(local_temp_dir):
             try:
@@ -1374,7 +1499,8 @@ def perform_startup_restore_sequence(app_for_context):
             except Exception as e_cleanup:
                 app_logger.error(f"Failed to clean up temporary directory {local_temp_dir}: {e_cleanup}", exc_info=True)
 
-    app_logger.info(f"Startup restore final status: {restore_status['status']}, Message: {restore_status['message']}")
+    # Final log of the outcome
+    app_logger.info(f"Startup restore sequence final status: {restore_status['status']}. Message: {restore_status['message']}")
     return restore_status
 
 # Appending the rest of the original file content (placeholders for brevity)

@@ -139,9 +139,24 @@ AZURE_STORAGE_CONNECTION_STRING = os.environ.get('AZURE_STORAGE_CONNECTION_STRIN
 # Default container name for backups in Azure Blob Storage
 AZURE_CONTAINER_NAME = os.environ.get('AZURE_CONTAINER_NAME', 'roombookingbackup')
 # Names for shares within Azure File Storage (if used by azure_backup.py)
-AZURE_DB_SHARE = os.environ.get('AZURE_DB_SHARE', 'db-backups')
-AZURE_CONFIG_SHARE = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
-AZURE_MEDIA_SHARE = os.environ.get('AZURE_MEDIA_SHARE', 'media')
+AZURE_DB_SHARE = os.environ.get('AZURE_DB_SHARE', 'db-backups') # Legacy or specific component share
+AZURE_CONFIG_SHARE = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups') # Legacy or specific component share
+AZURE_MEDIA_SHARE = os.environ.get('AZURE_MEDIA_SHARE', 'media') # Legacy or specific component share
+
+# Unified Azure File Share for full system backups (used by azure_backup.py's new system)
+AZURE_SYSTEM_BACKUP_SHARE = os.environ.get('AZURE_SYSTEM_BACKUP_SHARE', 'system-backups')
+# Base directory name within the AZURE_SYSTEM_BACKUP_SHARE where 'backup_YYYYMMDD_HHMMSS' folders are stored
+# This corresponds to FULL_SYSTEM_BACKUPS_BASE_DIR in azure_backup.py
+AZURE_FULL_SYSTEM_BACKUPS_BASE_DIR_NAME = os.environ.get('AZURE_FULL_SYSTEM_BACKUPS_BASE_DIR_NAME', 'full_system_backups')
+
+
+# Share for booking data protection backups (JSON exports, etc.)
+AZURE_BOOKING_DATA_SHARE = os.environ.get('AZURE_BOOKING_DATA_SHARE', 'booking-data-backups')
+# Base directory name within AZURE_BOOKING_DATA_SHARE for these backups
+# Corresponds to AZURE_BOOKING_DATA_PROTECTION_DIR in azure_backup.py
+AZURE_BOOKING_DATA_PROTECTION_BASE_DIR_NAME = os.environ.get('AZURE_BOOKING_DATA_PROTECTION_BASE_DIR_NAME', 'booking_data_protection_backups')
+
+
 # BOOKINGS_CSV_BACKUP_INTERVAL_MINUTES has been removed as it's related to legacy CSV backups.
 
 
