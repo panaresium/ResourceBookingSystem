@@ -62,13 +62,12 @@ try:
         restore_bookings_from_full_db_backup,
         backup_incremental_bookings,
         backup_full_bookings_json,
-        restore_bookings_from_full_json_export,
+        # restore_bookings_from_full_json_export, # REMOVED
         delete_incremental_booking_backup,
         list_booking_data_json_backups,
         delete_booking_data_json_backup,
         restore_booking_data_to_point_in_time,
         download_booking_data_json_backup
-        # Ensure list_available_full_booking_json_exports is NOT here
     )
     import azure_backup # This line can remain
     print(f"DEBUG api_system.py: Successfully imported from azure_backup (again). create_full_backup type: {type(create_full_backup)}") # New debug
@@ -97,14 +96,13 @@ except (ImportError, RuntimeError) as e_detailed_azure_import: # Capture the exc
     restore_bookings_from_full_db_backup = None
     backup_incremental_bookings = None
     backup_full_bookings_json = None
-    restore_bookings_from_full_json_export = None
+    # restore_bookings_from_full_json_export = None # REMOVED
     delete_incremental_booking_backup = None
     list_booking_data_json_backups = None
     delete_booking_data_json_backup = None
     restore_booking_data_to_point_in_time = None
     download_booking_data_json_backup = None
     azure_backup = None
-    # Ensure list_available_full_booking_json_exports = None is NOT here
 
 api_system_bp = Blueprint('api_system', __name__)
 
