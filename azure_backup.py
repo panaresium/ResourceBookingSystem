@@ -1302,26 +1302,31 @@ def perform_startup_restore_sequence(app_for_context):
                         app_logger.info(f"Attempting to replace live database at '{live_db_path}' with downloaded backup '{local_db_path}'.")
                         shutil.copyfile(local_db_path, live_db_path)
                         app_logger.info("Database file successfully replaced by restored version.")
-                        try:
-                            add_audit_log("System Restore", f"Database file replaced from startup sequence using backup {latest_backup_timestamp}.")
-                        except Exception as e_audit:
-                            app_logger.warning(f"Could not write audit log for system restore (db file replaced): {e_audit}")
 
-                        # <<< START NEW MIGRATION CODE >>>
+                        # Run database migrations immediately after restoring the DB file
                         try:
                             app_logger.info("Attempting to apply database migrations programmatically on restored database...")
-                            flask_db_upgrade()
+                            flask_db_upgrade() # This uses the current app context
                             app_logger.info("Database migrations applied successfully (or were already up-to-date).")
+
+                            # Now that migrations have run, attempt to log the audit event
+                            try:
+                                add_audit_log("System Restore", f"Database file replaced and migrations applied from startup sequence using backup {latest_backup_timestamp}.")
+                                app_logger.info("Audit log entry for database restore and migration added successfully.")
+                            except Exception as e_audit:
+                                app_logger.warning(f"Could not write audit log for system restore (db file replaced & migrated): {e_audit}", exc_info=True)
+
                         except Exception as e_migrate:
                             msg = f"CRITICAL: Error applying database migrations after DB restore: {e_migrate}. The database may be in an inconsistent state."
                             app_logger.error(msg, exc_info=True)
                             restore_status["message"] = msg
                             restore_status["status"] = "failure"
+                            # Raising an exception here will stop further processing in perform_startup_restore_sequence
+                            # and the error will be caught by the main try-except block in that function.
                             raise Exception(msg)
-                        # <<< END NEW MIGRATION CODE >>>
 
                     except Exception as e_db_restore:
-                        msg = f"Error replacing live database with restored version: {e_db_restore}"
+                        msg = f"Error replacing live database with restored version (before migrations): {e_db_restore}"
                         app_logger.error(msg, exc_info=True)
                         restore_status["message"] = msg
                         raise Exception(msg)

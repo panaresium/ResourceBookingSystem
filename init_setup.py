@@ -417,9 +417,10 @@ def main(force_init=False):
 
     if restore_from_azure_flag or enable_auto_restore_env:
         print("Azure restoration requested via command line or environment variable.")
-        app_for_restore = create_app() # Create an app instance for context
+        # Create app instance for restore context WITHOUT starting the scheduler
+        app_for_restore = create_app(start_scheduler=False)
         with app_for_restore.app_context():
-            app_for_restore.logger.info("Attempting to restore from Azure Backup...")
+            app_for_restore.logger.info("Attempting to restore from Azure Backup (scheduler will not be started for this app instance)...")
             try:
                 restore_result = perform_startup_restore_sequence(app_for_restore)
                 app_for_restore.logger.info(f"Azure restore sequence completed with status: {restore_result.get('status')}, message: {restore_result.get('message')}")
