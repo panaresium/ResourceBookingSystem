@@ -26,19 +26,29 @@ from models import (
 # For now, assuming it works independently or is adapted elsewhere.
 from add_resource_tags_column import add_tags_column
 
+# Import for Azure restoration
+from azure_backup import perform_startup_restore_sequence
+
 
 AZURE_PRIMARY_STORAGE = bool(os.environ.get("AZURE_PRIMARY_STORAGE"))
 if AZURE_PRIMARY_STORAGE:
     try:
-        from azure_storage import ( # This is a separate, pre-existing module
-            download_database,
-            download_media,
-            upload_database,
-            upload_media,
+        # These specific functions from azure_storage might be legacy or for a different Azure service (e.g., Blob)
+        # The main restoration logic will now use azure_backup.py which uses Azure File Share.
+        # Keeping these for now if they serve other purposes, but they are not part of the primary system restore.
+        from azure_storage import (
+            download_database as legacy_download_database, # Renamed to avoid confusion
+            download_media as legacy_download_media,       # Renamed to avoid confusion
+            upload_database as legacy_upload_database,     # Renamed to avoid confusion
+            upload_media as legacy_upload_media            # Renamed to avoid confusion
         )
+        # If legacy_download_database was intended for initial DB fetch before app starts,
+        # it might need to be re-evaluated in context of perform_startup_restore_sequence.
     except Exception as exc:  # pragma: no cover - optional
-        print(f"Warning: Azure storage unavailable: {exc}")
-        AZURE_PRIMARY_STORAGE = False
+        print(f"Warning: Legacy Azure storage functions (azure_storage.py) unavailable: {exc}")
+        # This doesn't mean azure_backup.py (File Share) is unavailable.
+        # AZURE_PRIMARY_STORAGE might need to be redefined or used more carefully.
+        # For now, we'll assume it refers to the legacy Blob storage if these specific functions are key.
 
 MIN_PYTHON_VERSION = (3, 7)
 # Project root directory
@@ -49,12 +59,21 @@ FLOOR_MAP_UPLOADS_DIR_NAME = os.path.join(STATIC_DIR_NAME, "floor_map_uploads")
 RESOURCE_UPLOADS_DIR_NAME = os.path.join(STATIC_DIR_NAME, "resource_uploads")
 DB_PATH = BASE_DIR / DATA_DIR_NAME / 'site.db' # Using pathlib for consistency
 
+# This initial download from azure_storage.py (potentially Blob) is separate from
+# the full system restore from Azure File Share handled by perform_startup_restore_sequence.
+# If AZURE_PRIMARY_STORAGE implies the main system backup is on Blob, this needs review.
+# Assuming perform_startup_restore_sequence is the primary mechanism for full system restore.
+# This block might be redundant if perform_startup_restore_sequence handles the initial DB state.
 if AZURE_PRIMARY_STORAGE:
-    print("Downloading database from Azure storage...")
+    print("Attempting initial database download using legacy azure_storage.py (if configured)...")
     try:
-        download_database() # Assumes this function knows DB_PATH or configured path
+        # Make sure this doesn't conflict with the main restore.
+        # This might be for a very basic initial DB if no full backup exists.
+        legacy_download_database()
+    except NameError: # If legacy_download_database wasn't imported
+        print("Legacy database download function not available.")
     except Exception as exc:
-        print(f"Failed to download database from Azure: {exc}")
+        print(f"Failed to download database using legacy azure_storage.py: {exc}")
 
 def check_python_version():
     """Checks if the current Python version meets the minimum requirement."""
@@ -389,26 +408,51 @@ def main(force_init=False):
     
     check_python_version()
     print("-" * 30)
-    create_required_directories()
+    create_required_directories() # This might also download initial media via legacy_download_media
     print("-" * 30)
 
-    # Database initialization logic
+    # Handle Azure restoration if requested
+    restore_from_azure_flag = '--restore-from-azure' in sys.argv
+    enable_auto_restore_env = os.environ.get("ENABLE_AUTO_STARTUP_RESTORE", "false").lower() == "true"
+
+    if restore_from_azure_flag or enable_auto_restore_env:
+        print("Azure restoration requested via command line or environment variable.")
+        app_for_restore = create_app() # Create an app instance for context
+        with app_for_restore.app_context():
+            app_for_restore.logger.info("Attempting to restore from Azure Backup...")
+            try:
+                restore_result = perform_startup_restore_sequence(app_for_restore)
+                app_for_restore.logger.info(f"Azure restore sequence completed with status: {restore_result.get('status')}, message: {restore_result.get('message')}")
+                if restore_result.get('status') == 'failure':
+                    app_for_restore.logger.error("Azure restoration failed. Check logs for details. Database might be in an inconsistent state.")
+                    # Depending on desired behavior, might exit or continue with standard init
+            except Exception as e_restore:
+                app_for_restore.logger.error(f"Critical error during Azure restoration process: {e_restore}", exc_info=True)
+                print(f"ERROR: Azure restoration process failed critically: {e_restore}")
+                # Decide if to exit or continue. For now, let it continue to DB init logic below.
+        print("-" * 30)
+
+    # Database initialization logic (runs after potential Azure restore)
     if force_init:
         print(f"Force initializing database at {DB_PATH}...")
-        init_db(force=True)
+        init_db(force=True) # init_db creates its own app context
         print("Database force initialization process completed.")
     elif DB_PATH.exists():
         print(f"Existing database found at {DB_PATH}. Verifying structure...")
+        # verify_db_schema does not use Flask app context by default, uses direct sqlite3
         if verify_db_schema():
-            print("Database structure looks correct. No re-initialization needed.")
-            print("If you need to re-initialize, run: python init_setup.py --force")
+            print("Database structure looks correct. No re-initialization needed unless --force was used.")
+            print("If you need to re-initialize from scratch (ignoring any restored data), run: python init_setup.py --force")
         else:
-            print("Database structure invalid or outdated. Recreating database...")
-            # os.remove(DB_PATH) # Removing the DB if schema is bad might be too destructive.
-            # Better to let init_db(force=True) handle it if user wants.
-            print("Schema issues found. To attempt recreation, run: python init_setup.py --force")
-            # init_db(force=True) # Or just proceed to recreate. For safety, require explicit --force.
-    else:
+            print("Database structure invalid or outdated. This might be expected if a restore just happened and schema changed.")
+            print("Attempting to let init_db() handle schema updates or creation if necessary.")
+            # init_db(force=False) will try to create tables if they don't exist and run migrations.
+            # If a restore just happened, the DB exists, so it won't wipe data unless --force is used.
+            # It will still run ensure_all_migrations which might add missing columns.
+            init_db(force=False)
+            print("Database check/update process completed after structure verification.")
+
+    else: # No DB_PATH exists
         print(f"No database found at {DB_PATH}. Initializing database...")
         init_db(force=False) # force=False should still init if no DB exists
         print("Database initialization process completed.")
@@ -418,4 +462,5 @@ def main(force_init=False):
 
 if __name__ == "__main__":
     force_flag = '--force' in sys.argv
+    # The main function now internally checks for --restore-from-azure
     main(force_init=force_flag)
