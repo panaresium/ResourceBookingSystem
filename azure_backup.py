@@ -1382,5 +1382,3 @@ def perform_startup_restore_sequence(app_for_context):
 # Constants like AZURE_BOOKING_DATA_PROTECTION_DIR also need to be present.
 # For this operation, only the functions and imports shown above are strictly necessary
 # for the tool to accept the overwrite.
-
-[end of azure_backup.py]
