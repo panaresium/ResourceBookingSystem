@@ -103,7 +103,7 @@ def _ensure_sqlite_configured_factory_hook(current_app, current_db):
 
 # Removed load_booking_csv_schedule_settings helper function
 
-def create_app(config_object=config, testing=False): # Added testing parameter
+def create_app(config_object=config, testing=False, start_scheduler=True): # Added start_scheduler parameter
     app = Flask(__name__, template_folder='templates', static_folder='static')
     # Corrected template_folder and static_folder paths assuming app_factory.py is in root.
     # If app_factory is in a sub-directory, these might need adjustment (e.g. app.Flask('instance', ...))
@@ -372,7 +372,8 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
     # 9. Initialize Scheduler
     # Skip if testing or if SCHEDULER_ENABLED is False in config
-    if not testing and app.config.get("SCHEDULER_ENABLED", True):
+    # Also respect the new start_scheduler parameter
+    if not testing and app.config.get("SCHEDULER_ENABLED", True) and start_scheduler:
         apscheduler_available_check = True
         try:
             from apscheduler.schedulers.background import BackgroundScheduler # Already imported
@@ -681,12 +682,14 @@ def create_app(config_object=config, testing=False): # Added testing parameter
         else: # apscheduler_available_check is False
             app.scheduler = None # Ensure app.scheduler exists
             app.logger.info("APScheduler not installed, so it was not started.")
-    else: # Testing or SCHEDULER_ENABLED is False
+    else: # Testing or SCHEDULER_ENABLED is False or start_scheduler is False
         app.scheduler = None # Ensure app.scheduler exists but is None
-        if testing: # This log is now reachable due to the 'if testing: return app' being removed/changed
+        if testing:
             app.logger.info("Scheduler not started in TESTING mode.")
-        elif not app.config.get("SCHEDULER_ENABLED", True): # Log if disabled by config
-            app.logger.info("Scheduler not started because SCHEDULER_ENABLED is False.")
+        elif not app.config.get("SCHEDULER_ENABLED", True):
+            app.logger.info("Scheduler not started because SCHEDULER_ENABLED is False in config.")
+        elif not start_scheduler:
+            app.logger.info("Scheduler not started because start_scheduler parameter was False (e.g., for init_setup.py restore context).")
 
     if not testing: # Final log message only if not testing
         app.logger.info("Flask app created and configured via factory.")
