@@ -134,6 +134,8 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
     # Initialize DB early
     db.init_app(app)
+    # Initialize Migrate immediately after DB and App, and before startup restore sequence
+    migrate.init_app(app, db)
 
     if testing:
         # EXTREMELY MINIMAL SETUP FOR TESTING when create_app(testing=True)
@@ -188,30 +190,6 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
     app.logger.propagate = False
     logging.info("Ensured app.logger.propagate is False.")
-
-    # Placed inside create_app(), after app.logger is configured
-    app.logger.info(f"DIAGNOSTIC (inside create_app): Checking status of Azure utilities...")
-    app.logger.info(f"DIAGNOSTIC (inside create_app): Module-level azure_backup_available = {azure_backup_available}")
-
-    # Check for perform_startup_restore_sequence
-    if 'perform_startup_restore_sequence' in globals() and globals()['perform_startup_restore_sequence'] is not None:
-        pss_func = globals()['perform_startup_restore_sequence']
-        app.logger.info(f"DIAGNOSTIC (inside create_app): perform_startup_restore_sequence was found in globals. Type = {type(pss_func)}")
-        app.logger.info(f"DIAGNOSTIC (inside create_app): perform_startup_restore_sequence is callable = {callable(pss_func)}")
-    elif 'perform_startup_restore_sequence' in globals(): # It's in globals but is None
-        app.logger.info("DIAGNOSTIC (inside create_app): perform_startup_restore_sequence is in globals but is None (likely set to None in except ImportError block).")
-    else: # Not in globals at all
-        app.logger.info("DIAGNOSTIC (inside create_app): perform_startup_restore_sequence NOT FOUND in globals.")
-
-    # Check for backup_if_changed (aliased as azure_backup_if_changed)
-    if 'azure_backup_if_changed' in globals() and globals()['azure_backup_if_changed'] is not None:
-        bic_func = globals()['azure_backup_if_changed']
-        app.logger.info(f"DIAGNOSTIC (inside create_app): azure_backup_if_changed was found in globals. Type = {type(bic_func)}")
-        app.logger.info(f"DIAGNOSTIC (inside create_app): azure_backup_if_changed is callable = {callable(bic_func)}")
-    elif 'azure_backup_if_changed' in globals(): # It's in globals but is None
-        app.logger.info("DIAGNOSTIC (inside create_app): azure_backup_if_changed is in globals but is None (likely set to None in except ImportError block).")
-    else: # Not in globals at all
-        app.logger.info("DIAGNOSTIC (inside create_app): azure_backup_if_changed NOT FOUND in globals.")
 
     # Control verbosity of Azure SDK loggers based on app's log level
     azure_logger_names = [
@@ -320,7 +298,7 @@ def create_app(config_object=config, testing=False): # Added testing parameter
 
     csrf.init_app(app)
     socketio.init_app(app) # Add message_queue from config
-    migrate.init_app(app, db)
+    # migrate.init_app(app, db) # MOVED EARLIER
 
     # login_manager and oauth are initialized within init_auth
 
