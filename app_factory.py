@@ -43,16 +43,15 @@ from scheduler_tasks import (
     # run_periodic_full_booking_data_task # New task for unified periodic fulls
 )
 # Conditional import for azure_backup
+# Only import 'backup_if_changed' as 'perform_startup_restore_sequence' is no longer used here.
 try:
-    from azure_backup import perform_startup_restore_sequence, backup_if_changed as azure_backup_if_changed
-    azure_backup_available = True
-except ImportError as e_import_azure: # Capture the exception
-    # app.logger might not be fully configured here, using standard logging for this critical import failure.
-    # However, create_app calls app.logger.error very early, so it should be available.
-    logging.getLogger(__name__).warning(f"Failed to import Azure backup utilities (perform_startup_restore_sequence or backup_if_changed) from azure_backup.py. Azure features may be unavailable. Error: {e_import_azure}")
-    perform_startup_restore_sequence = None
-    azure_backup_if_changed = None
-    azure_backup_available = False
+    from azure_backup import backup_if_changed as azure_backup_if_changed
+    azure_backup_if_changed_available = True # More specific flag name
+except ImportError as e_import_azure_bifc: # Capture the exception
+    logging.getLogger(__name__).warning(f"Failed to import 'backup_if_changed' from azure_backup.py. Legacy Azure backup job may be unavailable. Error: {e_import_azure_bifc}")
+    azure_backup_if_changed = None # Ensure it's None if import fails
+    azure_backup_if_changed_available = False # More specific flag name
+
 
 # New diagnostic logging block
 # Assuming app.logger is available after the create_app's initial error log.
@@ -218,62 +217,11 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
 
     # Log settings after logger is configured
     # app.logger.info(f"Loaded Booking CSV Schedule Settings: {app.config.get('BOOKING_CSV_SCHEDULE_SETTINGS')}") # Removed
-    # This else block was associated with the `if not testing:` block for logging.
-    # However, the `if testing: return app` statement higher up makes this else unreachable.
-    # The following lines were causing an IndentationError because they were part of this
-    # effectively commented-out (or unreachable) else block.
-    # They are now removed entirely as the logic for testing logging is handled
-    # within the `if testing: return app` block or not at all if minimal logging is sufficient there.
-    # Previous problematic lines:
-    #    if not app.logger.hasHandlers(): # Ensure app.logger has a handler for tests
-    #        app.logger.addHandler(logging.StreamHandler())
 
-    # Determine startup restore behavior
-    should_attempt_restore = None
-    if not testing: # Only evaluate restore logic if not testing
-        env_restore_setting = os.environ.get("ENABLE_AUTO_STARTUP_RESTORE", "").strip().lower()
-        if env_restore_setting == "true":
-            should_attempt_restore = True
-            app.logger.info("Startup restore behavior determined by environment variable ENABLE_AUTO_STARTUP_RESTORE: ENABLED.")
-        elif env_restore_setting == "false":
-            should_attempt_restore = False
-            app.logger.info("Startup restore behavior determined by environment variable ENABLE_AUTO_STARTUP_RESTORE: DISABLED.")
-        else:
-            app.logger.info("Environment variable ENABLE_AUTO_STARTUP_RESTORE not set or invalid. Falling back to scheduler_settings.json.")
-            scheduler_settings = load_scheduler_settings()
-            should_attempt_restore = scheduler_settings.get('auto_restore_full_system_on_startup', False)
-            if should_attempt_restore:
-                app.logger.info("Startup restore from scheduler_settings.json: ENABLED.")
-            else:
-                app.logger.info("Startup restore from scheduler_settings.json: DISABLED.")
-
-    # New logic for startup restore sequence - SKIP IF TESTING
-    # THIS BLOCK IS NOW REMOVED. Restoration is handled by init_setup.py
-    # if not testing and azure_backup_available and callable(perform_startup_restore_sequence):
-    #     if should_attempt_restore:
-    #         app.logger.info("Configuration indicates automatic restore on startup. Attempting full system restore sequence...")
-    #         try:
-    #             # Pass the app instance itself
-    #             restore_result = perform_startup_restore_sequence(app)
-    #             app.logger.info(f"Startup restore sequence completed. Status: {restore_result.get('status')}, Message: {restore_result.get('message')}")
-    #             if restore_result.get('status') != 'success':
-    #                 app.logger.error(f"Startup restore sequence did not complete successfully: {restore_result.get('message')}")
-    #         except Exception as e_startup_restore:
-    #             app.logger.exception(f"Critical error during perform_startup_restore_sequence: {e_startup_restore}")
-    #     else:
-    #         # This log covers cases where restore is disabled by either env var or settings file.
-    #         app.logger.info("Automatic restore on startup is disabled. Skipping full system restore sequence.")
-    # elif not testing and should_attempt_restore: # Only warn if restore was desired but not possible due to missing utilities
-    #      app.logger.warning("Automatic restore on startup is ENABLED (by env var or settings), but restore utilities (perform_startup_restore_sequence) are not available/imported. Skipping restore.")
-    # # No specific 'else' needed here if should_attempt_restore is false and utilities are unavailable,
-    # # as the earlier log about being disabled covers it, or if testing is true, nothing here runs.
-
-    if not testing:
-        if should_attempt_restore:
-            app.logger.info("NOTE: Automatic Azure restore on app startup is configured but has been MOVED to init_setup.py. Run 'python init_setup.py --restore-from-azure' or set ENABLE_AUTO_STARTUP_RESTORE for init_setup.py to perform the restore.")
-        else:
-            app.logger.info("Automatic Azure restore on app startup is disabled (as determined by env vars or settings). This is the expected behavior if init_setup.py handles restoration.")
-
+    # The logic for determining 'should_attempt_restore' and logging related messages
+    # about Azure restore being moved to init_setup.py is now removed from app_factory.py,
+    # as it's no longer relevant here. init_setup.py handles its own restore triggering.
+    # app_factory.py will just create the app; init_setup.py will decide to use it for restore.
 
     # Old incremental booking restore block is removed.
 
@@ -668,11 +616,12 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
             else:
                 app.logger.warning("send_checkin_reminders function not found in scheduler_tasks. Job not added.")
 
-            if azure_backup_if_changed: # Legacy Azure backup, check if function exists
-                 scheduler.add_job(azure_backup_if_changed, 'interval', minutes=app.config.get('AZURE_BACKUP_INTERVAL_MINUTES', 60))
+            # Use the more specific azure_backup_if_changed_available flag
+            if azure_backup_if_changed and azure_backup_if_changed_available: # Legacy Azure backup
+                 scheduler.add_job(azure_backup_if_changed, 'interval', minutes=app.config.get('AZURE_BACKUP_INTERVAL_MINUTES', 60), args=[app]) # Added args=[app]
 
             # Start the scheduler only if it's not testing and SCHEDULER_ENABLED is true
-            # The outer 'if not testing and app.config.get("SCHEDULER_ENABLED", True):' already covers this.
+            # The outer 'if not testing and app.config.get("SCHEDULER_ENABLED", True) and start_scheduler:' already covers this.
             try:
                 scheduler.start()
                 app.logger.info("Background scheduler started.")
