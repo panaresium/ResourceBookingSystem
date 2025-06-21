@@ -1389,7 +1389,7 @@ def _import_user_configurations_data(user_config_data: dict): # Return type will
                 role.name = role_name
                 # Assuming Role.description and Role.permissions are attributes that can be set
                 role.description = role_item.get('description', role.description)
-                role.permissions = permissions_list
+                role.permissions = json.dumps(permissions_list)
                 db.session.add(role)
                 roles_updated += 1
                 backup_to_new_role_id_mapping[backup_role_id] = role.id
@@ -1398,7 +1398,7 @@ def _import_user_configurations_data(user_config_data: dict): # Return type will
                 if role_by_name:
                     warnings.append(f"Role with backup ID {backup_role_id} not found, but role with name '{role_name}' (ID: {role_by_name.id}) exists. Updating existing role by name.")
                     role_by_name.description = role_item.get('description', role_by_name.description)
-                    role_by_name.permissions = permissions_list
+                    role_by_name.permissions = json.dumps(permissions_list)
                     db.session.add(role_by_name)
                     roles_updated += 1
                     backup_to_new_role_id_mapping[backup_role_id] = role_by_name.id
@@ -1407,7 +1407,7 @@ def _import_user_configurations_data(user_config_data: dict): # Return type will
                     new_role = Role(
                         name=role_name,
                         description=role_item.get('description'),
-                        permissions=permissions_list
+                        permissions=json.dumps(permissions_list)
                     )
                     # If backup_role_id is intended to be preserved for new roles (and is unique)
                     # new_role.id = backup_role_id # This might require careful handling if IDs are auto-incrementing
