@@ -592,28 +592,267 @@ def api_one_click_restore():
                     add_audit_log(action="ONE_CLICK_RESTORE_SETUP_ERROR", details=f"Task {task_id_param}: {msg}", user_id=user_id_audit, username=username_audit)
                     return
 
-                # This is a simplified call. The original function did more steps after this.
-                # Those steps (config imports) should also be part of this worker.
-                # For now, focusing on making the call to azure_backup.restore_full_backup async.
-                # The azure_backup.restore_full_backup itself is a placeholder in this version.
-                # It would return: restored_db_path, map_config_json_path, resource_configs_json_path, user_configs_json_path, actions_list
-                # Assume it's refactored to use task_id for its internal _emit_progress
-                db_path, map_path, res_path, user_path, _ = restore_full_backup(backup_timestamp=backup_ts_param, task_id=task_id_param)
+                # Call azure_backup.restore_full_backup to download all components.
+                # This function is expected to return paths to the downloaded files/directories.
+                # Signature: restored_db_path, local_map_config_path, local_resource_configs_path, local_user_configs_path, local_scheduler_settings_path, local_media_base_path, actions_summary_list
+                # For full restore, media is handled by azure_backup.perform_startup_restore_sequence which calls restore_media_component.
+                # The `restore_full_backup` in azure_backup.py needs to be updated to match this expected return for a non-dry_run.
+                # For now, assuming it returns paths for DB and JSON configs. Media will be handled separately.
+                # The `restore_full_backup` in `azure_backup.py` is currently a placeholder and needs to be fully implemented
+                # to download all components and return their local paths.
+                # Let's assume it's updated to return:
+                # (db_dl_path, map_cfg_dl_path, res_cfg_dl_path, user_cfg_dl_path, sched_cfg_dl_path, media_base_dl_path, actions)
+                # For this step, we'll focus on using these paths.
 
-                # Simplified: Check if db_path (primary artifact) was "restored"
-                if db_path is not None or "DRY RUN" in str(db_path): # Placeholder might return string
-                     # Simulate further import steps here if they were part of the original logic
-                    update_task_log(task_id_param, "Simulating configuration data imports...", level="info")
-                    import time; time.sleep(3) # Simulate config imports
-                    final_message = f"Full system restore simulation for {backup_ts_param} completed. Further data import steps would follow."
-                    mark_task_done(task_id_param, success=True, result_message=final_message)
-                    add_audit_log(action="ONE_CLICK_RESTORE_WORKER_COMPLETED", details=f"Task {task_id_param}: {final_message}", user_id=user_id_audit, username=username_audit)
-                else:
-                    error_detail = f"Core restore operation (e.g., file download) failed for {backup_ts_param}."
+                update_task_log(task_id_param, "Calling core restore_full_backup to download components...", level="info")
+                # IMPORTANT: The `restore_full_backup` in `azure_backup.py` is a placeholder.
+                # It needs to be fleshed out to actually download files and return paths.
+                # For now, we will mock its return for the purpose of this function's logic.
+                # In a real scenario, `restore_full_backup` would do the Azure downloads.
+                # Mocked return for development:
+                # downloaded_db_path, downloaded_map_config_path, downloaded_resource_configs_path, \
+                # downloaded_user_configs_path, downloaded_scheduler_settings_path, \
+                # downloaded_media_base_path, download_actions = azure_backup.MOCK_restore_full_backup_downloads(backup_ts_param, task_id_param)
+
+                # This should be the actual call:
+                downloaded_components = restore_full_backup(backup_timestamp=backup_ts_param, task_id=task_id_param, dry_run=False)
+                # Expected structure of downloaded_components:
+                # {
+                #     "database": "/path/to/downloaded/site.db",
+                #     "map_config": "/path/to/downloaded/map_config.json",
+                #     "resource_configs": "/path/to/downloaded/resource_configs.json",
+                #     "user_configs": "/path/to/downloaded/user_configs.json",
+                #     "scheduler_settings": "/path/to/downloaded/scheduler_settings.json",
+                #     "media_base_path_on_share": "full_system_backups/backup_YYYYMMDD_HHMMSS/media" # Path on Azure
+                # }
+                # And a list of actions/logs from the download process.
+
+                if not downloaded_components or not downloaded_components.get("database"):
+                    error_detail = f"Core component download (especially database) failed for backup {backup_ts_param}."
+                    update_task_log(task_id_param, error_detail, level="error")
                     mark_task_done(task_id_param, success=False, result_message=error_detail)
-                    add_audit_log(action="ONE_CLICK_RESTORE_WORKER_FAILED", details=f"Task {task_id_param}: {error_detail}", user_id=user_id_audit, username=username_audit)
+                    add_audit_log(action="ONE_CLICK_RESTORE_DOWNLOAD_FAILED", details=f"Task {task_id_param}: {error_detail}", user_id=user_id_audit, username=username_audit)
+                    return
 
-                current_app.logger.info(f"Full restore task {task_id_param} worker finished.")
+                update_task_log(task_id_param, "Components downloaded. Proceeding with application.", level="info")
+                overall_success = True
+                restore_ops_summary = []
+
+                # 1. Apply Database (replace file)
+                local_db_dl_path = downloaded_components.get("database")
+                live_db_uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
+                if live_db_uri.startswith('sqlite:///'):
+                    live_db_path = live_db_uri.replace('sqlite:///', '', 1)
+                    try:
+                        update_task_log(task_id_param, f"Replacing live database at '{live_db_path}' with '{local_db_dl_path}'.", level="info")
+                        # Ensure parent directory of live_db_path exists
+                        live_db_dir = os.path.dirname(live_db_path)
+                        if not os.path.exists(live_db_dir): os.makedirs(live_db_dir, exist_ok=True)
+
+                        import shutil
+                        shutil.copyfile(local_db_dl_path, live_db_path)
+                        update_task_log(task_id_param, "Database file replaced successfully.", level="success")
+                        restore_ops_summary.append("Database file replaced.")
+
+                        # Apply migrations
+                        update_task_log(task_id_param, "Attempting to apply database migrations...", level="info")
+                        from flask_migrate import upgrade as flask_db_upgrade
+                        try:
+                            flask_db_upgrade() # Uses current app context
+                            update_task_log(task_id_param, "Database migrations applied successfully.", level="success")
+                            restore_ops_summary.append("Database migrations applied.")
+                        except Exception as e_migrate:
+                            overall_success = False
+                            err_mig = f"Error applying database migrations: {str(e_migrate)}"
+                            update_task_log(task_id_param, err_mig, level="error")
+                            restore_ops_summary.append(f"DB migration error: {str(e_migrate)}")
+                            # This is a critical failure.
+                            mark_task_done(task_id_param, success=False, result_message=f"Restore failed during DB migration: {err_mig}")
+                            add_audit_log(action="ONE_CLICK_RESTORE_MIGRATION_ERROR", details=f"Task {task_id_param}: {err_mig}", user_id=user_id_audit, username=username_audit)
+                            return # Stop further processing
+
+                    except Exception as e_db_apply:
+                        overall_success = False
+                        err_db = f"Error applying database file: {str(e_db)}"
+                        update_task_log(task_id_param, err_db, level="error")
+                        restore_ops_summary.append(f"DB apply error: {str(e_db)}")
+                        # This is a critical failure.
+                        mark_task_done(task_id_param, success=False, result_message=f"Restore failed during DB application: {err_db}")
+                        add_audit_log(action="ONE_CLICK_RESTORE_DB_APPLY_ERROR", details=f"Task {task_id_param}: {err_db}", user_id=user_id_audit, username=username_audit)
+                        return # Stop further processing
+                else:
+                    update_task_log(task_id_param, "Live database is not SQLite. Skipping database file replacement.", level="warning")
+                    restore_ops_summary.append("DB file replacement skipped (not SQLite).")
+
+
+                # 2. Apply Map Configuration
+                local_map_cfg_path = downloaded_components.get("map_config")
+                if local_map_cfg_path and os.path.exists(local_map_cfg_path):
+                    update_task_log(task_id_param, "Applying map configuration...", level="info")
+                    try:
+                        with open(local_map_cfg_path, 'r', encoding='utf-8') as f:
+                            map_data = json.load(f)
+                        summary, status = _import_map_configuration_data(map_data)
+                        if status < 300:
+                            update_task_log(task_id_param, f"Map configuration applied: {summary.get('message', 'Success')}", level="success")
+                            restore_ops_summary.append(f"Map config: {summary.get('message', 'Success')}")
+                        else:
+                            overall_success = False
+                            update_task_log(task_id_param, f"Map configuration import failed: {summary.get('message', 'Unknown error')}", detail=json.dumps(summary.get('errors')), level="error")
+                            restore_ops_summary.append(f"Map config error: {summary.get('message', 'Unknown error')}")
+                        if os.path.exists(local_map_cfg_path): os.remove(local_map_cfg_path)
+                    except Exception as e_map_apply:
+                        overall_success = False
+                        update_task_log(task_id_param, f"Error applying map configuration: {str(e_map_apply)}", level="error")
+                        restore_ops_summary.append(f"Map config exception: {str(e_map_apply)}")
+                else:
+                    update_task_log(task_id_param, "Map configuration file not found in download. Skipping.", level="warning")
+                    restore_ops_summary.append("Map config skipped (not downloaded).")
+
+                # 3. Apply Resource Configuration
+                local_res_cfg_path = downloaded_components.get("resource_configs")
+                if local_res_cfg_path and os.path.exists(local_res_cfg_path):
+                    update_task_log(task_id_param, "Applying resource configurations...", level="info")
+                    try:
+                        with open(local_res_cfg_path, 'r', encoding='utf-8') as f:
+                            res_data = json.load(f)
+                        # _import_resource_configurations_data returns: updated_count, created_count, errors, warnings, status_code, message
+                        _, _, errors, warnings, status, msg = _import_resource_configurations_data(res_data)
+                        if status < 300 :
+                            update_task_log(task_id_param, f"Resource configurations applied: {msg}", level="success" if not errors and not warnings else "warning")
+                            restore_ops_summary.append(f"Resource configs: {msg}")
+                        else:
+                            overall_success = False
+                            update_task_log(task_id_param, f"Resource configurations import failed: {msg}", detail=json.dumps(errors), level="error")
+                            restore_ops_summary.append(f"Resource configs error: {msg}")
+                        if os.path.exists(local_res_cfg_path): os.remove(local_res_cfg_path)
+                    except Exception as e_res_apply:
+                        overall_success = False
+                        update_task_log(task_id_param, f"Error applying resource configurations: {str(e_res_apply)}", level="error")
+                        restore_ops_summary.append(f"Resource configs exception: {str(e_res_apply)}")
+                else:
+                    update_task_log(task_id_param, "Resource configurations file not found. Skipping.", level="warning")
+                    restore_ops_summary.append("Resource configs skipped (not downloaded).")
+
+                # 4. Apply User Configuration
+                local_user_cfg_path = downloaded_components.get("user_configs")
+                if local_user_cfg_path and os.path.exists(local_user_cfg_path):
+                    update_task_log(task_id_param, "Applying user configurations...", level="info")
+                    try:
+                        with open(local_user_cfg_path, 'r', encoding='utf-8') as f:
+                            user_data = json.load(f)
+                        result_dict = _import_user_configurations_data(user_data) # Returns a dict
+                        if result_dict.get('success'):
+                            update_task_log(task_id_param, f"User configurations applied: {result_dict.get('message', 'Success')}", level="success")
+                            restore_ops_summary.append(f"User configs: {result_dict.get('message', 'Success')}")
+                        else:
+                            overall_success = False
+                            update_task_log(task_id_param, f"User configurations import failed: {result_dict.get('message', 'Unknown error')}", detail=json.dumps(result_dict.get('errors')), level="error")
+                            restore_ops_summary.append(f"User configs error: {result_dict.get('message', 'Unknown error')}")
+                        if os.path.exists(local_user_cfg_path): os.remove(local_user_cfg_path)
+                    except Exception as e_user_apply:
+                        overall_success = False
+                        update_task_log(task_id_param, f"Error applying user configurations: {str(e_user_apply)}", level="error")
+                        restore_ops_summary.append(f"User configs exception: {str(e_user_apply)}")
+                else:
+                    update_task_log(task_id_param, "User configurations file not found. Skipping.", level="warning")
+                    restore_ops_summary.append("User configs skipped (not downloaded).")
+
+                # 5. Apply Scheduler Settings
+                local_sched_cfg_path = downloaded_components.get("scheduler_settings")
+                if local_sched_cfg_path and os.path.exists(local_sched_cfg_path):
+                    update_task_log(task_id_param, "Applying scheduler settings...", level="info")
+                    try:
+                        with open(local_sched_cfg_path, 'r', encoding='utf-8') as f:
+                            sched_data = json.load(f)
+                        summary, status = save_scheduler_settings_from_json_data(sched_data)
+                        if status < 300:
+                            update_task_log(task_id_param, f"Scheduler settings applied: {summary.get('message', 'Success')}", level="success")
+                            restore_ops_summary.append(f"Scheduler settings: {summary.get('message', 'Success')}")
+                            # Reschedule jobs after applying settings
+                            reschedule_unified_backup_jobs(current_app._get_current_object()) # Pass the app object
+                            update_task_log(task_id_param, "Unified backup jobs rescheduled based on new settings.", level="info")
+                        else:
+                            overall_success = False
+                            update_task_log(task_id_param, f"Scheduler settings import failed: {summary.get('message', 'Unknown error')}", detail=json.dumps(summary.get('errors')), level="error")
+                            restore_ops_summary.append(f"Scheduler settings error: {summary.get('message', 'Unknown error')}")
+                        if os.path.exists(local_sched_cfg_path): os.remove(local_sched_cfg_path)
+                    except Exception as e_sched_apply:
+                        overall_success = False
+                        update_task_log(task_id_param, f"Error applying scheduler settings: {str(e_sched_apply)}", level="error")
+                        restore_ops_summary.append(f"Scheduler settings exception: {str(e_sched_apply)}")
+                else:
+                    update_task_log(task_id_param, "Scheduler settings file not found. Skipping.", level="warning")
+                    restore_ops_summary.append("Scheduler settings skipped (not downloaded).")
+
+                # 6. Restore Media Files (Floor Maps and Resource Uploads)
+                # This relies on `restore_full_backup` providing `media_base_path_on_share` in `downloaded_components`
+                # And `azure_backup.restore_media_component` to handle the actual download from Azure to live locations.
+                media_base_path_on_share = downloaded_components.get("media_base_path_on_share")
+                if media_base_path_on_share:
+                    update_task_log(task_id_param, f"Starting media files restore from Azure base: {media_base_path_on_share}", level="info")
+                    media_sources_to_restore = [
+                        {"name": "Floor Maps", "azure_subdir": "floor_map_uploads", "local_target_dir": azure_backup.FLOOR_MAP_UPLOADS},
+                        {"name": "Resource Uploads", "azure_subdir": "resource_uploads", "local_target_dir": azure_backup.RESOURCE_UPLOADS}
+                    ]
+                    service_client = azure_backup._get_service_client() # Get service client again, or pass from above
+                    system_backup_share_name = os.environ.get('AZURE_SYSTEM_BACKUP_SHARE', 'system-backups')
+                    share_client = service_client.get_share_client(system_backup_share_name)
+
+                    for media_src in media_sources_to_restore:
+                        azure_full_media_subdir_path = f"{media_base_path_on_share}/{media_src['azure_subdir']}"
+                        update_task_log(task_id_param, f"Restoring {media_src['name']} from {azure_full_media_subdir_path} to {media_src['local_target_dir']}", level="info")
+
+                        # Clear local target directory before restoring media
+                        if os.path.exists(media_src['local_target_dir']):
+                            import shutil
+                            try:
+                                shutil.rmtree(media_src['local_target_dir'])
+                                os.makedirs(media_src['local_target_dir'], exist_ok=True) # Recreate after deleting
+                                update_task_log(task_id_param, f"Cleared local directory: {media_src['local_target_dir']}", level="info")
+                            except Exception as e_clear_media:
+                                update_task_log(task_id_param, f"Error clearing local media directory {media_src['local_target_dir']}: {str(e_clear_media)}", level="warning")
+                        else:
+                             os.makedirs(media_src['local_target_dir'], exist_ok=True)
+
+
+                        media_success, media_msg, media_err = azure_backup.restore_media_component(
+                            share_client=share_client,
+                            azure_component_path_on_share=azure_full_media_subdir_path,
+                            local_target_folder_base=media_src['local_target_dir'],
+                            media_component_name=media_src['name'],
+                            task_id=task_id_param,
+                            dry_run=False # Actual restore
+                        )
+                        if media_success:
+                            update_task_log(task_id_param, f"{media_src['name']} restored successfully: {media_msg}", level="success")
+                            restore_ops_summary.append(f"{media_src['name']}: {media_msg}")
+                        else:
+                            overall_success = False
+                            update_task_log(task_id_param, f"Failed to restore {media_src['name']}: {media_msg}", detail=media_err, level="error")
+                            restore_ops_summary.append(f"{media_src['name']} error: {media_msg}")
+                else:
+                    update_task_log(task_id_param, "Media base path not provided by download step. Skipping media files restore.", level="warning")
+                    restore_ops_summary.append("Media files skipped (base path missing).")
+
+
+                # Final task status
+                final_message = f"Full system restore for {backup_ts_param} "
+                if overall_success:
+                    final_message += "completed successfully."
+                    update_task_log(task_id_param, final_message, detail=json.dumps(restore_ops_summary), level="success")
+                else:
+                    final_message += "completed with errors."
+                    update_task_log(task_id_param, final_message, detail=json.dumps(restore_ops_summary), level="error")
+
+                mark_task_done(task_id_param, success=overall_success, result_message=final_message)
+                add_audit_log(action="ONE_CLICK_RESTORE_WORKER_COMPLETED", details=f"Task {task_id_param}: {final_message} Summary: {json.dumps(restore_ops_summary)}", user_id=user_id_audit, username=username_audit)
+                current_app.logger.info(f"Full restore task {task_id_param} worker finished. Success: {overall_success}")
+
+            except Exception as e:
+                current_app.logger.error(f"Exception in full restore worker for task {task_id_param}: {e}", exc_info=True)
+                mark_task_done(task_id_param, success=False, result_message=f"Restore failed: {str(e)}")
+                add_audit_log(action="ONE_CLICK_RESTORE_WORKER_EXCEPTION", details=f"Task {task_id_param}, Exception: {str(e)}", user_id=user_id_audit, username=username_audit)
             except Exception as e:
                 current_app.logger.error(f"Exception in full restore worker for task {task_id_param}: {e}", exc_info=True)
                 mark_task_done(task_id_param, success=False, result_message=f"Restore failed: {str(e)}")

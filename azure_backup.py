@@ -535,14 +535,26 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
         local_db_path = os.path.join(DATA_DIR, 'site.db')
         db_backup_filename = f"{DB_FILENAME_PREFIX}{timestamp_str}.db"
         remote_db_file_path = f"{remote_db_dir}/{db_backup_filename}"
+
+        # ADDED LOGGING HERE
+        _emit_progress(task_id, f"Preparing to backup database from local path: {local_db_path}", level='DEBUG')
         if not os.path.exists(local_db_path):
             _emit_progress(task_id, f"Local database file not found at '{local_db_path}'. Cannot proceed with DB backup.", level='ERROR')
             overall_success = False
-        elif upload_file(share_client, local_db_path, remote_db_file_path):
-            _emit_progress(task_id, "Database backup successful.", detail=f"Uploaded to: {remote_db_file_path}", level='SUCCESS')
-            backed_up_items.append({"type": "database", "filename": db_backup_filename, "path_in_backup": f"{COMPONENT_SUBDIR_DATABASE}/{db_backup_filename}"})
         else:
-            _emit_progress(task_id, "Database backup failed during upload.", detail=f"Target: {remote_db_file_path}", level='ERROR')
+            # ADDED LOGGING for file size/timestamp
+            try:
+                db_file_size = os.path.getsize(local_db_path)
+                db_file_mtime = datetime.fromtimestamp(os.path.getmtime(local_db_path), tz=timezone.utc).isoformat()
+                _emit_progress(task_id, f"Local database file details: Size={db_file_size} bytes, Modified={db_file_mtime}", level='INFO')
+            except Exception as e_stat:
+                _emit_progress(task_id, f"Could not get local DB file stats: {str(e_stat)}", level='WARNING')
+
+            if upload_file(share_client, local_db_path, remote_db_file_path):
+                _emit_progress(task_id, "Database backup successful.", detail=f"Uploaded to: {remote_db_file_path}", level='SUCCESS')
+                backed_up_items.append({"type": "database", "filename": db_backup_filename, "path_in_backup": f"{COMPONENT_SUBDIR_DATABASE}/{db_backup_filename}"})
+            else:
+                _emit_progress(task_id, "Database backup failed during upload.", detail=f"Target: {remote_db_file_path}", level='ERROR')
             overall_success = False
     except Exception as e_db:
         _emit_progress(task_id, f"Database backup component failed with an unexpected error: {str(e_db)}", level='ERROR')
