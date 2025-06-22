@@ -458,13 +458,126 @@ def list_available_backups():
         return []
 
 def restore_full_backup(backup_timestamp, task_id=None, dry_run=False):
-    logger.warning(f"Placeholder 'restore_full_backup' for {backup_timestamp}, dry_run={dry_run}, task_id: {task_id}.")
-    if dry_run:
-        _emit_progress(task_id, "DRY RUN: Starting...", detail=f'Timestamp: {backup_timestamp}')
-        _emit_progress(task_id, "DRY RUN: Completed.", detail=json.dumps({'actions': ["Simulated action 1"]}), level='SUCCESS')
-        return None, None, None, None, ["Simulated action 1"]
-    _emit_progress(task_id, "Restore Error: Not implemented.", detail='NOT_IMPLEMENTED', level='ERROR')
-    return None, None, None, None, []
+    """
+    Downloads all components of a specified full system backup set from Azure to a local temporary directory.
+    For dry_run, it simulates these actions and lists what would be downloaded.
+
+    Returns:
+        A dictionary mapping component identifiers (e.g., "database_dump", "map_config",
+        "resource_configs", "user_configs", "scheduler_settings", "media_base_path_on_share")
+        to their local downloaded paths or relevant Azure path info.
+        Returns None on critical failure (e.g., manifest not found/downloadable).
+    """
+    _emit_progress(task_id, f"Initiating full backup component download for timestamp: {backup_timestamp}. Dry run: {dry_run}", level='INFO')
+
+    local_temp_dir_for_restore = None
+    downloaded_component_details = {}
+    actions_performed_summary = []
+
+    try:
+        service_client = _get_service_client()
+        system_backup_share_name = os.environ.get('AZURE_SYSTEM_BACKUP_SHARE', 'system-backups')
+        share_client = service_client.get_share_client(system_backup_share_name)
+
+        if not _client_exists(share_client):
+            msg = f"Azure share '{system_backup_share_name}' not found. Cannot perform restore."
+            _emit_progress(task_id, msg, level='ERROR')
+            return None # Critical failure
+
+        backup_root_on_share = f"{FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_timestamp}"
+        manifest_filename = f"backup_manifest_{backup_timestamp}.json"
+        manifest_path_on_share = f"{backup_root_on_share}/{COMPONENT_SUBDIR_MANIFEST}/{manifest_filename}"
+
+        local_temp_dir_for_restore = tempfile.mkdtemp(prefix=f"restore_{backup_timestamp}_")
+        _emit_progress(task_id, f"Created temporary directory for downloads: {local_temp_dir_for_restore}", level='DEBUG')
+
+        local_manifest_path = os.path.join(local_temp_dir_for_restore, manifest_filename)
+
+        _emit_progress(task_id, f"Attempting to download manifest: {manifest_path_on_share}", level='INFO')
+        if not download_file(share_client, manifest_path_on_share, local_manifest_path):
+            msg = f"Failed to download manifest '{manifest_path_on_share}'. Restore aborted."
+            _emit_progress(task_id, msg, level='ERROR')
+            if os.path.exists(local_temp_dir_for_restore): shutil.rmtree(local_temp_dir_for_restore)
+            return None
+
+        actions_performed_summary.append(f"Manifest '{manifest_filename}' downloaded to '{local_manifest_path}'.")
+        _emit_progress(task_id, "Manifest downloaded. Parsing components.", level='INFO')
+
+        with open(local_manifest_path, 'r', encoding='utf-8') as f_manifest:
+            manifest_data = json.load(f_manifest)
+
+        # Download each component listed in the manifest (except media directory itself)
+        for component in manifest_data.get("components", []):
+            comp_type_from_manifest = component.get("type") # e.g., "database_dump", "config", "media"
+            comp_name_from_manifest = component.get("name") # e.g., "map_config", "media_files"
+            comp_path_in_backup_set = component.get("path_in_backup") # Relative path like "database/dump.sql" or "media"
+
+            if not comp_path_in_backup_set:
+                _emit_progress(task_id, f"Component '{comp_name_from_manifest}' in manifest missing 'path_in_backup'. Skipping.", level='WARNING')
+                actions_performed_summary.append(f"Skipped component '{comp_name_from_manifest}': missing path in manifest.")
+                continue
+
+            full_azure_path = f"{backup_root_on_share}/{comp_path_in_backup_set}"
+
+            if comp_type_from_manifest == "media":
+                # For the "media" component itself, we don't download a single file.
+                # We store its base path on Azure. Individual media files inside this path
+                # will be handled by restore_media_component later.
+                downloaded_component_details["media_base_path_on_share"] = full_azure_path
+                actions_performed_summary.append(f"Media base path on Azure identified: '{full_azure_path}'.")
+                _emit_progress(task_id, f"Media component '{comp_name_from_manifest}' identified. Base Azure path: {full_azure_path}. Individual files will be restored by a separate step.", level='INFO')
+                continue
+
+            # For file-based components (DB dump, configs)
+            local_filename = os.path.basename(comp_path_in_backup_set) # e.g., database_dump_....sql or map_config_....json
+            local_download_target_path = os.path.join(local_temp_dir_for_restore, local_filename)
+
+            if dry_run:
+                _emit_progress(task_id, f"DRY RUN: Would download '{comp_name_from_manifest}' from '{full_azure_path}' to '{local_download_target_path}'.", level='INFO')
+                actions_performed_summary.append(f"DRY RUN: Component '{comp_name_from_manifest}' download simulated from '{full_azure_path}'.")
+                # In dry_run, we still need to populate the dictionary with expected keys for subsequent dry_run steps.
+                # Use a placeholder for the path, or the intended path.
+                if comp_type_from_manifest == "database_dump":
+                    downloaded_component_details["database_dump"] = local_download_target_path # Store expected path
+                elif comp_type_from_manifest == "config":
+                    downloaded_component_details[comp_name_from_manifest] = local_download_target_path # e.g., downloaded_component_details["map_config"]
+            else:
+                _emit_progress(task_id, f"Downloading '{comp_name_from_manifest}' from '{full_azure_path}' to '{local_download_target_path}'.", level='INFO')
+                if download_file(share_client, full_azure_path, local_download_target_path):
+                    actions_performed_summary.append(f"Component '{comp_name_from_manifest}' downloaded to '{local_download_target_path}'.")
+                    _emit_progress(task_id, f"Successfully downloaded '{comp_name_from_manifest}'.", level='SUCCESS')
+                    if comp_type_from_manifest == "database_dump":
+                        downloaded_component_details["database_dump"] = local_download_target_path
+                    elif comp_type_from_manifest == "config":
+                         # Use the 'name' from manifest as the key (e.g., "map_config", "resource_configs")
+                        downloaded_component_details[comp_name_from_manifest] = local_download_target_path
+                else:
+                    msg = f"Failed to download component '{comp_name_from_manifest}' from '{full_azure_path}'. Restore may be incomplete."
+                    _emit_progress(task_id, msg, level='ERROR')
+                    actions_performed_summary.append(f"FAILED to download component '{comp_name_from_manifest}'.")
+                    # Depending on criticality, we might choose to return None here or allow partial downloads.
+                    # For now, let's mark as partial and continue, caller can decide.
+                    # If DB dump fails, it's critical.
+                    if comp_type_from_manifest == "database_dump":
+                         _emit_progress(task_id, "Critical failure: Database dump could not be downloaded.", level='CRITICAL')
+                         if os.path.exists(local_temp_dir_for_restore): shutil.rmtree(local_temp_dir_for_restore)
+                         return None # Abort if DB dump download fails
+
+        # Add the path to the temporary directory itself, so caller can clean up if needed
+        downloaded_component_details["local_temp_dir"] = local_temp_dir_for_restore
+        downloaded_component_details["actions_summary"] = actions_performed_summary # Include summary of download actions
+
+        _emit_progress(task_id, "All specified components downloaded (or simulated).", level='INFO')
+        return downloaded_component_details
+
+    except Exception as e:
+        _emit_progress(task_id, f"Error during restore_full_backup process: {str(e)}", detail=traceback.format_exc(), level='CRITICAL')
+        if local_temp_dir_for_restore and os.path.exists(local_temp_dir_for_restore):
+            try:
+                shutil.rmtree(local_temp_dir_for_restore)
+            except Exception as e_cleanup:
+                _emit_progress(task_id, f"Error cleaning up temp directory {local_temp_dir_for_restore} after failure: {str(e_cleanup)}", level='ERROR')
+        return None # Indicate critical failure
 
 def create_full_backup(timestamp_str, map_config_data=None, resource_configs_data=None, user_configs_data=None, task_id=None):
     _emit_progress(task_id, f"AzureBackup: Received map_config_data type: {type(map_config_data)}", level='DEBUG')
@@ -608,40 +721,95 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             _emit_progress(task_id, f"Configuration files backup component FAILED with an unexpected error: {str(e_cfg)}. Setting overall_success to False.", level='ERROR')
             overall_success = False
 
-    print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Entered create_full_backup function.", flush=True) # DEBUG PRINT
+    import subprocess # For calling sqlite3 CLI
+
+    print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Entered create_full_backup function.", flush=True)
 
     # Main try-except block for the entire backup creation process
     try:
-        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Entered main try block.", flush=True) # DEBUG PRINT
-        # DB Backup
-        _emit_progress(task_id, "Attempting DB Backup Component.", level='INFO')
-        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Attempting DB Backup Component.", flush=True) # DEBUG PRINT
-        remote_db_dir = f"{current_backup_root_path_on_share}/{COMPONENT_SUBDIR_DATABASE}"
-        _ensure_directory_exists(share_client, remote_db_dir)
-        local_db_path = os.path.join(DATA_DIR, 'site.db')
-        db_backup_filename = f"{DB_FILENAME_PREFIX}{timestamp_str}.db"
-        remote_db_file_path = f"{remote_db_dir}/{db_backup_filename}"
-        _emit_progress(task_id, f"Preparing to backup database from local path: {local_db_path}", level='DEBUG')
-        if not os.path.exists(local_db_path):
-            _emit_progress(task_id, f"Local database file not found at '{local_db_path}'. Critical DB backup failure.", level='ERROR')
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Entered main try block.", flush=True)
+
+        # Logical DB Dump
+        _emit_progress(task_id, "Attempting LOGICAL DB Backup Component.", level='INFO')
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Attempting LOGICAL DB Backup Component.", flush=True)
+
+        remote_db_component_dir = f"{current_backup_root_path_on_share}/{COMPONENT_SUBDIR_DATABASE}"
+        _ensure_directory_exists(share_client, remote_db_component_dir)
+
+        local_actual_db_path = os.path.join(DATA_DIR, 'site.db')
+        db_dump_filename = f"database_dump_{timestamp_str}.sql" # Changed extension
+        local_temp_dump_path = os.path.join(DATA_DIR, db_dump_filename) # Temp path for dump
+        remote_db_dump_upload_path = f"{remote_db_component_dir}/{db_dump_filename}" # Path on Azure
+
+        if not os.path.exists(local_actual_db_path):
+            _emit_progress(task_id, f"Local database file not found at '{local_actual_db_path}'. Critical DB backup failure.", level='ERROR')
+            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Local DB not found at {local_actual_db_path}. Returning False.", flush=True)
+            return False
+
+        _emit_progress(task_id, f"Starting logical dump of database {local_actual_db_path} to {local_temp_dump_path}", level='INFO')
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Starting logical dump of {local_actual_db_path} to {local_temp_dump_path}", flush=True)
+
+        dump_success = False
+        try:
+            # Attempt WAL checkpoint before dump for good measure, though .dump should read committed state.
+            _emit_progress(task_id, f"Attempting WAL checkpoint for {local_actual_db_path} before dump.", level='INFO')
+            conn_cp = sqlite3.connect(local_actual_db_path)
+            conn_cp.execute("PRAGMA journal_mode=WAL;")
+            conn_cp.execute("PRAGMA busy_timeout = 5000;")
+            cp_result = conn_cp.execute("PRAGMA wal_checkpoint(TRUNCATE);").fetchone()
+            _emit_progress(task_id, f"Pre-dump WAL Checkpoint result: {cp_result}", level='INFO')
+            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Pre-dump WAL Checkpoint result: {cp_result}", flush=True)
+            conn_cp.close()
+            _emit_progress(task_id, "Pre-dump WAL checkpoint attempt finished.", level='INFO')
+
+            with open(local_temp_dump_path, 'w', encoding='utf-8') as f_dump:
+                process = subprocess.run(
+                    ['sqlite3', local_actual_db_path, '.dump'],
+                    stdout=f_dump, text=True, check=True, encoding='utf-8', timeout=120 # Increased timeout
+                )
+            dump_success = True
+            _emit_progress(task_id, f"Logical database dump created successfully at {local_temp_dump_path}", level='INFO')
+            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Logical dump created at {local_temp_dump_path}", flush=True)
+        except subprocess.CalledProcessError as e_subproc:
+            stderr_output = e_subproc.stderr.strip() if e_subproc.stderr else "No stderr output"
+            _emit_progress(task_id, f"sqlite3 .dump command FAILED: {str(e_subproc)}. stderr: {stderr_output}", level='ERROR')
+            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: sqlite3 .dump failed: {str(e_subproc)}. Stderr: {stderr_output}", flush=True)
+        except FileNotFoundError as e_fnf:
+            _emit_progress(task_id, f"sqlite3 command not found. Ensure it's in the system PATH. Error: {str(e_fnf)}", level='ERROR')
+            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: sqlite3 command not found: {str(e_fnf)}", flush=True)
+        except subprocess.TimeoutExpired:
+            _emit_progress(task_id, "sqlite3 .dump command timed out after 120 seconds.", level='ERROR')
+            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: sqlite3 .dump command timed out.", flush=True)
+        except Exception as e_dump_exec:
+            _emit_progress(task_id, f"Logical database dump execution FAILED with an unexpected error: {str(e_dump_exec)}", level='ERROR')
+            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Logical DB dump execution unexpected error: {str(e_dump_exec)}", flush=True)
+
+        if not dump_success:
+            if os.path.exists(local_temp_dump_path): os.remove(local_temp_dump_path)
             return False
 
         try:
-            db_file_size = os.path.getsize(local_db_path)
-            db_file_mtime = datetime.fromtimestamp(os.path.getmtime(local_db_path), tz=timezone.utc).isoformat()
-            _emit_progress(task_id, f"Local database file details: Size={db_file_size} bytes, Modified={db_file_mtime}", level='INFO')
+            dump_file_size = os.path.getsize(local_temp_dump_path)
+            _emit_progress(task_id, f"Local DB dump file size: {dump_file_size} bytes", level='INFO')
         except Exception as e_stat:
-            _emit_progress(task_id, f"Could not get local DB file stats: {str(e_stat)}", level='WARNING')
+            _emit_progress(task_id, f"Could not get local DB dump file stats: {str(e_stat)}", level='WARNING')
 
-        if not upload_file(share_client, local_db_path, remote_db_file_path):
-            _emit_progress(task_id, "Database backup FAILED during upload. Critical DB backup failure.", detail=f"Target: {remote_db_file_path}", level='ERROR')
+        if not upload_file(share_client, local_temp_dump_path, remote_db_dump_upload_path):
+            _emit_progress(task_id, "Database dump upload FAILED. Critical DB backup failure.", detail=f"Target: {remote_db_dump_upload_path}", level='ERROR')
+            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: DB dump upload failed. Returning False.", flush=True)
+            if os.path.exists(local_temp_dump_path): os.remove(local_temp_dump_path)
             return False
-        _emit_progress(task_id, "Database backup successful.", detail=f"Uploaded to: {remote_db_file_path}", level='SUCCESS')
-        backed_up_items.append({"type": "database", "filename": db_backup_filename, "path_in_backup": f"{COMPONENT_SUBDIR_DATABASE}/{db_backup_filename}"})
-        _emit_progress(task_id, "DB Backup Component finished successfully.", level='DEBUG')
+
+        _emit_progress(task_id, "Database dump uploaded successfully.", detail=f"Uploaded to: {remote_db_dump_upload_path}", level='SUCCESS')
+        backed_up_items.append({"type": "database_dump", "filename": db_dump_filename, "path_in_backup": f"{COMPONENT_SUBDIR_DATABASE}/{db_dump_filename}"})
+
+        if os.path.exists(local_temp_dump_path): os.remove(local_temp_dump_path)
+        _emit_progress(task_id, "DB Dump Backup Component finished successfully.", level='DEBUG')
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: DB Dump Backup Component finished successfully.", flush=True)
 
         # Config Files Backup
         _emit_progress(task_id, "Attempting Config Files Backup Component.", level='INFO')
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Attempting Config Files Backup Component.", flush=True)
         remote_config_dir = f"{current_backup_root_path_on_share}/{COMPONENT_SUBDIR_CONFIGURATIONS}"
         _ensure_directory_exists(share_client, remote_config_dir)
         configs_to_backup = [
@@ -666,7 +834,7 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
                     return False
                 backed_up_items.append({"type": "config", "name": name, "filename": config_filename, "path_in_backup": f"{COMPONENT_SUBDIR_CONFIGURATIONS}/{config_filename}"})
                 _emit_progress(task_id, f"Config '{name}' backup successful.", level='SUCCESS')
-            finally: # Ensure temp file for this config is removed
+            finally:
                 if tmp_json_path and os.path.exists(tmp_json_path): os.remove(tmp_json_path)
 
         scheduler_settings_local_path = os.path.join(DATA_DIR, 'scheduler_settings.json')
@@ -681,9 +849,11 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
         else:
             _emit_progress(task_id, "scheduler_settings.json not found locally, skipping.", level='WARNING')
         _emit_progress(task_id, "Config Files Backup Component finished successfully.", level='DEBUG')
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Config Files Backup Component finished successfully.", flush=True)
 
         # Media Backup
         _emit_progress(task_id, "Attempting Media Backup Component.", level='INFO')
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Attempting Media Backup Component.", flush=True)
         azure_media_base_for_this_backup = f"{current_backup_root_path_on_share}/{COMPONENT_SUBDIR_MEDIA}"
         _ensure_directory_exists(share_client, azure_media_base_for_this_backup)
         media_sources = [
@@ -693,7 +863,6 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
         any_media_source_had_files = False
         all_individual_media_uploads_succeeded = True
         for src in media_sources:
-            # ... (media processing as in previous correct version, ensuring returns on failure)
             if not os.path.isdir(src["path"]):
                 _emit_progress(task_id, f"Local path for {src['name']} ('{src['path']}') not dir. Skipping.", level='WARNING')
                 continue
@@ -714,18 +883,20 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             if not all_individual_media_uploads_succeeded: break
         if not all_individual_media_uploads_succeeded:
              _emit_progress(task_id, "Media backup FAILED due to file upload errors.", level='ERROR'); return False
-        if any_media_source_had_files:
+        if any_media_source_had_files: # This condition ensures we only add to manifest if media was processed
             backed_up_items.append({"type": "media", "name": "media_files", "path_in_backup": COMPONENT_SUBDIR_MEDIA})
-            _emit_progress(task_id, "Media backup component successful.", level='SUCCESS')
-        else:
-             _emit_progress(task_id, "Media backup: No media files found.", level='INFO')
+            _emit_progress(task_id, "Media backup component successful (or no files to backup).", level='SUCCESS')
+        else: # No media files were found in any source directory
+             _emit_progress(task_id, "Media backup: No media files found in any source.", level='INFO')
         _emit_progress(task_id, "Media Backup Component finished.", level='DEBUG')
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Media Backup Component finished.", flush=True)
 
         # Manifest Backup
         _emit_progress(task_id, "Attempting Manifest Backup Component.", level='INFO')
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Attempting Manifest Backup Component.", flush=True)
         remote_manifest_dir = f"{current_backup_root_path_on_share}/{COMPONENT_SUBDIR_MANIFEST}"
         _ensure_directory_exists(share_client, remote_manifest_dir)
-        manifest_data = {"backup_timestamp": timestamp_str, "backup_version": "1.1_unified_structure", "components": backed_up_items}
+        manifest_data = {"backup_timestamp": timestamp_str, "backup_version": "1.2_sqldump", "components": backed_up_items} # Updated version
         tmp_manifest_path = None
         try:
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', dir=DATA_DIR, encoding='utf-8') as tmp_mf:
@@ -741,8 +912,10 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
         finally:
             if tmp_manifest_path and os.path.exists(tmp_manifest_path): os.remove(tmp_manifest_path)
         _emit_progress(task_id, "Manifest Backup Component finished successfully.", level='DEBUG')
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Manifest Backup Component finished successfully.", flush=True)
 
         _emit_progress(task_id, "All backup components processed. create_full_backup returning True.", level='SUCCESS')
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: create_full_backup returning True.", flush=True)
         return True
 
     except Exception as e_main_backup_process:
@@ -1367,51 +1540,80 @@ def perform_startup_restore_sequence(app_for_context):
         # Proceed with applying the downloaded components
         with app_for_context.app_context():
             app_logger.info("Entering app_context for applying restored components.")
-            if "database" in downloaded_component_paths:
-                local_db_path = downloaded_component_paths["database"]
+
+            # 1. Apply Database from SQL Dump
+            db_dump_component_key = "database_dump" # Key used by restore_full_backup
+            if db_dump_component_key in downloaded_component_paths:
+                local_db_dump_path = downloaded_component_paths[db_dump_component_key]
                 live_db_uri = app_for_context.config.get('SQLALCHEMY_DATABASE_URI', '')
+
+                if not (local_db_dump_path and os.path.exists(local_db_dump_path)):
+                    msg = f"Local database dump file '{local_db_dump_path}' not found or path is invalid. Cannot restore database."
+                    app_logger.error(msg)
+                    restore_status["message"] = msg
+                    raise Exception(msg) # Critical failure
+
                 if live_db_uri.startswith('sqlite:///'):
                     live_db_path = live_db_uri.replace('sqlite:///', '', 1)
                     live_db_dir = os.path.dirname(live_db_path)
                     if not os.path.exists(live_db_dir): os.makedirs(live_db_dir, exist_ok=True)
-                    try:
-                        app_logger.info(f"Attempting to replace live database at '{live_db_path}' with downloaded backup '{local_db_path}'.")
-                        shutil.copyfile(local_db_path, live_db_path)
-                        app_logger.info("Database file successfully replaced by restored version.")
 
-                        # Run database migrations immediately after restoring the DB file
-                        try:
-                            app_logger.info("Attempting to apply database migrations programmatically on restored database...")
-                            flask_db_upgrade() # This uses the current app context
-                            app_logger.info("Database migrations applied successfully (or were already up-to-date).")
-
-                            # Now that migrations have run, attempt to log the audit event
+                    app_logger.info(f"Preparing to restore database from SQL dump: {local_db_dump_path} to {live_db_path}")
+                    # Remove existing DB files for a clean restore
+                    for ext in ['', '-wal', '-shm']:
+                        db_file_to_remove = live_db_path + ext
+                        if os.path.exists(db_file_to_remove):
                             try:
-                                add_audit_log("System Restore", f"Database file replaced and migrations applied from startup sequence using backup {latest_backup_timestamp}.")
-                                app_logger.info("Audit log entry for database restore and migration added successfully.")
-                            except Exception as e_audit:
-                                app_logger.warning(f"Could not write audit log for system restore (db file replaced & migrated): {e_audit}", exc_info=True)
+                                os.remove(db_file_to_remove)
+                                app_logger.info(f"Removed existing DB file: {db_file_to_remove}")
+                            except OSError as e_remove:
+                                msg = f"Failed to remove existing DB file {db_file_to_remove}: {str(e_remove)}. Restore cannot proceed safely."
+                                app_logger.error(msg)
+                                restore_status["message"] = msg
+                                raise Exception(msg) # Critical
 
-                        except Exception as e_migrate:
-                            msg = f"CRITICAL: Error applying database migrations after DB restore: {e_migrate}. The database may be in an inconsistent state."
-                            app_logger.error(msg, exc_info=True)
-                            restore_status["message"] = msg
-                            restore_status["status"] = "failure"
-                            # Raising an exception here will stop further processing in perform_startup_restore_sequence
-                            # and the error will be caught by the main try-except block in that function.
-                            raise Exception(msg)
+                    try:
+                        app_logger.info(f"Executing SQL dump into {live_db_path}...")
+                        with open(local_db_dump_path, 'r', encoding='utf-8') as f_dump_script:
+                            sql_script_content = f_dump_script.read()
 
-                    except Exception as e_db_restore:
-                        msg = f"Error replacing live database with restored version (before migrations): {e_db_restore}"
+                        conn = sqlite3.connect(live_db_path)
+                        conn.executescript(sql_script_content)
+                        conn.commit()
+                        conn.close()
+                        app_logger.info("Database successfully restored from SQL dump.")
+
+                        # Apply migrations
+                        app_logger.info("Attempting to apply database migrations on restored database...")
+                        flask_db_upgrade()
+                        app_logger.info("Database migrations applied successfully.")
+                        try:
+                            add_audit_log("System Restore", f"Database restored from SQL dump and migrations applied from startup using backup {latest_backup_timestamp}.")
+                        except Exception as e_audit:
+                             app_logger.warning(f"Could not write audit log for DB restore & migration: {e_audit}", exc_info=True)
+
+                    except sqlite3.Error as e_sql_exec:
+                        msg = f"Error executing SQL dump during startup restore: {str(e_sql_exec)}"
                         app_logger.error(msg, exc_info=True)
                         restore_status["message"] = msg
-                        raise Exception(msg)
+                        raise Exception(msg) # Critical
+                    except Exception as e_db_restore_logic:
+                        msg = f"Unexpected error during database restore logic (SQL dump/migration) at startup: {str(e_db_restore_logic)}"
+                        app_logger.error(msg, exc_info=True)
+                        restore_status["message"] = msg
+                        raise Exception(msg) # Critical
                 else:
-                    app_logger.warning(f"Database URI '{live_db_uri}' is not SQLite. Skipping database file replacement and migrations.")
+                    app_logger.warning(f"Database URI '{live_db_uri}' is not SQLite. SQL dump restore skipped.")
             else:
-                app_logger.warning("Database component not found in downloaded files. Skipping database restore and migrations.")
+                # This condition means the manifest did not list a "database_dump" or the download failed earlier.
+                # restore_full_backup should have returned None if DB dump download failed.
+                # If it's just not in downloaded_component_paths, it means it wasn't in the manifest for some reason.
+                app_logger.warning("Database dump component ('database_dump') not found in downloaded files or manifest. Skipping database restore and migrations.")
+
 
             config_types_map = {
+                # Ensure these keys match what restore_full_backup stores in downloaded_component_paths
+                # which should be the 'name' from the manifest for config types.
                 "map_config": (_import_map_configuration_data, "Map Configuration"),
                 "resource_configs": (_import_resource_configurations_data, "Resource Configurations"),
                 "user_configs": (_import_user_configurations_data, "User Configurations")}
