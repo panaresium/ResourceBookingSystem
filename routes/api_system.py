@@ -624,74 +624,112 @@ def api_one_click_restore():
 
                 # This should be the actual call:
                 downloaded_components = restore_full_backup(backup_timestamp=backup_ts_param, task_id=task_id_param, dry_run=False)
-                # Expected structure of downloaded_components:
-                # {
-                #     "database": "/path/to/downloaded/site.db",
-                #     "map_config": "/path/to/downloaded/map_config.json",
-                #     "resource_configs": "/path/to/downloaded/resource_configs.json",
-                #     "user_configs": "/path/to/downloaded/user_configs.json",
-                #     "scheduler_settings": "/path/to/downloaded/scheduler_settings.json",
-                #     "media_base_path_on_share": "full_system_backups/backup_YYYYMMDD_HHMMSS/media" # Path on Azure
-                # }
-                # And a list of actions/logs from the download process.
 
-                if not downloaded_components or not downloaded_components.get("database"):
-                    error_detail = f"Core component download (especially database) failed for backup {backup_ts_param}."
+                local_temp_restore_dir = None
+                if downloaded_components: # Check if downloads were successful at all
+                    local_temp_restore_dir = downloaded_components.get("local_temp_dir")
+                    update_task_log(task_id_param, f"APISYS: Downloaded components info: {json.dumps({k:v for k,v in downloaded_components.items() if k != 'actions_summary'})}", level='DEBUG')
+                    download_actions = downloaded_components.get("actions_summary", [])
+                    for action_log in download_actions: # Log actions from download phase
+                        update_task_log(task_id_param, action_log, level='INFO')
+
+
+                if not downloaded_components or not downloaded_components.get("database_dump"): # Check for database_dump
+                    error_detail = f"Core component download (especially database dump) failed for backup {backup_ts_param} or component not found in manifest."
                     update_task_log(task_id_param, error_detail, level="error")
                     mark_task_done(task_id_param, success=False, result_message=error_detail)
                     add_audit_log(action="ONE_CLICK_RESTORE_DOWNLOAD_FAILED", details=f"Task {task_id_param}: {error_detail}", user_id=user_id_audit, username=username_audit)
+                    if local_temp_restore_dir and os.path.exists(local_temp_restore_dir): import shutil; shutil.rmtree(local_temp_restore_dir)
                     return
 
-                update_task_log(task_id_param, "Components downloaded. Proceeding with application.", level="info")
+                update_task_log(task_id_param, "Components downloaded. Proceeding with application of restored data.", level="info")
                 overall_success = True
                 restore_ops_summary = []
 
-                # 1. Apply Database (replace file)
-                local_db_dl_path = downloaded_components.get("database")
+                # 1. Apply Database from SQL Dump
+                local_db_dump_path = downloaded_components.get("database_dump")
                 live_db_uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
+
+                if not (local_db_dump_path and os.path.exists(local_db_dump_path)):
+                    error_detail = "Local database dump path not found or file does not exist. Cannot restore database."
+                    update_task_log(task_id_param, error_detail, level="critical")
+                    mark_task_done(task_id_param, success=False, result_message=error_detail)
+                    add_audit_log(action="ONE_CLICK_RESTORE_DB_DUMP_MISSING", details=f"Task {task_id_param}: {error_detail}", user_id=user_id_audit, username=username_audit)
+                    if local_temp_restore_dir and os.path.exists(local_temp_restore_dir): import shutil; shutil.rmtree(local_temp_restore_dir)
+                    return
+
                 if live_db_uri.startswith('sqlite:///'):
                     live_db_path = live_db_uri.replace('sqlite:///', '', 1)
-                    try:
-                        update_task_log(task_id_param, f"Replacing live database at '{live_db_path}' with '{local_db_dl_path}'.", level="info")
-                        # Ensure parent directory of live_db_path exists
-                        live_db_dir = os.path.dirname(live_db_path)
-                        if not os.path.exists(live_db_dir): os.makedirs(live_db_dir, exist_ok=True)
+                    live_db_dir = os.path.dirname(live_db_path)
+                    if not os.path.exists(live_db_dir): os.makedirs(live_db_dir, exist_ok=True)
 
-                        import shutil
-                        shutil.copyfile(local_db_dl_path, live_db_path)
-                        update_task_log(task_id_param, "Database file replaced successfully.", level="success")
-                        restore_ops_summary.append("Database file replaced.")
+                    update_task_log(task_id_param, f"Preparing to restore database from SQL dump: {local_db_dump_path} to {live_db_path}", level="info")
+
+                    # Ensure old DB files are removed for a clean restore from dump
+                    for ext in ['', '-wal', '-shm']:
+                        db_file_to_remove = live_db_path + ext
+                        if os.path.exists(db_file_to_remove):
+                            try:
+                                os.remove(db_file_to_remove)
+                                update_task_log(task_id_param, f"Removed existing DB file: {db_file_to_remove}", level="info")
+                            except OSError as e_remove:
+                                error_detail = f"Failed to remove existing DB file {db_file_to_remove}: {str(e_remove)}. Restore cannot proceed safely."
+                                update_task_log(task_id_param, error_detail, level="critical")
+                                mark_task_done(task_id_param, success=False, result_message=error_detail)
+                                if local_temp_restore_dir and os.path.exists(local_temp_restore_dir): import shutil; shutil.rmtree(local_temp_restore_dir)
+                                return
+
+                    import subprocess
+                    try:
+                        update_task_log(task_id_param, f"Executing SQL dump into {live_db_path}...", level="info")
+                        with open(local_db_dump_path, 'r', encoding='utf-8') as f_dump_script:
+                            sql_script_content = f_dump_script.read()
+
+                        # Connect to the (now empty or non-existent) database file and execute script
+                        # Using Python's sqlite3 module is safer than CLI for script execution
+                        import sqlite3
+                        conn = sqlite3.connect(live_db_path)
+                        conn.executescript(sql_script_content)
+                        conn.commit()
+                        conn.close()
+
+                        update_task_log(task_id_param, "Database successfully restored from SQL dump.", level="success")
+                        restore_ops_summary.append("Database restored from SQL dump.")
 
                         # Apply migrations
                         update_task_log(task_id_param, "Attempting to apply database migrations...", level="info")
-                        from flask_migrate import upgrade as flask_db_upgrade
+                        from flask_migrate import upgrade as flask_db_upgrade # Ensure import
                         try:
-                            flask_db_upgrade() # Uses current app context
+                            flask_db_upgrade()
                             update_task_log(task_id_param, "Database migrations applied successfully.", level="success")
                             restore_ops_summary.append("Database migrations applied.")
                         except Exception as e_migrate:
-                            overall_success = False
+                            overall_success = False # Mark as overall failure but continue with other components if possible
                             err_mig = f"Error applying database migrations: {str(e_migrate)}"
                             update_task_log(task_id_param, err_mig, level="error")
                             restore_ops_summary.append(f"DB migration error: {str(e_migrate)}")
-                            # This is a critical failure.
-                            mark_task_done(task_id_param, success=False, result_message=f"Restore failed during DB migration: {err_mig}")
-                            add_audit_log(action="ONE_CLICK_RESTORE_MIGRATION_ERROR", details=f"Task {task_id_param}: {err_mig}", user_id=user_id_audit, username=username_audit)
-                            return # Stop further processing
+                            # Do not return immediately, allow other components to restore if possible
+                            # The overall_success flag will ensure the final status is correct.
 
-                    except Exception as e_db_apply:
+                    except sqlite3.Error as e_sql_exec:
                         overall_success = False
-                        err_db = f"Error applying database file: {str(e_db)}"
-                        update_task_log(task_id_param, err_db, level="error")
-                        restore_ops_summary.append(f"DB apply error: {str(e_db)}")
-                        # This is a critical failure.
-                        mark_task_done(task_id_param, success=False, result_message=f"Restore failed during DB application: {err_db}")
-                        add_audit_log(action="ONE_CLICK_RESTORE_DB_APPLY_ERROR", details=f"Task {task_id_param}: {err_db}", user_id=user_id_audit, username=username_audit)
-                        return # Stop further processing
+                        err_db = f"Error executing SQL dump: {str(e_sql_exec)}"
+                        update_task_log(task_id_param, err_db, level="critical")
+                        restore_ops_summary.append(f"DB SQL execution error: {str(e_sql_exec)}")
+                        mark_task_done(task_id_param, success=False, result_message=f"Restore failed during SQL dump execution: {err_db}")
+                        if local_temp_restore_dir and os.path.exists(local_temp_restore_dir): import shutil; shutil.rmtree(local_temp_restore_dir)
+                        return # Critical failure
+                    except Exception as e_db_restore_logic:
+                        overall_success = False
+                        err_db = f"Unexpected error during database restore logic: {str(e_db_restore_logic)}"
+                        update_task_log(task_id_param, err_db, level="critical")
+                        restore_ops_summary.append(f"DB restore logic error: {str(e_db_restore_logic)}")
+                        mark_task_done(task_id_param, success=False, result_message=f"Restore failed: {err_db}")
+                        if local_temp_restore_dir and os.path.exists(local_temp_restore_dir): import shutil; shutil.rmtree(local_temp_restore_dir)
+                        return # Critical failure
                 else:
-                    update_task_log(task_id_param, "Live database is not SQLite. Skipping database file replacement.", level="warning")
-                    restore_ops_summary.append("DB file replacement skipped (not SQLite).")
-
+                    update_task_log(task_id_param, "Live database is not SQLite. SQL dump restore skipped.", level="warning")
+                    restore_ops_summary.append("DB SQL dump restore skipped (not SQLite).")
 
                 # 2. Apply Map Configuration
                 local_map_cfg_path = downloaded_components.get("map_config")
