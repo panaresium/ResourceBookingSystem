@@ -722,6 +722,7 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             overall_success = False
 
     import subprocess # For calling sqlite3 CLI
+    import sys # For sys.platform
 
     print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Entered create_full_backup function.", flush=True)
 
@@ -737,9 +738,9 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
         _ensure_directory_exists(share_client, remote_db_component_dir)
 
         local_actual_db_path = os.path.join(DATA_DIR, 'site.db')
-        db_dump_filename = f"database_dump_{timestamp_str}.sql" # Changed extension
-        local_temp_dump_path = os.path.join(DATA_DIR, db_dump_filename) # Temp path for dump
-        remote_db_dump_upload_path = f"{remote_db_component_dir}/{db_dump_filename}" # Path on Azure
+        db_dump_filename = f"database_dump_{timestamp_str}.sql"
+        local_temp_dump_path = os.path.join(DATA_DIR, db_dump_filename)
+        remote_db_dump_upload_path = f"{remote_db_component_dir}/{db_dump_filename}"
 
         if not os.path.exists(local_actual_db_path):
             _emit_progress(task_id, f"Local database file not found at '{local_actual_db_path}'. Critical DB backup failure.", level='ERROR')
@@ -749,9 +750,23 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
         _emit_progress(task_id, f"Starting logical dump of database {local_actual_db_path} to {local_temp_dump_path}", level='INFO')
         print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Starting logical dump of {local_actual_db_path} to {local_temp_dump_path}", flush=True)
 
+        # Determine sqlite3 command
+        sqlite_exe_name = "sqlite3.exe" if sys.platform == "win32" else "sqlite3"
+        # Assume azure_backup.py is at the project root, so tools is ./tools
+        local_sqlite_path = os.path.join(BASE_DIR, "tools", sqlite_exe_name)
+
+        sqlite_cmd_to_use = None
+        if os.path.exists(local_sqlite_path) and os.access(local_sqlite_path, os.X_OK):
+            sqlite_cmd_to_use = local_sqlite_path
+            _emit_progress(task_id, f"Using local sqlite3: {local_sqlite_path}", level='INFO')
+            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Using local sqlite3: {local_sqlite_path}", flush=True)
+        else:
+            sqlite_cmd_to_use = "sqlite3" # Rely on PATH
+            _emit_progress(task_id, f"Local sqlite3 not found or not executable at {local_sqlite_path}. Falling back to PATH for 'sqlite3'.", level='INFO')
+            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Local sqlite3 not found/executable at {local_sqlite_path}. Using PATH 'sqlite3'.", flush=True)
+
         dump_success = False
         try:
-            # Attempt WAL checkpoint before dump for good measure, though .dump should read committed state.
             _emit_progress(task_id, f"Attempting WAL checkpoint for {local_actual_db_path} before dump.", level='INFO')
             conn_cp = sqlite3.connect(local_actual_db_path)
             conn_cp.execute("PRAGMA journal_mode=WAL;")
@@ -764,25 +779,25 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
 
             with open(local_temp_dump_path, 'w', encoding='utf-8') as f_dump:
                 process = subprocess.run(
-                    ['sqlite3', local_actual_db_path, '.dump'],
-                    stdout=f_dump, text=True, check=True, encoding='utf-8', timeout=120 # Increased timeout
+                    [sqlite_cmd_to_use, local_actual_db_path, '.dump'],
+                    stdout=f_dump, text=True, check=True, encoding='utf-8', timeout=120
                 )
             dump_success = True
             _emit_progress(task_id, f"Logical database dump created successfully at {local_temp_dump_path}", level='INFO')
             print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Logical dump created at {local_temp_dump_path}", flush=True)
         except subprocess.CalledProcessError as e_subproc:
             stderr_output = e_subproc.stderr.strip() if e_subproc.stderr else "No stderr output"
-            _emit_progress(task_id, f"sqlite3 .dump command FAILED: {str(e_subproc)}. stderr: {stderr_output}", level='ERROR')
-            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: sqlite3 .dump failed: {str(e_subproc)}. Stderr: {stderr_output}", flush=True)
+            _emit_progress(task_id, f"'{sqlite_cmd_to_use}' .dump command FAILED: {str(e_subproc)}. stderr: {stderr_output}", level='ERROR')
+            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: '{sqlite_cmd_to_use}' .dump failed: {str(e_subproc)}. Stderr: {stderr_output}", flush=True)
         except FileNotFoundError as e_fnf:
-            _emit_progress(task_id, f"sqlite3 command not found. Ensure it's in the system PATH. Error: {str(e_fnf)}", level='ERROR')
-            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: sqlite3 command not found: {str(e_fnf)}", flush=True)
+            _emit_progress(task_id, f"'{sqlite_cmd_to_use}' command not found. Ensure it's in local './tools/' or system PATH. Error: {str(e_fnf)}", level='ERROR')
+            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: '{sqlite_cmd_to_use}' command not found: {str(e_fnf)}", flush=True)
         except subprocess.TimeoutExpired:
-            _emit_progress(task_id, "sqlite3 .dump command timed out after 120 seconds.", level='ERROR')
-            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: sqlite3 .dump command timed out.", flush=True)
+            _emit_progress(task_id, f"'{sqlite_cmd_to_use}' .dump command timed out after 120 seconds.", level='ERROR')
+            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: '{sqlite_cmd_to_use}' .dump command timed out.", flush=True)
         except Exception as e_dump_exec:
-            _emit_progress(task_id, f"Logical database dump execution FAILED with an unexpected error: {str(e_dump_exec)}", level='ERROR')
-            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Logical DB dump execution unexpected error: {str(e_dump_exec)}", flush=True)
+            _emit_progress(task_id, f"Logical database dump execution FAILED with an unexpected error using '{sqlite_cmd_to_use}': {str(e_dump_exec)}", level='ERROR')
+            print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Logical DB dump execution unexpected error with '{sqlite_cmd_to_use}': {str(e_dump_exec)}", flush=True)
 
         if not dump_success:
             if os.path.exists(local_temp_dump_path): os.remove(local_temp_dump_path)
@@ -808,6 +823,8 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
         print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: DB Dump Backup Component finished successfully.", flush=True)
 
         # Config Files Backup
+        _emit_progress(task_id, "Attempting Config Files Backup Component.", level='INFO')
+        print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Attempting Config Files Backup Component.", flush=True)
         _emit_progress(task_id, "Attempting Config Files Backup Component.", level='INFO')
         print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Attempting Config Files Backup Component.", flush=True)
         remote_config_dir = f"{current_backup_root_path_on_share}/{COMPONENT_SUBDIR_CONFIGURATIONS}"
