@@ -29,6 +29,8 @@ from add_resource_tags_column import add_tags_column
 # Import for Azure restoration
 from azure_backup import perform_startup_restore_sequence
 
+import subprocess # For checking sqlite3 CLI availability
+
 
 AZURE_PRIMARY_STORAGE = bool(os.environ.get("AZURE_PRIMARY_STORAGE"))
 if AZURE_PRIMARY_STORAGE:
@@ -464,4 +466,52 @@ def main(force_init=False):
 if __name__ == "__main__":
     force_flag = '--force' in sys.argv
     # The main function now internally checks for --restore-from-azure
+    if not check_sqlite_cli_availability(): # Call the new check function
+        # Warning is printed by the function itself if not found
+        pass # Decide if script should exit or just warn if not found. For now, it just warns.
     main(force_init=force_flag)
+
+
+# Function to check SQLite CLI availability (definition)
+def check_sqlite_cli_availability():
+    """Checks for sqlite3 CLI tool and prints guidance if not found."""
+    sqlite_exe_name = "sqlite3.exe" if sys.platform == "win32" else "sqlite3"
+
+    # Check 1: Local './tools/' directory (relative to init_setup.py, which is project root)
+    # BASE_DIR is pathlib.Path(__file__).resolve().parent, so it's the project root.
+    tools_dir = os.path.join(BASE_DIR, "tools")
+    local_sqlite_path = os.path.join(tools_dir, sqlite_exe_name)
+
+    if os.path.exists(local_sqlite_path) and os.access(local_sqlite_path, os.X_OK):
+        print(f"INFO: Found local sqlite3 CLI at: {local_sqlite_path}")
+        return True
+
+    # Check 2: System PATH
+    try:
+        process = subprocess.run([sqlite_exe_name if sys.platform == "win32" else "sqlite3", "-version"], capture_output=True, text=True, check=False, timeout=5)
+        if process.returncode == 0 and "SQLite version" in process.stdout: # check=False, so verify output too
+            print(f"INFO: Found sqlite3 CLI in system PATH. Version: {process.stdout.strip()}")
+            return True
+    except FileNotFoundError:
+        # This will be caught if 'sqlite3'/'sqlite3.exe' is not even found in PATH
+        pass # Will proceed to the warning message
+    except subprocess.TimeoutExpired:
+        print(f"WARNING: Checking for sqlite3 in PATH timed out.") # Should not happen for -version
+    except Exception as e:
+        print(f"WARNING: Error when checking for sqlite3 in PATH: {e}")
+
+    # If not found in either location:
+    print("-" * 60)
+    print("IMPORTANT: `sqlite3` Command-Line Tool Not Found or Not Executable.")
+    print("-" * 60)
+    print("The database backup functionality requires the SQLite3 command-line tool.")
+    print("You have two options to make it available:")
+    print("\n1. Install SQLite3 and add it to your system's PATH:")
+    print("   - Download from: https://www.sqlite.org/download.html")
+    print("   - Ensure the directory containing `sqlite3` (or `sqlite3.exe`) is in your PATH environment variable.")
+    print("\n2. Place the SQLite3 executable in the project's `./tools/` directory:")
+    print(f"   - Create a directory named 'tools' in your project root: {BASE_DIR / 'tools'}")
+    print(f"   - Download `sqlite3.exe` (for Windows) or `sqlite3` (for Linux/macOS) into this '{BASE_DIR / 'tools'}' directory.")
+    print("   - Ensure the downloaded file is executable.")
+    print("-" * 60)
+    return False
