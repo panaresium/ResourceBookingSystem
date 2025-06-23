@@ -1576,18 +1576,43 @@ def perform_startup_restore_sequence(app_for_context):
                     if not os.path.exists(live_db_dir): os.makedirs(live_db_dir, exist_ok=True)
 
                     app_logger.info(f"Preparing to restore database from SQL dump: {local_db_dump_path} to {live_db_path}")
+
+                    # Force close/dispose of DB connections before attempting to modify DB files
+                    app_logger.info("Attempting to close existing database connections before file operations...")
+                    try:
+                        from extensions import db as current_db_instance # Ensure we use the main db instance
+                        current_db_instance.session.remove() # Remove session associated with current thread/context
+                        current_db_instance.get_engine(app=app_for_context).dispose() # Dispose engine connections
+                        app_logger.info("SQLAlchemy session removed and engine disposed for current app context.")
+                        time.sleep(0.5) # Increased delay for OS to release file locks, especially on Windows
+                    except Exception as e_db_close:
+                        app_logger.error(f"Error trying to close DB connections: {str(e_db_close)}. File lock issues may persist.", exc_info=True)
+
                     # Remove existing DB files for a clean restore
+                    app_logger.info("Attempting to remove existing database files...")
+                    db_files_successfully_removed = True
                     for ext in ['', '-wal', '-shm']:
                         db_file_to_remove = live_db_path + ext
                         if os.path.exists(db_file_to_remove):
                             try:
                                 os.remove(db_file_to_remove)
-                                app_logger.info(f"Removed existing DB file: {db_file_to_remove}")
+                                app_logger.info(f"Successfully removed existing DB file: {db_file_to_remove}")
                             except OSError as e_remove:
-                                msg = f"Failed to remove existing DB file {db_file_to_remove}: {str(e_remove)}. Restore cannot proceed safely."
-                                app_logger.error(msg)
-                                restore_status["message"] = msg
-                                raise Exception(msg) # Critical
+                                app_logger.error(f"Failed to remove existing DB file {db_file_to_remove}: {str(e_remove)}. Attempting to rename instead.", exc_info=True)
+                                try:
+                                    rename_target = f"{db_file_to_remove}.old_{latest_backup_timestamp}"
+                                    shutil.move(db_file_to_remove, rename_target)
+                                    app_logger.info(f"Successfully renamed problematic DB file to: {rename_target}")
+                                except Exception as e_rename:
+                                    msg = f"CRITICAL: Failed to remove AND rename existing DB file {db_file_to_remove}: {str(e_rename)}. Restore cannot proceed."
+                                    app_logger.error(msg, exc_info=True)
+                                    restore_status["message"] = msg
+                                    db_files_successfully_removed = False
+                                    break # Stop trying to remove other files if one fails critically
+
+                    if not db_files_successfully_removed:
+                        raise Exception("Failed to prepare database location for restore due to file lock on existing DB files.")
+
 
                     try:
                         app_logger.info(f"Executing SQL dump into {live_db_path}...")
