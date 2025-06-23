@@ -23,7 +23,8 @@ def check_sqlite_cli_availability():
         print(f"INFO: Found local sqlite3 CLI at: {local_sqlite_path}")
         return True
     try:
-        process = subprocess.run([sqlite_exe_name if sys.platform == "win32" else "sqlite3", "-version"],
+        # Use the platform-specific executable name directly in the list
+        process = subprocess.run([sqlite_exe_name, "-version"],
                                  capture_output=True, text=True, check=False, timeout=5)
         if process.returncode == 0 and "SQLite version" in process.stdout:
             print(f"INFO: Found sqlite3 CLI in system PATH. Version: {process.stdout.strip()}")
@@ -35,20 +36,104 @@ def check_sqlite_cli_availability():
     except Exception as e:
         print(f"WARNING: Error when checking for sqlite3 in PATH: {e}")
 
+    # Attempt to download from Azure if not found locally or in PATH
+    print(f"INFO: sqlite3 CLI not found locally or in PATH. Attempting to download from Azure...")
+    try:
+        from azure.storage.fileshare import ShareServiceClient, ShareFileClient
+        from azure.core.exceptions import ResourceNotFoundError
+    except ImportError:
+        print("WARNING: Azure SDK not installed (azure-storage-fileshare). Cannot download sqlite3 from Azure.")
+        # Fall through to standard guidance messages
+        print_sqlite_guidance(tools_dir)
+        return False
+
+    connection_string = os.environ.get("AZURE_TOOLS_CONNECTION_STRING")
+    tools_share_name = os.environ.get("AZURE_TOOLS_SHARE_NAME")
+
+    # Determine the correct remote filename based on platform
+    # SQLITE3_REMOTE_FILENAME_WINDOWS, SQLITE3_REMOTE_FILENAME_LINUX, SQLITE3_REMOTE_FILENAME_MACOS
+    if sys.platform == "win32":
+        sqlite3_remote_filename = os.environ.get("SQLITE3_REMOTE_FILENAME_WINDOWS", "sqlite3.exe")
+    elif sys.platform == "linux":
+        sqlite3_remote_filename = os.environ.get("SQLITE3_REMOTE_FILENAME_LINUX", "sqlite3_linux")
+    elif sys.platform == "darwin": # macOS
+        sqlite3_remote_filename = os.environ.get("SQLITE3_REMOTE_FILENAME_MACOS", "sqlite3_macos")
+    else:
+        print(f"WARNING: Unsupported platform '{sys.platform}' for automatic sqlite3 download.")
+        print_sqlite_guidance(tools_dir)
+        return False
+
+    if not all([connection_string, tools_share_name, sqlite3_remote_filename]):
+        print("WARNING: Azure connection details for tools (AZURE_TOOLS_CONNECTION_STRING, AZURE_TOOLS_SHARE_NAME, or platform-specific SQLITE3_REMOTE_FILENAME_*) not fully configured. Cannot download sqlite3.")
+        print_sqlite_guidance(tools_dir)
+        return False
+
+    try:
+        service_client = ShareServiceClient.from_connection_string(connection_string)
+        share_client = service_client.get_share_client(tools_share_name)
+        # Assuming sqlite3 is in the root of the tools share, or a 'sqlite' subdirectory.
+        # For simplicity, let's assume root for now. Adjust 'sqlite3_remote_path' if it's in a subdir.
+        # Example: sqlite3_remote_path = f"sqlite/{sqlite3_remote_filename}"
+        sqlite3_remote_path = sqlite3_remote_filename
+
+        file_client = share_client.get_file_client(sqlite3_remote_path)
+
+        if not os.path.exists(tools_dir):
+            os.makedirs(tools_dir)
+            print(f"INFO: Created tools directory: {tools_dir}")
+
+        print(f"INFO: Downloading '{sqlite3_remote_path}' from Azure share '{tools_share_name}' to '{local_sqlite_path}'...")
+        with open(local_sqlite_path, "wb") as file_handle:
+            download_stream = file_client.download_file()
+            file_handle.write(download_stream.readall())
+
+        print(f"INFO: Downloaded sqlite3 to {local_sqlite_path}.")
+
+        if sys.platform != "win32":
+            print(f"INFO: Setting execute permission for {local_sqlite_path}...")
+            os.chmod(local_sqlite_path, 0o755) # rwxr-xr-x
+
+        # Verify again after download
+        if os.path.exists(local_sqlite_path) and os.access(local_sqlite_path, os.X_OK):
+            print(f"INFO: Successfully downloaded and configured local sqlite3 CLI at: {local_sqlite_path}")
+            return True
+        else:
+            print(f"ERROR: sqlite3 downloaded to {local_sqlite_path} but it's not found or not executable.")
+            print_sqlite_guidance(tools_dir)
+            return False
+
+    except ResourceNotFoundError:
+        print(f"ERROR: sqlite3 executable '{sqlite3_remote_path}' not found in Azure share '{tools_share_name}'.")
+        print_sqlite_guidance(tools_dir)
+        return False
+    except ImportError: # Should have been caught earlier, but good for safety
+        print("ERROR: Azure SDK (azure-storage-fileshare) import failed during download attempt.")
+        print_sqlite_guidance(tools_dir)
+        return False
+    except Exception as e:
+        print(f"ERROR: Failed to download or configure sqlite3 from Azure: {e}")
+        print_sqlite_guidance(tools_dir)
+        return False
+
+    # Fallback if all methods (local, PATH, Azure download) fail
+    print_sqlite_guidance(tools_dir)
+    return False
+
+def print_sqlite_guidance(tools_dir_path):
+    """Helper function to print manual installation guidance for sqlite3."""
     print("-" * 60)
     print("IMPORTANT: `sqlite3` Command-Line Tool Not Found or Not Executable.")
     print("-" * 60)
     print("The database backup functionality requires the SQLite3 command-line tool.")
-    # ... (rest of the print messages for guidance) ...
+    print("\nPlease ensure it's available by one of these methods:")
     print("\n1. Install SQLite3 and add it to your system's PATH:")
     print("   - Download from: https://www.sqlite.org/download.html")
     print("   - Ensure the directory containing `sqlite3` (or `sqlite3.exe`) is in your PATH environment variable.")
-    print("\n2. Place the SQLite3 executable in the project's `./tools/` directory:")
-    print(f"   - Create a directory named 'tools' in your project root: {BASE_DIR / 'tools'}")
-    print(f"   - Download `sqlite3.exe` (for Windows) or `sqlite3` (for Linux/macOS) into this '{BASE_DIR / 'tools'}' directory.")
+    print(f"\n2. Place the SQLite3 executable in the project's `./tools/` directory ({tools_dir_path}):")
+    print(f"   - If the 'tools' directory doesn't exist, create it: {tools_dir_path}")
+    print(f"   - Download `sqlite3.exe` (for Windows) or `sqlite3` (for Linux/macOS) into this directory.")
     print("   - Ensure the downloaded file is executable (e.g., `chmod +x ./tools/sqlite3` on Linux/macOS).")
     print("-" * 60)
-    return False
 
 # Refactored imports for application factory pattern
 from app_factory import create_app

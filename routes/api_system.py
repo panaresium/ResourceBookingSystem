@@ -831,7 +831,36 @@ def api_one_click_restore():
                     update_task_log(task_id_param, "Scheduler settings file not found. Skipping.", level="warning")
                     restore_ops_summary.append("Scheduler settings skipped (not downloaded).")
 
-                # 6. Restore Media Files (Floor Maps and Resource Uploads)
+                # 6. Apply Unified Booking Backup Schedule Settings
+                local_unified_sched_cfg_path = downloaded_components.get("unified_booking_backup_schedule")
+                if local_unified_sched_cfg_path and os.path.exists(local_unified_sched_cfg_path):
+                    update_task_log(task_id_param, "Applying Unified Booking Backup Schedule settings...", level="info")
+                    try:
+                        with open(local_unified_sched_cfg_path, 'r', encoding='utf-8') as f:
+                            unified_sched_data = json.load(f)
+
+                        # save_unified_backup_schedule_settings returns (success_bool, message_str)
+                        # It internally calls reschedule_unified_backup_jobs
+                        save_success, save_message = save_unified_backup_schedule_settings(unified_sched_data)
+
+                        if save_success:
+                            update_task_log(task_id_param, f"Unified Booking Backup Schedule settings applied: {save_message}", level="success")
+                            restore_ops_summary.append(f"Unified Backup Schedule: {save_message}")
+                        else:
+                            overall_success = False # Mark overall as failed if this specific step fails
+                            update_task_log(task_id_param, f"Unified Booking Backup Schedule settings import failed: {save_message}", level="error")
+                            restore_ops_summary.append(f"Unified Backup Schedule error: {save_message}")
+
+                        if os.path.exists(local_unified_sched_cfg_path): os.remove(local_unified_sched_cfg_path)
+                    except Exception as e_unified_sched_apply:
+                        overall_success = False
+                        update_task_log(task_id_param, f"Error applying Unified Booking Backup Schedule settings: {str(e_unified_sched_apply)}", level="error")
+                        restore_ops_summary.append(f"Unified Backup Schedule exception: {str(e_unified_sched_apply)}")
+                else:
+                    update_task_log(task_id_param, "Unified Booking Backup Schedule settings file not found in download. Skipping.", level="warning")
+                    restore_ops_summary.append("Unified Backup Schedule skipped (not downloaded).")
+
+                # 7. Restore Media Files (Floor Maps and Resource Uploads)
                 # This relies on `restore_full_backup` providing `media_base_path_on_share` in `downloaded_components`
                 # And `azure_backup.restore_media_component` to handle the actual download from Azure to live locations.
                 media_base_path_on_share = downloaded_components.get("media_base_path_on_share")

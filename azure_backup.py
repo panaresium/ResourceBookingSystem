@@ -865,6 +865,22 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             _emit_progress(task_id, "scheduler_settings.json backup successful.", level='SUCCESS')
         else:
             _emit_progress(task_id, "scheduler_settings.json not found locally, skipping.", level='WARNING')
+
+        # Backup unified_booking_backup_schedule.json
+        unified_schedule_local_path = os.path.join(DATA_DIR, 'unified_booking_backup_schedule.json')
+        _emit_progress(task_id, f"Checking for unified_booking_backup_schedule.json at {unified_schedule_local_path}", level='INFO')
+        if os.path.exists(unified_schedule_local_path):
+            unified_filename = f"unified_booking_backup_schedule_{timestamp_str}.json"
+            remote_unified_file_path = f"{remote_config_dir}/{unified_filename}"
+            _emit_progress(task_id, f"Attempting to backup unified_booking_backup_schedule.json to {remote_unified_file_path}", level='INFO')
+            if not upload_file(share_client, unified_schedule_local_path, remote_unified_file_path):
+                _emit_progress(task_id, "unified_booking_backup_schedule.json backup FAILED. Critical config backup failure.", level='ERROR')
+                return False # Fail fast
+            backed_up_items.append({"type": "config", "name": "unified_booking_backup_schedule", "filename": unified_filename, "path_in_backup": f"{COMPONENT_SUBDIR_CONFIGURATIONS}/{unified_filename}"})
+            _emit_progress(task_id, "unified_booking_backup_schedule.json backup successful.", level='SUCCESS')
+        else:
+            _emit_progress(task_id, "unified_booking_backup_schedule.json not found locally, skipping its backup.", level='WARNING')
+
         _emit_progress(task_id, "Config Files Backup Component finished successfully.", level='DEBUG')
         print(f"[CREATE_FULL_BACKUP_DEBUG] Task {task_id}: Config Files Backup Component finished successfully.", flush=True)
 
@@ -1734,6 +1750,43 @@ def perform_startup_restore_sequence(app_for_context):
                         restore_status["message"] = error_detail
             else:
                 app_logger.info("Scheduler settings component not found in downloaded files. Skipping its restore.")
+
+            # Restore unified_booking_backup_schedule.json
+            if "unified_booking_backup_schedule" in downloaded_component_paths:
+                local_unified_schedule_path = downloaded_component_paths["unified_booking_backup_schedule"]
+                app_logger.info(f"Attempting to restore Unified Booking Backup Schedule from {local_unified_schedule_path}")
+                try:
+                    with open(local_unified_schedule_path, 'r', encoding='utf-8') as f_config:
+                        unified_schedule_data = json.load(f_config)
+
+                    from utils import save_unified_backup_schedule_settings # Ensure import
+                    save_success, save_message = save_unified_backup_schedule_settings(unified_schedule_data) # This also reschedules jobs
+
+                    if save_success:
+                        app_logger.info(f"Unified Booking Backup Schedule settings restored and jobs rescheduled. Message: {save_message}")
+                        try:
+                            add_audit_log("System Restore", f"Unified Booking Backup Schedule settings restored from startup using backup {latest_backup_timestamp}.")
+                        except Exception as e_audit:
+                            app_logger.warning(f"Could not write audit log for Unified Backup Schedule restore: {e_audit}")
+                    else:
+                        app_logger.error(f"Failed to restore Unified Booking Backup Schedule settings. Message: {save_message}")
+                        restore_status["status"] = "partial_failure"
+                        error_detail = f"Error during Unified Backup Schedule restore: {save_message}"
+                        if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
+                            restore_status["message"] += f"; {error_detail}"
+                        else:
+                            restore_status["message"] = error_detail
+                except Exception as e_unified_sched_restore:
+                    app_logger.error(f"Error processing Unified Booking Backup Schedule restore: {e_unified_sched_restore}", exc_info=True)
+                    restore_status["status"] = "partial_failure"
+                    error_detail = f"Error during Unified Backup Schedule processing: {str(e_unified_sched_restore)}"
+                    if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
+                        restore_status["message"] += f"; {error_detail}"
+                    else:
+                        restore_status["message"] = error_detail
+            else:
+                app_logger.info("Unified Booking Backup Schedule component not found in downloaded files. Skipping its restore.")
+
 
             # Restore Media Files (Floor Maps and Resource Uploads)
             if "media" in downloaded_component_paths and isinstance(downloaded_component_paths["media"], dict):
