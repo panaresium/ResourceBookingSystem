@@ -1658,8 +1658,20 @@ def reschedule_unified_backup_jobs(app_instance):
 
         incremental_config = unified_schedule_settings.get('unified_incremental_backup', {})
         if incremental_config.get('is_enabled'):
-            app_instance.logger.warning("Unified incremental backup is enabled in settings, but the target task 'run_scheduled_incremental_booking_data_task' is obsolete and will not be scheduled.")
-            # The scheduler.add_job(...) block for run_scheduled_incremental_booking_data_task has been removed.
+            interval_minutes = incremental_config.get('interval_minutes', 30)
+            if not isinstance(interval_minutes, int) or interval_minutes <= 0:
+                app_instance.logger.error(f"Invalid interval_minutes ({interval_minutes}) for incremental backup. Must be a positive integer. Job not scheduled.")
+            else:
+                scheduler.add_job(
+                    id='unified_incremental_booking_backup_job',
+                    func='scheduler_tasks:run_scheduled_incremental_booking_data_task', # Path to the task function
+                    trigger='interval',
+                    minutes=interval_minutes,
+                    args=[app_instance], # Pass the app instance
+                    replace_existing=True,
+                    misfire_grace_time=300 # 5 minutes
+                )
+                app_instance.logger.info(f"Scheduled unified incremental booking backup job to run every {interval_minutes} minutes.")
         else:
             app_instance.logger.info("Unified incremental booking backup is disabled. Job not rescheduled.")
     except Exception as e:

@@ -5,9 +5,9 @@ from models import Booking, User, Resource, FloorMap, BookingSettings
 from utils import add_audit_log, send_email, _get_map_configuration_data, _get_resource_configurations_data, _get_user_configurations_data, get_current_effective_time
 from azure_backup import (
     create_full_backup,
-    # backup_incremental_bookings, # This is legacy incremental, may also be removed. # Ensure this line is removed or commented out if part of a multi-line import
-    # backup_scheduled_incremental_booking_data, # New unified incremental # TODO: Obsolete function
-    # backup_full_booking_data_json_azure # New unified full # TODO: Obsolete function
+    create_full_backup,
+    create_incremental_booking_backup, # Added for the new incremental backup logic
+    # backup_full_booking_data_json_azure # This was for the old unified full, can be removed if not used elsewhere
 )
 # Ensure current_app is available if not passed directly
 # from flask import current_app # current_app is already imported by the other functions
@@ -621,30 +621,30 @@ def send_checkin_reminders(app):
 
 # --- New Unified Scheduled Backup Tasks ---
 
-# TODO: This task depended on the obsolete function azure_backup.backup_scheduled_incremental_booking_data.
-# Review for permanent removal or refactor if core scheduling purpose is still valid via other means.
-# def run_scheduled_incremental_booking_data_task(app):
-#     """
-#     Scheduled task entry point to run the new unified INCREMENTAL booking data JSON backup to Azure.
-#     This is intended to be run frequently (e.g., every few minutes).
-#     """
-#     with app.app_context():
-#         logger = app.logger
-#         logger.info("Scheduler: Starting run_scheduled_incremental_booking_data_task (unified incremental JSON backup)...")
-#         task_id_for_log = f"scheduled_incremental_booking_data_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-#         try:
-#             success = backup_scheduled_incremental_booking_data(
-#                 app=app,
-#                 socketio_instance=None,
-#                 task_id=task_id_for_log
-#             )
-#             if success:
-#                 logger.info(f"Scheduler: Unified incremental booking data backup task (ID: {task_id_for_log}) executed successfully.")
-#             else:
-#                 logger.warning(f"Scheduler: Unified incremental booking data backup task (ID: {task_id_for_log}) reported issues. Check azure_backup logs.")
-#         except Exception as e:
-#             logger.error(f"Scheduler: Exception during run_scheduled_incremental_booking_data_task (ID: {task_id_for_log}): {e}", exc_info=True)
-#         logger.info(f"Scheduler: run_scheduled_incremental_booking_data_task (ID: {task_id_for_log}) finished.")
+def run_scheduled_incremental_booking_data_task(app):
+    """
+    Scheduled task entry point to run the new unified INCREMENTAL booking data JSON backup to Azure.
+    This is intended to be run frequently (e.g., every few minutes).
+    """
+    with app.app_context():
+        logger = app.logger
+        logger.info("Scheduler: Starting run_scheduled_incremental_booking_data_task (unified incremental JSON backup)...")
+        # Generate a unique ID for this run, can be used if azure_backup function supports task_id for logging
+        run_instance_id = f"sched_inc_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
+        try:
+            # Call the new function in azure_backup.py
+            # Pass the app instance, and optionally the run_instance_id if create_incremental_booking_backup supports it for logging
+            success = create_incremental_booking_backup(
+                app=app,
+                task_id=run_instance_id # Pass instance_id as task_id for consistent logging if supported
+            )
+            if success:
+                logger.info(f"Scheduler: Unified incremental booking data backup task (Run ID: {run_instance_id}) executed successfully.")
+            else:
+                logger.warning(f"Scheduler: Unified incremental booking data backup task (Run ID: {run_instance_id}) reported issues or no changes. Check azure_backup logs.")
+        except Exception as e:
+            logger.error(f"Scheduler: Exception during run_scheduled_incremental_booking_data_task (Run ID: {run_instance_id}): {e}", exc_info=True)
+        logger.info(f"Scheduler: run_scheduled_incremental_booking_data_task (Run ID: {run_instance_id}) finished.")
 
 # TODO: This task depended on the obsolete function azure_backup.backup_full_booking_data_json_azure.
 # Review for permanent removal or refactor if core scheduling purpose is still valid via other means.
