@@ -1604,9 +1604,9 @@ def perform_startup_restore_sequence(app_for_context):
             for config_key, (import_func, log_name) in config_types_map.items():
                 if config_key in downloaded_component_paths:
                     local_config_path = downloaded_component_paths[config_key]
-                log_message_attempt = f"STARTUP_RESTORE_LOG: Attempting to restore {log_name} from {local_config_path}"
-                app_logger.info(log_message_attempt)
-                print(log_message_attempt) # Explicit print for init_setup.py
+                    log_message_attempt = f"STARTUP_RESTORE_LOG: Attempting to restore {log_name} from {local_config_path}"
+                    app_logger.info(log_message_attempt)
+                    print(log_message_attempt) # Explicit print for init_setup.py
                     try:
                         with open(local_config_path, 'r', encoding='utf-8') as f_config:
                             config_data = json.load(f_config)
