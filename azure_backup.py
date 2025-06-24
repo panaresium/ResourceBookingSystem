@@ -310,8 +310,8 @@ def download_backup_set_as_zip(full_backup_filename, task_id=None):
         if task_id: update_task_log(task_id, f"Downloading full backup: {full_backup_filename}...", level="info")
 
         # Re-using download_booking_data_json_backup which has its own logging.
-        # It expects backup_type="full" or "manual_full_json" to correctly find the subdir for full backups.
-        full_backup_content = download_booking_data_json_backup(filename=full_backup_filename, backup_type="full")
+        # It expects backup_type="manual_full_json" to correctly find the subdir for full backups.
+        full_backup_content = download_booking_data_json_backup(filename=full_backup_filename, backup_type="manual_full_json")
 
         if full_backup_content is None:
             err_msg = f"{log_prefix}Failed to download critical full backup file: {full_backup_filename}"
@@ -521,13 +521,23 @@ def download_booking_data_json_backup(filename, backup_type=None):
             logger.warning(f"Azure share '{share_name}' not found. Cannot download backup.")
             return None
         target_subdir = ""
-        if backup_type == "manual_full_json":
+        logger.debug(f"Inside download_booking_data_json_backup: received backup_type='{backup_type}' (type: {type(backup_type)}) for filename='{filename}'")
+
+        if backup_type == "manual_full_json" or backup_type == "full": # Accept "full" as an alias
+            logger.info(f"Condition `backup_type == 'manual_full_json' or backup_type == 'full'` met for backup_type: '{backup_type}'. Setting target_subdir.")
             target_subdir = "manual_full_json"
+            if backup_type == "full": # This specific log was already there.
+                logger.info(f"Backup type 'full' provided; interpreting as 'manual_full_json' for directory targeting.")
         else:
-            logger.warning(f"Unknown or unhandled backup_type '{backup_type}' for download. Attempting download from base backup directory.")
+            logger.warning(f"Unknown or unhandled backup_type '{backup_type}' for download. Cannot determine target directory.")
+            logger.error(f"Cannot determine directory for backup type '{backup_type}'. Download aborted.")
+            return None
+
         if not target_subdir:
-             logger.error(f"Cannot determine directory for backup type '{backup_type}'. Download aborted.")
+             logger.error(f"Logical error: Target subdirectory not set for backup type '{backup_type}' even after checks. This should not happen if type is 'full' or 'manual_full_json'. Download aborted.")
              return None
+
+        logger.info(f"Determined target_subdir: '{target_subdir}' for backup_type: '{backup_type}'.")
         remote_file_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{target_subdir}/{filename}"
         file_client = share_client.get_file_client(remote_file_path)
         if not _client_exists(file_client):
