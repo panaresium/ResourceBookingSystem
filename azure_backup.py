@@ -617,13 +617,18 @@ def create_incremental_booking_backup(app, task_id=None):
 
 def restore_booking_data_to_point_in_time(app, selected_filename, selected_type, selected_timestamp_iso, task_id=None):
     update_task_log(task_id, f"Starting restore from '{selected_filename}' (Type: {selected_type}).", level="info")
-    if selected_type != "manual_full_json":
-        msg = f"Restore for backup type '{selected_type}' is not currently supported. Only 'manual_full_json' is supported."
+    # Allow "full" as an alias for "manual_full_json" for this restore operation
+    if selected_type not in ["manual_full_json", "full"]:
+        msg = f"Restore for backup type '{selected_type}' is not currently supported. Supported types for this operation: 'manual_full_json', 'full'."
         update_task_log(task_id, msg, level="error")
         return {'status': 'failure', 'message': msg, 'errors': [msg]}
+
+    # If type is "full", internally use "manual_full_json" for logic that depends on this specific string, like download.
+    effective_backup_type_for_download = "manual_full_json" if selected_type == "full" else selected_type
+
     try:
         with app.app_context():
-            update_task_log(task_id, f"Downloading backup file: {selected_filename}...", level="info")
+            update_task_log(task_id, f"Downloading backup file: {selected_filename} using effective type '{effective_backup_type_for_download}'...", level="info")
             file_content_bytes = download_booking_data_json_backup(filename=selected_filename, backup_type=selected_type)
             if file_content_bytes is None:
                 msg = f"Failed to download backup file '{selected_filename}'."
