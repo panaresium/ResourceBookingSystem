@@ -20,8 +20,9 @@ from utils import (
     _import_resource_configurations_data,
     _import_user_configurations_data,
     add_audit_log,
-    _get_general_configurations_data, # Added for general configs backup
-    _import_general_configurations_data # Added for general configs restore
+    _get_general_configurations_data,
+    _import_general_configurations_data,
+    save_unified_backup_schedule_settings # Added for unified schedule restore
 )
 from extensions import db # Ensure db is imported from extensions (already imported via models)
 from utils import update_task_log # Ensure this is imported from utils
@@ -1750,8 +1751,9 @@ def perform_startup_restore_sequence(app_for_context):
                     with open(local_unified_sched_path, 'r', encoding='utf-8') as f_us:
                         unified_sched_data = json.load(f_us)
 
-                    save_success, save_message = utils.save_unified_backup_schedule_settings(unified_sched_data)
-                    app_logger.info(f"STARTUP_RESTORE_LOG: utils.save_unified_backup_schedule_settings result - Success: {save_success}, Message: {save_message}")
+                    # Corrected: Call the directly imported function
+                    save_success, save_message = save_unified_backup_schedule_settings(unified_sched_data)
+                    app_logger.info(f"STARTUP_RESTORE_LOG: save_unified_backup_schedule_settings result - Success: {save_success}, Message: {save_message}")
 
                     if save_success:
                         app_logger.info(f"STARTUP_RESTORE_LOG: Unified Booking Backup Schedule settings applied: {save_message}")

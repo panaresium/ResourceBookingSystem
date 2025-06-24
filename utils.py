@@ -1466,7 +1466,7 @@ def _import_user_configurations_data(user_config_data: dict): # Return type will
                                 warnings.append(f"For User '{username}' (Backup ID {backup_user_id}), mapped Role ID {actual_db_role_id} (from backup Role ID {b_role_id}) not found in DB. Skipping assignment.")
                         elif b_role_id is not None: # Only warn if it was a non-null ID that couldn't be mapped
                             warnings.append(f"For User '{username}' (Backup ID {backup_user_id}), backup Role ID {b_role_id} could not be mapped to a current Role ID. Skipping assignment.")
-                user.roles = actual_db_roles
+                user.roles = actual_db_roles_for_user # Corrected variable name
 
                 db.session.add(user)
                 users_updated += 1
