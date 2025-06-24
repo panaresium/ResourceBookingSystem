@@ -1604,7 +1604,9 @@ def perform_startup_restore_sequence(app_for_context):
             for config_key, (import_func, log_name) in config_types_map.items():
                 if config_key in downloaded_component_paths:
                     local_config_path = downloaded_component_paths[config_key]
-                    app_logger.info(f"Attempting to restore {log_name} from {local_config_path}")
+                log_message_attempt = f"STARTUP_RESTORE_LOG: Attempting to restore {log_name} from {local_config_path}"
+                app_logger.info(log_message_attempt)
+                print(log_message_attempt) # Explicit print for init_setup.py
                     try:
                         with open(local_config_path, 'r', encoding='utf-8') as f_config:
                             config_data = json.load(f_config)
@@ -1662,8 +1664,9 @@ def perform_startup_restore_sequence(app_for_context):
                     app_logger.info("Scheduler settings successfully restored.")
                     try:
                         add_audit_log("System Restore", f"Scheduler settings restored from startup sequence using backup {latest_backup_timestamp}.")
+                        app_logger.info("STARTUP_RESTORE_LOG: Scheduler settings audit log successful.")
                     except Exception as e_audit: # Should be specific to DB errors if logger/DB is not ready
-                        app_logger.warning(f"Could not write audit log for system restore (scheduler_settings): {e_audit}")
+                        app_logger.warning(f"STARTUP_RESTORE_LOG: Could not write audit log for system restore (scheduler_settings): {e_audit}")
                 except Exception as e_sched_restore:
                     app_logger.error(f"Error replacing live scheduler settings: {e_sched_restore}", exc_info=True)
                     # Update status and message for partial failure
@@ -1677,27 +1680,28 @@ def perform_startup_restore_sequence(app_for_context):
                 app_logger.info("Scheduler settings component not found in downloaded files. Skipping its restore.")
 
             # Apply General Configurations (BookingSettings)
-            # The key 'general_configs' matches what restore_full_backup would store it as.
+            app_logger.info("STARTUP_RESTORE_LOG: Checking for General Configurations (BookingSettings) component.")
             if "general_configs" in downloaded_component_paths:
                 local_general_configs_path = downloaded_component_paths["general_configs"]
-                app_logger.info(f"Attempting to restore General Configurations (BookingSettings) from {local_general_configs_path}")
+                app_logger.info(f"STARTUP_RESTORE_LOG: Attempting to restore General Configurations (BookingSettings) from {local_general_configs_path}")
                 try:
                     with open(local_general_configs_path, 'r', encoding='utf-8') as f_gc:
                         general_configs_data = json.load(f_gc)
 
-                    # _import_general_configurations_data expects the full dict containing 'booking_settings' list
                     summary_gc, status_gc = _import_general_configurations_data(general_configs_data)
+                    app_logger.info(f"STARTUP_RESTORE_LOG: _import_general_configurations_data result - Status: {status_gc}, Summary: {summary_gc}")
 
                     if status_gc < 300:
-                        app_logger.info(f"General Configurations (BookingSettings) applied: {summary_gc.get('message', 'Success')}")
+                        app_logger.info(f"STARTUP_RESTORE_LOG: General Configurations (BookingSettings) applied: {summary_gc.get('message', 'Success')}")
                         if summary_gc.get('errors') or summary_gc.get('warnings'):
-                             app_logger.warning(f"General Configurations import details - Errors: {summary_gc.get('errors', [])}, Warnings: {summary_gc.get('warnings', [])}")
+                             app_logger.warning(f"STARTUP_RESTORE_LOG: General Configurations import details - Errors: {summary_gc.get('errors', [])}, Warnings: {summary_gc.get('warnings', [])}")
                         try:
                             add_audit_log("System Restore", f"General Configurations (BookingSettings) restored from startup using backup {latest_backup_timestamp}. Status: {summary_gc.get('message', 'Success')}")
+                            app_logger.info("STARTUP_RESTORE_LOG: General configs audit log successful.")
                         except Exception as e_audit_gc:
-                            app_logger.warning(f"Could not write audit log for startup restore (general_configs): {e_audit_gc}")
+                            app_logger.warning(f"STARTUP_RESTORE_LOG: Could not write audit log for startup restore (general_configs): {e_audit_gc}")
                     else:
-                        app_logger.error(f"Failed to restore General Configurations (BookingSettings): {summary_gc.get('message', 'Unknown error')}. Errors: {summary_gc.get('errors', [])}")
+                        app_logger.error(f"STARTUP_RESTORE_LOG: Failed to restore General Configurations (BookingSettings): {summary_gc.get('message', 'Unknown error')}. Errors: {summary_gc.get('errors', [])}")
                         restore_status["status"] = "partial_failure"
                         error_detail_gc = f"Error during General Configurations restore: {summary_gc.get('message', 'Unknown error')}"
                         if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
@@ -1705,7 +1709,7 @@ def perform_startup_restore_sequence(app_for_context):
                         else:
                             restore_status["message"] = error_detail_gc
                 except Exception as e_gc_restore:
-                    app_logger.error(f"Error during General Configurations (BookingSettings) import stage: {e_gc_restore}", exc_info=True)
+                    app_logger.error(f"STARTUP_RESTORE_LOG: Error during General Configurations (BookingSettings) import stage: {e_gc_restore}", exc_info=True)
                     restore_status["status"] = "partial_failure"
                     error_detail_gc_exc = f"Exception during General Configurations restore: {str(e_gc_restore)}"
                     if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
@@ -1713,27 +1717,29 @@ def perform_startup_restore_sequence(app_for_context):
                     else:
                          restore_status["message"] = error_detail_gc_exc
             else:
-                app_logger.info("General Configurations (BookingSettings) component not found in downloaded files. Skipping its restore.")
+                app_logger.info("STARTUP_RESTORE_LOG: General Configurations (BookingSettings) component not found in downloaded files. Skipping its restore.")
 
             # Apply Unified Booking Backup Schedule Settings
+            app_logger.info("STARTUP_RESTORE_LOG: Checking for Unified Booking Backup Schedule component.")
             if "unified_booking_backup_schedule" in downloaded_component_paths:
                 local_unified_sched_path = downloaded_component_paths["unified_booking_backup_schedule"]
-                app_logger.info(f"Attempting to restore Unified Booking Backup Schedule from {local_unified_sched_path}")
+                app_logger.info(f"STARTUP_RESTORE_LOG: Attempting to restore Unified Booking Backup Schedule from {local_unified_sched_path}")
                 try:
                     with open(local_unified_sched_path, 'r', encoding='utf-8') as f_us:
                         unified_sched_data = json.load(f_us)
 
-                    # utils.save_unified_backup_schedule_settings saves to file and reschedules jobs
                     save_success, save_message = utils.save_unified_backup_schedule_settings(unified_sched_data)
+                    app_logger.info(f"STARTUP_RESTORE_LOG: utils.save_unified_backup_schedule_settings result - Success: {save_success}, Message: {save_message}")
 
                     if save_success:
-                        app_logger.info(f"Unified Booking Backup Schedule settings applied: {save_message}")
+                        app_logger.info(f"STARTUP_RESTORE_LOG: Unified Booking Backup Schedule settings applied: {save_message}")
                         try:
                             add_audit_log("System Restore", f"Unified Backup Schedule restored from startup using backup {latest_backup_timestamp}. Status: {save_message}")
+                            app_logger.info("STARTUP_RESTORE_LOG: Unified backup schedule audit log successful.")
                         except Exception as e_audit_us:
-                            app_logger.warning(f"Could not write audit log for startup restore (unified_schedule): {e_audit_us}")
+                            app_logger.warning(f"STARTUP_RESTORE_LOG: Could not write audit log for startup restore (unified_schedule): {e_audit_us}")
                     else:
-                        app_logger.error(f"Failed to restore Unified Booking Backup Schedule: {save_message}")
+                        app_logger.error(f"STARTUP_RESTORE_LOG: Failed to restore Unified Booking Backup Schedule: {save_message}")
                         restore_status["status"] = "partial_failure"
                         error_detail_us = f"Error during Unified Backup Schedule restore: {save_message}"
                         if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
@@ -1741,7 +1747,7 @@ def perform_startup_restore_sequence(app_for_context):
                         else:
                             restore_status["message"] = error_detail_us
                 except Exception as e_us_restore:
-                    app_logger.error(f"Error during Unified Booking Backup Schedule import stage: {e_us_restore}", exc_info=True)
+                    app_logger.error(f"STARTUP_RESTORE_LOG: Error during Unified Booking Backup Schedule import stage: {e_us_restore}", exc_info=True)
                     restore_status["status"] = "partial_failure"
                     error_detail_us_exc = f"Exception during Unified Backup Schedule restore: {str(e_us_restore)}"
                     if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
@@ -1749,9 +1755,10 @@ def perform_startup_restore_sequence(app_for_context):
                     else:
                          restore_status["message"] = error_detail_us_exc
             else:
-                app_logger.info("Unified Booking Backup Schedule component not found in downloaded files. Skipping its restore.")
+                app_logger.info("STARTUP_RESTORE_LOG: Unified Booking Backup Schedule component not found in downloaded files. Skipping its restore.")
 
             # Restore Media Files (Floor Maps and Resource Uploads)
+            app_logger.info("STARTUP_RESTORE_LOG: Checking for Media component.")
             if "media" in downloaded_component_paths and isinstance(downloaded_component_paths["media"], dict):
                 if not os.path.exists(live_scheduler_dir): os.makedirs(live_scheduler_dir, exist_ok=True)
                 try:
