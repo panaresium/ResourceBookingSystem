@@ -1780,15 +1780,9 @@ def perform_startup_restore_sequence(app_for_context):
                 app_logger.info("STARTUP_RESTORE_LOG: Unified Booking Backup Schedule component not found in downloaded files. Skipping its restore.")
 
             # Restore Media Files (Floor Maps and Resource Uploads)
-            print("DEBUG: Checking for media component...") # Added this line
+            print("DEBUG: Checking for media component...")
             app_logger.info("STARTUP_RESTORE_LOG: Checking for Media component.")
             if "media" in downloaded_component_paths and isinstance(downloaded_component_paths["media"], dict):
-                # The following block for applying scheduler_settings was misplaced here.
-                # It should have been processed before media. I'll remove it from here.
-                # This was likely a copy-paste error during previous edits.
-                # The correct scheduler_settings block is already present earlier.
-
-                # Correct logic for media starts here:
                 media_component_info = downloaded_component_paths["media"]
                 media_base_path_on_share = media_component_info.get("base_path_on_share")
                 print(f"DEBUG: Media base_path_on_share from downloaded_component_paths: {media_base_path_on_share}")
