@@ -3,18 +3,14 @@ import hashlib
 import logging
 import sqlite3
 import json
-from datetime import datetime, timezone # Ensure 'time' is not imported if not used directly, or 'import time as time_module'
+from datetime import datetime, timezone
 import tempfile
 import re
-import time # This is the standard time module
-import csv # Keep if CSV related functionality exists or is planned
+import time
 import shutil
-# tempfile was listed twice, removed one instance
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError, ServiceRequestError
 
-# Ensure os, json, logging, re, datetime, timezone, time are available (already imported or standard)
 from models import Booking, db
-# From utils import _import_map_configuration_data, _import_resource_configurations_data, _import_user_configurations_data, add_audit_log
 from utils import (
     _import_map_configuration_data,
     _import_resource_configurations_data,
@@ -22,27 +18,25 @@ from utils import (
     add_audit_log,
     _get_general_configurations_data,
     _import_general_configurations_data,
-    save_unified_backup_schedule_settings # Added for unified schedule restore
+    save_unified_backup_schedule_settings,
+    save_scheduler_settings_from_json_data # For consistency in startup restore
 )
-from extensions import db # Ensure db is imported from extensions (already imported via models)
-from utils import update_task_log # Ensure this is imported from utils
-# datetime, time, timezone were listed twice, ensured they are covered
-# Removed redundant import of tempfile, shutil, re, time, csv, json, logging, os, datetime, timezone as they are covered above or standard
+from extensions import db
+from utils import update_task_log
 
-from flask_migrate import upgrade as flask_db_upgrade # <<< ADDED IMPORT
+# from flask_migrate import upgrade as flask_db_upgrade # No longer called here
 
 try:
     from azure.storage.fileshare import ShareServiceClient, ShareClient, ShareDirectoryClient, ShareFileClient
-except ImportError:  # pragma: no cover - azure sdk optional
+except ImportError:
     ShareServiceClient = None
     ShareClient = None
     ShareDirectoryClient = None
     ShareFileClient = None
-    if 'ResourceNotFoundError' not in globals(): # Defensive
+    if 'ResourceNotFoundError' not in globals():
         ResourceNotFoundError = type('ResourceNotFoundError', (Exception,), {})
-    if 'HttpResponseError' not in globals(): # Defensive
+    if 'HttpResponseError' not in globals():
         HttpResponseError = type('HttpResponseError', (Exception,), {})
-
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -53,44 +47,37 @@ HASH_DB = os.path.join(DATA_DIR, 'backup_hashes.db')
 
 logger = logging.getLogger(__name__)
 
-
+# ... (list_booking_data_json_backups, delete_booking_data_json_backup, restore_booking_data_to_point_in_time, download_booking_data_json_backup - remain unchanged) ...
 def list_booking_data_json_backups():
     logger.info("Attempting to list unified booking data JSON backups from Azure.")
     all_backups = []
-
     try:
         service_client = _get_service_client()
         share_name = os.environ.get('AZURE_BOOKING_DATA_SHARE', 'booking-data-backups')
         if not share_name:
             logger.error("Azure share name for booking data backups is not configured (AZURE_BOOKING_DATA_SHARE).")
             return []
-
         share_client = service_client.get_share_client(share_name)
         if not _client_exists(share_client):
             logger.warning(f"Azure share '{share_name}' not found. Cannot list booking data backups.")
             return []
-
         base_backup_dir_client = share_client.get_directory_client(AZURE_BOOKING_DATA_PROTECTION_DIR)
         if not _client_exists(base_backup_dir_client):
             logger.info(f"Base backup directory '{AZURE_BOOKING_DATA_PROTECTION_DIR}' not found in share '{share_name}'. No backups to list.")
             return []
-
         backup_sources = [
             {"subdir": "manual_full_json", "type": "manual_full_json", "name_pattern": re.compile(r"manual_full_booking_export_(\d{8}_\d{6})\.json")}
         ]
-
         for source in backup_sources:
             source_dir_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{source['subdir']}"
             dir_client = share_client.get_directory_client(source_dir_path)
             if not _client_exists(dir_client):
                 logger.info(f"Backup subdirectory '{source_dir_path}' not found. Skipping.")
                 continue
-
             logger.info(f"Scanning for backups in '{source_dir_path}' of type '{source['type']}'.")
             for item in dir_client.list_directories_and_files():
                 if item['is_directory']:
                     continue
-
                 filename = item['name']
                 match = source['name_pattern'].match(filename)
                 if match:
@@ -214,7 +201,6 @@ def restore_booking_data_to_point_in_time(app, selected_filename, selected_type,
                         return datetime.fromisoformat(dt_str) if isinstance(dt_str, str) else None
                     def parse_time_optional(t_str):
                         if not t_str: return None
-                        # Ensure this handles various time formats potentially stored, or standardize export
                         try:
                             return datetime.strptime(t_str, '%H:%M:%S').time() if isinstance(t_str, str) else None
                         except ValueError:
@@ -304,8 +290,8 @@ MAP_CONFIG_FILENAME_PREFIX = 'map_config_'
 RESOURCE_CONFIG_FILENAME_PREFIX = "resource_configs_"
 USER_CONFIG_FILENAME_PREFIX = "user_configs_"
 SCHEDULER_SETTINGS_FILENAME_PREFIX = "scheduler_settings_"
-GENERAL_CONFIGS_FILENAME_PREFIX = "general_configs_" # New prefix for general configurations
-UNIFIED_SCHEDULE_FILENAME_PREFIX = "unified_booking_backup_schedule_" # New prefix for unified schedule
+GENERAL_CONFIGS_FILENAME_PREFIX = "general_configs_"
+UNIFIED_SCHEDULE_FILENAME_PREFIX = "unified_booking_backup_schedule_"
 BOOKING_FULL_JSON_EXPORTS_DIR = 'booking_full_json_exports'
 AZURE_BOOKING_DATA_PROTECTION_DIR = 'booking_data_protection_backups'
 BOOKING_DATA_FULL_DIR_SUFFIX = "full"
@@ -1431,7 +1417,11 @@ def perform_startup_restore_sequence(app_for_context):
     app_logger = app_for_context.logger
     app_logger.info("Initiating startup restore sequence from Azure.")
     local_temp_dir = None
-    restore_status = {"status": "failure", "message": "Startup restore sequence initiated but not completed."}
+    # Initialize with a more neutral/optimistic status, will be changed if errors occur
+    restore_status = {"status": "success", "message": "Startup restore sequence initiated."}
+    # Track if any component actually failed to set partial_failure correctly
+    any_component_failed_apply = False
+
     try:
         local_temp_dir = tempfile.mkdtemp(prefix="startup_restore_")
         app_logger.info(f"Created temporary directory for downloads: {local_temp_dir}")
@@ -1442,6 +1432,7 @@ def perform_startup_restore_sequence(app_for_context):
             msg = f"Azure share '{system_backup_share_name}' not found. Cannot perform startup restore."
             app_logger.error(msg)
             restore_status["message"] = msg
+            restore_status["status"] = "failure" # Critical early failure
             raise Exception(msg)
 
         app_logger.info(f"Successfully connected to Azure share '{system_backup_share_name}'.")
@@ -1449,16 +1440,13 @@ def perform_startup_restore_sequence(app_for_context):
         if not available_backups:
             msg = "No full system backup sets found in Azure. Skipping startup restore."
             app_logger.info(msg)
-            # This is not an error, just no backups to restore.
             restore_status["status"] = "success_no_action"
             restore_status["message"] = msg
-            # No need to raise Exception here, allow finally block to clean up temp dir.
             return restore_status
 
         latest_backup_timestamp = available_backups[0]
         app_logger.info(f"Latest full system backup timestamp found: {latest_backup_timestamp}")
 
-        # Construct paths based on the latest backup timestamp
         backup_root_on_share = f"{FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{latest_backup_timestamp}"
         manifest_filename = f"backup_manifest_{latest_backup_timestamp}.json"
         manifest_path_on_share = f"{backup_root_on_share}/{COMPONENT_SUBDIR_MANIFEST}/{manifest_filename}"
@@ -1469,167 +1457,103 @@ def perform_startup_restore_sequence(app_for_context):
             msg = f"Failed to download manifest file '{manifest_path_on_share}'. Startup restore aborted."
             app_logger.error(msg)
             restore_status["message"] = msg
-            raise Exception(msg) # Critical failure if manifest cannot be downloaded
+            restore_status["status"] = "failure" # Critical
+            raise Exception(msg)
 
         app_logger.info(f"Manifest downloaded to {local_manifest_path}. Parsing...")
         with open(local_manifest_path, 'r', encoding='utf-8') as f_manifest:
             manifest_data = json.load(f_manifest)
 
-        downloaded_component_paths = {} # Store paths of successfully downloaded components
+        downloaded_component_paths = {}
 
-        # Download all components listed in the manifest
         for component in manifest_data.get("components", []):
             comp_type = component.get("type")
-            comp_name_in_manifest = component.get("name", "UnknownComponent") # Use 'name' from manifest
-            comp_path_in_backup_set = component.get("path_in_backup") # Relative path within the backup set
-
-            # original_filename is already part of path_in_backup_set if it's a file
-            # e.g. database/site_YYYYMMDD_HHMMSS.db or configurations/map_config_YYYYMMDD_HHMMSS.json
-            # For media, path_in_backup_set would be 'media/floor_map_uploads' or 'media/resource_uploads'
+            comp_name_in_manifest = component.get("name", "UnknownComponent")
+            comp_path_in_backup_set = component.get("path_in_backup")
 
             if not comp_path_in_backup_set:
                 app_logger.warning(f"Component '{comp_name_in_manifest}' (Type: {comp_type}) in manifest has no 'path_in_backup'. Skipping.")
                 continue
-
             full_path_on_share = f"{backup_root_on_share}/{comp_path_in_backup_set}"
-
-            # Determine local download path carefully
-            # For files, it's straightforward. For media (directories), we handle them differently.
-            if comp_type == "media": # This component entry is for a directory of media files
-                # The actual media files are not downloaded here, but their parent directory structure is noted.
-                # The restore_media_component function will handle listing and downloading individual files.
+            if comp_type == "media":
                 app_logger.info(f"Media component '{comp_name_in_manifest}' identified. Path on share: {full_path_on_share}. Individual files will be handled by media restore logic.")
-                # We can store the base path for media if needed, or rely on manifest structure for media restore.
-                # For now, let's assume restore_media_component will use this info.
-                # Example: downloaded_component_paths['media_floor_map_uploads_source_path'] = full_path_on_share
-                # However, the current structure seems to download individual files, not entire directories at this stage.
-                # The current loop downloads files. If a "media" component is just a directory path, it needs special handling.
-                # The manifest currently has: {"type": "media", "name": "media_files", "path_in_backup": "media"}
-                # This suggests the "media" component itself is a directory.
-                # Let's refine: if comp_type is "media", we expect comp_path_in_backup to be like "media/floor_map_uploads"
-
-                # The current manifest structure has a single "media" component with path "media".
-                # Individual media subdirectories (floor_map_uploads, resource_uploads) are not separate components.
-                # This means the media restoration step needs to handle these subdirectories.
-                # So, we skip the generic file download for the top-level "media" directory entry.
-                if comp_path_in_backup_set == COMPONENT_SUBDIR_MEDIA: # e.g. "media"
-                     app_logger.info(f"Top-level media directory component '{comp_path_in_backup_set}' noted. Actual file restoration will occur in media restore phase.")
-                     # We need to ensure restore_media_component handles the sub-folders like 'floor_map_uploads' and 'resource_uploads'
-                     # by iterating through them based on the 'media' component path.
-                     downloaded_component_paths[comp_type] = {"base_path_on_share": full_path_on_share} # Store base path for media
-                     continue # Skip generic file download for the media directory itself.
-                else: # Should not happen with current manifest, but good for robustness
-                     app_logger.warning(f"Unexpected media component path '{comp_path_in_backup_set}'. Expected '{COMPONENT_SUBDIR_MEDIA}'. Skipping generic download.")
-                     continue
-
-
-            # For non-media files (db, configs)
-            # Use the actual filename from the path for the local download name
+                if comp_path_in_backup_set == COMPONENT_SUBDIR_MEDIA:
+                     downloaded_component_paths[comp_type] = {"base_path_on_share": full_path_on_share}
+                else:
+                     app_logger.warning(f"Unexpected media component path '{comp_path_in_backup_set}'. Expected '{COMPONENT_SUBDIR_MEDIA}'. Skipping.")
+                continue
             local_filename_for_download = os.path.basename(comp_path_in_backup_set)
             local_download_path = os.path.join(local_temp_dir, local_filename_for_download)
-
             app_logger.info(f"Downloading component file: {comp_name_in_manifest} (Type: {comp_type}) from {full_path_on_share} to {local_download_path}")
             if download_file(share_client, full_path_on_share, local_download_path):
                 app_logger.info(f"Successfully downloaded {comp_name_in_manifest} to {local_download_path}")
-                # Use a consistent key for downloaded_component_paths, e.g., the 'name' from manifest if unique, or type for db.
-                storage_key = comp_name_in_manifest if comp_type == "config" else comp_type # e.g. 'map_config' or 'database'
+                storage_key = comp_name_in_manifest if comp_type == "config" else comp_type
                 downloaded_component_paths[storage_key] = local_download_path
             else:
                 msg = f"Failed to download component file '{comp_name_in_manifest}' (Type: {comp_type}) from '{full_path_on_share}'. Startup restore might be incomplete."
                 app_logger.error(msg)
-                if comp_type == "database": # Database is critical
-                    restore_status["message"] = msg
-                    raise Exception(msg) # Abort if database download fails
-                # For other components, log error and continue (system might be partially restored)
-                if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
-                    restore_status["message"] += f"; {msg}"
-                else:
-                    restore_status["message"] = msg
-                # Update status to indicate partial failure if not already critical
-                if restore_status["status"] != "failure":
-                    restore_status["status"] = "partial_failure"
+                restore_status["message"] = msg # Update message
+                restore_status["status"] = "partial_failure" # Mark as partial
+                any_component_failed_apply = True # Track failure
+                if comp_type == "database":
+                    app_logger.critical("CRITICAL: Database component download failed. Aborting restore sequence.")
+                    restore_status["status"] = "failure"
+                    raise Exception(msg)
 
-
-        # Proceed with applying the downloaded components
+        # --- Apply downloaded components ---
         with app_for_context.app_context():
-            app_logger.info("Entering app_context for applying restored components.")
+            app_logger.info("STARTUP_RESTORE_LOG: Entering app_context for applying restored components.")
+
+            # 1. Database
             if "database" in downloaded_component_paths:
                 local_db_path = downloaded_component_paths["database"]
                 live_db_uri = app_for_context.config.get('SQLALCHEMY_DATABASE_URI', '')
+                app_logger.info(f"STARTUP_RESTORE_LOG: Attempting to restore Database from {local_db_path}")
                 if live_db_uri.startswith('sqlite:///'):
                     live_db_path = live_db_uri.replace('sqlite:///', '', 1)
                     live_db_dir = os.path.dirname(live_db_path)
                     if not os.path.exists(live_db_dir): os.makedirs(live_db_dir, exist_ok=True)
                     try:
-                        app_logger.info(f"Attempting to replace live database at '{live_db_path}' with downloaded backup '{local_db_path}'.")
                         shutil.copyfile(local_db_path, live_db_path)
-                        app_logger.info("Database file successfully replaced by restored version.")
-
-                        # Run database migrations immediately after restoring the DB file
-                        app_logger.info("Attempting to apply database migrations programmatically on restored database...")
-                        print("DEBUG: CHECKPOINT PRE-MIGRATION")
-                        migration_completed_successfully = False
+                        app_logger.info("STARTUP_RESTORE_LOG: Database file successfully replaced by restored version.")
+                        # Migrations are handled by init_setup.py after this function.
                         try:
-                            # flask_db_upgrade() # This uses the current app context - TEMPORARILY COMMENTED OUT FOR DEBUGGING
-                            migration_completed_successfully = True # Assume success for now if commented out
-                            print("DEBUG: CHECKPOINT POST-MIGRATION (flask_db_upgrade was here, now commented out)")
-                            app_logger.info("Database migrations step bypassed for debugging in perform_startup_restore_sequence. Migrations should be handled by init_setup.py's init_db.")
-
-                            # Now that migrations have run, attempt to log the audit event
-                            try:
-                                add_audit_log("System Restore", f"Database file replaced and migrations applied from startup sequence using backup {latest_backup_timestamp}.")
-                                app_logger.info("Audit log entry for database restore and migration added successfully.")
-                            except Exception as e_audit:
-                                app_logger.warning(f"Could not write audit log for system restore (db file replaced & migrated): {e_audit}", exc_info=True)
-
-                        except Exception as e_migrate:
-                            msg = f"CRITICAL: Error applying database migrations after DB restore: {e_migrate}. The database may be in an inconsistent state."
-                            app_logger.error(msg, exc_info=True)
-                            restore_status["message"] = msg
-                            restore_status["status"] = "failure"
-                            # Raising an exception here will stop further processing in perform_startup_restore_sequence
-                            # and the error will be caught by the main try-except block in that function.
-                            raise Exception(msg)
-
+                            add_audit_log("System Restore", f"Database file replaced from startup sequence using backup {latest_backup_timestamp}. Migrations to be run by init_setup.")
+                            app_logger.info("STARTUP_RESTORE_LOG: Database replacement audit log successful.")
+                        except Exception as e_audit:
+                            app_logger.warning(f"STARTUP_RESTORE_LOG: Could not write audit log for system restore (db file replaced): {e_audit}", exc_info=True)
                     except Exception as e_db_restore:
-                        msg = f"Error replacing live database with restored version (before migrations): {e_db_restore}"
-                        app_logger.error(msg, exc_info=True)
+                        msg = f"Error replacing live database with restored version: {e_db_restore}"
+                        app_logger.error(f"STARTUP_RESTORE_LOG: {msg}", exc_info=True)
                         restore_status["message"] = msg
+                        restore_status["status"] = "failure" # DB copy is critical
+                        any_component_failed_apply = True
                         raise Exception(msg)
-                else: # Corresponds to: if live_db_uri.startswith('sqlite:///')
-                    app_logger.warning(f"STARTUP_RESTORE_LOG: Database URI '{live_db_uri}' is not SQLite. Skipping database file replacement and migrations.")
-                    print(f"DEBUG: Database URI '{live_db_uri}' is not SQLite, skipping DB file replacement.")
-            else: # Corresponds to: if "database" in downloaded_component_paths
-                app_logger.warning("STARTUP_RESTORE_LOG: Database component not found in downloaded files. Skipping database restore and migrations.")
-                print("DEBUG: Database component not found, skipping DB restore.")
+                else:
+                    app_logger.warning(f"STARTUP_RESTORE_LOG: Database URI '{live_db_uri}' is not SQLite. Skipping database file replacement.")
+            else:
+                app_logger.warning("STARTUP_RESTORE_LOG: Database component not found in downloaded files. Skipping database restore.")
 
-            # Correct placement for starting JSON config phase logs
-            print("DEBUG: STARTING JSON CONFIG APPLICATION PHASE")
             app_logger.info("STARTUP_RESTORE_LOG: Starting JSON config application phase.")
 
+            # 2. Map, Resource, User Configs
             config_types_map = {
                 "map_config": (_import_map_configuration_data, "Map Configuration"),
                 "resource_configs": (_import_resource_configurations_data, "Resource Configurations"),
                 "user_configs": (_import_user_configurations_data, "User Configurations")}
 
-            print(f"DEBUG: Before map/resource/user config loop. downloaded_component_paths keys: {list(downloaded_component_paths.keys())}")
             app_logger.info(f"STARTUP_RESTORE_LOG: Before map/resource/user config loop. Downloaded keys: {list(downloaded_component_paths.keys())}")
-
             for config_key, (import_func, log_name) in config_types_map.items():
                 app_logger.info(f"STARTUP_RESTORE_LOG: In loop, checking config_key: {config_key}")
-                print(f"DEBUG: In loop, checking config_key: {config_key}")
                 if config_key in downloaded_component_paths:
                     local_config_path = downloaded_component_paths[config_key]
-                    log_message_attempt = f"STARTUP_RESTORE_LOG: Attempting to restore {log_name} from {local_config_path}"
-                    app_logger.info(log_message_attempt)
-                    print(log_message_attempt) # Explicit print for init_setup.py
+                    app_logger.info(f"STARTUP_RESTORE_LOG: Attempting to restore {log_name} from {local_config_path}")
                     try:
                         with open(local_config_path, 'r', encoding='utf-8') as f_config:
                             config_data = json.load(f_config)
-
                         raw_import_result = import_func(config_data)
                         import_successful = False
-                        message = "Import result not processed by startup sequence."
+                        message = f"{log_name} import result not fully processed."
                         errors_detail = "N/A"
 
                         if config_key == "map_config":
@@ -1638,234 +1562,169 @@ def perform_startup_restore_sequence(app_for_context):
                             message = summary_dict.get('message', f'{log_name} import status: {status_code}')
                             if not import_successful: errors_detail = str(summary_dict.get('errors', []))
                         elif config_key == "resource_configs":
-                            _, _, res_errors, _, status_code, msg = raw_import_result
+                            _, _, res_errors, _, status_code, msg_res = raw_import_result
                             import_successful = status_code < 300
-                            message = msg
+                            message = msg_res
                             if not import_successful: errors_detail = str(res_errors)
                         elif config_key == "user_configs":
-                            import_successful = raw_import_result.get('success', False)
-                            message = raw_import_result.get('message', f'{log_name} import {"succeeded" if import_successful else "failed"}.')
-                            if not import_successful: errors_detail = str(raw_import_result.get('errors', []))
+                            summary_user = raw_import_result # This returns a dict
+                            import_successful = summary_user.get('success', False)
+                            message = summary_user.get('message', f'{log_name} import {"succeeded" if import_successful else "failed"}.')
+                            if not import_successful: errors_detail = str(summary_user.get('errors', []))
 
                         if import_successful:
-                            app_logger.info(f"{log_name} processed. Message: {message}")
+                            app_logger.info(f"STARTUP_RESTORE_LOG: {log_name} processed successfully. Message: {message}")
                         else:
-                            app_logger.error(f"Failed to restore {log_name}. Details: {errors_detail}. Full message: {message}")
-                            if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
-                                restore_status["message"] += f"; Failed to process {log_name}: {errors_detail}"
-                            else:
-                                restore_status["message"] = f"Failed to process {log_name}: {errors_detail}"
+                            any_component_failed_apply = True
+                            restore_status["status"] = "partial_failure"
+                            app_logger.error(f"STARTUP_RESTORE_LOG: Failed to restore {log_name}. Details: {errors_detail}. Full message: {message}")
+                            restore_status["message"] = f"{restore_status.get('message','')}; Failed to process {log_name}: {errors_detail or message}"
+
                     except Exception as e_config_restore:
-                        app_logger.error(f"Error during {log_name} import stage: {e_config_restore}", exc_info=True)
-                        if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
-                            restore_status["message"] += f"; Error during {log_name} import stage: {str(e_config_restore)}"
-                        else:
-                             restore_status["message"] = f"Error during {log_name} import stage: {str(e_config_restore)}"
+                        any_component_failed_apply = True
+                        restore_status["status"] = "partial_failure"
+                        app_logger.error(f"STARTUP_RESTORE_LOG: Error during {log_name} import stage: {e_config_restore}", exc_info=True)
+                        restore_status["message"] = f"{restore_status.get('message','')}; Error during {log_name} import: {str(e_config_restore)}"
                 else:
                     app_logger.info(f"STARTUP_RESTORE_LOG: {log_name} component not found in downloaded_component_paths. Skipping its restore.")
-                    print(f"DEBUG: {log_name} component not found in downloaded_component_paths. Skipping.")
 
-            # Restore scheduler_settings.json
-            print("DEBUG: Checking for scheduler_settings component...")
+            # 3. Scheduler Settings
             app_logger.info("STARTUP_RESTORE_LOG: Checking for scheduler_settings component.")
             if "scheduler_settings" in downloaded_component_paths:
                 local_scheduler_path = downloaded_component_paths["scheduler_settings"]
-                # Correctly determine the live data directory using app config or a robust relative path
-                # DATA_DIR is module-level, ensure it's the correct one for the live app.
-                # Using app_for_context.config.get('DATA_DIR', DATA_DIR) is safer if DATA_DIR is configured in Flask.
-                # For now, assuming module-level DATA_DIR is appropriate.
-                live_scheduler_path = os.path.join(DATA_DIR, 'scheduler_settings.json') # DATA_DIR is BASE_DIR/data
-                live_scheduler_dir = os.path.dirname(live_scheduler_path)
-                if not os.path.exists(live_scheduler_dir): os.makedirs(live_scheduler_dir, exist_ok=True)
+                app_logger.info(f"STARTUP_RESTORE_LOG: Attempting to restore Scheduler Settings from {local_scheduler_path}")
                 try:
-                    app_logger.info(f"Attempting to replace live scheduler settings at '{live_scheduler_path}' with downloaded backup '{local_scheduler_path}'.")
-                    shutil.copyfile(local_scheduler_path, live_scheduler_path)
-                    app_logger.info("Scheduler settings successfully restored.")
-                    try:
-                        add_audit_log("System Restore", f"Scheduler settings restored from startup sequence using backup {latest_backup_timestamp}.")
-                        app_logger.info("STARTUP_RESTORE_LOG: Scheduler settings audit log successful.")
-                    except Exception as e_audit: # Should be specific to DB errors if logger/DB is not ready
-                        app_logger.warning(f"STARTUP_RESTORE_LOG: Could not write audit log for system restore (scheduler_settings): {e_audit}")
-                except Exception as e_sched_restore:
-                    app_logger.error(f"Error replacing live scheduler settings: {e_sched_restore}", exc_info=True)
-                    # Update status and message for partial failure
-                    restore_status["status"] = "partial_failure"
-                    error_detail = f"Error during scheduler settings restore: {e_sched_restore}"
-                    if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
-                        restore_status["message"] += f"; {error_detail}"
+                    with open(local_scheduler_path, 'r', encoding='utf-8') as f_sched:
+                        scheduler_data = json.load(f_sched)
+                    summary_sched, status_sched = save_scheduler_settings_from_json_data(scheduler_data)
+                    app_logger.info(f"STARTUP_RESTORE_LOG: save_scheduler_settings_from_json_data result - Status: {status_sched}, Summary: {summary_sched}")
+                    if status_sched < 300:
+                        app_logger.info(f"STARTUP_RESTORE_LOG: Scheduler settings applied: {summary_sched.get('message', 'Success')}")
+                        add_audit_log("System Restore", f"Scheduler settings restored from startup using backup {latest_backup_timestamp}. Status: {summary_sched.get('message', 'Success')}")
                     else:
-                        restore_status["message"] = error_detail
+                        any_component_failed_apply = True
+                        restore_status["status"] = "partial_failure"
+                        app_logger.error(f"STARTUP_RESTORE_LOG: Failed to restore Scheduler Settings: {summary_sched.get('message', 'Unknown error')}. Errors: {summary_sched.get('errors', [])}")
+                        restore_status["message"] = f"{restore_status.get('message','')}; Failed Scheduler Settings: {summary_sched.get('message', 'Unknown')}"
+                except Exception as e_sched_restore:
+                    any_component_failed_apply = True
+                    restore_status["status"] = "partial_failure"
+                    app_logger.error(f"STARTUP_RESTORE_LOG: Error during Scheduler Settings import stage: {e_sched_restore}", exc_info=True)
+                    restore_status["message"] = f"{restore_status.get('message','')}; Error Scheduler Settings: {str(e_sched_restore)}"
             else:
-                app_logger.info("Scheduler settings component not found in downloaded files. Skipping its restore.")
+                app_logger.info("STARTUP_RESTORE_LOG: Scheduler settings component not found. Skipping.")
 
-            # Apply General Configurations (BookingSettings)
-            print("DEBUG: Checking for general_configs component...")
+            # 4. General Configurations (BookingSettings)
             app_logger.info("STARTUP_RESTORE_LOG: Checking for General Configurations (BookingSettings) component.")
             if "general_configs" in downloaded_component_paths:
                 local_general_configs_path = downloaded_component_paths["general_configs"]
-                app_logger.info(f"STARTUP_RESTORE_LOG: Attempting to restore General Configurations (BookingSettings) from {local_general_configs_path}")
-                print(f"DEBUG: Attempting to restore General Configurations (BookingSettings) from {local_general_configs_path}")
+                app_logger.info(f"STARTUP_RESTORE_LOG: Attempting to restore General Configurations from {local_general_configs_path}")
                 try:
                     with open(local_general_configs_path, 'r', encoding='utf-8') as f_gc:
                         general_configs_data = json.load(f_gc)
-
                     summary_gc, status_gc = _import_general_configurations_data(general_configs_data)
                     app_logger.info(f"STARTUP_RESTORE_LOG: _import_general_configurations_data result - Status: {status_gc}, Summary: {summary_gc}")
-
                     if status_gc < 300:
-                        app_logger.info(f"STARTUP_RESTORE_LOG: General Configurations (BookingSettings) applied: {summary_gc.get('message', 'Success')}")
-                        if summary_gc.get('errors') or summary_gc.get('warnings'):
-                             app_logger.warning(f"STARTUP_RESTORE_LOG: General Configurations import details - Errors: {summary_gc.get('errors', [])}, Warnings: {summary_gc.get('warnings', [])}")
-                        try:
-                            add_audit_log("System Restore", f"General Configurations (BookingSettings) restored from startup using backup {latest_backup_timestamp}. Status: {summary_gc.get('message', 'Success')}")
-                            app_logger.info("STARTUP_RESTORE_LOG: General configs audit log successful.")
-                        except Exception as e_audit_gc:
-                            app_logger.warning(f"STARTUP_RESTORE_LOG: Could not write audit log for startup restore (general_configs): {e_audit_gc}")
+                        app_logger.info(f"STARTUP_RESTORE_LOG: General Configurations applied: {summary_gc.get('message', 'Success')}")
+                        add_audit_log("System Restore", f"General Configurations (BookingSettings) restored from startup using backup {latest_backup_timestamp}. Status: {summary_gc.get('message', 'Success')}")
                     else:
-                        app_logger.error(f"STARTUP_RESTORE_LOG: Failed to restore General Configurations (BookingSettings): {summary_gc.get('message', 'Unknown error')}. Errors: {summary_gc.get('errors', [])}")
+                        any_component_failed_apply = True
                         restore_status["status"] = "partial_failure"
-                        error_detail_gc = f"Error during General Configurations restore: {summary_gc.get('message', 'Unknown error')}"
-                        if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
-                            restore_status["message"] += f"; {error_detail_gc}"
-                        else:
-                            restore_status["message"] = error_detail_gc
+                        app_logger.error(f"STARTUP_RESTORE_LOG: Failed to restore General Configurations: {summary_gc.get('message', 'Unknown error')}. Errors: {summary_gc.get('errors', [])}")
+                        restore_status["message"] = f"{restore_status.get('message','')}; Failed General Configs: {summary_gc.get('message', 'Unknown')}"
                 except Exception as e_gc_restore:
-                    app_logger.error(f"STARTUP_RESTORE_LOG: Error during General Configurations (BookingSettings) import stage: {e_gc_restore}", exc_info=True)
+                    any_component_failed_apply = True
                     restore_status["status"] = "partial_failure"
-                    error_detail_gc_exc = f"Exception during General Configurations restore: {str(e_gc_restore)}"
-                    if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
-                        restore_status["message"] += f"; {error_detail_gc_exc}"
-                    else:
-                         restore_status["message"] = error_detail_gc_exc
+                    app_logger.error(f"STARTUP_RESTORE_LOG: Error during General Configurations import stage: {e_gc_restore}", exc_info=True)
+                    restore_status["message"] = f"{restore_status.get('message','')}; Error General Configs: {str(e_gc_restore)}"
             else:
-                app_logger.info("STARTUP_RESTORE_LOG: General Configurations (BookingSettings) component not found in downloaded files. Skipping its restore.")
+                app_logger.info("STARTUP_RESTORE_LOG: General Configurations component not found. Skipping.")
 
-            # Apply Unified Booking Backup Schedule Settings
-            print("DEBUG: Checking for unified_booking_backup_schedule component...")
+            # 5. Unified Booking Backup Schedule Settings
             app_logger.info("STARTUP_RESTORE_LOG: Checking for Unified Booking Backup Schedule component.")
             if "unified_booking_backup_schedule" in downloaded_component_paths:
                 local_unified_sched_path = downloaded_component_paths["unified_booking_backup_schedule"]
-                app_logger.info(f"STARTUP_RESTORE_LOG: Attempting to restore Unified Booking Backup Schedule from {local_unified_sched_path}")
-                print(f"DEBUG: Attempting to restore Unified Booking Backup Schedule from {local_unified_sched_path}")
+                app_logger.info(f"STARTUP_RESTORE_LOG: Attempting to restore Unified Schedule from {local_unified_sched_path}")
                 try:
                     with open(local_unified_sched_path, 'r', encoding='utf-8') as f_us:
                         unified_sched_data = json.load(f_us)
-
-                    # Corrected: Call the directly imported function
                     save_success, save_message = save_unified_backup_schedule_settings(unified_sched_data)
                     app_logger.info(f"STARTUP_RESTORE_LOG: save_unified_backup_schedule_settings result - Success: {save_success}, Message: {save_message}")
-
                     if save_success:
-                        app_logger.info(f"STARTUP_RESTORE_LOG: Unified Booking Backup Schedule settings applied: {save_message}")
-                        try:
-                            add_audit_log("System Restore", f"Unified Backup Schedule restored from startup using backup {latest_backup_timestamp}. Status: {save_message}")
-                            app_logger.info("STARTUP_RESTORE_LOG: Unified backup schedule audit log successful.")
-                        except Exception as e_audit_us:
-                            app_logger.warning(f"STARTUP_RESTORE_LOG: Could not write audit log for startup restore (unified_schedule): {e_audit_us}")
+                        app_logger.info(f"STARTUP_RESTORE_LOG: Unified Backup Schedule settings applied: {save_message}")
+                        add_audit_log("System Restore", f"Unified Backup Schedule restored from startup using backup {latest_backup_timestamp}. Status: {save_message}")
                     else:
-                        app_logger.error(f"STARTUP_RESTORE_LOG: Failed to restore Unified Booking Backup Schedule: {save_message}")
+                        any_component_failed_apply = True
                         restore_status["status"] = "partial_failure"
-                        error_detail_us = f"Error during Unified Backup Schedule restore: {save_message}"
-                        if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
-                            restore_status["message"] += f"; {error_detail_us}"
-                        else:
-                            restore_status["message"] = error_detail_us
+                        app_logger.error(f"STARTUP_RESTORE_LOG: Failed to restore Unified Backup Schedule: {save_message}")
+                        restore_status["message"] = f"{restore_status.get('message','')}; Failed Unified Schedule: {save_message}"
                 except Exception as e_us_restore:
-                    app_logger.error(f"STARTUP_RESTORE_LOG: Error during Unified Booking Backup Schedule import stage: {e_us_restore}", exc_info=True)
+                    any_component_failed_apply = True
                     restore_status["status"] = "partial_failure"
-                    error_detail_us_exc = f"Exception during Unified Backup Schedule restore: {str(e_us_restore)}"
-                    if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
-                        restore_status["message"] += f"; {error_detail_us_exc}"
-                    else:
-                         restore_status["message"] = error_detail_us_exc
+                    app_logger.error(f"STARTUP_RESTORE_LOG: Error during Unified Backup Schedule import stage: {e_us_restore}", exc_info=True)
+                    restore_status["message"] = f"{restore_status.get('message','')}; Error Unified Schedule: {str(e_us_restore)}"
             else:
-                app_logger.info("STARTUP_RESTORE_LOG: Unified Booking Backup Schedule component not found in downloaded files. Skipping its restore.")
+                app_logger.info("STARTUP_RESTORE_LOG: Unified Backup Schedule component not found. Skipping.")
 
-            # Restore Media Files (Floor Maps and Resource Uploads)
-            print("DEBUG: Checking for media component...")
+            # 6. Media Files
             app_logger.info("STARTUP_RESTORE_LOG: Checking for Media component.")
             if "media" in downloaded_component_paths and isinstance(downloaded_component_paths["media"], dict):
                 media_component_info = downloaded_component_paths["media"]
                 media_base_path_on_share = media_component_info.get("base_path_on_share")
-                print(f"DEBUG: Media base_path_on_share from downloaded_component_paths: {media_base_path_on_share}")
+                app_logger.info(f"STARTUP_RESTORE_LOG: Media base_path_on_share: {media_base_path_on_share}")
                 if media_base_path_on_share:
                     media_sources_to_restore = [
-                        {"name": "Floor Maps",
-                         "azure_subdir": "floor_map_uploads", # Subdirectory name on Azure under the 'media' component path
-                         "local_target_dir": FLOOR_MAP_UPLOADS}, # Absolute local path
-                        {"name": "Resource Uploads",
-                         "azure_subdir": "resource_uploads",
-                         "local_target_dir": RESOURCE_UPLOADS}
+                        {"name": "Floor Maps", "azure_subdir": "floor_map_uploads", "local_target_dir": FLOOR_MAP_UPLOADS},
+                        {"name": "Resource Uploads", "azure_subdir": "resource_uploads", "local_target_dir": RESOURCE_UPLOADS}
                     ]
                     for media_src in media_sources_to_restore:
                         azure_full_subdir_path = f"{media_base_path_on_share}/{media_src['azure_subdir']}"
-                        app_logger.info(f"Attempting to restore media for {media_src['name']} from Azure path '{azure_full_subdir_path}' to local '{media_src['local_target_dir']}'.")
-
-                        # Ensure local target directory exists and is empty (optional, but good for clean restore)
+                        app_logger.info(f"STARTUP_RESTORE_LOG: Attempting to restore media for {media_src['name']} from Azure path '{azure_full_subdir_path}' to local '{media_src['local_target_dir']}'.")
                         if os.path.exists(media_src['local_target_dir']):
-                            app_logger.info(f"Clearing existing local media directory: {media_src['local_target_dir']}")
-                            try:
-                                shutil.rmtree(media_src['local_target_dir'])
-                            except Exception as e_rm:
-                                app_logger.error(f"Failed to clear local media directory {media_src['local_target_dir']}: {e_rm}")
-                                # Decide if this is critical enough to stop this part of media restore
-                        try:
-                            os.makedirs(media_src['local_target_dir'], exist_ok=True)
-                        except Exception as e_mkdir:
-                             app_logger.error(f"Failed to create local media directory {media_src['local_target_dir']}: {e_mkdir}")
-                             continue # Skip this media source if dir can't be made
+                            app_logger.info(f"STARTUP_RESTORE_LOG: Clearing existing local media directory: {media_src['local_target_dir']}")
+                            try: shutil.rmtree(media_src['local_target_dir'])
+                            except Exception as e_rm: app_logger.error(f"STARTUP_RESTORE_LOG: Failed to clear local media directory {media_src['local_target_dir']}: {e_rm}")
+                        try: os.makedirs(media_src['local_target_dir'], exist_ok=True)
+                        except Exception as e_mkdir: app_logger.error(f"STARTUP_RESTORE_LOG: Failed to create local media directory {media_src['local_target_dir']}: {e_mkdir}"); continue
 
                         media_success, media_msg, media_err_detail = restore_media_component(
-                            share_client=share_client,
-                            azure_component_path_on_share=azure_full_subdir_path, # e.g., .../media/floor_map_uploads
-                            local_target_folder_base=media_src['local_target_dir'],
-                            media_component_name=media_src['name'],
-                            task_id=None # No task_id for startup sequence, using app_logger
+                            share_client=share_client, azure_component_path_on_share=azure_full_subdir_path,
+                            local_target_folder_base=media_src['local_target_dir'], media_component_name=media_src['name']
                         )
                         if media_success:
-                            app_logger.info(f"{media_src['name']} restored successfully. {media_msg}")
+                            app_logger.info(f"STARTUP_RESTORE_LOG: {media_src['name']} restored successfully. {media_msg}")
                         else:
-                            app_logger.error(f"Failed to restore {media_src['name']}. Message: {media_msg}. Details: {media_err_detail}")
+                            any_component_failed_apply = True
                             restore_status["status"] = "partial_failure"
-                            error_detail = f"Failed media restore for {media_src['name']}: {media_msg}"
-                            if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
-                                restore_status["message"] += f"; {error_detail}"
-                            else:
-                                 restore_status["message"] = error_detail
+                            app_logger.error(f"STARTUP_RESTORE_LOG: Failed to restore {media_src['name']}. Message: {media_msg}. Details: {media_err_detail}")
+                            restore_status["message"] = f"{restore_status.get('message','')}; Failed media {media_src['name']}: {media_msg}"
                 else:
-                    app_logger.warning("Media component base path not found in downloaded_component_paths. Skipping media files restore.")
+                    app_logger.warning("STARTUP_RESTORE_LOG: Media component base path not found. Skipping media files restore.")
             else:
-                app_logger.info("Media component not found in downloaded_component_paths. Skipping media files restore.")
+                app_logger.info("STARTUP_RESTORE_LOG: Media component not found. Skipping media files restore.")
+
+            # Final status update
+            if not any_component_failed_apply and restore_status["status"] != "failure": # Check if it wasn't changed from initial "success"
+                restore_status["status"] = "success"
+                restore_status["message"] = f"Startup restore sequence completed successfully from backup {latest_backup_timestamp}."
+            elif any_component_failed_apply and restore_status["status"] != "failure":
+                 restore_status["status"] = "partial_failure"
+                 # Message would have been built up by failing components
+                 if restore_status["message"] == "Startup restore sequence initiated.": # If only warnings, not errors that change message
+                     restore_status["message"] = f"Startup restore sequence for {latest_backup_timestamp} completed with some warnings or non-critical issues."
 
 
-            # Final status update based on accumulated results
-            if restore_status["message"] == "Startup restore sequence initiated but not completed." and restore_status["status"] == "failure":
-                 # This means no specific error message was set, but status remained 'failure' (e.g. critical DB download fail)
-                 # This should ideally be caught earlier, but as a fallback:
-                 restore_status["message"] = "A critical error occurred early in the restore process."
-
-            elif restore_status["status"] != "failure" and restore_status["status"] != "partial_failure":
-                 # If it's not 'failure' or 'partial_failure', and message is still default, it means all steps that ran were fine.
-                 if restore_status["message"] == "Startup restore sequence initiated but not completed.":
-                    restore_status["status"] = "success"
-                    restore_status["message"] = f"Startup restore sequence completed successfully from backup {latest_backup_timestamp}."
-                 # If message was updated by a non-critical step (e.g. DB download failed but others attempted)
-                 # and status is not failure, it might be partial_success.
-                 # This logic needs to be robust: if any critical step failed, status is "failure".
-                 # If any non-critical step failed, status is "partial_failure".
-                 # If all attempted steps succeeded, status is "success".
-
-            app_logger.info(f"Restore application process within app_context finished. Status: {restore_status['status']}, Message: {restore_status['message']}")
-        app_logger.info("Exited app_context for applying restored components.")
+            app_logger.info(f"STARTUP_RESTORE_LOG: Restore application process within app_context finished. Status: {restore_status['status']}, Message: {restore_status['message']}")
+        app_logger.info("STARTUP_RESTORE_LOG: Exited app_context for applying restored components.")
 
     except Exception as e_main:
-        app_logger.error(f"A critical error occurred during the startup restore sequence: {e_main}", exc_info=True)
-        # Ensure status reflects critical failure
+        app_logger.error(f"STARTUP_RESTORE_LOG: A critical error occurred during the startup restore sequence: {e_main}", exc_info=True)
         restore_status["status"] = "failure"
-        if restore_status["message"] == "Startup restore sequence initiated but not completed." or not restore_status["message"]:
-            restore_status["message"] = f"Critical error during restore: {e_main}"
-        else: # Append if a message already exists
-            restore_status["message"] += f"; Critical error: {e_main}"
+        # Ensure message reflects the main error if it's still the default or append
+        if restore_status.get("message") == "Startup restore sequence initiated." or not restore_status.get("message"):
+            restore_status["message"] = f"Critical error during restore: {str(e_main)}"
+        else:
+            restore_status["message"] = f"{restore_status.get('message','')}; Critical error: {str(e_main)}"
     finally:
         if local_temp_dir and os.path.exists(local_temp_dir):
             try:
@@ -1874,12 +1733,13 @@ def perform_startup_restore_sequence(app_for_context):
             except Exception as e_cleanup:
                 app_logger.error(f"Failed to clean up temporary directory {local_temp_dir}: {e_cleanup}", exc_info=True)
 
-    # Final log of the outcome
-    app_logger.info(f"Startup restore sequence final status: {restore_status['status']}. Message: {restore_status['message']}")
+    app_logger.info(f"STARTUP_RESTORE_LOG: Startup restore sequence final status: {restore_status['status']}. Message: {restore_status['message']}")
     return restore_status
 
-# Appending the rest of the original file content (placeholders for brevity)
-# (Content of _get_service_client, _client_exists, etc. from the original file would be here)
-# Constants like AZURE_BOOKING_DATA_PROTECTION_DIR also need to be present.
-# For this operation, only the functions and imports shown above are strictly necessary
-# for the tool to accept the overwrite.
+# ... (rest of the file: create_full_backup, _recursively_delete_share_directory, etc. remain unchanged) ...
+# ... (download_component functions, verify_backup_set, delete_backup_set, etc. remain unchanged) ...
+# ... (backup_full_bookings_json, backup_if_changed remain unchanged) ...
+# ... (utility functions like _get_service_client, _client_exists, _emit_progress, _ensure_directory_exists, _create_share_with_retry, upload_file, download_file remain unchanged) ...
+# ... (constants at the end of the file, if any, remain unchanged) ...
+
+[end of azure_backup.py]
