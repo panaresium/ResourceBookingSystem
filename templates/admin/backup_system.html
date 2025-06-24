@@ -201,8 +201,20 @@
                     <label class="form-check-label" for="component-map_config">{{ _('Map Configuration (Floor map definitions & resource mappings on maps)') }}</label>
                 </div>
                 <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="resource_configs" id="component-resource_configs" name="components">
+                    <label class="form-check-label" for="component-resource_configs">{{ _('Resource Configurations (Details of each resource, excluding images)') }}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="user_configs" id="component-user_configs" name="components">
+                    <label class="form-check-label" for="component-user_configs">{{ _('User Configurations (User accounts and roles)') }}</label>
+                </div>
+                <div class="form-check">
                     <input class="form-check-input component-checkbox" type="checkbox" value="scheduler_settings" id="component-scheduler_settings" name="components">
                     <label class="form-check-label" for="component-scheduler_settings">{{ _('Scheduler Settings (Schedules, Startup Restore Setting)') }}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input component-checkbox" type="checkbox" value="general_configs" id="component-general_configs" name="components">
+                    <label class="form-check-label" for="component-general_configs">{{ _('General Application Settings (e.g., Booking Behaviors, Time Offset)') }}</label>
                 </div>
                 <div class="form-check">
                     <input class="form-check-input component-checkbox" type="checkbox" value="floor_maps" id="component-floor_maps" name="components">

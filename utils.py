@@ -1735,3 +1735,146 @@ __all__ = [
     'active_booking_statuses_for_conflict', 'DATA_DIR',
     'SCHEDULER_SETTINGS_FILE_PATH', 'DEFAULT_SCHEDULER_SETTINGS'
 ]
+
+def _get_general_configurations_data() -> dict:
+    """
+    Fetches general application configurations, currently from BookingSettings.
+    Assumes BookingSettings contains a single row of settings.
+    """
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
+    logger.info("Exporting general configurations data (BookingSettings).")
+
+    settings_data_list = []
+    try:
+        # Assuming BookingSettings is imported in utils.py
+        booking_settings = BookingSettings.query.first()
+        if booking_settings:
+            settings_data_list.append(booking_settings.to_dict())
+            message = "Successfully exported BookingSettings."
+        else:
+            message = "No BookingSettings record found to export."
+            logger.warning(message)
+
+        logger.info(message)
+        return {
+            'booking_settings': settings_data_list, # Store as a list, even if only one record
+            'message': message
+        }
+    except Exception as e:
+        error_message = f"Error exporting BookingSettings: {str(e)}"
+        logger.error(error_message, exc_info=True)
+        return {
+            'booking_settings': [],
+            'message': error_message,
+            'error': True
+        }
+
+def _import_general_configurations_data(config_data: dict) -> tuple[dict, int]:
+    """
+    Imports general application configurations, currently targeting BookingSettings.
+    Args:
+        config_data: A dictionary typically containing a 'booking_settings' key
+                     with a list of settings dictionaries (usually one).
+    Returns:
+        A tuple: (summary_dict, status_code)
+    """
+    logger = current_app.logger if current_app else logging.getLogger(__name__)
+    logger.info("Importing general configurations (BookingSettings).")
+
+    if not isinstance(config_data, dict):
+        msg = "Invalid input: config_data must be a dictionary."
+        logger.error(msg)
+        return ({'message': msg, 'errors': [msg], 'warnings': []}, 400)
+
+    booking_settings_list = config_data.get('booking_settings', [])
+    if not isinstance(booking_settings_list, list):
+        msg = "Invalid format: 'booking_settings' must be a list."
+        logger.error(msg)
+        return ({'message': msg, 'errors': [msg], 'warnings': []}, 400)
+
+    errors = []
+    warnings = []
+    processed_count = 0
+    updated_count = 0
+    created_count = 0
+
+    if not booking_settings_list:
+        warnings.append("No 'booking_settings' data found in the input. Nothing to import.")
+    else:
+        # Expecting only one item in the list for BookingSettings
+        if len(booking_settings_list) > 1:
+            warnings.append(f"Expected one BookingSettings object, found {len(booking_settings_list)}. Processing the first one only.")
+
+        settings_data_to_apply = booking_settings_list[0]
+        processed_count = 1
+
+        try:
+            # BookingSettings.from_dict handles finding or creating the record
+            # It needs the db.session, which can be accessed via current_app or passed in.
+            # For utils, it's better if db operations are managed by the caller or via app context.
+            # However, BookingSettings.from_dict was defined to take db_session.
+            # Let's assume db.session is available here as it is in other utils functions.
+
+            booking_settings_record = BookingSettings.from_dict(settings_data_to_apply, db.session)
+
+            if booking_settings_record:
+                # Determine if it was created or updated based on its state before from_dict
+                # This is a bit tricky without knowing original state. from_dict itself could return this.
+                # For now, let's assume if from_dict returns an object, it's effectively an update/creation.
+                # A simple way: check if ID was None before (if from_dict sets it).
+                # Or, more simply, assume an update if it existed, creation if not.
+                # BookingSettings.from_dict already adds to session if new.
+
+                # Let's refine: from_dict modifies or adds. We just need to commit.
+                # We can't easily tell if it was created or updated by from_dict's current design
+                # without querying again or modifying from_dict to return more info.
+                # For simplicity, let's assume "applied".
+
+                # For now, we'll count it as an update if it was found, create if not.
+                # This requires a query before calling from_dict, or changing from_dict.
+                # Let's adjust to a simpler "applied" count.
+
+                # A slightly better approach:
+                existing_settings = db.session.query(BookingSettings).first()
+                if existing_settings and existing_settings.id == booking_settings_record.id:
+                    updated_count = 1
+                else: # Was newly created by from_dict
+                    created_count = 1
+
+                # The commit will happen after all components are processed by the caller (e.g., restore API endpoint)
+                # For now, this function's responsibility is to prepare the object in the session.
+                # db.session.commit() # NO - commit should be handled by the calling restore orchestrator.
+
+            else:
+                errors.append("Failed to process BookingSettings data using from_dict (returned None).")
+
+        except Exception as e:
+            db.session.rollback() # Rollback if an error occurs during this specific import
+            error_msg = f"Error importing BookingSettings: {str(e)}"
+            errors.append(error_msg)
+            logger.error(error_msg, exc_info=True)
+
+
+    final_message_parts = [
+        f"BookingSettings processed: {processed_count} (Created: {created_count}, Updated: {updated_count})."
+    ]
+    status_code = 200
+
+    if warnings:
+        final_message_parts.append(f"Warnings: {'; '.join(warnings)}")
+    if errors:
+        final_message_parts.append(f"Errors: {'; '.join(errors)}")
+        status_code = 500 if not warnings else 207 # Error if errors, Multi-status if only warnings
+
+    final_message = " ".join(final_message_parts)
+    logger.info(f"BookingSettings import result: {final_message}")
+
+    summary = {
+        'message': final_message,
+        'errors': errors,
+        'warnings': warnings,
+        'processed': processed_count,
+        'created': created_count,
+        'updated': updated_count
+    }
+    return summary, status_code

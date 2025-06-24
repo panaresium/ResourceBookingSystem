@@ -111,6 +111,52 @@ class BookingSettings(db.Model):
     global_time_offset_hours = db.Column(db.Integer, nullable=False, default=0, server_default='0')
     auto_release_if_not_checked_in_minutes = db.Column(db.Integer, nullable=True, default=None)
 
+    def to_dict(self):
+        """Serializes the BookingSettings object to a dictionary."""
+        return {
+            'allow_past_bookings': self.allow_past_bookings,
+            'max_booking_days_in_future': self.max_booking_days_in_future,
+            'allow_multiple_resources_same_time': self.allow_multiple_resources_same_time,
+            'max_bookings_per_user': self.max_bookings_per_user,
+            'enable_check_in_out': self.enable_check_in_out,
+            'past_booking_time_adjustment_hours': self.past_booking_time_adjustment_hours,
+            'check_in_minutes_before': self.check_in_minutes_before,
+            'check_in_minutes_after': self.check_in_minutes_after,
+            'checkin_reminder_minutes_before': self.checkin_reminder_minutes_before,
+            'pin_auto_generation_enabled': self.pin_auto_generation_enabled,
+            'pin_length': self.pin_length,
+            'pin_allow_manual_override': self.pin_allow_manual_override,
+            'allow_check_in_without_pin': self.allow_check_in_without_pin,
+            'resource_checkin_url_requires_login': self.resource_checkin_url_requires_login,
+            'map_resource_opacity': self.map_resource_opacity,
+            'enable_auto_checkout': self.enable_auto_checkout,
+            'auto_checkout_delay_minutes': self.auto_checkout_delay_minutes,
+            'global_time_offset_hours': self.global_time_offset_hours,
+            'auto_release_if_not_checked_in_minutes': self.auto_release_if_not_checked_in_minutes
+        }
+
+    @classmethod
+    def from_dict(cls, data, db_session):
+        """
+        Updates or creates a BookingSettings record from a dictionary.
+        Assumes there's only one BookingSettings record.
+        """
+        if not data or not isinstance(data, dict):
+            return None
+
+        settings = db_session.query(cls).first()
+        if not settings:
+            settings = cls()
+            db_session.add(settings)
+
+        for key, value in data.items():
+            if hasattr(settings, key):
+                setattr(settings, key, value)
+            # else:
+                # Optionally log or handle keys in data that don't exist on the model
+                # current_app.logger.warning(f"Key '{key}' in data not found on BookingSettings model.")
+        return settings
+
     def __repr__(self):
         return f"<BookingSettings {self.id} auto_release_minutes={self.auto_release_if_not_checked_in_minutes}>"
 
