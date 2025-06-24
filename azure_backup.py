@@ -1593,13 +1593,16 @@ def perform_startup_restore_sequence(app_for_context):
                         app_logger.error(msg, exc_info=True)
                         restore_status["message"] = msg
                         raise Exception(msg)
+                else: # Corresponds to: if live_db_uri.startswith('sqlite:///')
+                    app_logger.warning(f"STARTUP_RESTORE_LOG: Database URI '{live_db_uri}' is not SQLite. Skipping database file replacement and migrations.")
+                    print(f"DEBUG: Database URI '{live_db_uri}' is not SQLite, skipping DB file replacement.")
+            else: # Corresponds to: if "database" in downloaded_component_paths
+                app_logger.warning("STARTUP_RESTORE_LOG: Database component not found in downloaded files. Skipping database restore and migrations.")
+                print("DEBUG: Database component not found, skipping DB restore.")
 
-            print("DEBUG: STARTING JSON CONFIG APPLICATION PHASE") # New Checkpoint
+            # Correct placement for starting JSON config phase logs
+            print("DEBUG: STARTING JSON CONFIG APPLICATION PHASE")
             app_logger.info("STARTUP_RESTORE_LOG: Starting JSON config application phase.")
-                else:
-                    app_logger.warning(f"Database URI '{live_db_uri}' is not SQLite. Skipping database file replacement and migrations.")
-            else:
-                app_logger.warning("Database component not found in downloaded files. Skipping database restore and migrations.")
 
             config_types_map = {
                 "map_config": (_import_map_configuration_data, "Map Configuration"),
