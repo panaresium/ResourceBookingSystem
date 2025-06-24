@@ -329,18 +329,64 @@
         const tableBody = $('#listManageAzureBackups');
         tableBody.empty();
         if (backups && backups.length > 0) {
-            backups.forEach(backup => {
-                let actionsHtml = `
-                    <button class="btn btn-sm btn-success mr-1" onclick="downloadUnifiedBackup('${backup.filename}', '${backup.type}')" title="{{ _('Download this backup') }}"><i class="fas fa-download"></i></button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteUnifiedBackup('${backup.filename}', '${backup.type}')" title="{{ _('Delete this backup') }}"><i class="fas fa-trash"></i></button>`;
+            backups.forEach((fullBackup, index) => {
+                // Full backup row
+                let fullBackupActionsHtml = `
+                    <button class="btn btn-sm btn-success mr-1" onclick="downloadUnifiedBackup('${fullBackup.filename}', 'full')" title="{{ _('Download this backup set (ZIP)') }}"><i class="fas fa-file-archive"></i></button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteUnifiedBackup('${fullBackup.filename}', 'full')" title="{{ _('Delete this full backup and its incrementals') }}"><i class="fas fa-trash"></i></button>`;
+
+                let incrementalToggleId = `incrementals-for-${fullBackup.base_timestamp}`;
+                let incrementalCount = fullBackup.incrementals ? fullBackup.incrementals.length : 0;
+                let toggleButtonHtml = "";
+                if (incrementalCount > 0) {
+                    toggleButtonHtml = `<button class="btn btn-sm btn-outline-info mr-1" type="button" data-toggle="collapse" data-target="#${incrementalToggleId}" aria-expanded="false" aria-controls="${incrementalToggleId}" title="{{ _('Show/Hide Incrementals') }}"><i class="fas fa-sitemap"></i> (${incrementalCount})</button>`;
+                }
+
                 tableBody.append(`
-                    <tr>
-                        <td>${backup.display_name}</td>
-                        <td>${backup.type.charAt(0).toUpperCase() + backup.type.slice(1)}</td>
-                        <td>${backup.filename}</td>
-                        <td>${backup.timestamp_str ? new Date(backup.timestamp_str).toLocaleString() : 'N/A'}</td>
-                        <td>${actionsHtml}</td>
-                    </tr>`);
+                    <tr class="table-primary">
+                        <td>${toggleButtonHtml} ${fullBackup.display_name}</td>
+                        <td>{{ _("Full") }}</td>
+                        <td>${fullBackup.filename}</td>
+                        <td>${fullBackup.timestamp_str ? new Date(fullBackup.timestamp_str).toLocaleString() : 'N/A'}</td>
+                        <td>${fullBackupActionsHtml}</td>
+                    </tr>
+                `);
+
+                // Incremental backups rows (collapsible)
+                if (incrementalCount > 0) {
+                    let incrementalsHtml = "";
+                    fullBackup.incrementals.forEach(incBackup => {
+                        // For individual incremental deletion, we might need a more specific delete function or pass more info.
+                        // For now, let's assume deleteUnifiedBackup can handle deleting a single incremental.
+                        let incBackupActionsHtml = `
+                            <button class="btn btn-sm btn-danger" onclick="deleteUnifiedBackup('${incBackup.filename}', 'incremental', '${incBackup.base_timestamp}')" title="{{ _('Delete this incremental backup') }}"><i class="fas fa-trash"></i></button>
+                            <!-- Individual download for incremental might not be needed if main download is a set -->
+                            `;
+                        incrementalsHtml += `
+                            <tr class="table-info">
+                                <td style="padding-left: 40px;">${incBackup.display_name}</td>
+                                <td>{{ _("Incremental") }}</td>
+                                <td>${incBackup.filename}</td>
+                                <td>${incBackup.timestamp_str ? new Date(incBackup.timestamp_str).toLocaleString() : 'N/A'}</td>
+                                <td>${incBackupActionsHtml}</td>
+                            </tr>
+                        `;
+                    });
+                    // Add a row that contains a div for collapse, and inside that div, a table for incrementals
+                    tableBody.append(`
+                        <tr class="collapse-row">
+                            <td colspan="5" style="padding: 0;">
+                                <div class="collapse" id="${incrementalToggleId}">
+                                    <table class="table mb-0">
+                                        <tbody>
+                                            ${incrementalsHtml}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </td>
+                        </tr>
+                    `);
+                }
             });
         } else {
             tableBody.append(`<tr><td colspan="5" class="text-center">{{ _("No Unified Azure JSON backups found.") }}</td></tr>`);
@@ -436,15 +482,24 @@
         // Socket.IO event handler removed
     }
 
-    function deleteUnifiedBackup(filename, backupType) {
-        if (!confirm(`{{ _('Delete backup') }} '${filename}' (Type: ${backupType})? {{ _('Cannot be undone.') }}`)) return;
+    function deleteUnifiedBackup(filename, backupType, baseTimestampForIncremental = null) {
+        let confirmMessage = `{{ _('Delete backup') }} '${filename}' (Type: ${backupType})? {{ _('Cannot be undone.') }}`;
+        if (backupType === 'full') {
+            confirmMessage += ` {{ _('This will also delete all its associated incremental backups.') }}`;
+        }
+        if (!confirm(confirmMessage)) return;
+
         showProgressModal(`{{ _('Deleting backup') }} ${filename}...`);
         fetch("{{ url_for('api_system.api_delete_booking_data_backup') }}", {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
-            body: JSON.stringify({ backup_filename: filename, backup_type: backupType })
+            body: JSON.stringify({
+                backup_filename: filename,
+                backup_type: backupType,
+                base_timestamp: baseTimestampForIncremental // Pass this if it's an incremental being deleted, though backend logic for full delete handles most.
+            })
         }).then(response => response.json()).then(data => {
             hideProgressModal();
-            if (data.success) { alert("{{ _('Backup deleted.') }}"); refreshUnifiedAzureBackupList(); }
+            if (data.success) { alert("{{ _('Backup deletion process completed.') }}"); refreshUnifiedAzureBackupList(); } // Changed message slightly
             else { alert("{{ _('Error deleting backup:') }} " + (data.message || "{{ _('Unknown error') }}")); }
         }).catch(error => { hideProgressModal(); alert("{{ _('Error deleting backup.') }}"); console.error(error); });
     }
@@ -606,20 +661,27 @@
     }
 
     function downloadUnifiedBackup(filename, backupType) {
-        // Construct the download URL using placeholders and replacing them
-        // This is a robust way to handle URL generation in JS when url_for needs dynamic parts.
-        let downloadUrlTemplate = "{{ url_for('api_system.api_download_booking_data_backup', backup_type='TYPE_PLACEHOLDER', filename='FILENAME_PLACEHOLDER') }}";
-        let downloadUrl = downloadUrlTemplate
-            .replace('TYPE_PLACEHOLDER', encodeURIComponent(backupType))
-            .replace('FILENAME_PLACEHOLDER', encodeURIComponent(filename));
+        // If it's a 'full' backup, we download the set (ZIP).
+        // If it's an 'incremental', the current spec doesn't require individual download,
+        // but we could adapt if needed. For now, this function primarily targets full backup sets.
+        if (backupType === 'full') {
+            let downloadUrlTemplate = "{{ url_for('api_system.api_download_backup_set_zip', full_backup_filename='FILENAME_PLACEHOLDER') }}";
+            let downloadUrl = downloadUrlTemplate.replace('FILENAME_PLACEHOLDER', encodeURIComponent(filename));
 
-        console.log(`Attempting to download: ${downloadUrl}`);
-        // Trigger the download by navigating to the URL
-        window.location.href = downloadUrl;
-        // Note: Error handling for this direct navigation approach is limited.
-        // The browser will handle the download or display an error page if the URL fails.
-        // For more sophisticated error handling (e.g., via fetch and Blob), the backend would need to avoid direct 'attachment' disposition
-        // or the client-side would need to handle the blob response. This method is simpler for direct downloads.
+            console.log(`Attempting to download backup set (ZIP): ${downloadUrl}`);
+            // Trigger the download by navigating to the URL
+            window.location.href = downloadUrl;
+        } else if (backupType === 'incremental') {
+            // Individual incremental download - currently not planned as part of this feature set.
+            // If needed, this would call a different endpoint or the old one.
+            alert("{{ _('Individual download for incremental backups is not currently supported. Download the full backup set to get all related files.') }}");
+            console.warn(`Download requested for incremental backup '${filename}', but only full set downloads are supported via this button.`);
+        } else {
+            // Fallback or handling for other types if any (e.g., old single file download)
+            // This part can be adapted from the original downloadUnifiedBackup if needed for other types.
+            console.warn(`Download requested for unknown backup type '${backupType}' for file '${filename}'.`);
+            alert(`{{ _('Download for this backup type (${backupType}) is not supported through this interface.') }}`);
+        }
     }
 
     function handleScheduleTypeChange() {
