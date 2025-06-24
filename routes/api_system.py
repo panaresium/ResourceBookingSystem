@@ -71,7 +71,8 @@ try:
         list_booking_data_json_backups,
         delete_booking_data_json_backup,
         restore_booking_data_to_point_in_time,
-        download_booking_data_json_backup
+        download_booking_data_json_backup,
+        download_backup_set_as_zip # Added new function
     )
     import azure_backup # This line can remain
     print(f"DEBUG api_system.py: Successfully imported from azure_backup (again). create_full_backup type: {type(create_full_backup)}") # New debug
@@ -382,6 +383,42 @@ def api_download_booking_data_backup(backup_type, filename):
             return Response(file_content, mimetype='application/json', headers={"Content-Disposition": f"attachment;filename={filename}"})
         else: return jsonify({'success': False, 'message': 'File not found or download failed.'}), 404
     except Exception as e: return jsonify({'success': False, 'message': f'An unexpected error occurred: {str(e)}'}), 500
+
+@api_system_bp.route('/api/admin/backup/booking_data/download_set/<string:full_backup_filename>', methods=['GET'])
+@login_required
+@permission_required('manage_system')
+def api_download_backup_set_zip(full_backup_filename):
+    current_app.logger.info(f"User {current_user.username} requested download of backup set for: {full_backup_filename}.")
+    task_id = create_task(task_type='download_backup_set_zip') # Create a task for potential logging
+
+    if not download_backup_set_as_zip:
+        update_task_log(task_id, "Download backup set function (download_backup_set_as_zip) is not available.", level="error")
+        mark_task_done(task_id, success=False, result_message="Download function not available.")
+        return jsonify({'success': False, 'message': 'Download functionality (zip) is not available.'}), 501
+
+    try:
+        update_task_log(task_id, f"Initiating ZIP creation for full backup: {full_backup_filename}.", level="info")
+        zip_buffer = download_backup_set_as_zip(full_backup_filename=full_backup_filename, task_id=task_id)
+
+        if zip_buffer:
+            update_task_log(task_id, "ZIP file created successfully. Preparing for download.", level="success")
+            mark_task_done(task_id, success=True, result_message="ZIP file created and sent.")
+
+            zip_filename = f"backup_set_{full_backup_filename.replace('.json', '')}.zip"
+            return Response(
+                zip_buffer,
+                mimetype='application/zip',
+                headers={"Content-Disposition": f"attachment;filename={zip_filename}"}
+            )
+        else:
+            update_task_log(task_id, "Failed to create ZIP file for the backup set.", level="error")
+            mark_task_done(task_id, success=False, result_message="ZIP file creation failed.")
+            return jsonify({'success': False, 'message': 'Failed to create ZIP file for the backup set.'}), 500
+    except Exception as e:
+        current_app.logger.error(f"Error creating or downloading backup set ZIP for {full_backup_filename}: {e}", exc_info=True)
+        update_task_log(task_id, f"Unexpected error during ZIP creation/download: {str(e)}", level="critical")
+        mark_task_done(task_id, success=False, result_message=f"Unexpected error: {str(e)}")
+        return jsonify({'success': False, 'message': f'An unexpected error occurred: {str(e)}'}), 500
 
 
 @api_system_bp.route('/api/admin/settings/unified_backup_schedule', methods=['GET'])

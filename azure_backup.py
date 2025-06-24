@@ -8,6 +8,8 @@ import tempfile
 import re
 import time
 import shutil
+import zipfile # Added for ZIP functionality
+from io import BytesIO # Added for ZIP functionality
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError, ServiceRequestError
 
 from models import Booking, db
@@ -47,10 +49,19 @@ HASH_DB = os.path.join(DATA_DIR, 'backup_hashes.db')
 
 logger = logging.getLogger(__name__)
 
+# Naming conventions
+# Full backup: manual_full_booking_export_<timestamp>.json (e.g., manual_full_booking_export_20231026_100000.json)
+# Incremental backup: incremental_booking_export_<inc_timestamp>_for_<full_backup_timestamp>.json (e.g., incremental_booking_export_20231026_110000_for_20231026_100000.json)
+
+FULL_BACKUP_PATTERN = re.compile(r"manual_full_booking_export_(\d{8}_\d{6})\.json")
+INCREMENTAL_BACKUP_PATTERN = re.compile(r"incremental_booking_export_(\d{8}_\d{6})_for_(\d{8}_\d{6})\.json")
+
 # ... (list_booking_data_json_backups, delete_booking_data_json_backup, restore_booking_data_to_point_in_time, download_booking_data_json_backup - remain unchanged) ...
 def list_booking_data_json_backups():
-    logger.info("Attempting to list unified booking data JSON backups from Azure.")
-    all_backups = []
+    logger.info("Attempting to list unified booking data JSON backups from Azure with hierarchy.")
+    structured_backups = []
+    raw_files = [] # To store all found files initially
+
     try:
         service_client = _get_service_client()
         share_name = os.environ.get('AZURE_BOOKING_DATA_SHARE', 'booking-data-backups')
@@ -61,57 +72,119 @@ def list_booking_data_json_backups():
         if not _client_exists(share_client):
             logger.warning(f"Azure share '{share_name}' not found. Cannot list booking data backups.")
             return []
-        base_backup_dir_client = share_client.get_directory_client(AZURE_BOOKING_DATA_PROTECTION_DIR)
-        if not _client_exists(base_backup_dir_client):
-            logger.info(f"Base backup directory '{AZURE_BOOKING_DATA_PROTECTION_DIR}' not found in share '{share_name}'. No backups to list.")
-            return []
-        backup_sources = [
-            {"subdir": "manual_full_json", "type": "manual_full_json", "name_pattern": re.compile(r"manual_full_booking_export_(\d{8}_\d{6})\.json")}
-        ]
-        for source in backup_sources:
-            source_dir_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{source['subdir']}"
+
+        # Directories to scan for backups
+        # Assuming full backups are in 'manual_full_json' and incrementals might be in the same or a dedicated subdir.
+        # For simplicity, let's assume they are in distinct subdirectories for now or parse based on filename if mixed.
+        # For the defined patterns, they can be in the same directory.
+        # Let's refine backup_sources or how we iterate.
+        # We'll scan AZURE_BOOKING_DATA_PROTECTION_DIR and its subdirectories like 'manual_full_json' and potentially 'incremental_json'
+
+        backup_subdirs_to_scan = ["manual_full_json", "incremental_json"] # Add more if incrementals are elsewhere
+
+        for subdir_name in backup_subdirs_to_scan:
+            source_dir_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{subdir_name}"
             dir_client = share_client.get_directory_client(source_dir_path)
+
             if not _client_exists(dir_client):
                 logger.info(f"Backup subdirectory '{source_dir_path}' not found. Skipping.")
                 continue
-            logger.info(f"Scanning for backups in '{source_dir_path}' of type '{source['type']}'.")
+
+            logger.info(f"Scanning for backups in '{source_dir_path}'.")
             for item in dir_client.list_directories_and_files():
                 if item['is_directory']:
-                    continue
+                    continue # Skip directories for now, assuming flat file structure within these subdirs
+
                 filename = item['name']
-                match = source['name_pattern'].match(filename)
-                if match:
-                    timestamp_str_from_name = match.group(1)
-                    try:
-                        dt_obj_naive = datetime.strptime(timestamp_str_from_name, '%Y%m%d_%H%M%S')
-                        dt_obj_utc = dt_obj_naive.replace(tzinfo=timezone.utc)
-                        iso_timestamp_str = dt_obj_utc.isoformat()
-                        display_name = f"{source['type'].replace('_', ' ').title()} - {dt_obj_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}"
-                        all_backups.append({
+                raw_files.append({
+                    'filename': filename,
+                    'full_path': f"{source_dir_path}/{filename}", # Store full path for easier download/delete
+                    'size_bytes': item.get('size', 0),
+                    'azure_subdir': subdir_name # Keep track of where it was found
+                })
+
+        full_backups_map = {} # Maps full_backup_timestamp to its data
+
+        # Process all raw files
+        for file_info in raw_files:
+            filename = file_info['filename']
+            full_match = FULL_BACKUP_PATTERN.match(filename)
+            inc_match = INCREMENTAL_BACKUP_PATTERN.match(filename)
+
+            if full_match:
+                timestamp_str = full_match.group(1)
+                try:
+                    dt_obj_naive = datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
+                    dt_obj_utc = dt_obj_naive.replace(tzinfo=timezone.utc)
+                    iso_timestamp_str = dt_obj_utc.isoformat()
+                    display_name = f"Full Backup - {dt_obj_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+
+                    if timestamp_str not in full_backups_map:
+                        full_backups_map[timestamp_str] = {
                             'filename': filename,
-                            'full_path': f"{source_dir_path}/{filename}",
+                            'full_path': file_info['full_path'],
                             'display_name': display_name,
-                            'type': source['type'],
+                            'type': 'full', # Changed from 'manual_full_json' for clarity
                             'timestamp_str': iso_timestamp_str,
-                            'size_bytes': item.get('size', 0)
+                            'size_bytes': file_info['size_bytes'],
+                            'azure_subdir': file_info['azure_subdir'],
+                            'base_timestamp': timestamp_str, # For easy reference
+                            'incrementals': []
+                        }
+                    logger.debug(f"Processed full backup: {filename}, Timestamp: {iso_timestamp_str}")
+                except ValueError:
+                    logger.warning(f"Could not parse timestamp from full backup filename: {filename}. Skipping.")
+                except Exception as e_parse:
+                    logger.error(f"Error processing full backup file {filename}: {e_parse}", exc_info=True)
+
+            elif inc_match:
+                inc_timestamp_str = inc_match.group(1)
+                base_full_timestamp_str = inc_match.group(2)
+                try:
+                    dt_obj_naive = datetime.strptime(inc_timestamp_str, '%Y%m%d_%H%M%S')
+                    dt_obj_utc = dt_obj_naive.replace(tzinfo=timezone.utc)
+                    iso_timestamp_str = dt_obj_utc.isoformat()
+                    display_name = f"Incremental - {dt_obj_utc.strftime('%Y-%m-%d %H:%M:%S UTC')} (for {base_full_timestamp_str})"
+
+                    # Ensure the base full backup exists in our map
+                    if base_full_timestamp_str in full_backups_map:
+                        full_backups_map[base_full_timestamp_str]['incrementals'].append({
+                            'filename': filename,
+                            'full_path': file_info['full_path'],
+                            'display_name': display_name,
+                            'type': 'incremental',
+                            'timestamp_str': iso_timestamp_str,
+                            'size_bytes': file_info['size_bytes'],
+                            'azure_subdir': file_info['azure_subdir'],
+                            'base_timestamp': base_full_timestamp_str # Link to base
                         })
-                        logger.debug(f"Found backup: {filename}, Timestamp: {iso_timestamp_str}")
-                    except ValueError:
-                        logger.warning(f"Could not parse timestamp from filename: {filename} in {source_dir_path}. Skipping.")
-                    except Exception as e_parse:
-                         logger.error(f"Error processing file {filename} in {source_dir_path}: {e_parse}", exc_info=True)
-                else:
-                    logger.debug(f"Filename {filename} in {source_dir_path} did not match pattern for type {source['type']}.")
-        all_backups.sort(key=lambda x: x['timestamp_str'], reverse=True)
-        logger.info(f"Found {len(all_backups)} unified booking data backups.")
-        return all_backups
+                        # Sort incrementals by their own timestamp
+                        full_backups_map[base_full_timestamp_str]['incrementals'].sort(key=lambda x: x['timestamp_str'], reverse=True)
+                    else:
+                        logger.warning(f"Found incremental backup '{filename}' but its base full backup (timestamp: {base_full_timestamp_str}) was not found or processed. Orphaned incremental.")
+
+                    logger.debug(f"Processed incremental backup: {filename}, Base Timestamp: {base_full_timestamp_str}")
+                except ValueError:
+                    logger.warning(f"Could not parse timestamp from incremental backup filename: {filename}. Skipping.")
+                except Exception as e_parse:
+                    logger.error(f"Error processing incremental backup file {filename}: {e_parse}", exc_info=True)
+
+        # Convert map to list and sort full backups by timestamp
+        structured_backups = sorted(full_backups_map.values(), key=lambda x: x['timestamp_str'], reverse=True)
+
+        logger.info(f"Found {len(structured_backups)} full backups with their incrementals (if any).")
+        return structured_backups
+
     except Exception as e:
-        logger.error(f"Error listing unified booking data JSON backups: {e}", exc_info=True)
+        logger.error(f"Error listing structured booking data JSON backups: {e}", exc_info=True)
         return []
 
-def delete_booking_data_json_backup(filename, backup_type=None, task_id=None):
+
+def delete_booking_data_json_backup(filename, backup_type=None, task_id=None, base_timestamp_for_incremental=None):
     log_prefix = f"[Task {task_id}] " if task_id else ""
     logger.info(f"{log_prefix}Attempting to delete unified backup: Type='{backup_type}', Filename='{filename}'.")
+    files_to_delete = []
+
     try:
         service_client = _get_service_client()
         share_name = os.environ.get('AZURE_BOOKING_DATA_SHARE', 'booking-data-backups')
@@ -122,26 +195,219 @@ def delete_booking_data_json_backup(filename, backup_type=None, task_id=None):
         if not _client_exists(share_client):
             logger.warning(f"{log_prefix}Azure share '{share_name}' not found. Cannot delete backup.")
             return False
-        target_subdir = ""
-        if backup_type == "manual_full_json":
-            target_subdir = "manual_full_json"
-        else:
-            logger.error(f"{log_prefix}Cannot determine directory for backup type '{backup_type}'. Deletion aborted.")
+
+        # Determine the primary file to delete and its subdir
+        primary_file_azure_subdir = ""
+        full_match = FULL_BACKUP_PATTERN.match(filename)
+        inc_match = INCREMENTAL_BACKUP_PATTERN.match(filename)
+
+        if backup_type == "full" or (not backup_type and full_match): # Deleting a full backup
+            primary_file_azure_subdir = "manual_full_json" # Assuming full backups are here
+            files_to_delete.append({'filename': filename, 'subdir': primary_file_azure_subdir})
+
+            # If it's a full backup, find its incrementals
+            full_backup_ts_match = FULL_BACKUP_PATTERN.match(filename)
+            if full_backup_ts_match:
+                full_backup_timestamp = full_backup_ts_match.group(1)
+                logger.info(f"{log_prefix}Full backup specified. Searching for associated incrementals for base timestamp '{full_backup_timestamp}'.")
+
+                # Scan relevant directories for incrementals
+                incremental_scan_subdirs = ["incremental_json", "manual_full_json"] # Scan where incrementals might be
+                for scan_subdir_name in incremental_scan_subdirs:
+                    inc_dir_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{scan_subdir_name}"
+                    dir_client = share_client.get_directory_client(inc_dir_path)
+                    if _client_exists(dir_client):
+                        for item in dir_client.list_directories_and_files():
+                            if not item['is_directory']:
+                                inc_file_match = INCREMENTAL_BACKUP_PATTERN.match(item['name'])
+                                if inc_file_match and inc_file_match.group(2) == full_backup_timestamp:
+                                    logger.info(f"{log_prefix}Found associated incremental: {item['name']} in {scan_subdir_name}")
+                                    files_to_delete.append({'filename': item['name'], 'subdir': scan_subdir_name})
+
+        elif backup_type == "incremental" or (not backup_type and inc_match): # Deleting a single incremental
+            # Determine subdir for incremental. Assume 'incremental_json' or 'manual_full_json'
+            # This part might need refinement if incrementals can be in multiple places.
+            # For now, let's assume they are primarily in 'incremental_json' or check 'manual_full_json'
+            # A more robust way would be to get the subdir from where it was listed.
+            # However, this function is called with just filename and type.
+            if os.path.exists(f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/incremental_json/{filename}"):
+                 primary_file_azure_subdir = "incremental_json"
+            else: # Fallback or assume it might be with full backups if not in dedicated dir
+                 primary_file_azure_subdir = "manual_full_json"
+            files_to_delete.append({'filename': filename, 'subdir': primary_file_azure_subdir})
+
+        else: # Fallback for older type "manual_full_json" or if type is ambiguous
+            logger.warning(f"{log_prefix}Backup type '{backup_type}' is ambiguous or unhandled for specific subdir. Defaulting to 'manual_full_json' for {filename}.")
+            primary_file_azure_subdir = "manual_full_json"
+            files_to_delete.append({'filename': filename, 'subdir': primary_file_azure_subdir})
+            # No incremental deletion logic here for this ambiguous case to be safe.
+
+        if not files_to_delete:
+            logger.error(f"{log_prefix}No files identified for deletion for filename '{filename}' and type '{backup_type}'.")
             return False
-        remote_file_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{target_subdir}/{filename}"
-        file_client = share_client.get_file_client(remote_file_path)
-        if not _client_exists(file_client):
-            logger.warning(f"{log_prefix}File '{remote_file_path}' not found in share '{share_name}'. No action taken, considered success for deletion.")
-            return True
-        file_client.delete_file()
-        logger.info(f"{log_prefix}Successfully deleted file '{remote_file_path}'.")
-        return True
-    except ResourceNotFoundError:
-        logger.warning(f"{log_prefix}File '{filename}' (Type: {backup_type}) not found during delete. Considered success.")
-        return True
+
+        all_deleted_successfully = True
+        for file_info in files_to_delete:
+            f_name = file_info['filename']
+            f_subdir = file_info['subdir']
+            remote_file_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{f_subdir}/{f_name}"
+            file_client = share_client.get_file_client(remote_file_path)
+
+            try:
+                if _client_exists(file_client):
+                    file_client.delete_file()
+                    logger.info(f"{log_prefix}Successfully deleted file '{remote_file_path}'.")
+                else:
+                    logger.warning(f"{log_prefix}File '{remote_file_path}' not found in share '{share_name}'. No action taken for this file.")
+            except ResourceNotFoundError: # Should be caught by _client_exists, but as a safeguard
+                logger.warning(f"{log_prefix}File '{f_name}' (Path: {remote_file_path}) not found during delete attempt. Considered success for this file.")
+            except Exception as e_del:
+                logger.error(f"{log_prefix}An unexpected error occurred during deletion of '{remote_file_path}': {e_del}", exc_info=True)
+                all_deleted_successfully = False # Mark overall operation as failed
+
+        return all_deleted_successfully
+
     except Exception as e:
-        logger.error(f"{log_prefix}An unexpected error occurred during deletion of '{filename}' (Type: {backup_type}): {e}", exc_info=True)
+        logger.error(f"{log_prefix}An unexpected error occurred during the deletion process for '{filename}' (Type: {backup_type}): {e}", exc_info=True)
         return False
+
+
+def download_backup_set_as_zip(full_backup_filename, task_id=None):
+    log_prefix = f"[Task {task_id}] " if task_id else ""
+    logger.info(f"{log_prefix}Preparing to download backup set for full backup: {full_backup_filename}")
+
+    zip_buffer = BytesIO()
+    files_added_to_zip = []
+
+    try:
+        service_client = _get_service_client()
+        share_name = os.environ.get('AZURE_BOOKING_DATA_SHARE', 'booking-data-backups')
+        if not share_name:
+            err_msg = f"{log_prefix}Azure share name for booking data backups is not configured (AZURE_BOOKING_DATA_SHARE)."
+            logger.error(err_msg)
+            if task_id: update_task_log(task_id, err_msg, level="error")
+            raise ValueError("Azure share name not configured.")
+
+        share_client = service_client.get_share_client(share_name)
+        if not _client_exists(share_client):
+            err_msg = f"{log_prefix}Azure share '{share_name}' not found."
+            logger.warning(err_msg)
+            if task_id: update_task_log(task_id, err_msg, level="error")
+            raise ValueError(f"Azure share '{share_name}' not found.")
+
+        # 1. Download the full backup file
+        full_backup_ts_match = FULL_BACKUP_PATTERN.match(full_backup_filename)
+        if not full_backup_ts_match:
+            err_msg = f"{log_prefix}Invalid full backup filename format: {full_backup_filename}"
+            logger.error(err_msg)
+            if task_id: update_task_log(task_id, err_msg, level="error")
+            raise ValueError("Invalid full backup filename format.")
+
+        full_backup_timestamp = full_backup_ts_match.group(1)
+        full_backup_azure_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/manual_full_json/{full_backup_filename}" # Assuming full backups are here
+
+        logger.info(f"{log_prefix}Attempting to download full backup file: {full_backup_azure_path}")
+        if task_id: update_task_log(task_id, f"Downloading full backup: {full_backup_filename}...", level="info")
+
+        # Re-using download_booking_data_json_backup which has its own logging.
+        # It expects backup_type="full" or "manual_full_json" to correctly find the subdir for full backups.
+        full_backup_content = download_booking_data_json_backup(filename=full_backup_filename, backup_type="full")
+
+        if full_backup_content is None:
+            err_msg = f"{log_prefix}Failed to download critical full backup file: {full_backup_filename}"
+            logger.error(err_msg)
+            if task_id: update_task_log(task_id, err_msg, level="critical")
+            raise IOError(f"Failed to download full backup file: {full_backup_filename}. Cannot create ZIP.")
+
+        files_added_to_zip.append({'name_in_zip': full_backup_filename, 'content': full_backup_content})
+        logger.info(f"{log_prefix}Full backup file '{full_backup_filename}' downloaded successfully.")
+        if task_id: update_task_log(task_id, f"Full backup '{full_backup_filename}' downloaded.", level="info")
+
+        # 2. Find and download associated incremental backups
+        logger.info(f"{log_prefix}Searching for incremental backups based on full backup timestamp: {full_backup_timestamp}")
+        if task_id: update_task_log(task_id, "Searching for associated incremental backups...", level="info")
+
+        incremental_scan_subdirs = ["incremental_json", "manual_full_json"]
+        incrementals_found_count = 0
+
+        for scan_subdir_name in incremental_scan_subdirs:
+            inc_dir_path_on_share = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{scan_subdir_name}"
+            dir_client = share_client.get_directory_client(inc_dir_path_on_share)
+
+            if not _client_exists(dir_client):
+                logger.info(f"{log_prefix}Incremental scan directory '{inc_dir_path_on_share}' does not exist. Skipping.")
+                continue
+
+            for item in dir_client.list_directories_and_files():
+                if item['is_directory']:
+                    continue
+
+                inc_filename = item['name']
+                inc_match = INCREMENTAL_BACKUP_PATTERN.match(inc_filename)
+                if inc_match and inc_match.group(2) == full_backup_timestamp:
+                    incrementals_found_count += 1
+                    logger.info(f"{log_prefix}Found associated incremental: {inc_filename} in {scan_subdir_name}. Attempting download...")
+                    if task_id: update_task_log(task_id, f"Downloading incremental: {inc_filename}...", level="info")
+
+                    inc_backup_azure_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{scan_subdir_name}/{inc_filename}"
+                    inc_file_client = share_client.get_file_client(inc_backup_azure_path)
+
+                    try:
+                        if _client_exists(inc_file_client):
+                            download_stream = inc_file_client.download_file()
+                            inc_content = download_stream.readall()
+                            if inc_content:
+                                files_added_to_zip.append({'name_in_zip': inc_filename, 'content': inc_content})
+                                logger.info(f"{log_prefix}Incremental backup '{inc_filename}' downloaded successfully.")
+                                if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' downloaded.", level="info")
+                            else:
+                                logger.warning(f"{log_prefix}Incremental backup '{inc_filename}' downloaded but content is empty. Skipping this file.")
+                                if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' was empty. Skipped.", level="warning")
+                        else:
+                            logger.warning(f"{log_prefix}Incremental backup file '{inc_backup_azure_path}' was listed but not found during download attempt. Skipping.")
+                            if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' not found on attempt. Skipped.", level="warning")
+                    except Exception as e_inc_dl:
+                        logger.error(f"{log_prefix}Error downloading incremental file '{inc_filename}': {e_inc_dl}", exc_info=True)
+                        if task_id: update_task_log(task_id, f"Error downloading incremental '{inc_filename}': {str(e_inc_dl)}. Skipped.", level="error")
+                        # Decide if this is a critical failure or if the ZIP can be created with available files.
+                        # For now, we'll continue and log the error.
+
+        if task_id: update_task_log(task_id, f"Found and processed {incrementals_found_count} potential incremental backups.", level="info")
+
+        if not files_added_to_zip: # Should be caught by full_backup_content check, but as a safeguard
+            err_msg = f"{log_prefix}No files (not even the full backup) were successfully prepared for zipping for base {full_backup_filename}."
+            logger.warning(err_msg)
+            if task_id: update_task_log(task_id, "No backup files could be prepared for the ZIP archive.", level="error")
+            raise IOError("No backup files could be prepared for the ZIP archive.")
+
+        # 3. Create ZIP file in memory
+        logger.info(f"{log_prefix}Creating ZIP archive with {len(files_added_to_zip)} file(s).")
+        if task_id: update_task_log(task_id, f"Creating ZIP archive with {len(files_added_to_zip)} file(s)...", level="info")
+
+        try:
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for file_to_add in files_added_to_zip:
+                    zf.writestr(file_to_add['name_in_zip'], file_to_add['content'])
+        except Exception as e_zip:
+            err_msg = f"{log_prefix}Error during ZIP file creation: {e_zip}"
+            logger.error(err_msg, exc_info=True)
+            if task_id: update_task_log(task_id, f"Error creating ZIP file: {str(e_zip)}", level="critical")
+            raise IOError(f"Failed to create ZIP archive: {str(e_zip)}")
+
+        zip_buffer.seek(0)
+        logger.info(f"{log_prefix}ZIP archive created successfully in memory for {full_backup_filename}.")
+        if task_id: update_task_log(task_id, "ZIP archive created successfully.", level="success")
+        return zip_buffer
+
+    except (ValueError, IOError) as e_val_io: # Catch config/setup errors or critical file IO errors
+        logger.error(f"{log_prefix}Error preparing ZIP for backup set {full_backup_filename}: {e_val_io}", exc_info=True)
+        if task_id: update_task_log(task_id, f"Failed to prepare ZIP: {str(e_val_io)}", level="critical")
+        return None # Return None to indicate failure to the caller API
+    except Exception as e_final: # Catch any other unexpected errors
+        logger.error(f"{log_prefix}Unexpected error creating ZIP for backup set {full_backup_filename}: {e_final}", exc_info=True)
+        if task_id: update_task_log(task_id, f"Unexpected critical error during ZIP creation: {str(e_final)}", level="critical")
+        return None
+
 
 def restore_booking_data_to_point_in_time(app, selected_filename, selected_type, selected_timestamp_iso, task_id=None):
     update_task_log(task_id, f"Starting restore from '{selected_filename}' (Type: {selected_type}).", level="info")
