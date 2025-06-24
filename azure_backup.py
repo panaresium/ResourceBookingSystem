@@ -1567,7 +1567,9 @@ def perform_startup_restore_sequence(app_for_context):
                         # Run database migrations immediately after restoring the DB file
                         try:
                             app_logger.info("Attempting to apply database migrations programmatically on restored database...")
+                            print("DEBUG: CHECKPOINT PRE-MIGRATION")
                             flask_db_upgrade() # This uses the current app context
+                            print("DEBUG: CHECKPOINT POST-MIGRATION")
                             app_logger.info("Database migrations applied successfully (or were already up-to-date).")
 
                             # Now that migrations have run, attempt to log the audit event
@@ -1591,6 +1593,9 @@ def perform_startup_restore_sequence(app_for_context):
                         app_logger.error(msg, exc_info=True)
                         restore_status["message"] = msg
                         raise Exception(msg)
+
+            print("DEBUG: STARTING JSON CONFIG APPLICATION PHASE") # New Checkpoint
+            app_logger.info("STARTUP_RESTORE_LOG: Starting JSON config application phase.")
                 else:
                     app_logger.warning(f"Database URI '{live_db_uri}' is not SQLite. Skipping database file replacement and migrations.")
             else:
@@ -1601,7 +1606,12 @@ def perform_startup_restore_sequence(app_for_context):
                 "resource_configs": (_import_resource_configurations_data, "Resource Configurations"),
                 "user_configs": (_import_user_configurations_data, "User Configurations")}
 
+            print(f"DEBUG: Before map/resource/user config loop. downloaded_component_paths keys: {list(downloaded_component_paths.keys())}")
+            app_logger.info(f"STARTUP_RESTORE_LOG: Before map/resource/user config loop. Downloaded keys: {list(downloaded_component_paths.keys())}")
+
             for config_key, (import_func, log_name) in config_types_map.items():
+                app_logger.info(f"STARTUP_RESTORE_LOG: In loop, checking config_key: {config_key}")
+                print(f"DEBUG: In loop, checking config_key: {config_key}")
                 if config_key in downloaded_component_paths:
                     local_config_path = downloaded_component_paths[config_key]
                     log_message_attempt = f"STARTUP_RESTORE_LOG: Attempting to restore {log_name} from {local_config_path}"
@@ -1646,9 +1656,12 @@ def perform_startup_restore_sequence(app_for_context):
                         else:
                              restore_status["message"] = f"Error during {log_name} import stage: {str(e_config_restore)}"
                 else:
-                    app_logger.info(f"{log_name} component not found in downloaded files. Skipping its restore.")
+                    app_logger.info(f"STARTUP_RESTORE_LOG: {log_name} component not found in downloaded_component_paths. Skipping its restore.")
+                    print(f"DEBUG: {log_name} component not found in downloaded_component_paths. Skipping.")
 
             # Restore scheduler_settings.json
+            print("DEBUG: Checking for scheduler_settings component...")
+            app_logger.info("STARTUP_RESTORE_LOG: Checking for scheduler_settings component.")
             if "scheduler_settings" in downloaded_component_paths:
                 local_scheduler_path = downloaded_component_paths["scheduler_settings"]
                 # Correctly determine the live data directory using app config or a robust relative path
@@ -1680,10 +1693,12 @@ def perform_startup_restore_sequence(app_for_context):
                 app_logger.info("Scheduler settings component not found in downloaded files. Skipping its restore.")
 
             # Apply General Configurations (BookingSettings)
+            print("DEBUG: Checking for general_configs component...")
             app_logger.info("STARTUP_RESTORE_LOG: Checking for General Configurations (BookingSettings) component.")
             if "general_configs" in downloaded_component_paths:
                 local_general_configs_path = downloaded_component_paths["general_configs"]
                 app_logger.info(f"STARTUP_RESTORE_LOG: Attempting to restore General Configurations (BookingSettings) from {local_general_configs_path}")
+                print(f"DEBUG: Attempting to restore General Configurations (BookingSettings) from {local_general_configs_path}")
                 try:
                     with open(local_general_configs_path, 'r', encoding='utf-8') as f_gc:
                         general_configs_data = json.load(f_gc)
@@ -1720,10 +1735,12 @@ def perform_startup_restore_sequence(app_for_context):
                 app_logger.info("STARTUP_RESTORE_LOG: General Configurations (BookingSettings) component not found in downloaded files. Skipping its restore.")
 
             # Apply Unified Booking Backup Schedule Settings
+            print("DEBUG: Checking for unified_booking_backup_schedule component...")
             app_logger.info("STARTUP_RESTORE_LOG: Checking for Unified Booking Backup Schedule component.")
             if "unified_booking_backup_schedule" in downloaded_component_paths:
                 local_unified_sched_path = downloaded_component_paths["unified_booking_backup_schedule"]
                 app_logger.info(f"STARTUP_RESTORE_LOG: Attempting to restore Unified Booking Backup Schedule from {local_unified_sched_path}")
+                print(f"DEBUG: Attempting to restore Unified Booking Backup Schedule from {local_unified_sched_path}")
                 try:
                     with open(local_unified_sched_path, 'r', encoding='utf-8') as f_us:
                         unified_sched_data = json.load(f_us)
@@ -1758,32 +1775,18 @@ def perform_startup_restore_sequence(app_for_context):
                 app_logger.info("STARTUP_RESTORE_LOG: Unified Booking Backup Schedule component not found in downloaded files. Skipping its restore.")
 
             # Restore Media Files (Floor Maps and Resource Uploads)
+            print("DEBUG: Checking for media component...") # Added this line
             app_logger.info("STARTUP_RESTORE_LOG: Checking for Media component.")
             if "media" in downloaded_component_paths and isinstance(downloaded_component_paths["media"], dict):
-                if not os.path.exists(live_scheduler_dir): os.makedirs(live_scheduler_dir, exist_ok=True)
-                try:
-                    app_logger.info(f"Attempting to replace live scheduler settings at '{live_scheduler_path}' with downloaded backup '{local_scheduler_path}'.")
-                    shutil.copyfile(local_scheduler_path, live_scheduler_path)
-                    app_logger.info("Scheduler settings successfully restored.")
-                    try:
-                        add_audit_log("System Restore", f"Scheduler settings restored from startup sequence using backup {latest_backup_timestamp}.")
-                    except Exception as e_audit: # Should be specific to DB errors if logger/DB is not ready
-                        app_logger.warning(f"Could not write audit log for system restore (scheduler_settings): {e_audit}")
-                except Exception as e_sched_restore:
-                    app_logger.error(f"Error replacing live scheduler settings: {e_sched_restore}", exc_info=True)
-                    # Update status and message for partial failure
-                    restore_status["status"] = "partial_failure"
-                    error_detail = f"Error during scheduler settings restore: {e_sched_restore}"
-                    if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
-                        restore_status["message"] += f"; {error_detail}"
-                    else:
-                        restore_status["message"] = error_detail
-            else:
-                app_logger.info("Scheduler settings component not found in downloaded files. Skipping its restore.")
+                # The following block for applying scheduler_settings was misplaced here.
+                # It should have been processed before media. I'll remove it from here.
+                # This was likely a copy-paste error during previous edits.
+                # The correct scheduler_settings block is already present earlier.
 
-            # Restore Media Files (Floor Maps and Resource Uploads)
-            if "media" in downloaded_component_paths and isinstance(downloaded_component_paths["media"], dict):
-                media_base_path_on_share = downloaded_component_paths["media"].get("base_path_on_share")
+                # Correct logic for media starts here:
+                media_component_info = downloaded_component_paths["media"]
+                media_base_path_on_share = media_component_info.get("base_path_on_share")
+                print(f"DEBUG: Media base_path_on_share from downloaded_component_paths: {media_base_path_on_share}")
                 if media_base_path_on_share:
                     media_sources_to_restore = [
                         {"name": "Floor Maps",
