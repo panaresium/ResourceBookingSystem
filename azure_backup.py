@@ -15,7 +15,14 @@ from azure.core.exceptions import ResourceNotFoundError, HttpResponseError, Serv
 # Ensure os, json, logging, re, datetime, timezone, time are available (already imported or standard)
 from models import Booking, db
 # From utils import _import_map_configuration_data, _import_resource_configurations_data, _import_user_configurations_data, add_audit_log
-from utils import _import_map_configuration_data, _import_resource_configurations_data, _import_user_configurations_data, add_audit_log # Added
+from utils import (
+    _import_map_configuration_data,
+    _import_resource_configurations_data,
+    _import_user_configurations_data,
+    add_audit_log,
+    _get_general_configurations_data, # Added for general configs backup
+    _import_general_configurations_data # Added for general configs restore
+)
 from extensions import db # Ensure db is imported from extensions (already imported via models)
 from utils import update_task_log # Ensure this is imported from utils
 # datetime, time, timezone were listed twice, ensured they are covered
@@ -296,6 +303,7 @@ MAP_CONFIG_FILENAME_PREFIX = 'map_config_'
 RESOURCE_CONFIG_FILENAME_PREFIX = "resource_configs_"
 USER_CONFIG_FILENAME_PREFIX = "user_configs_"
 SCHEDULER_SETTINGS_FILENAME_PREFIX = "scheduler_settings_"
+GENERAL_CONFIGS_FILENAME_PREFIX = "general_configs_" # New prefix for general configurations
 BOOKING_FULL_JSON_EXPORTS_DIR = 'booking_full_json_exports'
 AZURE_BOOKING_DATA_PROTECTION_DIR = 'booking_data_protection_backups'
 BOOKING_DATA_FULL_DIR_SUFFIX = "full"
@@ -464,7 +472,181 @@ def restore_full_backup(backup_timestamp, task_id=None, dry_run=False):
         _emit_progress(task_id, "DRY RUN: Completed.", detail=json.dumps({'actions': ["Simulated action 1"]}), level='SUCCESS')
         return None, None, None, None, ["Simulated action 1"]
     _emit_progress(task_id, "Restore Error: Not implemented.", detail='NOT_IMPLEMENTED', level='ERROR')
-    return None, None, None, None, []
+    _emit_progress(task_id, "Restore Error: Not implemented.", detail='NOT_IMPLEMENTED', level='ERROR')
+    # return None, None, None, None, [] # Old placeholder return
+
+    _emit_progress(task_id, f"Starting full restore for backup timestamp: {backup_timestamp}", level="INFO")
+    if dry_run:
+        _emit_progress(task_id, "DRY RUN: Full restore process initiated.", level="INFO")
+        # Simulate manifest download and component identification
+        simulated_actions = [
+            "DRY RUN: Would download manifest.",
+            "DRY RUN: Would identify database component from manifest.",
+            "DRY RUN: Would download database component.",
+            "DRY RUN: Would identify map_config component from manifest.",
+            "DRY RUN: Would download map_config component.",
+            "DRY RUN: Would identify resource_configs component from manifest.",
+            "DRY RUN: Would download resource_configs component.",
+            "DRY RUN: Would identify user_configs component from manifest.",
+            "DRY RUN: Would download user_configs component.",
+            "DRY RUN: Would identify scheduler_settings component from manifest.",
+            "DRY RUN: Would download scheduler_settings component.",
+            "DRY RUN: Would identify general_configs component from manifest.",
+            "DRY RUN: Would download general_configs component.",
+            "DRY RUN: Would identify media component base path from manifest.",
+            "DRY RUN: Media sub-components (floor_maps, resource_uploads) would be handled by restore_media_component later."
+        ]
+        for action in simulated_actions:
+            _emit_progress(task_id, action, level="INFO")
+
+        _emit_progress(task_id, "DRY RUN: Full restore simulation completed.", level="SUCCESS")
+        # Return structure for dry run: (None for paths, but list of actions)
+        # The calling function in api_system.py expects a dictionary for downloaded_components
+        return {
+            "local_temp_dir": "/tmp/simulated_dry_run_dir", # Placeholder
+            "database_dump": "/tmp/simulated_dry_run_dir/sim_database.sql", # Placeholder
+            "map_config": "/tmp/simulated_dry_run_dir/sim_map_config.json", # Placeholder
+            "resource_configs": "/tmp/simulated_dry_run_dir/sim_resource_configs.json", # Placeholder
+            "user_configs": "/tmp/simulated_dry_run_dir/sim_user_configs.json", # Placeholder
+            "scheduler_settings": "/tmp/simulated_dry_run_dir/sim_scheduler_settings.json", # Placeholder
+            "general_configs": "/tmp/simulated_dry_run_dir/sim_general_configs.json", # Placeholder
+            "unified_booking_backup_schedule": "/tmp/simulated_dry_run_dir/sim_unified_booking_backup_schedule.json", # Placeholder
+            "media_base_path_on_share": f"{FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_timestamp}/{COMPONENT_SUBDIR_MEDIA}", # Placeholder for path on share
+            "actions_summary": simulated_actions
+        }
+
+    # Actual restore logic
+    downloaded_component_paths = {
+        "database_dump": None,
+        "map_config": None,
+        "resource_configs": None,
+        "user_configs": None,
+        "scheduler_settings": None,
+        "general_configs": None,
+        "unified_booking_backup_schedule": None, # Added for unified schedule
+        "media_base_path_on_share": None, # Store the base path on Azure for media, not a local download path
+        "local_temp_dir": None,
+        "actions_summary": []
+    }
+    actions_summary = downloaded_component_paths["actions_summary"]
+
+    local_temp_dir = None
+    try:
+        service_client = _get_service_client()
+        system_backup_share_name = os.environ.get('AZURE_SYSTEM_BACKUP_SHARE', 'system-backups')
+        share_client = service_client.get_share_client(system_backup_share_name)
+
+        if not _client_exists(share_client):
+            msg = f"Azure share '{system_backup_share_name}' not found for restore."
+            _emit_progress(task_id, msg, level="ERROR")
+            actions_summary.append(msg)
+            # No specific paths to return, but the structure is expected.
+            return downloaded_component_paths # Return partially filled dict indicating failure at this stage
+
+        local_temp_dir = tempfile.mkdtemp(prefix=f"restore_{backup_timestamp}_")
+        downloaded_component_paths["local_temp_dir"] = local_temp_dir
+        _emit_progress(task_id, f"Created temporary directory for downloads: {local_temp_dir}", level="INFO")
+        actions_summary.append(f"Created temp dir: {local_temp_dir}")
+
+        # 1. Download Manifest
+        manifest_filename = f"backup_manifest_{backup_timestamp}.json"
+        manifest_path_on_share = f"{FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_timestamp}/{COMPONENT_SUBDIR_MANIFEST}/{manifest_filename}"
+        local_manifest_path = os.path.join(local_temp_dir, manifest_filename)
+
+        if not download_file(share_client, manifest_path_on_share, local_manifest_path):
+            msg = f"Failed to download manifest: {manifest_path_on_share}"
+            _emit_progress(task_id, msg, level="ERROR")
+            actions_summary.append(msg)
+            # shutil.rmtree(local_temp_dir) # Clean up temp dir on failure
+            return downloaded_component_paths
+
+        actions_summary.append(f"Manifest downloaded to {local_manifest_path}")
+        _emit_progress(task_id, "Manifest downloaded. Parsing components...", level="INFO")
+
+        with open(local_manifest_path, 'r', encoding='utf-8') as f_manifest:
+            manifest_data = json.load(f_manifest)
+
+        backup_root_on_share = f"{FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_timestamp}"
+
+        # 2. Download components based on manifest
+        for component in manifest_data.get("components", []):
+            comp_type = component.get("type")
+            comp_name = component.get("name") # e.g., "database", "map_config", "general_configs"
+            comp_path_in_backup = component.get("path_in_backup") # Relative path like "database/site_....db" or "configurations/general_configs_....json"
+
+            if not comp_path_in_backup:
+                _emit_progress(task_id, f"Component '{comp_name}' (Type: {comp_type}) missing 'path_in_backup' in manifest. Skipping.", level="WARNING")
+                actions_summary.append(f"Skipped component '{comp_name}': missing path_in_backup.")
+                continue
+
+            full_path_on_share = f"{backup_root_on_share}/{comp_path_in_backup}"
+
+            # Determine local download filename (use original filename from path_in_backup)
+            local_filename = os.path.basename(comp_path_in_backup)
+            local_download_target_path = os.path.join(local_temp_dir, local_filename)
+
+            _emit_progress(task_id, f"Attempting to download component: {comp_name} (Type: {comp_type}) from {full_path_on_share}", level="INFO")
+
+            if comp_type == "media": # Media is a directory, store its Azure base path for later processing
+                # The manifest component for media should have path_in_backup like "media"
+                # The actual subdirectories (floor_map_uploads, resource_uploads) are inside this.
+                # We store the Azure path to the "media" directory of this backup set.
+                downloaded_component_paths["media_base_path_on_share"] = full_path_on_share
+                _emit_progress(task_id, f"Media base path on Azure identified: {full_path_on_share}. Actual files will be restored by specific media logic.", level="INFO")
+                actions_summary.append(f"Media base path on Azure for component '{comp_name}': {full_path_on_share}")
+                continue # Don't download the media directory itself as a single file.
+
+            # For file-based components (db, configs)
+            if download_file(share_client, full_path_on_share, local_download_target_path):
+                _emit_progress(task_id, f"Component '{comp_name}' downloaded to {local_download_target_path}", level="SUCCESS")
+                actions_summary.append(f"Downloaded '{comp_name}' to {local_download_target_path}")
+
+                # Store path based on standardized keys
+                if comp_type == "database":
+                    downloaded_component_paths["database_dump"] = local_download_target_path
+                elif comp_name == "map_config": # Match by name from manifest
+                    downloaded_component_paths["map_config"] = local_download_target_path
+                elif comp_name == "resource_configs":
+                    downloaded_component_paths["resource_configs"] = local_download_target_path
+                elif comp_name == "user_configs":
+                    downloaded_component_paths["user_configs"] = local_download_target_path
+                elif comp_name == "scheduler_settings":
+                    downloaded_component_paths["scheduler_settings"] = local_download_target_path
+                elif comp_name == "general_configs": # New general configurations
+                    downloaded_component_paths["general_configs"] = local_download_target_path
+                elif comp_name == "unified_booking_backup_schedule": # For unified schedule file
+                     downloaded_component_paths["unified_booking_backup_schedule"] = local_download_target_path
+                else:
+                    _emit_progress(task_id, f"Unknown component name '{comp_name}' (Type: {comp_type}) in manifest during download mapping. File downloaded but not assigned to a standard key.", level="WARNING")
+                    actions_summary.append(f"Downloaded unknown component '{comp_name}' to {local_download_target_path}")
+            else:
+                msg = f"Failed to download component '{comp_name}' from {full_path_on_share}"
+                _emit_progress(task_id, msg, level="ERROR")
+                actions_summary.append(msg)
+                # Depending on criticality, you might set an overall failure flag here.
+                # For now, allow continuing to download other components.
+
+        _emit_progress(task_id, "All listed components processed for download.", level="INFO")
+        actions_summary.append("Component download phase complete.")
+        # The local_temp_dir should NOT be cleaned up here; the caller (api_system.py) will use these files.
+        # Caller is responsible for cleanup.
+
+    except Exception as e:
+        error_msg = f"Critical error during full restore download phase: {str(e)}"
+        _emit_progress(task_id, error_msg, level="CRITICAL", detail=traceback.format_exc())
+        actions_summary.append(error_msg)
+        if local_temp_dir and os.path.exists(local_temp_dir):
+            try:
+                shutil.rmtree(local_temp_dir) # Attempt cleanup on critical error
+                _emit_progress(task_id, f"Cleaned up temp dir {local_temp_dir} due to error.", level="INFO")
+            except Exception as e_clean:
+                _emit_progress(task_id, f"Error cleaning up temp dir {local_temp_dir}: {str(e_clean)}", level="ERROR")
+        downloaded_component_paths["local_temp_dir"] = None # Nullify if cleaned or failed to create
+        # Return partially filled dict indicating failure
+        return downloaded_component_paths
+
+    return downloaded_component_paths
+
 
 def create_full_backup(timestamp_str, map_config_data=None, resource_configs_data=None, user_configs_data=None, task_id=None):
     _emit_progress(task_id, f"AzureBackup: Received map_config_data type: {type(map_config_data)}", level='DEBUG')
@@ -555,10 +737,23 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
             configs_to_backup_dynamically = [
                 (map_config_data, "map_config", MAP_CONFIG_FILENAME_PREFIX),
                 (resource_configs_data, "resource_configs", RESOURCE_CONFIG_FILENAME_PREFIX),
-                (user_configs_data, "user_configs", USER_CONFIG_FILENAME_PREFIX)]
+                (user_configs_data, "user_configs", USER_CONFIG_FILENAME_PREFIX),
+            ]
+            # Add general configurations (BookingSettings)
+            general_configs_data = _get_general_configurations_data() # Fetch general configs
+            if general_configs_data and not general_configs_data.get('error'):
+                configs_to_backup_dynamically.append(
+                    (general_configs_data, "general_configs", GENERAL_CONFIGS_FILENAME_PREFIX)
+                )
+            else:
+                _emit_progress(task_id, "Failed to retrieve general configurations (BookingSettings) for backup.",
+                               detail=general_configs_data.get('message', 'Unknown error during fetch.'), level='ERROR')
+                # Decide if this is a critical failure. For now, log and continue.
+                # overall_success = False # Uncomment if this should fail the entire backup.
+
             for config_data, name, prefix in configs_to_backup_dynamically:
                 _emit_progress(task_id, f"AzureBackup: Checking dynamic config component '{name}'. Data is None: {config_data is None}. Data is empty (if applicable): {not config_data if isinstance(config_data, (list, dict)) else 'N/A'}", level='DEBUG')
-                if not config_data:
+                if not config_data or (isinstance(config_data, dict) and config_data.get('error')): # Also check for error flag from _get_general_configurations_data
                     _emit_progress(task_id, f"Dynamic configuration '{name}' data is empty or None, skipping.", level='INFO')
                     continue
                 tmp_json_path = None
@@ -947,6 +1142,32 @@ def download_scheduler_settings_component(share_client: ShareClient, full_path_o
         return True, f"Scheduler settings downloaded to '{local_temp_path}'.", local_temp_path, None
     else:
         error_msg = f"Failed to download scheduler settings from '{full_path_on_share}'."
+        _emit_progress(task_id, error_msg, level='ERROR')
+        return False, error_msg, None, error_msg
+
+def download_general_config_component(share_client: ShareClient, full_path_on_share: str, task_id: str = None, dry_run: bool = False):
+    """Downloads the general configurations JSON file from Azure to a local temporary path."""
+    if dry_run:
+        _emit_progress(task_id, "DRY RUN: Simulating general configurations component download.", level='INFO')
+        # Return a success-like tuple with a simulated path
+        return True, "Dry run: General configurations download simulated.", f"simulated_downloaded_general_configs.json", None
+
+    _emit_progress(task_id, f"Starting general configurations component download from '{full_path_on_share}'.", level='INFO')
+
+    base_filename = os.path.basename(full_path_on_share) if full_path_on_share else "general_configs.json"
+    local_filename = f"downloaded_{base_filename}" # e.g., downloaded_general_configs_YYYYMMDD_HHMMSS.json
+
+    # Ensure DATA_DIR is defined (it should be at the module level)
+    # If DATA_DIR is not suitable for temp files, use tempfile.gettempdir() or a dedicated app temp folder.
+    # For consistency with other download functions, using DATA_DIR for now.
+    local_temp_path = os.path.join(DATA_DIR, local_filename)
+    os.makedirs(DATA_DIR, exist_ok=True) # Ensure DATA_DIR exists
+
+    if download_file(share_client, full_path_on_share, local_temp_path):
+        _emit_progress(task_id, f"General configurations downloaded successfully to '{local_temp_path}'.", level='SUCCESS')
+        return True, f"General configurations downloaded to '{local_temp_path}'.", local_temp_path, None
+    else:
+        error_msg = f"Failed to download general configurations from '{full_path_on_share}'."
         _emit_progress(task_id, error_msg, level='ERROR')
         return False, error_msg, None, error_msg
 
@@ -1394,6 +1615,69 @@ def perform_startup_restore_sequence(app_for_context):
                 # For now, assuming module-level DATA_DIR is appropriate.
                 live_scheduler_path = os.path.join(DATA_DIR, 'scheduler_settings.json') # DATA_DIR is BASE_DIR/data
                 live_scheduler_dir = os.path.dirname(live_scheduler_path)
+                if not os.path.exists(live_scheduler_dir): os.makedirs(live_scheduler_dir, exist_ok=True)
+                try:
+                    app_logger.info(f"Attempting to replace live scheduler settings at '{live_scheduler_path}' with downloaded backup '{local_scheduler_path}'.")
+                    shutil.copyfile(local_scheduler_path, live_scheduler_path)
+                    app_logger.info("Scheduler settings successfully restored.")
+                    try:
+                        add_audit_log("System Restore", f"Scheduler settings restored from startup sequence using backup {latest_backup_timestamp}.")
+                    except Exception as e_audit: # Should be specific to DB errors if logger/DB is not ready
+                        app_logger.warning(f"Could not write audit log for system restore (scheduler_settings): {e_audit}")
+                except Exception as e_sched_restore:
+                    app_logger.error(f"Error replacing live scheduler settings: {e_sched_restore}", exc_info=True)
+                    # Update status and message for partial failure
+                    restore_status["status"] = "partial_failure"
+                    error_detail = f"Error during scheduler settings restore: {e_sched_restore}"
+                    if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
+                        restore_status["message"] += f"; {error_detail}"
+                    else:
+                        restore_status["message"] = error_detail
+            else:
+                app_logger.info("Scheduler settings component not found in downloaded files. Skipping its restore.")
+
+            # Apply General Configurations (BookingSettings)
+            # The key 'general_configs' matches what restore_full_backup would store it as.
+            if "general_configs" in downloaded_component_paths:
+                local_general_configs_path = downloaded_component_paths["general_configs"]
+                app_logger.info(f"Attempting to restore General Configurations (BookingSettings) from {local_general_configs_path}")
+                try:
+                    with open(local_general_configs_path, 'r', encoding='utf-8') as f_gc:
+                        general_configs_data = json.load(f_gc)
+
+                    # _import_general_configurations_data expects the full dict containing 'booking_settings' list
+                    summary_gc, status_gc = _import_general_configurations_data(general_configs_data)
+
+                    if status_gc < 300:
+                        app_logger.info(f"General Configurations (BookingSettings) applied: {summary_gc.get('message', 'Success')}")
+                        if summary_gc.get('errors') or summary_gc.get('warnings'):
+                             app_logger.warning(f"General Configurations import details - Errors: {summary_gc.get('errors', [])}, Warnings: {summary_gc.get('warnings', [])}")
+                        try:
+                            add_audit_log("System Restore", f"General Configurations (BookingSettings) restored from startup using backup {latest_backup_timestamp}. Status: {summary_gc.get('message', 'Success')}")
+                        except Exception as e_audit_gc:
+                            app_logger.warning(f"Could not write audit log for startup restore (general_configs): {e_audit_gc}")
+                    else:
+                        app_logger.error(f"Failed to restore General Configurations (BookingSettings): {summary_gc.get('message', 'Unknown error')}. Errors: {summary_gc.get('errors', [])}")
+                        restore_status["status"] = "partial_failure"
+                        error_detail_gc = f"Error during General Configurations restore: {summary_gc.get('message', 'Unknown error')}"
+                        if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
+                            restore_status["message"] += f"; {error_detail_gc}"
+                        else:
+                            restore_status["message"] = error_detail_gc
+                except Exception as e_gc_restore:
+                    app_logger.error(f"Error during General Configurations (BookingSettings) import stage: {e_gc_restore}", exc_info=True)
+                    restore_status["status"] = "partial_failure"
+                    error_detail_gc_exc = f"Exception during General Configurations restore: {str(e_gc_restore)}"
+                    if "message" in restore_status and restore_status["message"] != "Startup restore sequence initiated but not completed.":
+                        restore_status["message"] += f"; {error_detail_gc_exc}"
+                    else:
+                         restore_status["message"] = error_detail_gc_exc
+            else:
+                app_logger.info("General Configurations (BookingSettings) component not found in downloaded files. Skipping its restore.")
+
+
+            # Restore Media Files (Floor Maps and Resource Uploads)
+            if "media" in downloaded_component_paths and isinstance(downloaded_component_paths["media"], dict):
                 if not os.path.exists(live_scheduler_dir): os.makedirs(live_scheduler_dir, exist_ok=True)
                 try:
                     app_logger.info(f"Attempting to replace live scheduler settings at '{live_scheduler_path}' with downloaded backup '{local_scheduler_path}'.")
