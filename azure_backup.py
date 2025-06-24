@@ -1569,10 +1569,10 @@ def perform_startup_restore_sequence(app_for_context):
                         print("DEBUG: CHECKPOINT PRE-MIGRATION")
                         migration_completed_successfully = False
                         try:
-                            flask_db_upgrade() # This uses the current app context
-                            migration_completed_successfully = True
-                            print("DEBUG: CHECKPOINT POST-MIGRATION (after flask_db_upgrade success)")
-                            app_logger.info("Database migrations applied successfully (or were already up-to-date).")
+                            # flask_db_upgrade() # This uses the current app context - TEMPORARILY COMMENTED OUT FOR DEBUGGING
+                            migration_completed_successfully = True # Assume success for now if commented out
+                            print("DEBUG: CHECKPOINT POST-MIGRATION (flask_db_upgrade was here, now commented out)")
+                            app_logger.info("Database migrations step bypassed for debugging in perform_startup_restore_sequence. Migrations should be handled by init_setup.py's init_db.")
 
                             # Now that migrations have run, attempt to log the audit event
                             try:
