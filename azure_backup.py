@@ -1565,11 +1565,13 @@ def perform_startup_restore_sequence(app_for_context):
                         app_logger.info("Database file successfully replaced by restored version.")
 
                         # Run database migrations immediately after restoring the DB file
+                        app_logger.info("Attempting to apply database migrations programmatically on restored database...")
+                        print("DEBUG: CHECKPOINT PRE-MIGRATION")
+                        migration_completed_successfully = False
                         try:
-                            app_logger.info("Attempting to apply database migrations programmatically on restored database...")
-                            print("DEBUG: CHECKPOINT PRE-MIGRATION")
                             flask_db_upgrade() # This uses the current app context
-                            print("DEBUG: CHECKPOINT POST-MIGRATION")
+                            migration_completed_successfully = True
+                            print("DEBUG: CHECKPOINT POST-MIGRATION (after flask_db_upgrade success)")
                             app_logger.info("Database migrations applied successfully (or were already up-to-date).")
 
                             # Now that migrations have run, attempt to log the audit event
