@@ -324,16 +324,18 @@ def download_backup_set_as_zip(full_backup_filename, task_id=None):
         if task_id: update_task_log(task_id, f"Full backup '{full_backup_filename}' downloaded.", level="info")
 
         # 2. Find and download associated incremental backups
-        logger.info(f"{log_prefix}Searching for incremental backups based on full backup timestamp: {full_backup_timestamp}")
-        if task_id: update_task_log(task_id, "Searching for associated incremental backups...", level="info")
+        logger.info(f"{log_prefix}Searching for incremental backups based on full backup timestamp: '{full_backup_timestamp}' (derived from full backup filename: '{full_backup_filename}')")
+        if task_id: update_task_log(task_id, f"Searching for incremental backups for base timestamp '{full_backup_timestamp}'...", level="info")
 
         incremental_scan_subdirs = ["incremental_json", "manual_full_json"]
         incrementals_found_count = 0
+        incrementals_added_to_zip_count = 0
 
         for scan_subdir_name in incremental_scan_subdirs:
             inc_dir_path_on_share = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{scan_subdir_name}"
             dir_client = share_client.get_directory_client(inc_dir_path_on_share)
 
+            logger.debug(f"{log_prefix}Scanning directory for incrementals: '{inc_dir_path_on_share}'")
             if not _client_exists(dir_client):
                 logger.info(f"{log_prefix}Incremental scan directory '{inc_dir_path_on_share}' does not exist. Skipping.")
                 continue
@@ -343,36 +345,48 @@ def download_backup_set_as_zip(full_backup_filename, task_id=None):
                     continue
 
                 inc_filename = item['name']
+                logger.debug(f"{log_prefix}Checking file: '{inc_filename}' in subdir '{scan_subdir_name}'")
                 inc_match = INCREMENTAL_BACKUP_PATTERN.match(inc_filename)
-                if inc_match and inc_match.group(2) == full_backup_timestamp:
-                    incrementals_found_count += 1
-                    logger.info(f"{log_prefix}Found associated incremental: {inc_filename} in {scan_subdir_name}. Attempting download...")
-                    if task_id: update_task_log(task_id, f"Downloading incremental: {inc_filename}...", level="info")
 
-                    inc_backup_azure_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{scan_subdir_name}/{inc_filename}"
-                    inc_file_client = share_client.get_file_client(inc_backup_azure_path)
+                if inc_match:
+                    extracted_inc_ts = inc_match.group(1)
+                    extracted_base_ts = inc_match.group(2)
+                    logger.debug(f"{log_prefix}Incremental pattern matched for '{inc_filename}'. Extracted inc_ts: '{extracted_inc_ts}', base_ts: '{extracted_base_ts}'")
 
-                    try:
-                        if _client_exists(inc_file_client):
-                            download_stream = inc_file_client.download_file()
-                            inc_content = download_stream.readall()
-                            if inc_content:
-                                files_added_to_zip.append({'name_in_zip': inc_filename, 'content': inc_content})
-                                logger.info(f"{log_prefix}Incremental backup '{inc_filename}' downloaded successfully.")
-                                if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' downloaded.", level="info")
+                    comparison_result = (extracted_base_ts == full_backup_timestamp)
+                    logger.debug(f"{log_prefix}Comparing extracted base_ts '{extracted_base_ts}' with target full_backup_timestamp '{full_backup_timestamp}'. Match: {comparison_result}")
+
+                    if comparison_result:
+                        incrementals_found_count += 1
+                        logger.info(f"{log_prefix}Found matching associated incremental: '{inc_filename}' in '{scan_subdir_name}'. Attempting download...")
+                        if task_id: update_task_log(task_id, f"Downloading matching incremental: {inc_filename}...", level="info")
+
+                        inc_backup_azure_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{scan_subdir_name}/{inc_filename}"
+                        inc_file_client = share_client.get_file_client(inc_backup_azure_path)
+
+                        try:
+                            if _client_exists(inc_file_client):
+                                download_stream = inc_file_client.download_file()
+                                inc_content = download_stream.readall()
+                                if inc_content:
+                                    files_added_to_zip.append({'name_in_zip': inc_filename, 'content': inc_content})
+                                    incrementals_added_to_zip_count +=1
+                                    logger.info(f"{log_prefix}Incremental backup '{inc_filename}' downloaded and added to ZIP list.")
+                                    if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' downloaded and prepared for ZIP.", level="info")
+                                else:
+                                    logger.warning(f"{log_prefix}Incremental backup '{inc_filename}' downloaded but content is empty. Skipping this file for ZIP.")
+                                    if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' was empty. Skipped for ZIP.", level="warning")
                             else:
-                                logger.warning(f"{log_prefix}Incremental backup '{inc_filename}' downloaded but content is empty. Skipping this file.")
-                                if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' was empty. Skipped.", level="warning")
-                        else:
-                            logger.warning(f"{log_prefix}Incremental backup file '{inc_backup_azure_path}' was listed but not found during download attempt. Skipping.")
-                            if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' not found on attempt. Skipped.", level="warning")
-                    except Exception as e_inc_dl:
-                        logger.error(f"{log_prefix}Error downloading incremental file '{inc_filename}': {e_inc_dl}", exc_info=True)
-                        if task_id: update_task_log(task_id, f"Error downloading incremental '{inc_filename}': {str(e_inc_dl)}. Skipped.", level="error")
-                        # Decide if this is a critical failure or if the ZIP can be created with available files.
-                        # For now, we'll continue and log the error.
+                                logger.warning(f"{log_prefix}Incremental backup file '{inc_backup_azure_path}' was listed but not found during download attempt. Skipping for ZIP.")
+                                if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' not found on download attempt. Skipped for ZIP.", level="warning")
+                        except Exception as e_inc_dl:
+                            logger.error(f"{log_prefix}Error downloading incremental file '{inc_filename}': {e_inc_dl}", exc_info=True)
+                            if task_id: update_task_log(task_id, f"Error downloading incremental '{inc_filename}': {str(e_inc_dl)}. Skipped for ZIP.", level="error")
+                else:
+                    logger.debug(f"{log_prefix}File '{inc_filename}' did not match incremental pattern.")
 
-        if task_id: update_task_log(task_id, f"Found and processed {incrementals_found_count} potential incremental backups.", level="info")
+        logger.info(f"{log_prefix}Incremental search complete. Found {incrementals_found_count} potential incrementals, added {incrementals_added_to_zip_count} to ZIP list.")
+        if task_id: update_task_log(task_id, f"Found {incrementals_found_count} potential incrementals, added {incrementals_added_to_zip_count} to ZIP.", level="info")
 
         if not files_added_to_zip: # Should be caught by full_backup_content check, but as a safeguard
             err_msg = f"{log_prefix}No files (not even the full backup) were successfully prepared for zipping for base {full_backup_filename}."
