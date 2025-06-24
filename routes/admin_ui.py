@@ -570,5 +570,16 @@ def import_bookings_json():
 @login_required
 @permission_required('manage_system')
 def clear_all_bookings_data():
-    # ... (implementation as provided) ...
-    return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+    logger = current_app.logger
+    try:
+        num_deleted = db.session.query(Booking).delete()
+        db.session.commit()
+        add_audit_log(action='CLEAR_ALL_BOOKINGS', details=f'All {num_deleted} booking entries deleted by user {current_user.username}.')
+        logger.info(f"User {current_user.username} cleared all {num_deleted} booking entries.")
+        # flash(_('All booking data has been successfully cleared.'), 'success') # Flash is for redirects
+        return jsonify({'success': True, 'message': _('All booking data has been successfully cleared.')}), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error clearing all booking data by user {current_user.username}: {e}", exc_info=True)
+        # flash(_('An error occurred while clearing booking data: %(error)s', error=str(e)), 'error')
+        return jsonify({'success': False, 'message': _('An error occurred while clearing booking data: %(error)s', error=str(e))}), 500
