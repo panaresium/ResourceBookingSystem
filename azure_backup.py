@@ -324,16 +324,18 @@ def download_backup_set_as_zip(full_backup_filename, task_id=None):
         if task_id: update_task_log(task_id, f"Full backup '{full_backup_filename}' downloaded.", level="info")
 
         # 2. Find and download associated incremental backups
-        logger.info(f"{log_prefix}Searching for incremental backups based on full backup timestamp: {full_backup_timestamp}")
-        if task_id: update_task_log(task_id, "Searching for associated incremental backups...", level="info")
+        logger.info(f"{log_prefix}Searching for incremental backups based on full backup timestamp: '{full_backup_timestamp}' (derived from full backup filename: '{full_backup_filename}')")
+        if task_id: update_task_log(task_id, f"Searching for incremental backups for base timestamp '{full_backup_timestamp}'...", level="info")
 
         incremental_scan_subdirs = ["incremental_json", "manual_full_json"]
         incrementals_found_count = 0
+        incrementals_added_to_zip_count = 0
 
         for scan_subdir_name in incremental_scan_subdirs:
             inc_dir_path_on_share = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{scan_subdir_name}"
             dir_client = share_client.get_directory_client(inc_dir_path_on_share)
 
+            logger.debug(f"{log_prefix}Scanning directory for incrementals: '{inc_dir_path_on_share}'")
             if not _client_exists(dir_client):
                 logger.info(f"{log_prefix}Incremental scan directory '{inc_dir_path_on_share}' does not exist. Skipping.")
                 continue
@@ -343,36 +345,48 @@ def download_backup_set_as_zip(full_backup_filename, task_id=None):
                     continue
 
                 inc_filename = item['name']
+                logger.debug(f"{log_prefix}Checking file: '{inc_filename}' in subdir '{scan_subdir_name}'")
                 inc_match = INCREMENTAL_BACKUP_PATTERN.match(inc_filename)
-                if inc_match and inc_match.group(2) == full_backup_timestamp:
-                    incrementals_found_count += 1
-                    logger.info(f"{log_prefix}Found associated incremental: {inc_filename} in {scan_subdir_name}. Attempting download...")
-                    if task_id: update_task_log(task_id, f"Downloading incremental: {inc_filename}...", level="info")
 
-                    inc_backup_azure_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{scan_subdir_name}/{inc_filename}"
-                    inc_file_client = share_client.get_file_client(inc_backup_azure_path)
+                if inc_match:
+                    extracted_inc_ts = inc_match.group(1)
+                    extracted_base_ts = inc_match.group(2)
+                    logger.debug(f"{log_prefix}Incremental pattern matched for '{inc_filename}'. Extracted inc_ts: '{extracted_inc_ts}', base_ts: '{extracted_base_ts}'")
 
-                    try:
-                        if _client_exists(inc_file_client):
-                            download_stream = inc_file_client.download_file()
-                            inc_content = download_stream.readall()
-                            if inc_content:
-                                files_added_to_zip.append({'name_in_zip': inc_filename, 'content': inc_content})
-                                logger.info(f"{log_prefix}Incremental backup '{inc_filename}' downloaded successfully.")
-                                if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' downloaded.", level="info")
+                    comparison_result = (extracted_base_ts == full_backup_timestamp)
+                    logger.debug(f"{log_prefix}Comparing extracted base_ts '{extracted_base_ts}' with target full_backup_timestamp '{full_backup_timestamp}'. Match: {comparison_result}")
+
+                    if comparison_result:
+                        incrementals_found_count += 1
+                        logger.info(f"{log_prefix}Found matching associated incremental: '{inc_filename}' in '{scan_subdir_name}'. Attempting download...")
+                        if task_id: update_task_log(task_id, f"Downloading matching incremental: {inc_filename}...", level="info")
+
+                        inc_backup_azure_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{scan_subdir_name}/{inc_filename}"
+                        inc_file_client = share_client.get_file_client(inc_backup_azure_path)
+
+                        try:
+                            if _client_exists(inc_file_client):
+                                download_stream = inc_file_client.download_file()
+                                inc_content = download_stream.readall()
+                                if inc_content:
+                                    files_added_to_zip.append({'name_in_zip': inc_filename, 'content': inc_content})
+                                    incrementals_added_to_zip_count +=1
+                                    logger.info(f"{log_prefix}Incremental backup '{inc_filename}' downloaded and added to ZIP list.")
+                                    if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' downloaded and prepared for ZIP.", level="info")
+                                else:
+                                    logger.warning(f"{log_prefix}Incremental backup '{inc_filename}' downloaded but content is empty. Skipping this file for ZIP.")
+                                    if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' was empty. Skipped for ZIP.", level="warning")
                             else:
-                                logger.warning(f"{log_prefix}Incremental backup '{inc_filename}' downloaded but content is empty. Skipping this file.")
-                                if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' was empty. Skipped.", level="warning")
-                        else:
-                            logger.warning(f"{log_prefix}Incremental backup file '{inc_backup_azure_path}' was listed but not found during download attempt. Skipping.")
-                            if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' not found on attempt. Skipped.", level="warning")
-                    except Exception as e_inc_dl:
-                        logger.error(f"{log_prefix}Error downloading incremental file '{inc_filename}': {e_inc_dl}", exc_info=True)
-                        if task_id: update_task_log(task_id, f"Error downloading incremental '{inc_filename}': {str(e_inc_dl)}. Skipped.", level="error")
-                        # Decide if this is a critical failure or if the ZIP can be created with available files.
-                        # For now, we'll continue and log the error.
+                                logger.warning(f"{log_prefix}Incremental backup file '{inc_backup_azure_path}' was listed but not found during download attempt. Skipping for ZIP.")
+                                if task_id: update_task_log(task_id, f"Incremental '{inc_filename}' not found on download attempt. Skipped for ZIP.", level="warning")
+                        except Exception as e_inc_dl:
+                            logger.error(f"{log_prefix}Error downloading incremental file '{inc_filename}': {e_inc_dl}", exc_info=True)
+                            if task_id: update_task_log(task_id, f"Error downloading incremental '{inc_filename}': {str(e_inc_dl)}. Skipped for ZIP.", level="error")
+                else:
+                    logger.debug(f"{log_prefix}File '{inc_filename}' did not match incremental pattern.")
 
-        if task_id: update_task_log(task_id, f"Found and processed {incrementals_found_count} potential incremental backups.", level="info")
+        logger.info(f"{log_prefix}Incremental search complete. Found {incrementals_found_count} potential incrementals, added {incrementals_added_to_zip_count} to ZIP list.")
+        if task_id: update_task_log(task_id, f"Found {incrementals_found_count} potential incrementals, added {incrementals_added_to_zip_count} to ZIP.", level="info")
 
         if not files_added_to_zip: # Should be caught by full_backup_content check, but as a safeguard
             err_msg = f"{log_prefix}No files (not even the full backup) were successfully prepared for zipping for base {full_backup_filename}."
@@ -407,6 +421,198 @@ def download_backup_set_as_zip(full_backup_filename, task_id=None):
         logger.error(f"{log_prefix}Unexpected error creating ZIP for backup set {full_backup_filename}: {e_final}", exc_info=True)
         if task_id: update_task_log(task_id, f"Unexpected critical error during ZIP creation: {str(e_final)}", level="critical")
         return None
+
+# Constant for the subdirectory where incremental backups will be stored
+INCREMENTAL_BACKUP_SUBDIR = "incremental_json"
+
+def create_incremental_booking_backup(app, task_id=None):
+    log_prefix = f"[Task {task_id if task_id else 'ScheduledInc'}] "
+    logger.info(f"{log_prefix}Starting creation of incremental booking backup.")
+    if task_id: update_task_log(task_id, "Incremental backup process started.", level="info")
+
+    try:
+        service_client = _get_service_client()
+        share_name = os.environ.get('AZURE_BOOKING_DATA_SHARE', 'booking-data-backups')
+        if not share_name:
+            err_msg = f"{log_prefix}Azure share name not configured (AZURE_BOOKING_DATA_SHARE)."
+            logger.error(err_msg)
+            if task_id: update_task_log(task_id, err_msg, level="critical")
+            return False
+        share_client = service_client.get_share_client(share_name)
+        if not _client_exists(share_client):
+            err_msg = f"{log_prefix}Azure share '{share_name}' not found."
+            logger.error(err_msg)
+            if task_id: update_task_log(task_id, err_msg, level="critical")
+            return False
+
+        # 1. Find Latest Full Backup
+        full_backup_dir_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/manual_full_json"
+        full_backup_dir_client = share_client.get_directory_client(full_backup_dir_path)
+        latest_full_backup_file = None
+        latest_full_backup_dt = None
+
+        if not _client_exists(full_backup_dir_client):
+            err_msg = f"{log_prefix}Full backup directory '{full_backup_dir_path}' not found. Cannot create incremental backup."
+            logger.warning(err_msg)
+            if task_id: update_task_log(task_id, err_msg, level="warning")
+            return False
+
+        for item in full_backup_dir_client.list_directories_and_files():
+            if not item['is_directory']:
+                match = FULL_BACKUP_PATTERN.match(item['name'])
+                if match:
+                    ts_str = match.group(1)
+                    try:
+                        dt_obj = datetime.strptime(ts_str, '%Y%m%d_%H%M%S').replace(tzinfo=timezone.utc)
+                        if latest_full_backup_dt is None or dt_obj > latest_full_backup_dt:
+                            latest_full_backup_dt = dt_obj
+                            latest_full_backup_file = item['name']
+                    except ValueError:
+                        logger.warning(f"{log_prefix}Could not parse timestamp from full backup filename: {item['name']}. Skipping.")
+
+        if latest_full_backup_file is None or latest_full_backup_dt is None:
+            err_msg = f"{log_prefix}No valid full backups found in '{full_backup_dir_path}'. Cannot create incremental backup."
+            logger.error(err_msg)
+            if task_id: update_task_log(task_id, err_msg, level="error")
+            return False
+
+        full_backup_timestamp_str = latest_full_backup_dt.strftime('%Y%m%d_%H%M%S')
+        logger.info(f"{log_prefix}Latest full backup identified: {latest_full_backup_file} (Timestamp: {full_backup_timestamp_str})")
+        if task_id: update_task_log(task_id, f"Using full backup {latest_full_backup_file} as base.", level="info")
+
+        # 2. Determine "Since" Timestamp
+        state_file_dir = DATA_DIR # Ensure DATA_DIR is defined, usually at module level
+        os.makedirs(state_file_dir, exist_ok=True)
+        state_filename = f"last_incremental_info_for_{full_backup_timestamp_str}.json"
+        state_filepath = os.path.join(state_file_dir, state_filename)
+        since_timestamp_dt = latest_full_backup_dt # Default to full backup's timestamp
+
+        if os.path.exists(state_filepath):
+            try:
+                with open(state_filepath, 'r', encoding='utf-8') as f_state:
+                    state_data = json.load(f_state)
+                    last_inc_ts_iso = state_data.get('last_incremental_creation_timestamp_iso')
+                    if last_inc_ts_iso:
+                        # Ensure it's parsed as UTC if stored as ISO string
+                        parsed_ts = datetime.fromisoformat(last_inc_ts_iso)
+                        if parsed_ts.tzinfo is None: # If ISO string was naive
+                             since_timestamp_dt = parsed_ts.replace(tzinfo=timezone.utc)
+                        else: # Already timezone-aware
+                             since_timestamp_dt = parsed_ts.astimezone(timezone.utc)
+                        logger.info(f"{log_prefix}Found last incremental state. Using 'since' timestamp: {since_timestamp_dt.isoformat()}")
+            except (IOError, json.JSONDecodeError, ValueError) as e_state:
+                logger.warning(f"{log_prefix}Error reading state file '{state_filepath}': {e_state}. Defaulting 'since' timestamp to full backup time.")
+
+        if task_id: update_task_log(task_id, f"Determined 'since' timestamp for changes: {since_timestamp_dt.isoformat()}", level="info")
+
+        # 3. Fetch Incremental Booking Data (from Flask app context)
+        bookings_to_backup = []
+        with app.app_context(): # Need app context for DB query
+            # Ensure since_timestamp_dt is naive UTC if Booking.last_modified is naive UTC
+            # Or ensure Booking.last_modified is compared correctly with timezone-aware since_timestamp_dt
+            # Assuming Booking.last_modified is stored as naive UTC datetime
+            if since_timestamp_dt.tzinfo is not None:
+                since_timestamp_naive_utc = since_timestamp_dt.astimezone(timezone.utc).replace(tzinfo=None)
+            else: # Should not happen if parsed correctly above, but as a safeguard
+                since_timestamp_naive_utc = since_timestamp_dt
+
+            logger.info(f"{log_prefix}Querying bookings modified since (naive UTC): {since_timestamp_naive_utc}")
+
+            # Add a small buffer to avoid missing records due to sub-second precision issues if any
+            # query_since_timestamp = since_timestamp_naive_utc - timedelta(seconds=5)
+            query_since_timestamp = since_timestamp_naive_utc
+
+            modified_bookings = Booking.query.filter(Booking.last_modified >= query_since_timestamp).all()
+
+            # Filter out bookings whose last_modified is exactly the since_timestamp if it's from a previous incremental,
+            # unless it's the very first incremental (where since_timestamp == full_backup_dt).
+            # This is to avoid re-backing up records that were the *last* ones in the previous incremental batch.
+            if since_timestamp_dt != latest_full_backup_dt: # True if this is NOT the first incremental for this full
+                 bookings_to_backup = [b for b in modified_bookings if b.last_modified > since_timestamp_naive_utc]
+            else: # First incremental, include everything >= full backup time
+                 bookings_to_backup = modified_bookings
+
+            logger.info(f"{log_prefix}Found {len(bookings_to_backup)} bookings modified since {since_timestamp_naive_utc} (after filtering exact matches if not first inc).")
+
+        # 4. Handle No Changes
+        if not bookings_to_backup:
+            logger.info(f"{log_prefix}No new or modified bookings since {since_timestamp_dt.isoformat()}. Incremental backup not created.")
+            if task_id: update_task_log(task_id, "No changes detected since last backup. Incremental backup skipped.", level="info")
+            # Note: We don't update the state file here, as no new incremental was made.
+            return True # Considered a successful outcome (no work to do)
+
+        # 5. Serialize Data
+        booking_list_for_json = []
+        for booking in bookings_to_backup:
+            booking_list_for_json.append({
+                'id': booking.id, 'resource_id': booking.resource_id, 'user_name': booking.user_name,
+                'start_time': booking.start_time.isoformat() if booking.start_time else None,
+                'end_time': booking.end_time.isoformat() if booking.end_time else None,
+                'title': booking.title, 'status': booking.status,
+                'last_modified': booking.last_modified.isoformat() if booking.last_modified else None,
+                # Add other relevant fields if needed for incremental restore
+            })
+
+        current_inc_time = datetime.now(timezone.utc)
+        current_inc_ts_str = current_inc_time.strftime('%Y%m%d_%H%M%S')
+
+        export_data = {
+            "backup_type": "incremental",
+            "creation_timestamp_iso": current_inc_time.isoformat(),
+            "base_full_backup_filename": latest_full_backup_file,
+            "incremental_since_timestamp_iso": since_timestamp_dt.isoformat(),
+            "bookings": booking_list_for_json
+        }
+        if task_id: update_task_log(task_id, f"Serialized {len(bookings_to_backup)} bookings for incremental backup.", level="info")
+
+        # 6. Generate Filename
+        inc_filename = f"incremental_booking_export_{current_inc_ts_str}_for_{full_backup_timestamp_str}.json"
+
+        # 7. Upload to Azure
+        _ensure_directory_exists(share_client, f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{INCREMENTAL_BACKUP_SUBDIR}")
+        remote_file_path = f"{AZURE_BOOKING_DATA_PROTECTION_DIR}/{INCREMENTAL_BACKUP_SUBDIR}/{inc_filename}"
+
+        tmp_file_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8') as tmp_file:
+                json.dump(export_data, tmp_file, indent=4)
+                tmp_file_path = tmp_file.name
+
+            logger.info(f"{log_prefix}Uploading incremental backup '{inc_filename}' to '{remote_file_path}'")
+            if task_id: update_task_log(task_id, f"Uploading incremental file: {inc_filename}", level="info")
+
+            upload_success = upload_file(share_client, tmp_file_path, remote_file_path)
+            if not upload_success:
+                err_msg = f"{log_prefix}Failed to upload incremental backup file '{inc_filename}'."
+                logger.error(err_msg)
+                if task_id: update_task_log(task_id, err_msg, level="error")
+                return False
+
+            logger.info(f"{log_prefix}Incremental backup '{inc_filename}' uploaded successfully.")
+            if task_id: update_task_log(task_id, "Incremental backup file uploaded.", level="success")
+
+            # 8. Update State File
+            try:
+                with open(state_filepath, 'w', encoding='utf-8') as f_state:
+                    json.dump({'last_incremental_creation_timestamp_iso': current_inc_time.isoformat()}, f_state)
+                logger.info(f"{log_prefix}Updated state file '{state_filepath}' with timestamp {current_inc_time.isoformat()}")
+            except IOError as e_state_write:
+                err_msg = f"{log_prefix}Successfully uploaded incremental backup but FAILED to update state file '{state_filepath}': {e_state_write}. This may cause duplicate data in next incremental."
+                logger.error(err_msg)
+                if task_id: update_task_log(task_id, err_msg, level="critical") # Critical because it affects next run
+                return False # Consider this a failure of the overall process due to state inconsistency risk
+
+            return True
+
+        finally:
+            if tmp_file_path and os.path.exists(tmp_file_path):
+                os.remove(tmp_file_path)
+
+    except Exception as e:
+        err_msg = f"{log_prefix}An unexpected error occurred during incremental backup creation: {e}"
+        logger.error(err_msg, exc_info=True)
+        if task_id: update_task_log(task_id, err_msg, level="critical")
+        return False
 
 
 def restore_booking_data_to_point_in_time(app, selected_filename, selected_type, selected_timestamp_iso, task_id=None):
