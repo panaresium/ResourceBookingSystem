@@ -61,6 +61,7 @@ try:
         download_user_config_component,
         download_scheduler_settings_component,
         download_general_config_component, # Added for selective restore of general configs
+        download_unified_schedule_component, # Added for selective restore of unified schedule
         restore_media_component,
         restore_bookings_from_full_db_backup,
         backup_incremental_bookings,
@@ -945,6 +946,36 @@ def api_one_click_restore():
                     update_task_log(task_id_param, "Media base path not provided by download step. Skipping media files restore.", level="warning")
                     restore_ops_summary.append("Media files skipped (base path missing).")
 
+                # 8. Apply Unified Booking Backup Schedule Settings (was 7, now 8, after media)
+                local_unified_sched_cfg_path = downloaded_components.get("unified_booking_backup_schedule")
+                if local_unified_sched_cfg_path and os.path.exists(local_unified_sched_cfg_path):
+                    update_task_log(task_id_param, "Applying Unified Booking Backup Schedule settings...", level="info")
+                    try:
+                        with open(local_unified_sched_cfg_path, 'r', encoding='utf-8') as f:
+                            unified_sched_data = json.load(f)
+
+                        # save_unified_backup_schedule_settings handles writing to file and rescheduling
+                        save_success, save_message = save_unified_backup_schedule_settings(unified_sched_data)
+
+                        if save_success:
+                            update_task_log(task_id_param, f"Unified Booking Backup Schedule settings applied: {save_message}", level="success")
+                            restore_ops_summary.append(f"Unified Backup Schedule: {save_message}")
+                            # reschedule_unified_backup_jobs is called within save_unified_backup_schedule_settings if successful
+                        else:
+                            overall_success = False # Mark overall as failed if this specific step fails
+                            update_task_log(task_id_param, f"Unified Booking Backup Schedule settings import failed: {save_message}", level="error")
+                            restore_ops_summary.append(f"Unified Backup Schedule error: {save_message}")
+
+                        if os.path.exists(local_unified_sched_cfg_path): # Clean up
+                            os.remove(local_unified_sched_cfg_path)
+                    except Exception as e_unified_sched_apply:
+                        overall_success = False
+                        update_task_log(task_id_param, f"Error applying Unified Booking Backup Schedule settings: {str(e_unified_sched_apply)}", level="error")
+                        restore_ops_summary.append(f"Unified Backup Schedule exception: {str(e_unified_sched_apply)}")
+                else:
+                    update_task_log(task_id_param, "Unified Booking Backup Schedule settings file not found in download. Skipping.", level="warning")
+                    restore_ops_summary.append("Unified Backup Schedule skipped (not downloaded).")
+
 
                 # Final task status
                 final_message = f"Full system restore for {backup_ts_param} "
@@ -1162,7 +1193,8 @@ def api_selective_restore():
                     "resource_configs": {"import_func": _import_resource_configurations_data, "name_in_manifest": "resource_configs", "display_name": "Resource Configurations", "azure_func": azure_backup.download_resource_config_component},
                     "user_configs": {"import_func": _import_user_configurations_data, "name_in_manifest": "user_configs", "display_name": "User Configurations", "azure_func": azure_backup.download_user_config_component},
                     "scheduler_settings": {"import_func": utils.save_scheduler_settings_from_json_data, "name_in_manifest": "scheduler_settings", "display_name": "Scheduler Settings", "azure_func": azure_backup.download_scheduler_settings_component},
-                    "general_configs": {"import_func": _import_general_configurations_data, "name_in_manifest": "general_configs", "display_name": "General Application Settings", "azure_func": azure_backup.download_general_config_component} # Added general_configs
+                    "general_configs": {"import_func": _import_general_configurations_data, "name_in_manifest": "general_configs", "display_name": "General Application Settings", "azure_func": azure_backup.download_general_config_component},
+                    "unified_booking_backup_schedule": {"import_func": utils.save_unified_backup_schedule_settings, "name_in_manifest": "unified_booking_backup_schedule", "display_name": "Unified Backup Schedule", "azure_func": azure_backup.download_unified_schedule_component}
                 }
 
                 for comp_key_internal, comp_details in config_component_map.items():
