@@ -470,11 +470,58 @@ def analytics_dashboard():
 @login_required
 @permission_required('manage_system_settings')
 def system_settings_page():
-    # ... (implementation as provided) ...
+    logger = current_app.logger
+    # Initialize with default or existing values
+    booking_settings = BookingSettings.query.first()
+    current_offset_hours = booking_settings.global_time_offset_hours if booking_settings and booking_settings.global_time_offset_hours is not None else 0
+
+    if request.method == 'POST':
+        new_offset_str = request.form.get('global_time_offset_hours')
+        try:
+            new_offset_hours = int(new_offset_str)
+            if not (-23 <= new_offset_hours <= 23):
+                flash(_('Global time offset must be between -23 and 23 hours.'), 'error')
+            else:
+                if not booking_settings:
+                    booking_settings = BookingSettings(global_time_offset_hours=new_offset_hours)
+                    db.session.add(booking_settings)
+                    logger.info(f"New BookingSettings created with offset {new_offset_hours} by {current_user.username}.")
+                else:
+                    booking_settings.global_time_offset_hours = new_offset_hours
+                    logger.info(f"Global time offset updated to {new_offset_hours} by {current_user.username}.")
+
+                db.session.commit()
+                add_audit_log(action='Update Global Time Offset', details=f'Set to {new_offset_hours} hours by {current_user.username}.')
+                flash(_('Global time offset saved successfully.'), 'success')
+                current_offset_hours = new_offset_hours # Update for immediate display
+        except ValueError:
+            flash(_('Invalid value for time offset. Please enter a whole number.'), 'error')
+            logger.warning(f"ValueError for time offset by {current_user.username}: {new_offset_str}")
+        except Exception as e:
+            db.session.rollback()
+            flash(_('Error saving global time offset: %(error)s', error=str(e)), 'error')
+            logger.error(f"Error saving global time offset by {current_user.username}: {e}", exc_info=True)
+        # Redirect to GET to prevent form re-submission on refresh
+        return redirect(url_for('admin_ui.system_settings_page'))
+
+    # For GET request or after POST processing for display
+    utc_now = datetime.now(timezone.utc)
+    effective_time = utc_now + timedelta(hours=current_offset_hours)
+
+    # Check Gmail configuration status
+    gmail_refresh_token = current_app.config.get('GMAIL_REFRESH_TOKEN')
+    gmail_sender_address = current_app.config.get('GMAIL_SENDER_ADDRESS')
+    # Consider configured if both refresh token and sender address are present
+    is_gmail_configured = bool(gmail_refresh_token and gmail_sender_address)
+
+    logger.debug(f"Rendering system_settings_page for {current_user.username}. Offset: {current_offset_hours}, Gmail Configured: {is_gmail_configured}")
+
     return render_template('admin/system_settings.html',
                            global_time_offset_hours=current_offset_hours,
                            current_utc_time_str=utc_now.strftime('%Y-%m-%d %H:%M:%S %Z'),
-                           effective_operational_time_str=effective_time.strftime('%Y-%m-%d %H:%M:%S %Z (Effective)'))
+                           effective_operational_time_str=effective_time.strftime('%Y-%m-%d %H:%M:%S %Z (Effective)'),
+                           is_gmail_configured=is_gmail_configured,
+                           gmail_sender_address=gmail_sender_address if is_gmail_configured else None)
 
 @admin_ui_bp.route('/analytics/data')
 @login_required

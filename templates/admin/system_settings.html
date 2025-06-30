@@ -70,10 +70,20 @@
             {{ _('Gmail Sending Authorization') }}
         </div>
         <div class="card-body">
-            <p>{{ _('To allow the system to send emails via Gmail (e.g., for booking confirmations, notifications), you need to authorize it with a Google account.') }}</p>
-            <a href="{{ url_for('gmail_auth.authorize_gmail_sending') }}" class="btn btn-primary">{{ _('Authorize Gmail Sending') }}</a>
+            {% if is_gmail_configured %}
+                <p class="text-success">{{ _('Status: Gmail Sending is <strong>Configured</strong>.') }}</p>
+                {% if gmail_sender_address %}
+                    <p>{{ _('Authorized Sender Address: %(email)s', email=gmail_sender_address) }}</p>
+                {% endif %}
+                <p>{{ _('You can re-authorize if you need to change the account or refresh permissions.') }}</p>
+                <a href="{{ url_for('gmail_auth.authorize_gmail_sending') }}" class="btn btn-secondary">{{ _('Re-authorize Gmail Sending') }}</a>
+            {% else %}
+                <p class="text-warning">{{ _('Status: Gmail Sending is <strong>Not Configured</strong>.') }}</p>
+                <p>{{ _('To allow the system to send emails via Gmail (e.g., for booking confirmations, notifications), you need to authorize it with a Google account.') }}</p>
+                <a href="{{ url_for('gmail_auth.authorize_gmail_sending') }}" class="btn btn-primary">{{ _('Authorize Gmail Sending') }}</a>
+            {% endif %}
             <small class="form-text text-muted mt-2">
-                {{ _('This will redirect you to Google to grant permission. After authorization, you will be provided with a Refresh Token. This token must be securely stored and configured as the GMAIL_REFRESH_TOKEN environment variable for the application.') }}
+                {{ _('This will redirect you to Google to grant permission. After authorization, you will be provided with a Refresh Token. This token must be securely stored and configured as the GMAIL_REFRESH_TOKEN environment variable for the application, along with GMAIL_SENDER_ADDRESS.') }}
             </small>
         </div>
     </div>
