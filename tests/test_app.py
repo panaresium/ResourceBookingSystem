@@ -9,7 +9,7 @@ from datetime import datetime as datetime_original, timedelta as timedelta_origi
 
 from flask import url_for, redirect, current_app as flask_current_app
 from app import app # app object
-from extensions import db, socketio
+from extensions import db # socketio removed
 from models import User, Resource, Booking, WaitlistEntry, FloorMap, AuditLog, BookingSettings, ResourcePIN, Role
 from utils import teams_log, slack_log, email_log
 from unittest.mock import patch, mock_open, MagicMock, ANY
@@ -223,9 +223,9 @@ class TestAutoCheckoutTask(AppTests):
     @patch.dict(app.config, {'SCHEDULER_ENABLED': True})
     @patch('scheduler_tasks.send_email')
     @patch('scheduler_tasks.add_audit_log')
-    @patch('scheduler_tasks.socketio.emit')
+    # @patch('scheduler_tasks.socketio.emit') # Removed
     @patch('scheduler_tasks.datetime')
-    def test_auto_checkout_success(self, mock_scheduler_datetime, mock_socketio_emit, mock_add_audit_log, mock_send_email):
+    def test_auto_checkout_success(self, mock_scheduler_datetime, mock_add_audit_log, mock_send_email): # mock_socketio_emit removed
         mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc) # Use datetime_original
         mock_scheduler_datetime.now.return_value = mocked_now
         mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
@@ -257,7 +257,7 @@ class TestAutoCheckoutTask(AppTests):
         self.assertEqual(checked_out_booking.status, 'completed')
         mock_send_email.assert_called_once()
         mock_add_audit_log.assert_called_once()
-        mock_socketio_emit.assert_called_once()
+        # mock_socketio_emit.assert_called_once() # Removed
 
     @patch.dict(app.config, {'SCHEDULER_ENABLED': True})
     @patch('scheduler_tasks.send_email')
@@ -319,9 +319,9 @@ class TestAutoCheckoutTask(AppTests):
     @patch.dict(app.config, {'SCHEDULER_ENABLED': True})
     @patch('scheduler_tasks.send_email')
     @patch('scheduler_tasks.add_audit_log')
-    @patch('scheduler_tasks.socketio.emit')
+    # @patch('scheduler_tasks.socketio.emit') # Removed
     @patch('scheduler_tasks.datetime')
-    def test_auto_checkout_multiple_bookings(self, mock_scheduler_datetime, mock_socketio_emit, mock_add_audit_log, mock_send_email):
+    def test_auto_checkout_multiple_bookings(self, mock_scheduler_datetime, mock_add_audit_log, mock_send_email): # mock_socketio_emit removed
         mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc) # Use datetime_original
         mock_scheduler_datetime.now.return_value = mocked_now
         mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
@@ -346,7 +346,7 @@ class TestAutoCheckoutTask(AppTests):
 
         mock_send_email.assert_called_once()
         mock_add_audit_log.assert_called_once()
-        mock_socketio_emit.assert_called_once()
+        # mock_socketio_emit.assert_called_once() # Removed
 
         processed_b_overdue = db.session.get(Booking, overdue_id)
         self.assertEqual(processed_b_overdue.status, 'completed', "Overdue booking status should be 'completed'")
@@ -360,9 +360,9 @@ class TestAutoCheckoutTask(AppTests):
     @patch('scheduler_tasks.User.query')
     @patch('scheduler_tasks.send_email')
     @patch('scheduler_tasks.add_audit_log')
-    @patch('scheduler_tasks.socketio.emit')
+    # @patch('scheduler_tasks.socketio.emit') # Removed
     @patch('scheduler_tasks.datetime')
-    def test_auto_checkout_no_user_email(self, mock_scheduler_datetime, mock_socketio_emit, mock_add_audit_log, mock_send_email, mock_user_query_in_task):
+    def test_auto_checkout_no_user_email(self, mock_scheduler_datetime, mock_add_audit_log, mock_send_email, mock_user_query_in_task): # mock_socketio_emit removed
         mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc) # Use datetime_original
         mock_scheduler_datetime.now.return_value = mocked_now
         mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
@@ -399,7 +399,7 @@ class TestAutoCheckoutTask(AppTests):
         self.assertEqual(processed_booking.status, 'completed', "Booking status should be 'completed' even if user has no email")
         self.assertIsNotNone(processed_booking.checked_out_at, "checked_out_at should be set even if user has no email")
         mock_add_audit_log.assert_called_once()
-        mock_socketio_emit.assert_called_once()
+        # mock_socketio_emit.assert_called_once() # Removed
 
 
 class TestPastBookingLogic(AppTests):

@@ -14,8 +14,7 @@ from datetime import datetime, timezone, timedelta
 from models import db, Booking, Resource, User, BookingSettings # Added Resource, User, db, BookingSettings
 # Assuming add_audit_log is in utils.py
 from utils import add_audit_log
-# Assuming socketio is in extensions.py
-from extensions import socketio
+# Assuming socketio is in extensions.py # Removed: from extensions import socketio
 
 # The template_folder is specified relative to the blueprint's location.
 # If app.py sets a global template_folder, and this blueprint's templates
@@ -222,13 +221,13 @@ def check_in_at_resource(resource_id):
                     action="CHECK_IN_RESOURCE_SUCCESS",
                     details=f"User '{current_user.username}' checked into resource '{resource.name}' (ID: {resource.id}) for booking ID {active_booking.id}."
                 )
-                if hasattr(socketio, 'emit'):
-                     socketio.emit('booking_updated', {
-                        'action': 'checked_in',
-                        'booking_id': active_booking.id,
-                        'checked_in_at': now_utc.isoformat(),
-                        'resource_id': active_booking.resource_id
-                    })
+                # if hasattr(socketio, 'emit'): # Removed Socket.IO emit
+                #      socketio.emit('booking_updated', {
+                #         'action': 'checked_in',
+                #         'booking_id': active_booking.id,
+                #         'checked_in_at': now_utc.isoformat(),
+                #         'resource_id': active_booking.resource_id
+                #     })
                 flash(f"Successfully checked into '{resource.name}' for your booking: {active_booking.title}.", "success")
                 return render_template('check_in_status.html', success=True, resource_name=resource.name, booking_title=active_booking.title, start_time=active_booking.start_time)
             except Exception as e:

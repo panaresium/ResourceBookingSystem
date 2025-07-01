@@ -2,8 +2,8 @@ from flask import Blueprint, jsonify, request, current_app, render_template, url
 from flask_login import login_required, current_user
 from datetime import timezone, timedelta # Added timezone and timedelta
 
-# Assuming extensions.py contains db, socketio, mail
-from extensions import db, socketio # Removed mail
+# Assuming extensions.py contains db # socketio and mail removed
+from extensions import db # socketio and mail removed
 # Assuming models.py contains these model definitions
 from models import Booking, User, Resource, BookingSettings # Added Resource and BookingSettings
 # Assuming utils.py contains these helper functions
@@ -57,7 +57,7 @@ def approve_booking_admin(booking_id):
     send_slack_notification(f"Booking {booking.id} approved by {current_user.username}")
     current_app.logger.info(f"Booking {booking.id} approved by admin {current_user.username}.")
     add_audit_log(action="APPROVE_BOOKING_ADMIN", details=f"Admin {current_user.username} approved booking ID {booking.id}.")
-    socketio.emit('booking_updated', {'action': 'approved', 'booking_id': booking.id, 'status': 'approved', 'resource_id': booking.resource_id})
+    # socketio.emit('booking_updated', {'action': 'approved', 'booking_id': booking.id, 'status': 'approved', 'resource_id': booking.resource_id}) # Removed
     return jsonify({'success': True}), 200
 
 
@@ -77,7 +77,7 @@ def reject_booking_admin(booking_id):
     send_slack_notification(f"Booking {booking.id} rejected by {current_user.username}")
     current_app.logger.info(f"Booking {booking.id} rejected by admin {current_user.username}.")
     add_audit_log(action="REJECT_BOOKING_ADMIN", details=f"Admin {current_user.username} rejected booking ID {booking.id}.")
-    socketio.emit('booking_updated', {'action': 'rejected', 'booking_id': booking.id, 'status': 'rejected', 'resource_id': booking.resource_id})
+    # socketio.emit('booking_updated', {'action': 'rejected', 'booking_id': booking.id, 'status': 'rejected', 'resource_id': booking.resource_id}) # Removed
     return jsonify({'success': True}), 200
 
 
@@ -111,11 +111,11 @@ def admin_delete_booking(booking_id):
         )
         add_audit_log(action="ADMIN_DELETE_BOOKING", details=audit_details)
 
-        socketio.emit('booking_updated', {
-            'action': 'deleted_by_admin',
-            'booking_id': booking_id,
-            'resource_id': resource_id_of_booking
-        })
+        # socketio.emit('booking_updated', { # Removed
+        #     'action': 'deleted_by_admin', # Removed
+        #     'booking_id': booking_id, # Removed
+        #     'resource_id': resource_id_of_booking # Removed
+        # }) # Removed
 
         current_app.logger.info(f"Admin user {current_user.username} successfully DELETED booking ID: {booking_id}.")
         return jsonify({'message': 'Booking deleted successfully by admin.', 'booking_id': booking_id}), 200
@@ -173,15 +173,15 @@ def admin_cancel_booking(booking_id):
         )
         add_audit_log(action="ADMIN_CANCEL_BOOKING", details=audit_details)
 
-        # SocketIO event
-        socketio.emit('booking_updated', {
-            'action': 'cancelled_by_admin',
-            'booking_id': booking.id,
-            'resource_id': booking.resource_id,
-            'new_status': booking.status,
-            'admin_message': booking.admin_deleted_message, # This will be None if no reason was provided
-            'user_name': booking.user_name
-        })
+        # SocketIO event # Removed
+        # socketio.emit('booking_updated', { # Removed
+        #     'action': 'cancelled_by_admin', # Removed
+        #     'booking_id': booking.id, # Removed
+        #     'resource_id': booking.resource_id, # Removed
+        #     'new_status': booking.status, # Removed
+        #     'admin_message': booking.admin_deleted_message, # This will be None if no reason was provided # Removed
+        #     'user_name': booking.user_name # Removed
+        # }) # Removed
 
         # Notify user
         user = User.query.filter_by(username=booking.user_name).first()
@@ -251,13 +251,13 @@ def admin_clear_booking_message(booking_id):
             f"Admin '{current_user.username}' cleared message for booking ID {booking.id}. Status set to 'cancelled_admin_acknowledged'."
         )
 
-        socketio.emit('booking_updated', {
-            'action': 'admin_message_cleared_by_admin',
-            'booking_id': booking.id,
-            'resource_id': booking.resource_id,
-            'new_status': booking.status,
-            'admin_deleted_message': None
-        })
+        # socketio.emit('booking_updated', { # Removed
+        #     'action': 'admin_message_cleared_by_admin', # Removed
+        #     'booking_id': booking.id, # Removed
+        #     'resource_id': booking.resource_id, # Removed
+        #     'new_status': booking.status, # Removed
+        #     'admin_deleted_message': None # Removed
+        # }) # Removed
 
         return jsonify({
             'message': 'Admin message cleared and booking acknowledged.',
@@ -437,13 +437,13 @@ def update_booking_status(booking_id):
             action="UPDATE_BOOKING_STATUS",
             details=f"Admin {current_user.username} updated booking ID {booking.id} status from '{current_status}' to '{new_status}'."
         )
-        socketio.emit('booking_updated', {
-            'action': 'status_updated',
-            'booking_id': booking.id,
-            'new_status': new_status,
-            'resource_id': booking.resource_id,
-            'user_name': booking.user_name # Good to include for client-side updates
-        })
+        # socketio.emit('booking_updated', { # Removed
+        #     'action': 'status_updated', # Removed
+        #     'booking_id': booking.id, # Removed
+        #     'new_status': new_status, # Removed
+        #     'resource_id': booking.resource_id, # Removed
+        #     'user_name': booking.user_name # Good to include for client-side updates # Removed
+        # }) # Removed
         current_app.logger.info(f"Booking {booking.id} status updated from '{current_status}' to '{new_status}' by admin {current_user.username}.")
         return jsonify({'success': True, 'message': 'Booking status updated.', 'new_status': booking.status}), 200
     except Exception as e:
