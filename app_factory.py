@@ -252,7 +252,16 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
     #         app.logger.error(f"Test email dispatch from factory FAILED due to an unexpected error: {e_factory_mail}", exc_info=True)
 
     csrf.init_app(app)
-    socketio.init_app(app) # Add message_queue from config
+    # Pass the message_queue from config to socketio.init_app()
+    # If SOCKETIO_MESSAGE_QUEUE is not set in config, app.config.get() will return None,
+    # and Flask-SocketIO will use its default in-memory manager, which is fine.
+    socketio_message_queue_uri = app.config.get('SOCKETIO_MESSAGE_QUEUE')
+    if socketio_message_queue_uri:
+        app.logger.info(f"Initializing Flask-SocketIO with message queue: {socketio_message_queue_uri}")
+        socketio.init_app(app, message_queue=socketio_message_queue_uri)
+    else:
+        app.logger.info("Initializing Flask-SocketIO without an external message queue (using default in-memory manager).")
+        socketio.init_app(app)
     # migrate.init_app(app, db) # MOVED EARLIER
 
     # login_manager and oauth are initialized within init_auth
