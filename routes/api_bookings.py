@@ -9,8 +9,8 @@ import secrets
 from datetime import datetime, timedelta, timezone, time
 
 # Local imports
-# Assuming extensions.py contains db, socketio, mail
-from extensions import db, socketio # Removed mail
+# Assuming extensions.py contains db # socketio and mail removed
+from extensions import db # socketio and mail removed
 # Assuming models.py contains these model definitions
 from models import Booking, Resource, User, WaitlistEntry, BookingSettings, ResourcePIN, FloorMap # Added ResourcePIN & FloorMap
 # Assuming utils.py contains these helper functions
@@ -610,7 +610,7 @@ def create_booking():
             action_taken = "REUSED_BOOKING" if audit_booking.last_modified > audit_booking.start_time else "CREATE_BOOKING" # Heuristic for reused
             # More robust: check if it was in exact_match_booking and status changed
             add_audit_log(action=action_taken, details=f"Booking ID {audit_booking.id} for resource ID {audit_booking.resource_id} ('{resource_name_for_audit}') processed for user '{audit_booking.user_name}'. Title: '{audit_booking.title}'. Token updated/generated.")
-            socketio.emit('booking_updated', {'action': 'created', 'booking_id': audit_booking.id, 'resource_id': audit_booking.resource_id}) # Client might need to handle 'reused' differently
+            # socketio.emit('booking_updated', {'action': 'created', 'booking_id': audit_booking.id, 'resource_id': audit_booking.resource_id}) # Removed
 
         created_data = [{
             'id': b.id, 'resource_id': b.resource_id, 'title': b.title, 'user_name': b.user_name,
@@ -1585,8 +1585,8 @@ def delete_booking_by_user(booking_id):
             action="CANCEL_BOOKING_USER",
             details=f"User '{current_user.username}' cancelled their booking. {booking_details_for_log}"
         )
-        # Assuming socketio is imported
-        socketio.emit('booking_updated', {'action': 'deleted', 'booking_id': booking_id, 'resource_id': original_resource_id}) # Use original_resource_id
+        # Assuming socketio is imported # Removed
+        # socketio.emit('booking_updated', {'action': 'deleted', 'booking_id': booking_id, 'resource_id': original_resource_id}) # Removed
         current_app.logger.info(f"User '{current_user.username}' successfully deleted booking ID: {booking_id}. Details: {booking_details_for_log}")
         return jsonify({'message': 'Booking cancelled successfully.'}), 200
 
@@ -1711,7 +1711,7 @@ def check_in_booking(booking_id):
             audit_details += f" Using PIN."
         add_audit_log(action="CHECK_IN_SUCCESS", details=audit_details)
 
-        socketio.emit('booking_updated', {'action': 'checked_in', 'booking_id': booking.id, 'checked_in_at': effective_now_aware.isoformat(), 'resource_id': booking.resource_id})
+        # socketio.emit('booking_updated', {'action': 'checked_in', 'booking_id': booking.id, 'checked_in_at': effective_now_aware.isoformat(), 'resource_id': booking.resource_id}) # Removed
         current_app.logger.info(f"User '{current_user.username}' successfully checked into booking ID: {booking_id} at {effective_now_aware.isoformat()}{' using PIN' if provided_pin else ''}.")
 
         # Send Email Notification for Check-in
@@ -1848,7 +1848,7 @@ def check_out_booking(booking_id):
 
         resource_name = booking.resource_booked.name if booking.resource_booked else "Unknown Resource"
         add_audit_log(action="CHECK_OUT_SUCCESS", details=f"User '{current_user.username}' checked out of booking ID {booking.id} for resource '{resource_name}'. Status set to completed.")
-        socketio.emit('booking_updated', {'action': 'checked_out', 'booking_id': booking.id, 'checked_out_at': effective_now_aware.isoformat(), 'resource_id': booking.resource_id, 'status': 'completed'})
+        # socketio.emit('booking_updated', {'action': 'checked_out', 'booking_id': booking.id, 'checked_out_at': effective_now_aware.isoformat(), 'resource_id': booking.resource_id, 'status': 'completed'}) # Removed
         current_app.logger.info(f"User '{current_user.username}' successfully checked out of booking ID: {booking_id} at {effective_now_aware.isoformat()}. Status set to completed.")
 
         # Send Email Notification for Check-out
@@ -2018,13 +2018,13 @@ def qr_check_in(token):
             details=f"Booking ID {booking.id} for resource '{resource_name}' (User: {booking.user_name}) checked in via QR code."
         )
 
-        if hasattr(socketio, 'emit'): # Check if socketio is available and configured
-            socketio.emit('booking_updated', {
-                'action': 'checked_in',
-                'booking_id': booking.id,
-                'checked_in_at': effective_now_aware.isoformat(),
-                'resource_id': booking.resource_id
-            })
+        # if hasattr(socketio, 'emit'): # Removed
+            # socketio.emit('booking_updated', { # Removed
+            #     'action': 'checked_in', # Removed
+            #     'booking_id': booking.id, # Removed
+            #     'checked_in_at': effective_now_aware.isoformat(), # Removed
+            #     'resource_id': booking.resource_id # Removed
+            # }) # Removed
         current_app.logger.info(f"Booking {booking.id} successfully checked in via QR token {token} by user {booking.user_name}")
 
         return jsonify({

@@ -9,7 +9,7 @@ import uuid # For task_id generation
 # Assuming Booking, Resource, User models are in models.py
 from models import Booking, Resource, User, FloorMap, BookingSettings # Added FloorMap
 # Assuming db is in extensions.py
-from extensions import db, socketio # Try to import socketio
+from extensions import db # socketio removed
 # Assuming permission_required is in auth.py
 from auth import permission_required # Corrected: auth.py is at root
 from datetime import datetime, timedelta, timezone # Add datetime imports
