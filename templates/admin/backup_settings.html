@@ -110,7 +110,7 @@
             {% if is_gmail_configured %}
                 <p class="text-success">{{ _('Status: Gmail Sending is <strong>Configured</strong>.') }}</p>
                 {% if gmail_sender_address %}
-                    <p>{{ _('Authorized Sender Address: %(email)s', {'email': gmail_sender_address}) }}</p>
+                    <p>{{ _('Authorized Sender Address:') }} {{ gmail_sender_address }}</p>
                 {% endif %}
                 <p>{{ _('You can re-authorize if you need to change the account or refresh permissions.') }}</p>
                 <a href="{{ url_for('gmail_auth.authorize_gmail_sending') }}" class="btn btn-secondary">{{ _('Re-authorize Gmail Sending') }}</a>
