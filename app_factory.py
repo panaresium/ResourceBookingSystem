@@ -6,7 +6,7 @@ import logging
 
 # Import configurations, extensions, and initialization functions
 import config
-from extensions import db, login_manager, oauth, csrf, socketio, migrate # Removed mail
+from extensions import db, login_manager, oauth, csrf, migrate # Removed mail, socketio
 # from flask_mail import Message # Removed: Added for test email - no longer needed by factory
 from models import User # Needed for load_user, others loaded via db object
 
@@ -252,16 +252,7 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
     #         app.logger.error(f"Test email dispatch from factory FAILED due to an unexpected error: {e_factory_mail}", exc_info=True)
 
     csrf.init_app(app)
-    # Pass the message_queue from config to socketio.init_app()
-    # If SOCKETIO_MESSAGE_QUEUE is not set in config, app.config.get() will return None,
-    # and Flask-SocketIO will use its default in-memory manager, which is fine.
-    socketio_message_queue_uri = app.config.get('SOCKETIO_MESSAGE_QUEUE')
-    if socketio_message_queue_uri:
-        app.logger.info(f"Initializing Flask-SocketIO with message queue: {socketio_message_queue_uri}")
-        socketio.init_app(app, message_queue=socketio_message_queue_uri)
-    else:
-        app.logger.info("Initializing Flask-SocketIO without an external message queue (using default in-memory manager).")
-        socketio.init_app(app)
+    # socketio.init_app(app) has been removed as SocketIO is no longer used.
     # migrate.init_app(app, db) # MOVED EARLIER
 
     # login_manager and oauth are initialized within init_auth
@@ -279,13 +270,7 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
               app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite'):
                _ensure_sqlite_configured_factory_hook(app, db)
 
-    # Add this block for CSRF exemption for Socket.IO paths
-    @app.before_request
-    def csrf_protect_socketio():
-        from flask import g # Import g here
-        # request is already imported at the top of app_factory.py
-        if request.path.startswith('/socket.io'):
-            g._csrf_exempt = True
+    # CSRF exemption for Socket.IO paths has been removed as Socket.IO is no longer used.
 
     # 5. Register i18n
     init_translations(app) # i18n might be needed for tests if templates are rendered
