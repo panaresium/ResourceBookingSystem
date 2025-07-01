@@ -1,6 +1,6 @@
 import os
 from app_factory import create_app
-from extensions import socketio # For socketio.run
+# from extensions import socketio # Removed: For socketio.run
 import logging
 
 # Create the Flask app instance using the factory
@@ -37,4 +37,5 @@ if __name__ == "__main__":
 
     # allow_unsafe_werkzeug=True is often needed for older Werkzeug versions with SocketIO's dev server.
     # Consider security implications or using a proper WSGI server for production.
-    socketio.run(app, host=host, port=port, debug=debug_mode, allow_unsafe_werkzeug=True)
+    # socketio.run(app, host=host, port=port, debug=debug_mode, allow_unsafe_werkzeug=True) # Replaced with app.run
+    app.run(host=host, port=port, debug=debug_mode)

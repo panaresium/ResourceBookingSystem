@@ -3185,48 +3185,49 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Global Socket.IO connection for real-time UI updates (e.g., booking changes)
     // This requires /socket.io/socket.io.js to be loaded (typically via base.html).
-    if (typeof io !== 'undefined') {
-        const socket = io();
-        socket.on('booking_updated', (data) => {
-            console.log('Socket.IO: booking_updated received', data);
-            if (calendarTable && roomSelectDropdown && availabilityDateInputCalendar && roomSelectDropdown.value == data.resource_id) {
-                const selectedOption = roomSelectDropdown.selectedOptions[0];
-                if (selectedOption) {
-                    const resourceDetails = {
-                        id: roomSelectDropdown.value,
-                        booking_restriction: selectedOption.dataset.bookingRestriction,
-                        allowed_user_ids: selectedOption.dataset.allowedUserIds,
-                        roles: parseRolesFromDataset(selectedOption.dataset.roleIds)
-                    };
-                    fetchAndDisplayAvailability(resourceDetails.id, availabilityDateInputCalendar.value, resourceDetails);
-                }
-            }
+    // if (typeof io !== 'undefined') {
+    //     const socket = io();
+    //     socket.on('booking_updated', (data) => {
+    //         console.log('Socket.IO: booking_updated received', data);
+    //         if (calendarTable && roomSelectDropdown && availabilityDateInputCalendar && roomSelectDropdown.value == data.resource_id) {
+    //             const selectedOption = roomSelectDropdown.selectedOptions[0];
+    //             if (selectedOption) {
+    //                 const resourceDetails = {
+    //                     id: roomSelectDropdown.value,
+    //                     booking_restriction: selectedOption.dataset.bookingRestriction,
+    //                     allowed_user_ids: selectedOption.dataset.allowedUserIds,
+    //                     roles: parseRolesFromDataset(selectedOption.dataset.roleIds)
+    //                 };
+    //                 fetchAndDisplayAvailability(resourceDetails.id, availabilityDateInputCalendar.value, resourceDetails);
+    //             }
+    //         }
 
-            if (typeof fetchAndRenderMap === 'function' && mapContainer && mapContainer.dataset.mapId) {
-                console.log('Socket.IO: Refreshing map view due to booking update.');
-                const mapId = mapContainer.dataset.mapId;
-                const dateInputMap = document.getElementById('map-availability-date');
-                const dateStr = dateInputMap ? dateInputMap.value : getTodayDateString();
-                fetchAndRenderMap(mapId, dateStr);
-            }
+    //         if (typeof fetchAndRenderMap === 'function' && mapContainer && mapContainer.dataset.mapId) {
+    //             console.log('Socket.IO: Refreshing map view due to booking update.');
+    //             const mapId = mapContainer.dataset.mapId;
+    //             const dateInputMap = document.getElementById('map-availability-date');
+    //             const dateStr = dateInputMap ? dateInputMap.value : getTodayDateString();
+    //             fetchAndRenderMap(mapId, dateStr);
+    //         }
 
-            if (typeof updateAllButtonColors === 'function' && resourceButtonsContainer) {
-                 console.log('Socket.IO: Refreshing resource button colors due to booking update for resource_id:', data.resource_id);
-                    updateAllButtonColors();
-            }
+    //         if (typeof updateAllButtonColors === 'function' && resourceButtonsContainer) {
+    //              console.log('Socket.IO: Refreshing resource button colors due to booking update for resource_id:', data.resource_id);
+    //                 updateAllButtonColors();
+    //         }
 
-            const newBookingMapContainer = document.getElementById('new-booking-map-container');
-            if (newBookingMapContainer) {
-                console.log('Socket.IO: Requesting refresh for new_booking_map.js map view via custom event.');
-                document.dispatchEvent(new CustomEvent('refreshNewBookingMap', { detail: data }));
-            }
-        });
-        socket.on('connect', () => console.log('Socket.IO connected'));
-        socket.on('disconnect', () => console.log('Socket.IO disconnected'));
-        socket.on('connect_error', (err) => console.error('Socket.IO connection error:', err));
-    } else {
-        console.warn('Socket.IO client library (socket.io.js) not loaded. Real-time features will be unavailable. Ensure the server is running correctly and serving the Socket.IO client.');
-    }
+    //         const newBookingMapContainer = document.getElementById('new-booking-map-container');
+    //         if (newBookingMapContainer) {
+    //             console.log('Socket.IO: Requesting refresh for new_booking_map.js map view via custom event.');
+    //             document.dispatchEvent(new CustomEvent('refreshNewBookingMap', { detail: data }));
+    //         }
+    //     });
+    //     socket.on('connect', () => console.log('Socket.IO connected'));
+    //     socket.on('disconnect', () => console.log('Socket.IO disconnected'));
+    //     socket.on('connect_error', (err) => console.error('Socket.IO connection error:', err));
+    // } else {
+    //     console.warn('Socket.IO client library (socket.io.js) not loaded. Real-time features will be unavailable. Ensure the server is running correctly and serving the Socket.IO client.');
+    // }
+    console.log("Socket.IO client-side initialization has been commented out as it's not in use.");
 
     const userDropdownButtonGlobal = document.getElementById('user-dropdown-button');
     const userDropdownMenuGlobal = document.getElementById('user-dropdown-menu');
