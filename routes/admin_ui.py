@@ -170,7 +170,18 @@ def serve_backup_settings_page():
         except Exception as e: db.session.rollback(); current_app.logger.error(f"Error committing default BookingSettings: {e}", exc_info=True)
     global_time_offset_hours = booking_settings.global_time_offset_hours if booking_settings else 0
     if global_time_offset_hours is None: global_time_offset_hours = 0; current_app.logger.warning("global_time_offset_hours was None, defaulted to 0.")
-    return render_template('admin/backup_settings.html', auto_restore_booking_records_on_startup=auto_restore_booking_records_on_startup, global_time_offset_hours=global_time_offset_hours)
+
+    # Check Gmail configuration status
+    gmail_refresh_token = current_app.config.get('GMAIL_REFRESH_TOKEN')
+    gmail_sender_address = current_app.config.get('GMAIL_SENDER_ADDRESS')
+    is_gmail_configured = bool(gmail_refresh_token and gmail_sender_address)
+    current_app.logger.debug(f"Rendering backup_settings_page for {current_user.username}. Gmail Configured: {is_gmail_configured}")
+
+    return render_template('admin/backup_settings.html',
+                           auto_restore_booking_records_on_startup=auto_restore_booking_records_on_startup,
+                           global_time_offset_hours=global_time_offset_hours,
+                           is_gmail_configured=is_gmail_configured,
+                           gmail_sender_address=gmail_sender_address if is_gmail_configured else None)
 
 # LEGACY - Azure CSV Restore Route - Body fully commented out.
 # LEGACY CSV Routes are fully removed.
@@ -508,20 +519,13 @@ def system_settings_page():
     utc_now = datetime.now(timezone.utc)
     effective_time = utc_now + timedelta(hours=current_offset_hours)
 
-    # Check Gmail configuration status
-    gmail_refresh_token = current_app.config.get('GMAIL_REFRESH_TOKEN')
-    gmail_sender_address = current_app.config.get('GMAIL_SENDER_ADDRESS')
-    # Consider configured if both refresh token and sender address are present
-    is_gmail_configured = bool(gmail_refresh_token and gmail_sender_address)
-
-    logger.debug(f"Rendering system_settings_page for {current_user.username}. Offset: {current_offset_hours}, Gmail Configured: {is_gmail_configured}")
+    # Gmail configuration status is no longer checked here, it's moved to serve_backup_settings_page
+    logger.debug(f"Rendering system_settings_page for {current_user.username}. Offset: {current_offset_hours}")
 
     return render_template('admin/system_settings.html',
                            global_time_offset_hours=current_offset_hours,
                            current_utc_time_str=utc_now.strftime('%Y-%m-%d %H:%M:%S %Z'),
-                           effective_operational_time_str=effective_time.strftime('%Y-%m-%d %H:%M:%S %Z (Effective)'),
-                           is_gmail_configured=is_gmail_configured,
-                           gmail_sender_address=gmail_sender_address if is_gmail_configured else None)
+                           effective_operational_time_str=effective_time.strftime('%Y-%m-%d %H:%M:%S %Z (Effective)'))
 
 @admin_ui_bp.route('/analytics/data')
 @login_required
