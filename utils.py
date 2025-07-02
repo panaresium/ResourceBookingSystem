@@ -520,9 +520,37 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
             logger.info(f"Converted to JPEG. New size: {img_size_kb:.2f} KB")
 
             if img_size_kb > 300:
-                logger.warning(f"JPEG image size ({img_size_kb:.2f} KB) still exceeds 300KB. Consider further optimization or resizing logic.")
-                # Potentially add resizing logic here if strictly needed
-                # For now, we'll proceed with the current size if JPEG conversion didn't meet the target.
+                logger.warning(f"JPEG image size ({img_size_kb:.2f} KB) still exceeds 300KB. Attempting to resize.")
+                # Resize logic
+                img.seek(0) # Go to the beginning of the in-memory JPEG image
+                img_to_resize = Image.open(temp_image_buffer)
+
+                # Calculate new dimensions, aiming for roughly 1/2, 1/4, etc. of the area
+                # until size is acceptable or dimensions are too small.
+                # This is a simple iterative approach.
+                quality = 85
+                while img_size_kb > 300 and max(img_to_resize.width, img_to_resize.height) > 300: # Min dimension check
+                    factor = 0.8 # Resize by 80% each time
+                    new_width = int(img_to_resize.width * factor)
+                    new_height = int(img_to_resize.height * factor)
+
+                    if new_width < 100 or new_height < 100: # Don't make it too small
+                        logger.warning(f"Image resizing stopped to prevent making it too small ({new_width}x{new_height}). Current size: {img_size_kb:.2f} KB.")
+                        break
+
+                    logger.info(f"Resizing image from {img_to_resize.width}x{img_to_resize.height} to {new_width}x{new_height}")
+                    img_to_resize = img_to_resize.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+                    temp_image_buffer.seek(0)
+                    temp_image_buffer.truncate()
+                    img_to_resize.save(temp_image_buffer, format="JPEG", quality=quality, optimize=True)
+                    img_size_kb = temp_image_buffer.tell() / 1024
+                    logger.info(f"Resized JPEG image. New size: {img_size_kb:.2f} KB. Quality: {quality}")
+
+                    # If still too large after resize, try reducing quality more aggressively for the next iteration if any
+                    if img_size_kb > 300 and quality > 50:
+                        quality -= 10
+
 
         temp_image_buffer.seek(0) # Rewind buffer to the beginning for reading
 
