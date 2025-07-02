@@ -475,6 +475,12 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
         ref_width = 800
         ref_height = 600
 
+        # Convert image to RGBA if not already, to support transparent fill for the rectangle
+        if img.mode != 'RGBA':
+            img = img.convert('RGBA')
+            logger.info("Converted image to RGBA mode for drawing.")
+        draw = ImageDraw.Draw(img) # Recreate draw object if image was converted
+
         # Get actual image dimensions
         actual_width, actual_height = img.size
 
