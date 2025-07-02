@@ -519,7 +519,8 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
         font_size_on_drawing_img = max(10, int(base_font_size * avg_scale_to_drawing_img))
         rect_width_on_drawing_img = max(10, int(base_rect_width * scale_to_drawing_img_x))
         rect_height_on_drawing_img = max(5, int(base_rect_height * scale_to_drawing_img_y))
-        outline_width_on_drawing_img = max(1, int(2 * avg_scale_to_drawing_img))
+        # Increased base outline width from 2 to 3 for better visibility
+        outline_width_on_drawing_img = max(1, int(3 * avg_scale_to_drawing_img))
 
         logger.info(f"Font size on drawing image: {font_size_on_drawing_img}")
         logger.info(f"Rectangle on drawing image: {rect_width_on_drawing_img}x{rect_height_on_drawing_img}, Outline: {outline_width_on_drawing_img}")
