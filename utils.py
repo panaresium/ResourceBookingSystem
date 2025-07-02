@@ -471,34 +471,109 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
             logger.error(f"Error parsing map coordinates '{map_coordinates_str}' for resource {resource_id}: {e}")
             return None
 
-        # Define marker properties
-        marker_radius = 10  # Adjust as needed
-        marker_color = "red" # RGBA for transparency: (255, 0, 0, 128)
+        # Define reference dimensions for the input coordinates
+        ref_width = 800
+        ref_height = 600
+
+        # Get actual image dimensions
+        actual_width, actual_height = img.size
+
+        # Calculate scaling factors
+        scale_x = actual_width / ref_width
+        scale_y = actual_height / ref_height
+
+        # Scale the drawing coordinates from the input string
+        original_x, original_y = x, y # Keep original for logging if needed
+        x = int(original_x * scale_x)
+        y = int(original_y * scale_y)
+
+        logger.info(f"Original map coordinates: ({original_x}, {original_y}) for reference {ref_width}x{ref_height}.")
+        logger.info(f"Actual image dimensions: {actual_width}x{actual_height}. Scale factors: sx={scale_x:.2f}, sy={scale_y:.2f}.")
+        logger.info(f"Scaled drawing coordinates: ({x}, {y}).")
+
+        # Define base marker properties (these will be scaled)
+        base_marker_radius = 10  # Radius on the reference 800x600 image
+        base_font_size = 16     # Font size on the reference 800x600 image
+        marker_color = "red"
         text_color = "black"
-        font_size = 20
+
+        # Scale marker radius and font size
+        # Use average scale or min scale to avoid excessive sizes if aspect ratios differ significantly
+        avg_scale = (scale_x + scale_y) / 2.0
+        scaled_marker_radius = int(base_marker_radius * avg_scale)
+        scaled_font_size = int(base_font_size * avg_scale)
+
+        # Ensure minimum sizes
+        scaled_marker_radius = max(5, scaled_marker_radius) # Min radius of 5px
+        scaled_font_size = max(10, scaled_font_size) # Min font size of 10px
+
+        logger.info(f"Base marker radius: {base_marker_radius}, Scaled: {scaled_marker_radius}")
+        logger.info(f"Base font size: {base_font_size}, Scaled: {scaled_font_size}")
+
         try:
-            # Attempt to load a system font; provide a fallback
-            font = ImageFont.truetype("arial.ttf", font_size)
+            font = ImageFont.truetype("arial.ttf", scaled_font_size)
         except IOError:
-            logger.warning("Arial font not found, using default PIL font.")
-            font = ImageFont.load_default()
-            # For default font, size control is limited. Consider bundling a .ttf file.
+            logger.warning(f"Arial font not found for size {scaled_font_size}, using default PIL font. Text scaling might be suboptimal.")
+            # Attempt to get a default font that can be somewhat scaled by PIL if possible, though it's limited.
+            # For default font, it's often better to just use it as is, or find a way to bundle a font.
+            try:
+                font = ImageFont.load_default(size=scaled_font_size) # Attempt to specify size
+            except AttributeError: # Older PIL might not support size for load_default
+                 font = ImageFont.load_default()
 
-        # Draw marker (a circle)
-        draw.ellipse((x - marker_radius, y - marker_radius, x + marker_radius, y + marker_radius), fill=marker_color, outline=marker_color)
+        # Define base rectangle dimensions for the marker area on the reference 800x600 image
+        base_rect_width = 50
+        base_rect_height = 30
+        rect_outline_color = "red"
+        rect_fill_color = (255, 0, 0, 100) # Semi-transparent red fill
 
-        # Add text (resource name)
-        # Calculate text size to position it nicely (e.g., below the marker)
-        text_bbox = draw.textbbox((0,0), resource_name, font=font)
-        text_width = text_bbox[2] - text_bbox[0]
-        text_height = text_bbox[3] - text_bbox[1]
+        # Scale rectangle dimensions
+        scaled_rect_width = int(base_rect_width * scale_x) # Scale width by x-scale
+        scaled_rect_height = int(base_rect_height * scale_y) # Scale height by y-scale
 
-        text_x = x - text_width // 2
-        text_y = y + marker_radius + 5  # Position text below the marker
+        # Ensure minimum dimensions for the rectangle
+        scaled_rect_width = max(10, scaled_rect_width)
+        scaled_rect_height = max(5, scaled_rect_height)
 
-        # Add a small background rectangle for text readability if needed
-        # draw.rectangle((text_x - 2, text_y - 2, text_x + text_width + 2, text_y + text_height + 2), fill="white")
+        logger.info(f"Base rectangle: {base_rect_width}x{base_rect_height}. Scaled rectangle: {scaled_rect_width}x{scaled_rect_height}.")
+
+        # Assuming x, y are the top-left coordinates for the rectangle area
+        rect_x1 = x
+        rect_y1 = y
+        rect_x2 = x + scaled_rect_width
+        rect_y2 = y + scaled_rect_height
+
+        draw.rectangle([(rect_x1, rect_y1), (rect_x2, rect_y2)], outline=rect_outline_color, fill=rect_fill_color, width=max(1, int(2 * avg_scale))) # Scale outline width too
+        logger.info(f"Drawing rectangle area at [({rect_x1}, {rect_y1}), ({rect_x2}, {rect_y2})]")
+
+        # Add scaled text (resource name) - position relative to the rectangle
+        # For example, center the text within the rectangle or place it nearby
+        text_anchor_x = rect_x1 + scaled_rect_width / 2
+        # Position text slightly below the rectangle, or inside if space allows and desired
+        text_anchor_y = rect_y2 + int(5 * avg_scale) # Below the rectangle
+
+        # For better text placement with common fonts, use textlength and anchor
+        try:
+            # Calculate text width using getlength if available (newer Pillow versions)
+            text_width = font.getlength(resource_name)
+            text_x = text_anchor_x - (text_width / 2)
+        except AttributeError:
+            # Fallback for older Pillow: use textbbox
+            text_bbox_calc = draw.textbbox((0,0), resource_name, font=font)
+            text_width_calc = text_bbox_calc[2] - text_bbox_calc[0]
+            text_x = text_anchor_x - (text_width_calc / 2)
+
+        text_y = text_anchor_y # Anchor y is typically the top of the text
+
+        # Optional: Add a small background rectangle for text readability if needed (also scale padding)
+        # padding = int(2 * avg_scale)
+        # text_height_approx = scaled_font_size # Approximate height
+        # draw.rectangle((text_x - padding, text_y - padding,
+        #                 text_x + text_width + padding, text_y + text_height_approx + padding),
+        #                fill=(255, 255, 255, 180)) # White with some transparency
+
         draw.text((text_x, text_y), resource_name, fill=text_color, font=font)
+        logger.info(f"Drawing text '{resource_name}' at ({text_x:.0f}, {text_y:.0f}) with font size {scaled_font_size}")
 
         # Save to a temporary file or BytesIO buffer
         temp_image_buffer = io.BytesIO()
