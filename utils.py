@@ -432,7 +432,7 @@ def resource_to_dict(resource: Resource) -> dict:
         'resource_pins': resource_pins_list
     }
 
-def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_name: str) -> str | None:
+def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_name: str) -> bytes | None:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     try:
         resource = Resource.query.get(resource_id)
@@ -445,13 +445,9 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
             logger.warning(f"Floor map image not found for resource {resource_id}, map ID {resource.floor_map_id}.")
             return None
 
-        # Construct image path - this might need adjustment based on your app's structure
-        # Assuming UPLOAD_FOLDER_MAPS is configured and accessible
         upload_folder_maps = current_app.config.get('UPLOAD_FOLDER_MAPS')
         if not upload_folder_maps:
             logger.error("UPLOAD_FOLDER_MAPS is not configured in the application.")
-            # Fallback to a default relative path if not configured, though this is not ideal
-            # This path assumes 'static/floor_map_uploads/' from the app root.
             upload_folder_maps = os.path.join(current_app.root_path, 'static', 'floor_map_uploads')
             logger.warning(f"UPLOAD_FOLDER_MAPS not set, defaulting to: {upload_folder_maps}")
 
@@ -461,12 +457,10 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
             return None
 
         img = Image.open(image_path)
-        draw = ImageDraw.Draw(img)
 
         # Parse coordinates from input string (these are relative to ref_width, ref_height)
         try:
             coords = json.loads(map_coordinates_str)
-            # These are the coordinates on the reference canvas (e.g., 800x600)
             original_ref_x, original_ref_y = int(coords['x']), int(coords['y'])
         except (json.JSONDecodeError, TypeError, KeyError, ValueError) as e:
             logger.error(f"Error parsing map coordinates '{map_coordinates_str}' for resource {resource_id}: {e}")
@@ -477,10 +471,9 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
         ref_height = 600
 
         # --- Step 1: Pre-resize the base image ---
-        target_pre_resize_long_edge = 1200 # px - Target for the longest edge of the pre-resized image
+        target_pre_resize_long_edge = 1200
         original_img_width, original_img_height = img.size
-
-        current_img_for_drawing = img # Start with the original image loaded
+        current_img_for_drawing = img
 
         if max(original_img_width, original_img_height) > target_pre_resize_long_edge:
             if original_img_width > original_img_height:
@@ -492,11 +485,9 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
 
             logger.info(f"Pre-resizing base image from {original_img_width}x{original_img_height} to {new_pre_width}x{new_pre_height}")
             current_img_for_drawing = img.resize((new_pre_width, new_pre_height), Image.Resampling.LANCZOS)
-            # Dimensions of the image we will actually draw on:
             drawing_img_width, drawing_img_height = new_pre_width, new_pre_height
         else:
             logger.info(f"Base image ({original_img_width}x{original_img_height}) is smaller than or equal to target pre-resize edge ({target_pre_resize_long_edge}). No pre-resize needed.")
-            # Dimensions of the image we will actually draw on are the original's:
             drawing_img_width, drawing_img_height = original_img_width, original_img_height
 
         # --- Step 2: Prepare for drawing on the (potentially pre-resized) image ---
@@ -506,11 +497,9 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
         draw = ImageDraw.Draw(current_img_for_drawing)
 
         # --- Step 3: Scale coordinates and drawing elements to the drawing_img dimensions ---
-        # Calculate scaling factors from reference (800x600) to drawing_img dimensions
         scale_to_drawing_img_x = drawing_img_width / ref_width
         scale_to_drawing_img_y = drawing_img_height / ref_height
 
-        # Scale the input (original_ref_x, original_ref_y) to the drawing_img
         draw_x = int(original_ref_x * scale_to_drawing_img_x)
         draw_y = int(original_ref_y * scale_to_drawing_img_y)
 
@@ -518,21 +507,19 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
         logger.info(f"Drawing on image of size: {drawing_img_width}x{drawing_img_height}. Scale factors to this image: sx={scale_to_drawing_img_x:.2f}, sy={scale_to_drawing_img_y:.2f}.")
         logger.info(f"Scaled drawing coordinates on this image: ({draw_x}, {draw_y}).")
 
-        # Define base sizes for drawing elements (on reference 800x600)
         base_font_size = 16
-        base_rect_width = 40 # Adjusted based on user feedback
-        base_rect_height = 45 # Adjusted based on user feedback
+        base_rect_width = 40
+        base_rect_height = 45
         rect_outline_color = "red"
-        rect_fill_color = (255, 0, 0, 100) # Semi-transparent red fill
+        rect_fill_color = (255, 0, 0, 100)
         text_color = "black"
 
-        # Scale drawing element sizes to the drawing_img dimensions
         avg_scale_to_drawing_img = (scale_to_drawing_img_x + scale_to_drawing_img_y) / 2.0
 
         font_size_on_drawing_img = max(10, int(base_font_size * avg_scale_to_drawing_img))
         rect_width_on_drawing_img = max(10, int(base_rect_width * scale_to_drawing_img_x))
         rect_height_on_drawing_img = max(5, int(base_rect_height * scale_to_drawing_img_y))
-        outline_width_on_drawing_img = max(1, int(2 * avg_scale_to_drawing_img)) # e.g. base outline of 2px
+        outline_width_on_drawing_img = max(1, int(2 * avg_scale_to_drawing_img))
 
         logger.info(f"Font size on drawing image: {font_size_on_drawing_img}")
         logger.info(f"Rectangle on drawing image: {rect_width_on_drawing_img}x{rect_height_on_drawing_img}, Outline: {outline_width_on_drawing_img}")
@@ -544,7 +531,6 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
             font = ImageFont.load_default()
 
         # --- Step 4: Draw on the (potentially pre-resized) image ---
-        # Assuming draw_x, draw_y are the top-left coordinates for the rectangle area
         rect_x1 = draw_x
         rect_y1 = draw_y
         rect_x2 = draw_x + rect_width_on_drawing_img
@@ -554,89 +540,73 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
                        outline=rect_outline_color, fill=rect_fill_color, width=outline_width_on_drawing_img)
         logger.info(f"Drawing rectangle on image at [({rect_x1}, {rect_y1}), ({rect_x2}, {rect_y2})]")
 
-        # Position text relative to the rectangle on the drawing image
         text_anchor_x = rect_x1 + rect_width_on_drawing_img / 2
-        text_anchor_y = rect_y2 + int(5 * avg_scale_to_drawing_img) # Below the rectangle
+        text_anchor_y = rect_y2 + int(5 * avg_scale_to_drawing_img)
 
-        # For better text placement with common fonts, use textlength and anchor
         try:
-            # Calculate text width using getlength if available (newer Pillow versions)
             text_width = font.getlength(resource_name)
             text_x = text_anchor_x - (text_width / 2)
         except AttributeError:
-            # Fallback for older Pillow: use textbbox
             text_bbox_calc = draw.textbbox((0,0), resource_name, font=font)
             text_width_calc = text_bbox_calc[2] - text_bbox_calc[0]
             text_x = text_anchor_x - (text_width_calc / 2)
 
-        text_y = text_anchor_y # Anchor y is typically the top of the text
-
-        # Optional: Add a small background rectangle for text readability if needed (also scale padding)
-        # padding = int(2 * avg_scale)
-        # text_height_approx = scaled_font_size # Approximate height
-        # draw.rectangle((text_x - padding, text_y - padding,
-        #                 text_x + text_width + padding, text_y + text_height_approx + padding),
-        #                fill=(255, 255, 255, 180)) # White with some transparency
-
+        text_y = text_anchor_y
         draw.text((text_x, text_y), resource_name, fill=text_color, font=font)
-        logger.info(f"Drawing text '{resource_name}' at ({text_x:.0f}, {text_y:.0f}) with font size {scaled_font_size}")
+        # Corrected variable name in the log line below
+        logger.info(f"Drawing text '{resource_name}' at ({text_x:.0f}, {text_y:.0f}) with font size {font_size_on_drawing_img}")
 
-        # Save to a temporary file or BytesIO buffer
+        # --- Step 5: Final Save and Compression ---
         temp_image_buffer = io.BytesIO()
-
-        # Attempt to save as PNG first
-        img.save(temp_image_buffer, format="PNG", optimize=True)
+        current_img_for_drawing.save(temp_image_buffer, format="PNG", optimize=True)
         img_size_kb = temp_image_buffer.tell() / 1024
         logger.info(f"Generated PNG image for booking. Size: {img_size_kb:.2f} KB")
 
         if img_size_kb > 300:
             logger.info(f"PNG image size ({img_size_kb:.2f} KB) exceeds 300KB. Attempting JPEG compression.")
-            temp_image_buffer.seek(0) # Reset buffer
-            temp_image_buffer.truncate() # Clear buffer
-            # Convert to RGB if it has alpha, as JPEG doesn't support alpha
-            if img.mode == 'RGBA' or img.mode == 'LA' or (img.mode == 'P' and 'transparency' in img.info):
-                img = img.convert('RGB')
-            img.save(temp_image_buffer, format="JPEG", quality=85, optimize=True) # Adjust quality
+            temp_image_buffer.seek(0)
+            temp_image_buffer.truncate()
+
+            img_to_save_jpeg = current_img_for_drawing
+            if img_to_save_jpeg.mode == 'RGBA' or img_to_save_jpeg.mode == 'LA' or (img_to_save_jpeg.mode == 'P' and 'transparency' in img_to_save_jpeg.info):
+                img_to_save_jpeg = img_to_save_jpeg.convert('RGB')
+            img_to_save_jpeg.save(temp_image_buffer, format="JPEG", quality=85, optimize=True)
             img_size_kb = temp_image_buffer.tell() / 1024
             logger.info(f"Converted to JPEG. New size: {img_size_kb:.2f} KB")
 
             if img_size_kb > 300:
-                logger.warning(f"JPEG image size ({img_size_kb:.2f} KB) still exceeds 300KB. Attempting to resize.")
-                # Resize logic
-                img.seek(0) # Go to the beginning of the in-memory JPEG image
-                img_to_resize = Image.open(temp_image_buffer)
+                logger.warning(f"JPEG image size ({img_size_kb:.2f} KB) still exceeds 300KB. Attempting to resize further (was pre-resized).")
+                temp_image_buffer.seek(0)
+                img_to_resize_further = Image.open(temp_image_buffer)
 
-                # Calculate new dimensions, aiming for roughly 1/2, 1/4, etc. of the area
-                # until size is acceptable or dimensions are too small.
-                # This is a simple iterative approach.
                 quality = 85
-                while img_size_kb > 300 and max(img_to_resize.width, img_to_resize.height) > 300: # Min dimension check
-                    factor = 0.8 # Resize by 80% each time
-                    new_width = int(img_to_resize.width * factor)
-                    new_height = int(img_to_resize.height * factor)
+                while img_size_kb > 300 and max(img_to_resize_further.width, img_to_resize_further.height) > 300:
+                    factor = 0.9
+                    new_width = int(img_to_resize_further.width * factor)
+                    new_height = int(img_to_resize_further.height * factor)
 
-                    if new_width < 100 or new_height < 100: # Don't make it too small
+                    if new_width < 100 or new_height < 100:
                         logger.warning(f"Image resizing stopped to prevent making it too small ({new_width}x{new_height}). Current size: {img_size_kb:.2f} KB.")
                         break
 
-                    logger.info(f"Resizing image from {img_to_resize.width}x{img_to_resize.height} to {new_width}x{new_height}")
-                    img_to_resize = img_to_resize.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                    logger.info(f"Further resizing image from {img_to_resize_further.width}x{img_to_resize_further.height} to {new_width}x{new_height}")
+                    img_to_resize_further = img_to_resize_further.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
                     temp_image_buffer.seek(0)
                     temp_image_buffer.truncate()
-                    img_to_resize.save(temp_image_buffer, format="JPEG", quality=quality, optimize=True)
+                    # Ensure image is RGB for JPEG save if it was RGBA (e.g. if PNG was re-opened)
+                    if img_to_resize_further.mode != 'RGB':
+                        img_to_save_jpeg_loop = img_to_resize_further.convert('RGB')
+                    else:
+                        img_to_save_jpeg_loop = img_to_resize_further
+
+                    img_to_save_jpeg_loop.save(temp_image_buffer, format="JPEG", quality=quality, optimize=True)
                     img_size_kb = temp_image_buffer.tell() / 1024
                     logger.info(f"Resized JPEG image. New size: {img_size_kb:.2f} KB. Quality: {quality}")
 
-                    # If still too large after resize, try reducing quality more aggressively for the next iteration if any
                     if img_size_kb > 300 and quality > 50:
                         quality -= 10
-
-
-        temp_image_buffer.seek(0) # Rewind buffer to the beginning for reading
-
-        # Instead of returning path, return the bytes directly
-        # This avoids managing temp files. The email function can handle bytes.
+        temp_image_buffer.seek(0)
         return temp_image_buffer.getvalue()
 
     except Exception as e:
@@ -874,7 +844,7 @@ def _import_map_configuration_data(config_data: dict) -> tuple[dict, int]:
 
                 # This block can be simplified as fields are now in constructor
                 # new_description = map_item.get('description')
-                # if new_description is not None and new_map.description != new_description:
+                # if new_description is not None and new_map.description != new_map.description:
                 #    new_map.description = new_description
 
                 backup_to_new_map_id_mapping[backup_map_id] = new_map.id
@@ -2141,3 +2111,5 @@ def _import_general_configurations_data(config_data: dict) -> tuple[dict, int]:
         'updated': updated_count
     }
     return summary, status_code
+
+[end of utils.py]
