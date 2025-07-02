@@ -313,17 +313,72 @@ def send_booking_confirmation_email(booking_id):
     }
 
     email_subject = "Booking Confirmation"
-    email_template = "email/booking_confirmation.html" # Path relative to templates directory
+    # email_template = "email/booking_confirmation.html" # Path relative to templates directory
+
+    # Get resource details for image generation and email content
+    resource = Resource.query.get(booking.resource_id)
+    if not resource:
+        current_app.logger.error(f"Resource {booking.resource_id} not found for booking {booking.id} during admin confirmation email.")
+        return jsonify({'error': 'Associated resource not found for this booking.'}), 500
+
+    floor_map_location = "N/A"
+    floor_map_floor = "N/A"
+    if resource.floor_map_id:
+        floor_map = FloorMap.query.get(resource.floor_map_id)
+        if floor_map:
+            floor_map_location = floor_map.location
+            floor_map_floor = floor_map.floor
+        else:
+            current_app.logger.warning(f"FloorMap {resource.floor_map_id} not found for resource {resource.id} (admin confirmation email for booking {booking.id}).")
+
+    # Add more details to email_context, similar to api_bookings.create_booking
+    email_context.update({
+        'location': floor_map_location,
+        'floor': floor_map_floor,
+        'resource_image_filename': resource.image_filename, # For template, if it uses it
+        'map_coordinates': resource.map_coordinates, # For template, if it uses it
+        'check_in_url': url_for('api_bookings.qr_check_in', token=booking.check_in_token, _external=True) if booking.check_in_token else None,
+        'booking_confirmation_message': f"Your booking for {resource.name} has been confirmed by an administrator."
+    })
+
+    # Generate image
+    processed_image_data = None
+    if resource.map_coordinates and resource.floor_map_id:
+        # Assuming generate_booking_image is imported or accessible
+        from utils import generate_booking_image
+        processed_image_data = generate_booking_image(
+            resource.id,
+            resource.map_coordinates,
+            resource.name
+        )
 
     try:
+        # Render templates
+        html_email_body = render_template("email/booking_confirmation.html", **email_context)
+        # Create a simple text body or use a text template if available
+        plain_text_body = (
+            f"Dear {email_context['user_name']},\n\n"
+            f"{email_context['booking_confirmation_message']}\n\n"
+            f"Booking Details:\n"
+            f"- Resource: {email_context['resource_name']}\n"
+            f"- Title: {email_context['booking_title']}\n"
+            f"- Date & Time: {email_context['start_time']} - {email_context['end_time']}\n"
+            f"- Location: {email_context['location']}\n"
+            f"- Floor: {email_context['floor']}\n\n"
+            f"Check-in URL: {email_context['check_in_url']}\n\n"
+            f"Thank you!"
+        )
+
         send_email(
-            recipient_email=user.email,
+            to_address=user.email, # Corrected parameter name
             subject=email_subject,
-            html_template=email_template,
-            context=email_context
+            body=plain_text_body,
+            html_body=html_email_body,
+            attachment_data=processed_image_data,
+            attachment_filename=f"booking_admin_confirmed_{booking.id}_{resource.name.replace(' ', '_')}_location.png" if processed_image_data else None
         )
         add_audit_log(
-            action="SEND_BOOKING_CONFIRMATION_EMAIL",
+            action="SEND_BOOKING_CONFIRMATION_EMAIL_ADMIN", # Changed action name slightly
             details=f"Admin {current_user.username} sent confirmation email for booking ID {booking.id} to {user.email}."
         )
         current_app.logger.info(f"Booking confirmation email sent for booking {booking.id} to {user.email} by admin {current_user.username}.")

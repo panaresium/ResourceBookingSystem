@@ -86,3 +86,6 @@ def migrate_booking_times_to_local_command():
 
 def register_cli_commands(app):
     app.cli.add_command(migrate_booking_times_to_local_command)
+
+    from cli_admin_emails import register_cli_admin_email_commands
+    register_cli_admin_email_commands(app)

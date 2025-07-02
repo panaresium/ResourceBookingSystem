@@ -598,7 +598,8 @@ def create_booking():
                     subject=f"Booking Confirmed: {email_data['resource_name']} - {email_data['booking_title']}",
                     body=plain_text_body,
                     html_body=html_email_body,
-                    attachment_path=processed_image_path
+                    attachment_data=processed_image_path, # This is now bytes
+                    attachment_filename=f"booking_{booking_obj.id}_{resource_for_email.name.replace(' ', '_')}_location.png" if processed_image_path else None
                 )
                 current_app.logger.info(f"Booking confirmation email initiated for booking {booking_obj.id} to {email_data['user_email']}.")
             except Exception as e_email:
@@ -1366,7 +1367,8 @@ def update_booking_by_user(booking_id):
                     subject=update_subject,
                     body=plain_text_body,
                     html_body=html_email_body,
-                    attachment_path=processed_image_path
+                    attachment_data=processed_image_path, # This is now bytes
+                    attachment_filename=f"booking_update_{booking.id}_{resource_for_email.name.replace(' ', '_')}_location.png" if processed_image_path else None
                 )
                 current_app.logger.info(f"Booking update email initiated for booking {booking.id} to {current_user.email}.")
 
