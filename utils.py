@@ -434,14 +434,156 @@ def resource_to_dict(resource: Resource) -> dict:
 
 def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_name: str) -> str | None:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    logger.debug(f"generate_booking_image called for {resource_name} - STUB")
-    return None
+    try:
+        resource = Resource.query.get(resource_id)
+        if not resource or not resource.floor_map_id:
+            logger.warning(f"Resource {resource_id} or its floor map not found.")
+            return None
 
-def send_email(to_address: str, subject: str, body: str = None, html_body: str = None, attachment_path: str = None):
+        floor_map = FloorMap.query.get(resource.floor_map_id)
+        if not floor_map or not floor_map.image_filename:
+            logger.warning(f"Floor map image not found for resource {resource_id}, map ID {resource.floor_map_id}.")
+            return None
+
+        # Construct image path - this might need adjustment based on your app's structure
+        # Assuming UPLOAD_FOLDER_MAPS is configured and accessible
+        upload_folder_maps = current_app.config.get('UPLOAD_FOLDER_MAPS')
+        if not upload_folder_maps:
+            logger.error("UPLOAD_FOLDER_MAPS is not configured in the application.")
+            # Fallback to a default relative path if not configured, though this is not ideal
+            # This path assumes 'static/floor_map_uploads/' from the app root.
+            upload_folder_maps = os.path.join(current_app.root_path, 'static', 'floor_map_uploads')
+            logger.warning(f"UPLOAD_FOLDER_MAPS not set, defaulting to: {upload_folder_maps}")
+
+        image_path = os.path.join(upload_folder_maps, floor_map.image_filename)
+        if not os.path.exists(image_path):
+            logger.error(f"Floor map image file not found at {image_path}")
+            return None
+
+        img = Image.open(image_path)
+        draw = ImageDraw.Draw(img)
+
+        # Parse coordinates
+        try:
+            coords = json.loads(map_coordinates_str)
+            x, y = int(coords['x']), int(coords['y'])
+        except (json.JSONDecodeError, TypeError, KeyError, ValueError) as e:
+            logger.error(f"Error parsing map coordinates '{map_coordinates_str}' for resource {resource_id}: {e}")
+            return None
+
+        # Define marker properties
+        marker_radius = 10  # Adjust as needed
+        marker_color = "red" # RGBA for transparency: (255, 0, 0, 128)
+        text_color = "black"
+        font_size = 20
+        try:
+            # Attempt to load a system font; provide a fallback
+            font = ImageFont.truetype("arial.ttf", font_size)
+        except IOError:
+            logger.warning("Arial font not found, using default PIL font.")
+            font = ImageFont.load_default()
+            # For default font, size control is limited. Consider bundling a .ttf file.
+
+        # Draw marker (a circle)
+        draw.ellipse((x - marker_radius, y - marker_radius, x + marker_radius, y + marker_radius), fill=marker_color, outline=marker_color)
+
+        # Add text (resource name)
+        # Calculate text size to position it nicely (e.g., below the marker)
+        text_bbox = draw.textbbox((0,0), resource_name, font=font)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+
+        text_x = x - text_width // 2
+        text_y = y + marker_radius + 5  # Position text below the marker
+
+        # Add a small background rectangle for text readability if needed
+        # draw.rectangle((text_x - 2, text_y - 2, text_x + text_width + 2, text_y + text_height + 2), fill="white")
+        draw.text((text_x, text_y), resource_name, fill=text_color, font=font)
+
+        # Save to a temporary file or BytesIO buffer
+        temp_image_buffer = io.BytesIO()
+
+        # Attempt to save as PNG first
+        img.save(temp_image_buffer, format="PNG", optimize=True)
+        img_size_kb = temp_image_buffer.tell() / 1024
+        logger.info(f"Generated PNG image for booking. Size: {img_size_kb:.2f} KB")
+
+        if img_size_kb > 300:
+            logger.info(f"PNG image size ({img_size_kb:.2f} KB) exceeds 300KB. Attempting JPEG compression.")
+            temp_image_buffer.seek(0) # Reset buffer
+            temp_image_buffer.truncate() # Clear buffer
+            # Convert to RGB if it has alpha, as JPEG doesn't support alpha
+            if img.mode == 'RGBA' or img.mode == 'LA' or (img.mode == 'P' and 'transparency' in img.info):
+                img = img.convert('RGB')
+            img.save(temp_image_buffer, format="JPEG", quality=85, optimize=True) # Adjust quality
+            img_size_kb = temp_image_buffer.tell() / 1024
+            logger.info(f"Converted to JPEG. New size: {img_size_kb:.2f} KB")
+
+            if img_size_kb > 300:
+                logger.warning(f"JPEG image size ({img_size_kb:.2f} KB) still exceeds 300KB. Consider further optimization or resizing logic.")
+                # Potentially add resizing logic here if strictly needed
+                # For now, we'll proceed with the current size if JPEG conversion didn't meet the target.
+
+        temp_image_buffer.seek(0) # Rewind buffer to the beginning for reading
+
+        # Instead of returning path, return the bytes directly
+        # This avoids managing temp files. The email function can handle bytes.
+        return temp_image_buffer.getvalue()
+
+    except Exception as e:
+        logger.exception(f"Error generating booking image for resource {resource_id}: {e}")
+        return None
+
+from email_utils import send_booking_email # Import the new function
+
+def send_email(to_address: str, subject: str, body: str = None, html_body: str = None, attachment_path: str = None, attachment_data: bytes = None, attachment_filename: str = "booking_location.png"):
     logger = current_app.logger if current_app else logging.getLogger(__name__)
-    logger.info(f"send_email called for {to_address} with subject '{subject}' - STUB")
-    email_log.append({'to': to_address, 'subject': subject, 'body': body or html_body}) # For testing
-    pass
+
+    # If attachment_path is provided and attachment_data is not, read the file.
+    # This maintains compatibility if some parts of the code still use attachment_path.
+    if attachment_path and not attachment_data:
+        try:
+            with open(attachment_path, 'rb') as f:
+                attachment_data = f.read()
+            if not attachment_filename or attachment_filename == "booking_location.png": # Default filename if not specific
+                attachment_filename = os.path.basename(attachment_path)
+            logger.info(f"Attachment read from path: {attachment_path}")
+        except IOError as e:
+            logger.error(f"Error reading attachment from path {attachment_path}: {e}")
+            # Decide if we should proceed without attachment or fail
+            attachment_data = None # Do not send a broken or non-existent attachment
+
+    # Determine MIME type for the attachment if data is present
+    attachment_mimetype = 'application/octet-stream' # Default MIME type
+    if attachment_filename and attachment_data:
+        if attachment_filename.lower().endswith('.png'):
+            attachment_mimetype = 'image/png'
+        elif attachment_filename.lower().endswith('.jpg') or attachment_filename.lower().endswith('.jpeg'):
+            attachment_mimetype = 'image/jpeg'
+        # Add more MIME types as needed
+        logger.info(f"Attachment details: filename='{attachment_filename}', mimetype='{attachment_mimetype}', data_size={len(attachment_data) if attachment_data else 0} bytes.")
+
+
+    success = send_booking_email(
+        to_address=to_address,
+        subject=subject,
+        html_body=html_body,
+        text_body=body, # Note: send_booking_email expects 'text_body' for plain text
+        attachment_data=attachment_data,
+        attachment_filename=attachment_filename,
+        attachment_mimetype=attachment_mimetype
+    )
+
+    if success:
+        logger.info(f"Email to {to_address} with subject '{subject}' delegated to email_utils.send_booking_email successfully.")
+        # Optionally, add to a local log for testing/auditing if needed, though send_booking_email does its own logging.
+        # email_log.append({'to': to_address, 'subject': subject, 'status': 'sent'})
+    else:
+        logger.error(f"Email to {to_address} with subject '{subject}' failed to send via email_utils.send_booking_email.")
+        # email_log.append({'to': to_address, 'subject': subject, 'status': 'failed'})
+
+    # The original stub function had 'pass'. Now it returns the success status.
+    return success
 
 def send_slack_notification(text: str):
     logger = current_app.logger if current_app else logging.getLogger(__name__)
