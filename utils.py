@@ -463,10 +463,11 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
         img = Image.open(image_path)
         draw = ImageDraw.Draw(img)
 
-        # Parse coordinates
+        # Parse coordinates from input string (these are relative to ref_width, ref_height)
         try:
             coords = json.loads(map_coordinates_str)
-            x, y = int(coords['x']), int(coords['y'])
+            # These are the coordinates on the reference canvas (e.g., 800x600)
+            original_ref_x, original_ref_y = int(coords['x']), int(coords['y'])
         except (json.JSONDecodeError, TypeError, KeyError, ValueError) as e:
             logger.error(f"Error parsing map coordinates '{map_coordinates_str}' for resource {resource_id}: {e}")
             return None
@@ -475,88 +476,87 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
         ref_width = 800
         ref_height = 600
 
-        # Convert image to RGBA if not already, to support transparent fill for the rectangle
-        if img.mode != 'RGBA':
-            img = img.convert('RGBA')
-            logger.info("Converted image to RGBA mode for drawing.")
-        draw = ImageDraw.Draw(img) # Recreate draw object if image was converted
+        # --- Step 1: Pre-resize the base image ---
+        target_pre_resize_long_edge = 1200 # px - Target for the longest edge of the pre-resized image
+        original_img_width, original_img_height = img.size
 
-        # Get actual image dimensions
-        actual_width, actual_height = img.size
+        current_img_for_drawing = img # Start with the original image loaded
 
-        # Calculate scaling factors
-        scale_x = actual_width / ref_width
-        scale_y = actual_height / ref_height
+        if max(original_img_width, original_img_height) > target_pre_resize_long_edge:
+            if original_img_width > original_img_height:
+                new_pre_width = target_pre_resize_long_edge
+                new_pre_height = int(original_img_height * (target_pre_resize_long_edge / original_img_width))
+            else:
+                new_pre_height = target_pre_resize_long_edge
+                new_pre_width = int(original_img_width * (target_pre_resize_long_edge / original_img_height))
 
-        # Scale the drawing coordinates from the input string
-        original_x, original_y = x, y # Keep original for logging if needed
-        x = int(original_x * scale_x)
-        y = int(original_y * scale_y)
+            logger.info(f"Pre-resizing base image from {original_img_width}x{original_img_height} to {new_pre_width}x{new_pre_height}")
+            current_img_for_drawing = img.resize((new_pre_width, new_pre_height), Image.Resampling.LANCZOS)
+            # Dimensions of the image we will actually draw on:
+            drawing_img_width, drawing_img_height = new_pre_width, new_pre_height
+        else:
+            logger.info(f"Base image ({original_img_width}x{original_img_height}) is smaller than or equal to target pre-resize edge ({target_pre_resize_long_edge}). No pre-resize needed.")
+            # Dimensions of the image we will actually draw on are the original's:
+            drawing_img_width, drawing_img_height = original_img_width, original_img_height
 
-        logger.info(f"Original map coordinates: ({original_x}, {original_y}) for reference {ref_width}x{ref_height}.")
-        logger.info(f"Actual image dimensions: {actual_width}x{actual_height}. Scale factors: sx={scale_x:.2f}, sy={scale_y:.2f}.")
-        logger.info(f"Scaled drawing coordinates: ({x}, {y}).")
+        # --- Step 2: Prepare for drawing on the (potentially pre-resized) image ---
+        if current_img_for_drawing.mode != 'RGBA':
+            current_img_for_drawing = current_img_for_drawing.convert('RGBA')
+            logger.info("Converted image for drawing to RGBA mode.")
+        draw = ImageDraw.Draw(current_img_for_drawing)
 
-        # Define base marker properties (these will be scaled)
-        base_marker_radius = 10  # Radius on the reference 800x600 image
-        base_font_size = 16     # Font size on the reference 800x600 image
-        marker_color = "red"
-        text_color = "black"
+        # --- Step 3: Scale coordinates and drawing elements to the drawing_img dimensions ---
+        # Calculate scaling factors from reference (800x600) to drawing_img dimensions
+        scale_to_drawing_img_x = drawing_img_width / ref_width
+        scale_to_drawing_img_y = drawing_img_height / ref_height
 
-        # Scale marker radius and font size
-        # Use average scale or min scale to avoid excessive sizes if aspect ratios differ significantly
-        avg_scale = (scale_x + scale_y) / 2.0
-        scaled_marker_radius = int(base_marker_radius * avg_scale)
-        scaled_font_size = int(base_font_size * avg_scale)
+        # Scale the input (original_ref_x, original_ref_y) to the drawing_img
+        draw_x = int(original_ref_x * scale_to_drawing_img_x)
+        draw_y = int(original_ref_y * scale_to_drawing_img_y)
 
-        # Ensure minimum sizes
-        scaled_marker_radius = max(5, scaled_marker_radius) # Min radius of 5px
-        scaled_font_size = max(10, scaled_font_size) # Min font size of 10px
+        logger.info(f"Input map coordinates: ({original_ref_x}, {original_ref_y}) for reference {ref_width}x{ref_height}.")
+        logger.info(f"Drawing on image of size: {drawing_img_width}x{drawing_img_height}. Scale factors to this image: sx={scale_to_drawing_img_x:.2f}, sy={scale_to_drawing_img_y:.2f}.")
+        logger.info(f"Scaled drawing coordinates on this image: ({draw_x}, {draw_y}).")
 
-        logger.info(f"Base marker radius: {base_marker_radius}, Scaled: {scaled_marker_radius}")
-        logger.info(f"Base font size: {base_font_size}, Scaled: {scaled_font_size}")
-
-        try:
-            font = ImageFont.truetype("arial.ttf", scaled_font_size)
-        except IOError:
-            logger.warning(f"Arial font not found for size {scaled_font_size}, using default PIL font. Text scaling might be suboptimal.")
-            # Attempt to get a default font that can be somewhat scaled by PIL if possible, though it's limited.
-            # For default font, it's often better to just use it as is, or find a way to bundle a font.
-            try:
-                font = ImageFont.load_default(size=scaled_font_size) # Attempt to specify size
-            except AttributeError: # Older PIL might not support size for load_default
-                 font = ImageFont.load_default()
-
-        # Define base rectangle dimensions for the marker area on the reference 800x600 image
-        base_rect_width = 50
-        base_rect_height = 30
+        # Define base sizes for drawing elements (on reference 800x600)
+        base_font_size = 16
+        base_rect_width = 40 # Adjusted based on user feedback
+        base_rect_height = 45 # Adjusted based on user feedback
         rect_outline_color = "red"
         rect_fill_color = (255, 0, 0, 100) # Semi-transparent red fill
+        text_color = "black"
 
-        # Scale rectangle dimensions
-        scaled_rect_width = int(base_rect_width * scale_x) # Scale width by x-scale
-        scaled_rect_height = int(base_rect_height * scale_y) # Scale height by y-scale
+        # Scale drawing element sizes to the drawing_img dimensions
+        avg_scale_to_drawing_img = (scale_to_drawing_img_x + scale_to_drawing_img_y) / 2.0
 
-        # Ensure minimum dimensions for the rectangle
-        scaled_rect_width = max(10, scaled_rect_width)
-        scaled_rect_height = max(5, scaled_rect_height)
+        font_size_on_drawing_img = max(10, int(base_font_size * avg_scale_to_drawing_img))
+        rect_width_on_drawing_img = max(10, int(base_rect_width * scale_to_drawing_img_x))
+        rect_height_on_drawing_img = max(5, int(base_rect_height * scale_to_drawing_img_y))
+        outline_width_on_drawing_img = max(1, int(2 * avg_scale_to_drawing_img)) # e.g. base outline of 2px
 
-        logger.info(f"Base rectangle: {base_rect_width}x{base_rect_height}. Scaled rectangle: {scaled_rect_width}x{scaled_rect_height}.")
+        logger.info(f"Font size on drawing image: {font_size_on_drawing_img}")
+        logger.info(f"Rectangle on drawing image: {rect_width_on_drawing_img}x{rect_height_on_drawing_img}, Outline: {outline_width_on_drawing_img}")
 
-        # Assuming x, y are the top-left coordinates for the rectangle area
-        rect_x1 = x
-        rect_y1 = y
-        rect_x2 = x + scaled_rect_width
-        rect_y2 = y + scaled_rect_height
+        try:
+            font = ImageFont.truetype("arial.ttf", font_size_on_drawing_img)
+        except IOError:
+            logger.warning(f"Arial font not found for size {font_size_on_drawing_img}, using default PIL font.")
+            font = ImageFont.load_default()
 
-        draw.rectangle([(rect_x1, rect_y1), (rect_x2, rect_y2)], outline=rect_outline_color, fill=rect_fill_color, width=max(1, int(2 * avg_scale))) # Scale outline width too
-        logger.info(f"Drawing rectangle area at [({rect_x1}, {rect_y1}), ({rect_x2}, {rect_y2})]")
+        # --- Step 4: Draw on the (potentially pre-resized) image ---
+        # Assuming draw_x, draw_y are the top-left coordinates for the rectangle area
+        rect_x1 = draw_x
+        rect_y1 = draw_y
+        rect_x2 = draw_x + rect_width_on_drawing_img
+        rect_y2 = draw_y + rect_height_on_drawing_img
 
-        # Add scaled text (resource name) - position relative to the rectangle
-        # For example, center the text within the rectangle or place it nearby
-        text_anchor_x = rect_x1 + scaled_rect_width / 2
-        # Position text slightly below the rectangle, or inside if space allows and desired
-        text_anchor_y = rect_y2 + int(5 * avg_scale) # Below the rectangle
+        draw.rectangle([(rect_x1, rect_y1), (rect_x2, rect_y2)],
+                       outline=rect_outline_color, fill=rect_fill_color, width=outline_width_on_drawing_img)
+        logger.info(f"Drawing rectangle on image at [({rect_x1}, {rect_y1}), ({rect_x2}, {rect_y2})]")
+
+        # Position text relative to the rectangle on the drawing image
+        text_anchor_x = rect_x1 + rect_width_on_drawing_img / 2
+        text_anchor_y = rect_y2 + int(5 * avg_scale_to_drawing_img) # Below the rectangle
 
         # For better text placement with common fonts, use textlength and anchor
         try:
