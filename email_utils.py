@@ -5,6 +5,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
 from email.mime.application import MIMEApplication
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request as GoogleAuthRequest # Import Request
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from flask import current_app, render_template
@@ -39,19 +40,23 @@ def send_booking_email(to_address, subject, html_body=None, text_body=None, atta
     creds = Credentials(
         None,  # No access token initially
         refresh_token=refresh_token,
-        token_uri='https://oauth2.googleapis.com/token',
+        token_uri='https://oauth2.googleapis.com/token', # Default token URI
         client_id=client_id,
         client_secret=client_secret,
         scopes=['https://www.googleapis.com/auth/gmail.send']
     )
 
     try:
+        # Prepare the request object for refreshing credentials
+        auth_request = GoogleAuthRequest()
+
         if not creds.valid or creds.expired:
             logger.info("Gmail credentials need refresh.")
-            creds.refresh(None) # Pass None for request object, it will use default http client
+            creds.refresh(auth_request) # Pass the GoogleAuthRequest instance
             logger.info("Gmail credentials refreshed.")
             # Note: In a long-running app, you might want to save the new creds.token (access_token)
-            # if the library doesn't handle it automatically for future calls within the same instance.
+            # For example, by updating a stored configuration or session.
+            # For simplicity here, we assume the refreshed creds object is used for the current send.
             # However, for single email sends, refreshing each time if needed is okay.
 
         service = build('gmail', 'v1', credentials=creds)
