@@ -536,9 +536,10 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
         rect_x2 = draw_x + rect_width_on_drawing_img
         rect_y2 = draw_y + rect_height_on_drawing_img
 
+        # Draw outline-only rectangle
         draw.rectangle([(rect_x1, rect_y1), (rect_x2, rect_y2)],
-                       outline=rect_outline_color, fill=rect_fill_color, width=outline_width_on_drawing_img)
-        logger.info(f"Drawing rectangle on image at [({rect_x1}, {rect_y1}), ({rect_x2}, {rect_y2})]")
+                       outline=rect_outline_color, width=outline_width_on_drawing_img) # Removed fill=rect_fill_color
+        logger.info(f"Drawing outline-only rectangle on image at [({rect_x1}, {rect_y1}), ({rect_x2}, {rect_y2})]")
 
         text_anchor_x = rect_x1 + rect_width_on_drawing_img / 2
         text_anchor_y = rect_y2 + int(5 * avg_scale_to_drawing_img)
@@ -557,38 +558,56 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
         logger.info(f"Drawing text '{resource_name}' at ({text_x:.0f}, {text_y:.0f}) with font size {font_size_on_drawing_img}")
 
         # --- Step 5: Final Save and Compression ---
+        # current_img_for_drawing is the annotated image, in RGBA mode.
         temp_image_buffer = io.BytesIO()
-        # current_img_for_drawing is RGBA at this point if conversion happened
-        current_img_for_drawing.save(temp_image_buffer, format="PNG", optimize=True)
+        current_img_for_drawing.save(temp_image_buffer, format="PNG") # Save with alpha
         img_size_kb = temp_image_buffer.tell() / 1024
-        logger.info(f"Saved annotated image as PNG. Size: {img_size_kb:.2f} KB. Mode: {current_img_for_drawing.mode}")
-        final_image_mode_for_email = "PNG"
+        logger.info(f"Saved annotated image as PNG (supports alpha). Size: {img_size_kb:.2f} KB")
 
+        final_data_to_send = None
+        final_content_type = "image/png" # Default to PNG
 
-        if img_size_kb > 300:
-            final_image_mode_for_email = "JPEG"
-            logger.info(f"PNG image size ({img_size_kb:.2f} KB) exceeds 300KB. Attempting JPEG compression.")
+        if img_size_kb <= 300:
+            logger.info("PNG size is within limits. Using PNG with alpha.")
+            final_data_to_send = temp_image_buffer.getvalue()
+        else:
+            logger.info(f"PNG image size ({img_size_kb:.2f} KB) is too large. Converting to JPEG.")
+            final_content_type = "image/jpeg"
 
-            img_for_jpeg_conversion = current_img_for_drawing # This is an RGBA image with drawings
+            # To convert RGBA to JPEG and simulate transparency, composite onto a background.
+            # The original floor map (pre-resized, before annotation) can act as the background.
+            # This ensures the transparent rectangle color blends with actual map features.
 
-            # Create a white background image of the same size
-            background = Image.new("RGB", img_for_jpeg_conversion.size, (255, 255, 255))
-            # Paste the RGBA image (with its alpha transparency) onto the white background
-            # The alpha channel of img_for_jpeg_conversion will be used for blending
-            background.paste(img_for_jpeg_conversion, (0, 0), img_for_jpeg_conversion)
-            img_to_save_as_jpeg = background # This is now an RGB image with transparency "baked in"
+            # Re-open the original pre-resized image (before annotation and RGBA conversion for drawing)
+            # This is tricky if 'img' was modified in place. Let's re-evaluate.
+            # current_img_for_drawing IS the annotated RGBA image.
+            # We need the map content that was *under* the annotation.
+
+            # Simpler: If we must go to JPEG, true alpha is lost.
+            # The previous method of pasting onto white is one way to handle it.
+            # If "see-through" means the map details show through the color, then pasting onto
+            # white makes the red very faint. If that's not desired, then a solid but lighter fill
+            # for JPEGs, or an outline-only for JPEGs are alternatives.
+
+            # Let's stick to the "paste RGBA onto white for JPEG" strategy,
+            # ensuring the alpha (26) for the rectangle fill is very low.
+
+            # current_img_for_drawing is our RGBA image with the (255,0,0,26) rectangle
+            background = Image.new("RGB", current_img_for_drawing.size, (255, 255, 255))
+            background.paste(current_img_for_drawing, (0, 0), current_img_for_drawing) # Use alpha channel of current_img_for_drawing as mask
+
+            composited_rgb_image = background
 
             temp_image_buffer.seek(0)
             temp_image_buffer.truncate()
-            img_to_save_as_jpeg.save(temp_image_buffer, format="JPEG", quality=85, optimize=True)
+            composited_rgb_image.save(temp_image_buffer, format="JPEG", quality=85, optimize=True)
             img_size_kb = temp_image_buffer.tell() / 1024
-            logger.info(f"Converted to JPEG by pasting on white background. New size: {img_size_kb:.2f} KB. Mode: {img_to_save_as_jpeg.mode}")
+            logger.info(f"Converted RGBA to JPEG by pasting on white. JPEG size: {img_size_kb:.2f} KB")
 
             if img_size_kb > 300:
-                logger.warning(f"JPEG image size ({img_size_kb:.2f} KB) still exceeds 300KB. Attempting to resize further (was pre-resized).")
-                # For further resizing, we need to re-open the image from buffer as it's now JPEG
+                logger.warning(f"JPEG image size ({img_size_kb:.2f} KB) still exceeds 300KB. Attempting iterative resize/quality reduction.")
                 temp_image_buffer.seek(0)
-                img_to_resize_further = Image.open(temp_image_buffer) # This will be an RGB image
+                img_to_resize_jpeg = Image.open(temp_image_buffer) # This is the composited RGB JPEG
 
                 quality = 85
                 while img_size_kb > 300 and max(img_to_resize_further.width, img_to_resize_further.height) > 300:
