@@ -558,26 +558,37 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
 
         # --- Step 5: Final Save and Compression ---
         temp_image_buffer = io.BytesIO()
+        # current_img_for_drawing is RGBA at this point if conversion happened
         current_img_for_drawing.save(temp_image_buffer, format="PNG", optimize=True)
         img_size_kb = temp_image_buffer.tell() / 1024
-        logger.info(f"Generated PNG image for booking. Size: {img_size_kb:.2f} KB")
+        logger.info(f"Saved annotated image as PNG. Size: {img_size_kb:.2f} KB. Mode: {current_img_for_drawing.mode}")
+        final_image_mode_for_email = "PNG"
+
 
         if img_size_kb > 300:
+            final_image_mode_for_email = "JPEG"
             logger.info(f"PNG image size ({img_size_kb:.2f} KB) exceeds 300KB. Attempting JPEG compression.")
+
+            img_for_jpeg_conversion = current_img_for_drawing # This is an RGBA image with drawings
+
+            # Create a white background image of the same size
+            background = Image.new("RGB", img_for_jpeg_conversion.size, (255, 255, 255))
+            # Paste the RGBA image (with its alpha transparency) onto the white background
+            # The alpha channel of img_for_jpeg_conversion will be used for blending
+            background.paste(img_for_jpeg_conversion, (0, 0), img_for_jpeg_conversion)
+            img_to_save_as_jpeg = background # This is now an RGB image with transparency "baked in"
+
             temp_image_buffer.seek(0)
             temp_image_buffer.truncate()
-
-            img_to_save_jpeg = current_img_for_drawing
-            if img_to_save_jpeg.mode == 'RGBA' or img_to_save_jpeg.mode == 'LA' or (img_to_save_jpeg.mode == 'P' and 'transparency' in img_to_save_jpeg.info):
-                img_to_save_jpeg = img_to_save_jpeg.convert('RGB')
-            img_to_save_jpeg.save(temp_image_buffer, format="JPEG", quality=85, optimize=True)
+            img_to_save_as_jpeg.save(temp_image_buffer, format="JPEG", quality=85, optimize=True)
             img_size_kb = temp_image_buffer.tell() / 1024
-            logger.info(f"Converted to JPEG. New size: {img_size_kb:.2f} KB")
+            logger.info(f"Converted to JPEG by pasting on white background. New size: {img_size_kb:.2f} KB. Mode: {img_to_save_as_jpeg.mode}")
 
             if img_size_kb > 300:
                 logger.warning(f"JPEG image size ({img_size_kb:.2f} KB) still exceeds 300KB. Attempting to resize further (was pre-resized).")
+                # For further resizing, we need to re-open the image from buffer as it's now JPEG
                 temp_image_buffer.seek(0)
-                img_to_resize_further = Image.open(temp_image_buffer)
+                img_to_resize_further = Image.open(temp_image_buffer) # This will be an RGB image
 
                 quality = 85
                 while img_size_kb > 300 and max(img_to_resize_further.width, img_to_resize_further.height) > 300:
