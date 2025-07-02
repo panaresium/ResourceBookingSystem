@@ -63,11 +63,11 @@ def authorize_gmail_sending():
     except ValueError as ve:
         current_app.logger.error(f"Configuration error during Gmail auth initiation: {str(ve)}")
         flash(f"Configuration error: {str(ve)}. Please check server logs and config.", "danger")
-        return redirect(url_for('admin_ui.system_settings_page')) # Corrected route name
+        return redirect(url_for('admin_ui.serve_backup_settings_page'))
     except Exception as e:
         current_app.logger.exception(f"Error initiating Gmail sending authorization: {e}")
         flash("An unexpected error occurred while initiating Gmail authorization. Please try again.", "danger")
-        return redirect(url_for('admin_ui.system_settings_page')) # Corrected route name
+        return redirect(url_for('admin_ui.serve_backup_settings_page'))
 
 
 @gmail_auth_bp.route('/authorize_callback')
@@ -83,7 +83,8 @@ def authorize_gmail_callback():
     if not state or state != request.args.get('state'):
         current_app.logger.error("OAuth state mismatch in Gmail authorization callback. Potential CSRF.")
         flash("Authorization failed due to a state mismatch. Please try again.", "error")
-        return redirect(url_for('admin_ui.system_settings_page')) # Corrected route name
+        # Redirect to the new target page: /admin/backup/settings
+        return redirect(url_for('admin_ui.serve_backup_settings_page'))
 
     try:
         flow = get_gmail_oauth_flow()
@@ -105,17 +106,15 @@ def authorize_gmail_callback():
 
         if refresh_token:
             flash_message = (
-                "Gmail sending authorization successful! "
-                "Please copy the **Refresh Token** below and set it as the "
+                "Gmail sending authorization successful! Your Refresh Token is: "
+                f"<strong>{refresh_token}</strong><br>"
+                "Please copy this token NOW and set it as the "
                 "`GMAIL_REFRESH_TOKEN` environment variable for your application. "
                 "Store this token securely. You will only see it once."
             )
             flash(flash_message, "success")
-            # Render a simple page to display the token
-            return render_template('admin/display_refresh_token.html',
-                                   refresh_token=refresh_token,
-                                   access_token=access_token,
-                                   target_email=current_app.config.get('GMAIL_SENDER_ADDRESS', 'Not Configured'))
+            # Redirect to the new target page: /admin/backup/settings
+            return redirect(url_for('admin_ui.serve_backup_settings_page'))
         else:
             flash_message = (
                 "Gmail authorization was successful, but a **Refresh Token was NOT provided by Google**. "
@@ -126,16 +125,19 @@ def authorize_gmail_callback():
             )
             flash(flash_message, "warning")
             current_app.logger.warning(f"Gmail authorization for {current_user.username} did not yield a refresh token. Access token: {access_token}")
-            return redirect(url_for('admin_ui.system_settings_page')) # Corrected route name
+            # Redirect to the new target page: /admin/backup/settings
+            return redirect(url_for('admin_ui.serve_backup_settings_page'))
 
     except OAuthError as oe:
         current_app.logger.error(f"OAuthError during Gmail token exchange: {str(oe)}", exc_info=True)
         flash(f"OAuth error during token exchange: {str(oe)}. Please ensure your client ID/secret and redirect URI are correct.", "danger")
-        return redirect(url_for('admin_ui.system_settings_page')) # Corrected route name
+        # Redirect to the new target page: /admin/backup/settings
+        return redirect(url_for('admin_ui.serve_backup_settings_page'))
     except Exception as e:
         current_app.logger.exception(f"Error in Gmail authorization callback: {e}")
         flash("An unexpected error occurred during the Gmail authorization callback.", "danger")
-        return redirect(url_for('admin_ui.system_settings_page')) # Corrected route name
+        # Redirect to the new target page: /admin/backup/settings
+        return redirect(url_for('admin_ui.serve_backup_settings_page'))
 
 def init_gmail_auth_routes(app):
     app.register_blueprint(gmail_auth_bp)
