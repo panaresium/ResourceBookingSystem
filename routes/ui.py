@@ -152,9 +152,32 @@ def serve_map_view(map_id):
 @ui_bp.route('/check-in/resource/<int:resource_id>', methods=['GET', 'POST'])
 def check_in_at_resource(resource_id):
     resource = Resource.query.get_or_404(resource_id)
-    now_utc = datetime.now(timezone.utc)
-    grace_period_minutes = current_app.config.get('CHECK_IN_GRACE_MINUTES', 15)
-    window_start_offset = timedelta(minutes=grace_period_minutes)
+
+    # Fetch booking settings
+    booking_settings = BookingSettings.query.first()
+    if not booking_settings:
+        flash("System error: Booking settings not configured.", "danger")
+        return render_template('check_in_status.html', success=False, resource_name=resource.name, message="Booking settings not found."), 500
+
+    global_time_offset_hours = booking_settings.global_time_offset_hours if hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
+    check_in_minutes_before = booking_settings.check_in_minutes_before
+    check_in_minutes_after = booking_settings.check_in_minutes_after
+
+    # Calculate effective_now_utc
+    # Note: Booking.start_time is stored as naive UTC in the database, representing the venue's local time if it were UTC.
+    # So, effective_now_utc should also be naive UTC for direct comparison.
+    # The current datetime.now(timezone.utc) is aware. We need to adjust it by offset, then make it naive.
+    # This matches the logic in utils.get_current_effective_time() which returns an *aware* time,
+    # but for comparison with naive DB times, we'd typically convert effective_now_aware to naive UTC.
+    # Let's be explicit:
+    # All booking times (start_time, end_time) are stored as naive datetime objects representing UTC.
+    # Comparisons should happen with naive UTC.
+
+    _now_utc_aware = datetime.now(timezone.utc)
+    effective_now_utc_aware = _now_utc_aware + timedelta(hours=global_time_offset_hours)
+    # For comparing with Booking.start_time (which is naive UTC), we use naive UTC version of effective_now
+    effective_now_naive_utc = effective_now_utc_aware.replace(tzinfo=None)
+
 
     if request.method == 'POST': # PIN Submission
         if not current_user.is_authenticated:
@@ -198,21 +221,28 @@ def check_in_at_resource(resource_id):
             Booking.resource_id == resource_id,
             Booking.status == 'approved',
             Booking.checked_in_at.is_(None),
-            # Check-in window condition:
-            Booking.start_time <= now_utc + window_start_offset,
-            Booking.start_time >= now_utc - window_start_offset
+            # Check-in window condition using dynamic settings and effective_now_naive_utc:
+            # Booking.start_time is naive UTC. effective_now_naive_utc is also naive UTC.
+            Booking.start_time - timedelta(minutes=check_in_minutes_before) <= effective_now_naive_utc,
+            Booking.start_time + timedelta(minutes=check_in_minutes_after) >= effective_now_naive_utc
         ).order_by(Booking.start_time).first() # Get the earliest one if multiple somehow fit
 
         if active_booking:
-            actual_check_in_window_start = active_booking.start_time - window_start_offset
-            actual_check_in_window_end = active_booking.start_time + window_start_offset
+            # The primary query now correctly determines if a booking is within the dynamic window.
+            # The secondary check can be removed or simplified.
+            # For clarity, let's proceed with the check-in if active_booking is found.
+            # The message "No active booking found..." will be shown if query returns None.
 
-            if not (actual_check_in_window_start <= now_utc <= actual_check_in_window_end):
-                flash(f"Check-in window for your booking for '{resource.name}' is not currently active.", "warning")
-                return render_template('check_in_status.html', success=False, resource_name=resource.name, message=f"Check-in window for your booking ({active_booking.title}) is {actual_check_in_window_start.strftime('%H:%M')} to {actual_check_in_window_end.strftime('%H:%M')}. Current time: {now_utc.strftime('%H:%M')}.")
+            # Storing check-in time: should use the original _now_utc_aware and make it naive,
+            # or effective_now_naive_utc?
+            # Standard practice is to record event times in true UTC.
+            # Booking.checked_in_at is naive UTC.
+            # So, _now_utc_aware.replace(tzinfo=None) is the actual UTC timestamp of the event, made naive.
+            # effective_now_naive_utc is the venue's "current time" perception.
+            # For an audit field like checked_in_at, actual UTC is better.
 
             try:
-                active_booking.checked_in_at = now_utc.replace(tzinfo=None) # Store naive UTC
+                active_booking.checked_in_at = _now_utc_aware.replace(tzinfo=None) # Store actual naive UTC
                 db.session.commit()
 
                 add_audit_log(
