@@ -37,11 +37,12 @@ class Booking:
         self.resource_booked = None # Will be linked to a Resource object
 
 class BookingSettings:
-    def __init__(self, id=1, enable_check_in_out=True, check_in_minutes_before=15, check_in_minutes_after=15):
+    def __init__(self, id=1, enable_check_in_out=True, check_in_minutes_before=15, check_in_minutes_after=15, global_time_offset_hours=0):
         self.id = id
         self.enable_check_in_out = enable_check_in_out
         self.check_in_minutes_before = check_in_minutes_before
         self.check_in_minutes_after = check_in_minutes_after
+        self.global_time_offset_hours = global_time_offset_hours
 
 # --- Mock DB ---
 mock_db_data = {
@@ -136,14 +137,21 @@ def mockable_check_in_booking(booking_id, provided_pin, current_user_username="t
     if not settings.enable_check_in_out:
         return {'error': 'Check-in/out feature is disabled.'}, 403
 
+    # Calculate effective_now for check-in window validation
+    _now_utc_aware = datetime.datetime.now(datetime.timezone.utc) # This will be the patched (fixed) time
+    effective_now_utc_aware = _now_utc_aware + datetime.timedelta(hours=settings.global_time_offset_hours)
+    # Booking times (start_time) are naive UTC in the mock DB, representing venue's local time if it were UTC.
+    # So, for comparison, use naive version of effective_now.
+    effective_now_naive_utc = effective_now_utc_aware.replace(tzinfo=None)
 
-    now = datetime.datetime.now(datetime.timezone.utc)
-    start_time_aware = booking.start_time
-    if start_time_aware.tzinfo is None:
-        start_time_aware = start_time_aware.replace(tzinfo=datetime.timezone.utc)
+    # Booking.start_time is naive in mock_db_data, treat as naive UTC
+    booking_start_naive_utc = booking.start_time
 
-    if not (start_time_aware - datetime.timedelta(minutes=settings.check_in_minutes_before) <= now <= \
-            start_time_aware + datetime.timedelta(minutes=settings.check_in_minutes_after)):
+    # Check-in window logic (all naive UTC comparisons)
+    check_in_window_start_naive_utc = booking_start_naive_utc - datetime.timedelta(minutes=settings.check_in_minutes_before)
+    check_in_window_end_naive_utc = booking_start_naive_utc + datetime.timedelta(minutes=settings.check_in_minutes_after)
+
+    if not (check_in_window_start_naive_utc <= effective_now_naive_utc <= check_in_window_end_naive_utc):
         return {'error': 'Check-in is only allowed within the defined window.'}, 403
 
     resource = booking.resource_booked # Assumes this is linked during setup
@@ -174,9 +182,10 @@ def mockable_check_in_booking(booking_id, provided_pin, current_user_username="t
 
     # If resource_has_any_pin is False, no PIN is required, so we proceed.
 
-    booking.checked_in_at = now
+    # Record check-in time using the actual time of the event (_now_utc_aware), made naive for DB storage
+    booking.checked_in_at = _now_utc_aware.replace(tzinfo=None)
     mock_db_session.commit()
-    return {'message': 'Check-in successful.', 'checked_in_at': now.isoformat(), 'booking_id': booking.id}, 200
+    return {'message': 'Check-in successful.', 'checked_in_at': booking.checked_in_at.isoformat(), 'booking_id': booking.id}, 200
 
 
 class TestPINCheckIn(unittest.TestCase):
