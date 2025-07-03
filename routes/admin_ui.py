@@ -416,11 +416,8 @@ def update_booking_settings():
 
         # Update fields
         settings.allow_past_bookings = 'allow_past_bookings' in request.form
-
-        if settings.allow_past_bookings:
-            settings.past_booking_time_adjustment_hours = _parse_int_field('past_booking_time_adjustment_hours', default_value=0, min_val=0)
-        else:
-            settings.past_booking_time_adjustment_hours = 0 # Default to 0 if past bookings not allowed
+        # Past Booking Time Adjustment should be settable independently of allow_past_bookings for same-day grace period.
+        settings.past_booking_time_adjustment_hours = _parse_int_field('past_booking_time_adjustment_hours', default_value=0, min_val=0)
 
         settings.max_booking_days_in_future = _parse_int_field('max_booking_days_in_future', nullable=True, min_val=0)
         settings.allow_multiple_resources_same_time = 'allow_multiple_resources_same_time' in request.form
