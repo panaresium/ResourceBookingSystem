@@ -173,7 +173,7 @@ DEFAULT_ADMIN_PASSWORD = os.environ.get('DEFAULT_ADMIN_PASSWORD', 'ChangeMe123!'
 APP_NAME = "Meeting Room Booking System"
 MAX_BOOKING_DURATION_HOURS = int(os.environ.get('MAX_BOOKING_DURATION_HOURS', 8))
 MIN_BOOKING_DURATION_MINUTES = int(os.environ.get('MIN_BOOKING_DURATION_MINUTES', 15))
-BOOKING_LEAD_TIME_DAYS = int(os.environ.get('BOOKING_LEAD_TIME_DAYS', 90)) # How far in advance users can book
+BOOKING_LEAD_TIME_DAYS = int(os.environ.get('BOOKING_LEAD_TIME_DAYS', 14)) # How far in advance users can book
 DEFAULT_ITEMS_PER_PAGE = int(os.environ.get('DEFAULT_ITEMS_PER_PAGE', 10)) # For pagination
 
 # --- Map View Settings ---
