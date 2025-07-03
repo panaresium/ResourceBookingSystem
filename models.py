@@ -88,7 +88,7 @@ class FloorMap(db.Model):
 class BookingSettings(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     allow_past_bookings = db.Column(db.Boolean, default=False)
-    max_booking_days_in_future = db.Column(db.Integer, nullable=True, default=None)
+    max_booking_days_in_future = db.Column(db.Integer, nullable=True, default=14)
     allow_multiple_resources_same_time = db.Column(db.Boolean, default=False)
     max_bookings_per_user = db.Column(db.Integer, nullable=True, default=None)
     enable_check_in_out = db.Column(db.Boolean, default=False)

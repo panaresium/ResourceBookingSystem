@@ -267,7 +267,7 @@ def create_booking():
     # Define lists of active statuses (lowercase)
     # These statuses are considered "active" for conflict checks or quota counting.
     active_conflict_statuses = ['approved', 'pending', 'checked_in', 'confirmed']
-    released_statuses = ['cancelled', 'system_cancelled_no_checkin', 'cancelled_by_admin', 'rejected', 'cancelled_admin_acknowledged']
+    released_statuses = ['cancelled', 'system_cancelled_no_checkin', 'cancelled_by_admin', 'rejected', 'cancelled_admin_acknowledged', 'completed']
     active_quota_statuses = ['approved', 'pending', 'checked_in', 'confirmed']
 
     data = request.get_json()
@@ -306,7 +306,14 @@ def create_booking():
     # Define effective settings, using defaults if booking_settings is None or specific values are not set
     allow_past_bookings_effective = booking_settings.allow_past_bookings if booking_settings else False
     effective_past_booking_hours = booking_settings.past_booking_time_adjustment_hours if booking_settings and booking_settings.past_booking_time_adjustment_hours is not None else 0
-    max_booking_days_in_future_effective = booking_settings.max_booking_days_in_future if booking_settings and booking_settings.max_booking_days_in_future is not None else None
+
+    max_booking_days_in_future_from_db = booking_settings.max_booking_days_in_future if booking_settings and hasattr(booking_settings, 'max_booking_days_in_future') else None
+    if max_booking_days_in_future_from_db is not None:
+        max_booking_days_in_future_effective = max_booking_days_in_future_from_db
+    else:
+        # Fallback to config's BOOKING_LEAD_TIME_DAYS, with a hardcoded default of 14 if not found in config
+        max_booking_days_in_future_effective = current_app.config.get('BOOKING_LEAD_TIME_DAYS', 14)
+
     allow_multiple_resources_same_time_effective = booking_settings.allow_multiple_resources_same_time if booking_settings else False
     max_bookings_per_user_effective = booking_settings.max_bookings_per_user if booking_settings and booking_settings.max_bookings_per_user is not None else None
     # enable_check_in_out_effective = booking_settings.enable_check_in_out if booking_settings else False # Not used in this function directly
