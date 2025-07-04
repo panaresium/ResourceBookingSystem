@@ -367,12 +367,18 @@ def get_unavailable_dates():
 
                     # Convert venue local naive slot times to actual UTC by subtracting the offset
                     # (e.g., if venue is UTC-5, global_time_offset_hours = -5. 8:00 local is 8:00 - (-5) = 13:00 UTC)
-                    slot_start_for_comparison_utc = (slot_start_local_naive - timedelta(hours=global_time_offset_hours)).replace(tzinfo=timezone.utc)
-                    slot_end_for_comparison_utc = (slot_end_local_naive - timedelta(hours=global_time_offset_hours)).replace(tzinfo=timezone.utc)
+                    slot_start_for_comparison_utc = (slot_start_local_naive - timedelta(hours=global_time_offset_hours)).replace(tzinfo=timezone.utc) # Still needed for user conflict check if that remains UTC based
+                    slot_end_for_comparison_utc = (slot_end_local_naive - timedelta(hours=global_time_offset_hours)).replace(tzinfo=timezone.utc) # Still needed for user conflict check
 
-                    # Calculate is_slot_time_passed for ALL current_processing_date values
-                    is_slot_time_passed = effective_cutoff_datetime_utc >= slot_start_for_comparison_utc
-                    logger.debug(f"[VERBOSE_UNAVAIL]   Attempting to check if slot passed. Cutoff: {effective_cutoff_datetime_utc.isoformat()}, Slot Start (UTC): {slot_start_for_comparison_utc.isoformat()}, Passed?: {is_slot_time_passed}")
+                    # Corrected "is_passed" logic to align with venue local time reasoning
+                    # effective_venue_now_utc is calculated earlier. We need its naive local equivalent.
+                    effective_venue_now_local_naive_for_check = effective_venue_now_utc.replace(tzinfo=None)
+                    # Calculate the cutoff point in naive local time
+                    cutoff_for_slot_passing_local_naive = effective_venue_now_local_naive_for_check - timedelta(hours=past_adjustment_hours)
+                    # A slot is "passed" if its local start time is before this local cutoff time
+                    is_slot_time_passed = slot_start_local_naive < cutoff_for_slot_passing_local_naive
+
+                    logger.debug(f"[VERBOSE_UNAVAIL]   Attempting to check if slot passed (local time logic). Venue Local Cutoff: {cutoff_for_slot_passing_local_naive.isoformat()}, Slot Start (Local): {slot_start_local_naive.isoformat()}, Passed?: {is_slot_time_passed}")
 
                     if is_server_today: # Conditional logging is fine
                         logger.debug(f"[UNAVAIL_DATES][TODAY]   Checking slot: Resource ID {resource_to_check.id}, Slot {slot_def['start'].strftime('%H:%M')}-{slot_def['end'].strftime('%H:%M')} (Venue Local Time)")
