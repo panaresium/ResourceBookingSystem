@@ -642,6 +642,11 @@ document.addEventListener('DOMContentLoaded', () => {
         initializeCalendar(); // Initialize calendar immediately if no user ID
     }
 
+    flatpickr("#cebm-booking-date", {
+        disable: unavailableDates,
+        dateFormat: "Y-m-d",
+    });
+
 
     // Event listener for the modal's close button
     if (cebmCloseModalBtn) {
