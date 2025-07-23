@@ -484,7 +484,8 @@ def serve_maintenance_page():
         if floor.location not in buildings:
             buildings[floor.location] = []
         buildings[floor.location].append(floor)
-    return render_template("admin/maintenance.html", floors=floors, buildings=buildings)
+    resources = Resource.query.all()
+    return render_template("admin/maintenance.html", floors=floors, buildings=buildings, resources=resources)
 
 @admin_ui_bp.route('/system-settings', methods=['GET', 'POST'])
 @login_required

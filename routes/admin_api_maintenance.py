@@ -17,13 +17,18 @@ def create_maintenance_schedule():
         return jsonify({'error': 'Missing required fields'}), 400
 
     try:
+        day_of_week = data.get('day_of_week') if data.get('day_of_week') else None
+        day_of_month = data.get('day_of_month') if data.get('day_of_month') else None
+        start_date = date.fromisoformat(data['start_date']) if data.get('start_date') else None
+        end_date = date.fromisoformat(data['end_date']) if data.get('end_date') else None
+
         new_schedule = MaintenanceSchedule(
             name=data['name'],
             schedule_type=data['schedule_type'],
-            day_of_week=data.get('day_of_week'),
-            day_of_month=data.get('day_of_month'),
-            start_date=date.fromisoformat(data['start_date']) if data.get('start_date') else None,
-            end_date=date.fromisoformat(data['end_date']) if data.get('end_date') else None,
+            day_of_week=day_of_week,
+            day_of_month=day_of_month,
+            start_date=start_date,
+            end_date=end_date,
             is_availability=data.get('is_availability', False),
             resource_selection_type=data['resource_selection_type'],
             resource_ids=data.get('resource_ids'),
