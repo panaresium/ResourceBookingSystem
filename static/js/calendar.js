@@ -625,14 +625,17 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(dates => {
                 unavailableDates = dates; // Populate the global array
                 console.log("Unavailable dates fetched:", unavailableDates);
-                const flatpickrInstance = document.querySelector("#cebm-booking-date")._flatpickr;
-                if (flatpickrInstance) {
-                    flatpickrInstance.set('disable', unavailableDates);
-                }
+                flatpickr("#cebm-booking-date", {
+                    disable: unavailableDates,
+                    dateFormat: "Y-m-d",
+                });
             })
             .catch(error => {
                 console.error('Error fetching unavailable dates:', error);
                 // Proceed without unavailable dates functionality
+                flatpickr("#cebm-booking-date", {
+                    dateFormat: "Y-m-d",
+                });
             })
             .finally(() => {
                 initializeCalendar(); // Initialize calendar after API call attempt
@@ -640,12 +643,10 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
         console.info('User ID not found for this calendar instance. Skipping fetching unavailable dates. This is normal for "My Calendar" view.');
         initializeCalendar(); // Initialize calendar immediately if no user ID
+        flatpickr("#cebm-booking-date", {
+            dateFormat: "Y-m-d",
+        });
     }
-
-    flatpickr("#cebm-booking-date", {
-        disable: unavailableDates,
-        dateFormat: "Y-m-d",
-    });
 
 
     // Event listener for the modal's close button
