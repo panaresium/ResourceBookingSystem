@@ -268,7 +268,7 @@ class MaintenanceSchedule(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     schedule_type = db.Column(db.String(50), nullable=False)  # 'recurring_day', 'specific_day', 'date_range'
-    day_of_week = db.Column(db.Integer, nullable=True)  # 0-6 for Monday-Sunday
+    day_of_week = db.Column(db.String(50), nullable=True)  # Comma-separated list of days (0-6)
     day_of_month = db.Column(db.Integer, nullable=True)  # 1-31
     start_date = db.Column(db.Date, nullable=True)
     end_date = db.Column(db.Date, nullable=True)

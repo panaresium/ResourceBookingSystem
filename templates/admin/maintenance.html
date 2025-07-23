@@ -29,16 +29,35 @@
                 </div>
                 <div id="recurring_day_fields">
                     <div class="form-group">
-                        <label for="day_of_week">{{ _('Day of the Week') }}</label>
-                        <select class="form-control" id="day_of_week" name="day_of_week">
-                            <option value="0">{{ _('Monday') }}</option>
-                            <option value="1">{{ _('Tuesday') }}</option>
-                            <option value="2">{{ _('Wednesday') }}</option>
-                            <option value="3">{{ _('Thursday') }}</option>
-                            <option value="4">{{ _('Friday') }}</option>
-                            <option value="5">{{ _('Saturday') }}</option>
-                            <option value="6">{{ _('Sunday') }}</option>
-                        </select>
+                        <label>{{ _('Day of the Week') }}</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="day_of_week" value="0">
+                            <label class="form-check-label">{{ _('Monday') }}</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="day_of_week" value="1">
+                            <label class="form-check-label">{{ _('Tuesday') }}</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="day_of_week" value="2">
+                            <label class="form-check-label">{{ _('Wednesday') }}</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="day_of_week" value="3">
+                            <label class="form-check-label">{{ _('Thursday') }}</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="day_of_week" value="4">
+                            <label class="form-check-label">{{ _('Friday') }}</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="day_of_week" value="5">
+                            <label class="form-check-label">{{ _('Saturday') }}</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="day_of_week" value="6">
+                            <label class="form-check-label">{{ _('Sunday') }}</label>
+                        </div>
                     </div>
                 </div>
                 <div id="specific_day_fields" style="display: none;">

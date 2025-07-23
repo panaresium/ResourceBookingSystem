@@ -30,24 +30,30 @@ def is_resource_unavailable(resource, start_time, end_time):
     for schedule in schedules:
         if schedule.resource_selection_type == 'all':
             if check_schedule_conflict(schedule, start_time, end_time):
-                return True
+                return not schedule.is_availability
         elif schedule.resource_selection_type == 'specific':
-            resource_ids = [int(id) for id in schedule.resource_ids.split(',')]
-            if resource.id in resource_ids:
-                if check_schedule_conflict(schedule, start_time, end_time):
-                    return True
+            if schedule.resource_ids:
+                resource_ids = [int(id) for id in schedule.resource_ids.split(',')]
+                if resource.id in resource_ids:
+                    if check_schedule_conflict(schedule, start_time, end_time):
+                        return not schedule.is_availability
     return False
 
 def check_schedule_conflict(schedule, start_time, end_time):
+    conflict = False
     if schedule.schedule_type == 'date_range':
         if schedule.start_date <= start_time.date() <= schedule.end_date:
-            return not schedule.is_availability
+            conflict = True
     elif schedule.schedule_type == 'recurring_day':
-        if start_time.weekday() == schedule.day_of_week:
-            return not schedule.is_availability
+        if schedule.day_of_week and str(start_time.weekday()) in schedule.day_of_week.split(','):
+            conflict = True
     elif schedule.schedule_type == 'specific_day':
         if start_time.day == schedule.day_of_month:
-            return not schedule.is_availability
+            conflict = True
+
+    current_app.logger.info(f"Schedule {schedule.id} conflict: {conflict}, is_availability: {schedule.is_availability}")
+    if conflict:
+        return not schedule.is_availability
     return False
 
 # Initialization function
