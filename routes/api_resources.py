@@ -191,26 +191,57 @@ def get_unavailable_dates_from_schedules(start_date, end_date):
     unavailable_dates = set()
     schedules = MaintenanceSchedule.query.all()
 
-    for schedule in schedules:
-        if not schedule.is_availability:
+    availability_schedules = [s for s in schedules if s.is_availability]
+    maintenance_schedules = [s for s in schedules if not s.is_availability]
+
+    if availability_schedules:
+        available_dates = set()
+        for schedule in availability_schedules:
             if schedule.schedule_type == 'date_range':
                 current_date = schedule.start_date
                 while current_date <= schedule.end_date:
-                    unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
+                    available_dates.add(current_date.strftime('%Y-%m-%d'))
                     current_date += timedelta(days=1)
             elif schedule.schedule_type == 'recurring_day':
                 days = [int(d) for d in schedule.day_of_week.split(',')]
                 current_date = start_date
                 while current_date <= end_date:
                     if current_date.weekday() in days:
-                        unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
+                        available_dates.add(current_date.strftime('%Y-%m-%d'))
                     current_date += timedelta(days=1)
             elif schedule.schedule_type == 'specific_day':
                 current_date = start_date
                 while current_date <= end_date:
                     if current_date.day == schedule.day_of_month:
-                        unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
+                        available_dates.add(current_date.strftime('%Y-%m-%d'))
                     current_date += timedelta(days=1)
+
+        current_date = start_date
+        while current_date <= end_date:
+            if current_date.strftime('%Y-%m-%d') not in available_dates:
+                unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
+            current_date += timedelta(days=1)
+
+    for schedule in maintenance_schedules:
+        if schedule.schedule_type == 'date_range':
+            current_date = schedule.start_date
+            while current_date <= schedule.end_date:
+                unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
+                current_date += timedelta(days=1)
+        elif schedule.schedule_type == 'recurring_day':
+            days = [int(d) for d in schedule.day_of_week.split(',')]
+            current_date = start_date
+            while current_date <= end_date:
+                if current_date.weekday() in days:
+                    unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
+                current_date += timedelta(days=1)
+        elif schedule.schedule_type == 'specific_day':
+            current_date = start_date
+            while current_date <= end_date:
+                if current_date.day == schedule.day_of_month:
+                    unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
+                current_date += timedelta(days=1)
+
     return unavailable_dates
 
 @api_resources_bp.route('/resources/unavailable_dates', methods=['GET'])
