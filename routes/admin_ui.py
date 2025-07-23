@@ -474,6 +474,12 @@ def analytics_dashboard():
     current_app.logger.info(f"User {current_user.username} accessed analytics dashboard.")
     return render_template('analytics.html')
 
+@admin_ui_bp.route('/maintenance')
+@login_required
+@permission_required('manage_maintenance')
+def serve_maintenance_page():
+    return render_template("admin/maintenance.html")
+
 @admin_ui_bp.route('/system-settings', methods=['GET', 'POST'])
 @login_required
 @permission_required('manage_system_settings')

@@ -67,6 +67,9 @@
                     <li id="system-settings-nav-link" style="display: none;">
                         <a href="{{ url_for('admin_ui.system_settings_page') }}">{{ _('System Settings') }}</a>
                     </li>
+                    <li id="maintenance-nav-link" style="display: none;">
+                        <a href="{{ url_for('admin_ui.serve_maintenance_page') }}">{{ _('Maintenance') }}</a>
+                    </li>
                 </ul>
             </details>
         </li>

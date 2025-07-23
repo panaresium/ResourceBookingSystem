@@ -17,9 +17,41 @@ from models import Booking, Resource, User, WaitlistEntry, BookingSettings, Reso
 from utils import add_audit_log, parse_simple_rrule, send_email, send_teams_notification, check_booking_permission, generate_booking_image, get_current_effective_time # Added get_current_effective_time
 # Assuming auth.py contains permission_required decorator
 from auth import permission_required
+from models import MaintenanceSchedule
 
 # Blueprint Configuration
 api_bookings_bp = Blueprint('api_bookings', __name__, url_prefix='/api')
+
+def is_resource_unavailable(resource, start_time, end_time):
+    """
+    Checks if a resource is unavailable due to a maintenance schedule.
+    """
+    schedules = MaintenanceSchedule.query.all()
+    for schedule in schedules:
+        if schedule.resource_selection_type == 'all':
+            if check_schedule_conflict(schedule, start_time, end_time):
+                return True
+        elif schedule.resource_selection_type == 'specific':
+            resource_ids = [int(id) for id in schedule.resource_ids.split(',')]
+            if resource.id in resource_ids:
+                if check_schedule_conflict(schedule, start_time, end_time):
+                    return True
+    return False
+
+def check_schedule_conflict(schedule, start_time, end_time):
+    if schedule.schedule_type == 'date_range':
+        if schedule.start_date <= start_time.date() <= schedule.end_date:
+            if schedule.start_time <= start_time.time() and schedule.end_time >= end_time.time():
+                return not schedule.is_availability
+    elif schedule.schedule_type == 'recurring_day':
+        if start_time.weekday() == schedule.day_of_week:
+            if schedule.start_time <= start_time.time() and schedule.end_time >= end_time.time():
+                return not schedule.is_availability
+    elif schedule.schedule_type == 'specific_day':
+        if start_time.day == schedule.day_of_month:
+            if schedule.start_time <= start_time.time() and schedule.end_time >= end_time.time():
+                return not schedule.is_availability
+    return False
 
 # Initialization function
 def init_api_bookings_routes(app):
@@ -375,6 +407,9 @@ def create_booking():
         if new_booking_start_time.date() > max_allowed_date:
             current_app.logger.warning(f"Booking attempt by {current_user.username} for resource {resource_id} too far in future ({new_booking_start_time.date()}), limit is {max_booking_days_in_future_effective} days.")
             return jsonify({'error': f'Bookings cannot be made more than {max_booking_days_in_future_effective} days in advance.'}), 400
+
+    if is_resource_unavailable(resource, new_booking_start_time, new_booking_end_time):
+        return jsonify({'error': 'Resource is unavailable due to a maintenance schedule.'}), 403
 
     if resource.is_under_maintenance:
         maintenance_until_local_naive = None

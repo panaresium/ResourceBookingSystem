@@ -323,7 +323,7 @@ def init_db(force=False):
 
         current_app.logger.info("Creating default roles and users...")
         try:
-            admin_role = Role(name="Administrator", description="Full system access", permissions="all_permissions,view_analytics,manage_bookings,manage_system,manage_users,manage_resources,manage_floor_maps")
+            admin_role = Role(name="Administrator", description="Full system access", permissions="all_permissions,view_analytics,manage_bookings,manage_system,manage_users,manage_resources,manage_floor_maps,manage_maintenance")
             standard_role = Role(name="StandardUser", description="Can make bookings and view resources", permissions="make_bookings,view_resources")
             db.session.add_all([admin_role, standard_role])
             db.session.commit() # Commit roles to get IDs
