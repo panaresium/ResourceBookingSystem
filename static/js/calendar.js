@@ -625,6 +625,10 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(dates => {
                 unavailableDates = dates; // Populate the global array
                 console.log("Unavailable dates fetched:", unavailableDates);
+                const flatpickrInstance = document.querySelector("#cebm-booking-date")._flatpickr;
+                if (flatpickrInstance) {
+                    flatpickrInstance.set('disable', unavailableDates);
+                }
             })
             .catch(error => {
                 console.error('Error fetching unavailable dates:', error);
