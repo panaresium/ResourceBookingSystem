@@ -1186,6 +1186,12 @@ def update_booking_by_user(booking_id):
             current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] Final time_changed value: {time_changed}")
             current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] --- End Detailed Time Comparison ---")
 
+            if time_changed and is_resource_unavailable(resource, parsed_new_start_time, parsed_new_end_time):
+                return jsonify({'error': 'Resource is unavailable due to a maintenance schedule.'}), 403
+
+            if time_changed and is_resource_unavailable(resource, parsed_new_start_time, parsed_new_end_time):
+                return jsonify({'error': 'Resource is unavailable due to a maintenance schedule.'}), 403
+
             if time_changed and resource.is_under_maintenance:
                 maintenance_active = False
                 maintenance_until_venue_local_naive = None
