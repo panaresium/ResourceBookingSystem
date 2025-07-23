@@ -108,6 +108,7 @@
                 </div>
                 <button type="submit" class="btn btn-primary">{{ _('Create Schedule') }}</button>
             </form>
+            <div id="maintenance-error" class="error-message" style="display: none;"></div>
         </div>
     </div>
 
@@ -195,9 +196,13 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(response => response.json())
         .then(data => {
+            const errorDiv = document.getElementById('maintenance-error');
             if (data.error) {
-                alert('Error: ' + data.error);
+                console.error('Error creating schedule:', data.error);
+                errorDiv.textContent = 'Error: ' + data.error;
+                errorDiv.style.display = 'block';
             } else {
+                errorDiv.style.display = 'none';
                 loadSchedules();
                 newScheduleForm.reset();
             }
@@ -226,7 +231,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         <td>${schedule.name}</td>
                         <td>${schedule.is_availability ? 'Availability' : 'Maintenance'}</td>
                         <td>${details}</td>
-                        <td>${schedule.start_time} - ${schedule.end_time}</td>
                         <td>
                             <button class="btn btn-sm btn-danger delete-schedule" data-id="${schedule.id}">Delete</button>
                         </td>
@@ -249,9 +253,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 })
                 .then(response => response.json())
                 .then(data => {
+                    const errorDiv = document.getElementById('maintenance-error');
                     if (data.error) {
-                        alert('Error: ' + data.error);
+                        console.error('Error deleting schedule:', data.error);
+                        errorDiv.textContent = 'Error: ' + data.error;
+                        errorDiv.style.display = 'block';
                     } else {
+                        errorDiv.style.display = 'none';
                         loadSchedules();
                     }
                 });
