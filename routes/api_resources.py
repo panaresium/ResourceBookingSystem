@@ -16,6 +16,7 @@ from models import User, Resource, Booking, FloorMap, Role, ResourcePIN, Booking
 from utils import add_audit_log, resource_to_dict, allowed_file, _import_resource_configurations_data, check_booking_permission
 # Assuming permission_required is in auth.py
 from auth import permission_required
+from models import MaintenanceSchedule
 
 api_resources_bp = Blueprint('api_resources', __name__, url_prefix='/api')
 
@@ -185,6 +186,32 @@ def get_resource_available_slots(resource_id):
     logger.info(f"Generated {len(available_slots)} slots for resource {resource_id} on {date_str}.")
     return jsonify(available_slots), 200
 
+
+def get_unavailable_dates_from_schedules(start_date, end_date):
+    unavailable_dates = set()
+    schedules = MaintenanceSchedule.query.all()
+
+    for schedule in schedules:
+        if not schedule.is_availability:
+            if schedule.schedule_type == 'date_range':
+                current_date = schedule.start_date
+                while current_date <= schedule.end_date:
+                    unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
+                    current_date += timedelta(days=1)
+            elif schedule.schedule_type == 'recurring_day':
+                days = [int(d) for d in schedule.day_of_week.split(',')]
+                current_date = start_date
+                while current_date <= end_date:
+                    if current_date.weekday() in days:
+                        unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
+                    current_date += timedelta(days=1)
+            elif schedule.schedule_type == 'specific_day':
+                current_date = start_date
+                while current_date <= end_date:
+                    if current_date.day == schedule.day_of_month:
+                        unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
+                    current_date += timedelta(days=1)
+    return unavailable_dates
 
 @api_resources_bp.route('/resources/unavailable_dates', methods=['GET'])
 @login_required
@@ -471,6 +498,9 @@ def get_unavailable_dates():
             current_iter_date += timedelta(days=1)
 
         # The old 5 PM server logic block is now removed.
+
+        unavailable_dates_from_schedules = get_unavailable_dates_from_schedules(start_range_date, end_range_date)
+        unavailable_dates_set.update(unavailable_dates_from_schedules)
 
         if not unavailable_dates_set:
             logger.info(f"get_unavailable_dates: Finished for user {user_id_str}. No unavailable dates found within the processed range ({start_range_date} to {end_range_date}). All dates appear to have some availability.")
