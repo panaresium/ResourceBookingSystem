@@ -17,7 +17,9 @@ def create_maintenance_schedule():
         return jsonify({'error': 'Missing required fields'}), 400
 
     try:
-        day_of_week = ','.join(request.form.getlist('day_of_week'))
+        day_of_week = data.get('day_of_week')
+        if isinstance(day_of_week, list):
+            day_of_week = ','.join(day_of_week)
         day_of_month = data.get('day_of_month') if data.get('day_of_month') else None
         start_date = date.fromisoformat(data['start_date']) if data.get('start_date') else None
         end_date = date.fromisoformat(data['end_date']) if data.get('end_date') else None
