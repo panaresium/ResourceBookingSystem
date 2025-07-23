@@ -96,7 +96,16 @@
                     </div>
                 </div>
                 <div id="specific_resources_fields" style="display: none;">
+                    <div class="form-group">
+                        <label>{{ _('Resources') }}</label>
+                        {% for resource in resources %}
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="resource_ids" value="{{ resource.id }}">
+                            <label class="form-check-label">{{ resource.name }}</label>
+                        </div>
+                        {% endfor %}
                     </div>
+                </div>
                 <button type="submit" class="btn btn-primary">{{ _('Create Schedule') }}</button>
             </form>
         </div>
@@ -166,6 +175,9 @@ document.addEventListener('DOMContentLoaded', function() {
             specificResourcesFields.style.display = 'block';
         }
     });
+
+    // Trigger change event to show the correct fields on page load
+    resourceSelectionType.dispatchEvent(new Event('change'));
 
     const newScheduleForm = document.getElementById('new-schedule-form');
     newScheduleForm.addEventListener('submit', function(event) {
