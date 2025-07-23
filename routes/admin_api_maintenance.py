@@ -24,8 +24,6 @@ def create_maintenance_schedule():
             day_of_month=data.get('day_of_month'),
             start_date=date.fromisoformat(data['start_date']) if data.get('start_date') else None,
             end_date=date.fromisoformat(data['end_date']) if data.get('end_date') else None,
-            start_time=time.fromisoformat(data['start_time']),
-            end_time=time.fromisoformat(data['end_time']),
             is_availability=data.get('is_availability', False),
             resource_selection_type=data['resource_selection_type'],
             resource_ids=data.get('resource_ids'),
@@ -54,8 +52,6 @@ def get_maintenance_schedules():
             'day_of_month': s.day_of_month,
             'start_date': s.start_date.isoformat() if s.start_date else None,
             'end_date': s.end_date.isoformat() if s.end_date else None,
-            'start_time': s.start_time.isoformat(),
-            'end_time': s.end_time.isoformat(),
             'is_availability': s.is_availability,
             'resource_selection_type': s.resource_selection_type,
             'resource_ids': s.resource_ids,
@@ -80,8 +76,6 @@ def update_maintenance_schedule(schedule_id):
         schedule.day_of_month = data.get('day_of_month', schedule.day_of_month)
         schedule.start_date = date.fromisoformat(data['start_date']) if data.get('start_date') else None
         schedule.end_date = date.fromisoformat(data['end_date']) if data.get('end_date') else None
-        schedule.start_time = time.fromisoformat(data['start_time']) if data.get('start_time') else schedule.start_time
-        schedule.end_time = time.fromisoformat(data['end_time']) if data.get('end_time') else schedule.end_time
         schedule.is_availability = data.get('is_availability', schedule.is_availability)
         schedule.resource_selection_type = data.get('resource_selection_type', schedule.resource_selection_type)
         schedule.resource_ids = data.get('resource_ids', schedule.resource_ids)

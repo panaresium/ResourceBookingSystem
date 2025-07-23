@@ -478,7 +478,13 @@ def analytics_dashboard():
 @login_required
 @permission_required('manage_maintenance')
 def serve_maintenance_page():
-    return render_template("admin/maintenance.html")
+    floors = FloorMap.query.all()
+    buildings = {}
+    for floor in floors:
+        if floor.location not in buildings:
+            buildings[floor.location] = []
+        buildings[floor.location].append(floor)
+    return render_template("admin/maintenance.html", floors=floors, buildings=buildings)
 
 @admin_ui_bp.route('/system-settings', methods=['GET', 'POST'])
 @login_required
