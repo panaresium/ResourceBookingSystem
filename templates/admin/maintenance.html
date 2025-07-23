@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% from "macros.html" import render_field, render_submit_button, render_flash_messages %}
+
+{% block title %}{{ _('Maintenance Schedules') }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    {{ render_flash_messages(get_flashed_messages(with_categories=true)) }}
+    <h2>{{ _('Maintenance Schedules') }}</h2>
+    <hr>
+
+    <div class="card mt-3">
+        <div class="card-header">
+            {{ _('Create New Schedule') }}
+        </div>
+        <div class="card-body">
+            <form id="new-schedule-form">
+                <div class="form-group">
+                    <label for="name">{{ _('Schedule Name') }}</label>
+                    <input type="text" class="form-control" id="name" name="name" required>
+                </div>
+                <div class="form-group">
+                    <label for="schedule_type">{{ _('Schedule Type') }}</label>
+                    <select class="form-control" id="schedule_type" name="schedule_type">
+                        <option value="recurring_day">{{ _('Recurring Day of the Week') }}</option>
+                        <option value="specific_day">{{ _('Specific Day of the Month') }}</option>
+                        <option value="date_range">{{ _('Date Range') }}</option>
+                    </select>
+                </div>
+                <div id="recurring_day_fields">
+                    <div class="form-group">
+                        <label for="day_of_week">{{ _('Day of the Week') }}</label>
+                        <select class="form-control" id="day_of_week" name="day_of_week">
+                            <option value="0">{{ _('Monday') }}</option>
+                            <option value="1">{{ _('Tuesday') }}</option>
+                            <option value="2">{{ _('Wednesday') }}</option>
+                            <option value="3">{{ _('Thursday') }}</option>
+                            <option value="4">{{ _('Friday') }}</option>
+                            <option value="5">{{ _('Saturday') }}</option>
+                            <option value="6">{{ _('Sunday') }}</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="specific_day_fields" style="display: none;">
+                    <div class="form-group">
+                        <label for="day_of_month">{{ _('Day of the Month') }}</label>
+                        <input type="number" class="form-control" id="day_of_month" name="day_of_month" min="1" max="31">
+                    </div>
+                </div>
+                <div id="date_range_fields" style="display: none;">
+                    <div class="form-group">
+                        <label for="start_date">{{ _('Start Date') }}</label>
+                        <input type="date" class="form-control" id="start_date" name="start_date">
+                    </div>
+                    <div class="form-group">
+                        <label for="end_date">{{ _('End Date') }}</label>
+                        <input type="date" class="form-control" id="end_date" name="end_date">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="start_time">{{ _('Start Time') }}</label>
+                    <input type="time" class="form-control" id="start_time" name="start_time" required>
+                </div>
+                <div class="form-group">
+                    <label for="end_time">{{ _('End Time') }}</label>
+                    <input type="time" class="form-control" id="end_time" name="end_time" required>
+                </div>
+                <div class="form-group">
+                    <label for="is_availability">{{ _('Type') }}</label>
+                    <select class="form-control" id="is_availability" name="is_availability">
+                        <option value="false">{{ _('Maintenance (Unavailable)') }}</option>
+                        <option value="true">{{ _('Availability (Bookable)') }}</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="resource_selection_type">{{ _('Apply to') }}</label>
+                    <select class="form-control" id="resource_selection_type" name="resource_selection_type">
+                        <option value="all">{{ _('All Resources') }}</option>
+                        <option value="building">{{ _('Building') }}</option>
+                        <option value="floor">{{ _('Floor') }}</option>
+                        <option value="specific">{{ _('Specific Resources') }}</option>
+                    </select>
+                </div>
+                <div id="building_fields" style="display: none;">
+                    </div>
+                <div id="floor_fields" style="display: none;">
+                    </div>
+                <div id="specific_resources_fields" style="display: none;">
+                    </div>
+                <button type="submit" class="btn btn-primary">{{ _('Create Schedule') }}</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="card mt-5">
+        <div class="card-header">
+            {{ _('Existing Schedules') }}
+        </div>
+        <div class="card-body">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>{{ _('Name') }}</th>
+                        <th>{{ _('Type') }}</th>
+                        <th>{{ _('Details') }}</th>
+                        <th>{{ _('Time') }}</th>
+                        <th>{{ _('Actions') }}</th>
+                    </tr>
+                </thead>
+                <tbody id="schedules-table-body">
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const scheduleType = document.getElementById('schedule_type');
+    const recurringDayFields = document.getElementById('recurring_day_fields');
+    const specificDayFields = document.getElementById('specific_day_fields');
+    const dateRangeFields = document.getElementById('date_range_fields');
+
+    scheduleType.addEventListener('change', function() {
+        recurringDayFields.style.display = 'none';
+        specificDayFields.style.display = 'none';
+        dateRangeFields.style.display = 'none';
+
+        if (this.value === 'recurring_day') {
+            recurringDayFields.style.display = 'block';
+        } else if (this.value === 'specific_day') {
+            specificDayFields.style.display = 'block';
+        } else if (this.value === 'date_range') {
+            dateRangeFields.style.display = 'block';
+        }
+    });
+
+    const resourceSelectionType = document.getElementById('resource_selection_type');
+    const buildingFields = document.getElementById('building_fields');
+    const floorFields = document.getElementById('floor_fields');
+    const specificResourcesFields = document.getElementById('specific_resources_fields');
+
+    resourceSelectionType.addEventListener('change', function() {
+        buildingFields.style.display = 'none';
+        floorFields.style.display = 'none';
+        specificResourcesFields.style.display = 'none';
+
+        if (this.value === 'building') {
+            buildingFields.style.display = 'block';
+        } else if (this.value === 'floor') {
+            floorFields.style.display = 'block';
+        } else if (this.value === 'specific') {
+            specificResourcesFields.style.display = 'block';
+        }
+    });
+
+    const newScheduleForm = document.getElementById('new-schedule-form');
+    newScheduleForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        const formData = new FormData(newScheduleForm);
+        const data = Object.fromEntries(formData.entries());
+
+        fetch('/admin/api/maintenance/schedules', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                alert('Error: ' + data.error);
+            } else {
+                loadSchedules();
+                newScheduleForm.reset();
+            }
+        });
+    });
+
+    function loadSchedules() {
+        fetch('/admin/api/maintenance/schedules')
+        .then(response => response.json())
+        .then(data => {
+            const tableBody = document.getElementById('schedules-table-body');
+            tableBody.innerHTML = '';
+            data.forEach(schedule => {
+                let details = '';
+                if (schedule.schedule_type === 'recurring_day') {
+                    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                    details = `Every ${days[schedule.day_of_week]}`;
+                } else if (schedule.schedule_type === 'specific_day') {
+                    details = `Day ${schedule.day_of_month} of every month`;
+                } else if (schedule.schedule_type === 'date_range') {
+                    details = `${schedule.start_date} to ${schedule.end_date}`;
+                }
+
+                const row = `
+                    <tr>
+                        <td>${schedule.name}</td>
+                        <td>${schedule.is_availability ? 'Availability' : 'Maintenance'}</td>
+                        <td>${details}</td>
+                        <td>${schedule.start_time} - ${schedule.end_time}</td>
+                        <td>
+                            <button class="btn btn-sm btn-danger delete-schedule" data-id="${schedule.id}">Delete</button>
+                        </td>
+                    </tr>
+                `;
+                tableBody.innerHTML += row;
+            });
+        });
+    }
+
+    document.addEventListener('click', function(event) {
+        if (event.target.classList.contains('delete-schedule')) {
+            const scheduleId = event.target.dataset.id;
+            if (confirm('Are you sure you want to delete this schedule?')) {
+                fetch(`/admin/api/maintenance/schedules/${scheduleId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'X-CSRFToken': '{{ csrf_token() }}'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Error: ' + data.error);
+                    } else {
+                        loadSchedules();
+                    }
+                });
+            }
+        }
+    });
+
+    loadSchedules();
+});
+</script>
+{% endblock %}
