@@ -58,14 +58,6 @@
                     </div>
                 </div>
                 <div class="form-group">
-                    <label for="start_time">{{ _('Start Time') }}</label>
-                    <input type="time" class="form-control" id="start_time" name="start_time" required>
-                </div>
-                <div class="form-group">
-                    <label for="end_time">{{ _('End Time') }}</label>
-                    <input type="time" class="form-control" id="end_time" name="end_time" required>
-                </div>
-                <div class="form-group">
                     <label for="is_availability">{{ _('Type') }}</label>
                     <select class="form-control" id="is_availability" name="is_availability">
                         <option value="false">{{ _('Maintenance (Unavailable)') }}</option>
@@ -82,9 +74,27 @@
                     </select>
                 </div>
                 <div id="building_fields" style="display: none;">
+                    <div class="form-group">
+                        <label>{{ _('Buildings') }}</label>
+                        {% for building, floors in buildings.items() %}
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="building_ids" value="{{ building }}">
+                            <label class="form-check-label">{{ building }}</label>
+                        </div>
+                        {% endfor %}
                     </div>
+                </div>
                 <div id="floor_fields" style="display: none;">
+                    <div class="form-group">
+                        <label>{{ _('Floors') }}</label>
+                        {% for floor in floors %}
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="floor_ids" value="{{ floor.id }}">
+                            <label class="form-check-label">{{ floor.name }} ({{ floor.location }})</label>
+                        </div>
+                        {% endfor %}
                     </div>
+                </div>
                 <div id="specific_resources_fields" style="display: none;">
                     </div>
                 <button type="submit" class="btn btn-primary">{{ _('Create Schedule') }}</button>

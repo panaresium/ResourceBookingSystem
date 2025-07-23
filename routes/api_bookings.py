@@ -41,16 +41,13 @@ def is_resource_unavailable(resource, start_time, end_time):
 def check_schedule_conflict(schedule, start_time, end_time):
     if schedule.schedule_type == 'date_range':
         if schedule.start_date <= start_time.date() <= schedule.end_date:
-            if schedule.start_time <= start_time.time() and schedule.end_time >= end_time.time():
-                return not schedule.is_availability
+            return not schedule.is_availability
     elif schedule.schedule_type == 'recurring_day':
         if start_time.weekday() == schedule.day_of_week:
-            if schedule.start_time <= start_time.time() and schedule.end_time >= end_time.time():
-                return not schedule.is_availability
+            return not schedule.is_availability
     elif schedule.schedule_type == 'specific_day':
         if start_time.day == schedule.day_of_month:
-            if schedule.start_time <= start_time.time() and schedule.end_time >= end_time.time():
-                return not schedule.is_availability
+            return not schedule.is_availability
     return False
 
 # Initialization function

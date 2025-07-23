@@ -272,8 +272,6 @@ class MaintenanceSchedule(db.Model):
     day_of_month = db.Column(db.Integer, nullable=True)  # 1-31
     start_date = db.Column(db.Date, nullable=True)
     end_date = db.Column(db.Date, nullable=True)
-    start_time = db.Column(db.Time, nullable=False)
-    end_time = db.Column(db.Time, nullable=False)
     is_availability = db.Column(db.Boolean, default=False, nullable=False)
     resource_selection_type = db.Column(db.String(50), nullable=False)  # 'all', 'building', 'floor', 'specific'
     resource_ids = db.Column(db.Text, nullable=True)  # Comma-separated list of resource IDs
