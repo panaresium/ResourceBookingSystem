@@ -145,7 +145,7 @@ def mockable_check_in_booking(booking_id, provided_pin, current_user_username="t
     effective_now_naive_utc = effective_now_utc_aware.replace(tzinfo=None)
 
     # Booking.start_time is naive in mock_db_data, treat as naive UTC
-    booking_start_naive_utc = booking.start_time
+    booking_start_naive_utc = booking.start_time.replace(tzinfo=None)
 
     # Check-in window logic (all naive UTC comparisons)
     check_in_window_start_naive_utc = booking_start_naive_utc - datetime.timedelta(minutes=settings.check_in_minutes_before)
@@ -194,10 +194,7 @@ class TestPINCheckIn(unittest.TestCase):
         setup_mock_db()
         self.user = next(u for u in mock_db_data["users"] if u.username == "testuser")
 
-    @patch('__main__.mock_db_session', new_callable=MagicMock)
-    # Removed erroneous patch for current_app.logger
-    @patch('__main__.mock_app.logger', new_callable=MagicMock)
-    def test_scenario_1_correct_pin(self, mock_app_logger, mock_session): # Adjusted arguments
+    def test_scenario_1_correct_pin(self):
         print("\n--- Scenario 1: Correct PIN ---")
         booking_id = 1 # Booking for "Test Room PIN"
         pin = "12345"
@@ -211,9 +208,7 @@ class TestPINCheckIn(unittest.TestCase):
         self.assertIsNotNone(booking.checked_in_at)
         print(f"Booking ID {booking_id} checked_in_at: {booking.checked_in_at}")
 
-    @patch('__main__.mock_db_session', new_callable=MagicMock)
-    @patch('__main__.mock_app.logger', new_callable=MagicMock)
-    def test_scenario_2_incorrect_pin(self, mock_logger, mock_session):
+    def test_scenario_2_incorrect_pin(self):
         print("\n--- Scenario 2: Incorrect PIN ---")
         booking_id = 1 # Booking for "Test Room PIN"
         pin = "54321" # Incorrect PIN
@@ -227,9 +222,7 @@ class TestPINCheckIn(unittest.TestCase):
         self.assertIsNone(booking.checked_in_at)
         print(f"Booking ID {booking_id} checked_in_at remains: {booking.checked_in_at}")
 
-    @patch('__main__.mock_db_session', new_callable=MagicMock)
-    @patch('__main__.mock_app.logger', new_callable=MagicMock)
-    def test_scenario_3_missing_pin_for_pin_resource(self, mock_logger, mock_session):
+    def test_scenario_3_missing_pin_for_pin_resource(self):
         print("\n--- Scenario 3: Missing PIN (Resource Requires PIN) ---")
         booking_id = 3 # Booking for "Test Room PIN", but we'll try with empty PIN
         pin = "" # Empty PIN
@@ -243,9 +236,7 @@ class TestPINCheckIn(unittest.TestCase):
         self.assertIsNone(booking.checked_in_at)
         print(f"Booking ID {booking_id} checked_in_at remains: {booking.checked_in_at}")
 
-    @patch('__main__.mock_db_session', new_callable=MagicMock)
-    @patch('__main__.mock_app.logger', new_callable=MagicMock)
-    def test_scenario_4_no_pin_for_no_pin_resource(self, mock_logger, mock_session):
+    def test_scenario_4_no_pin_for_no_pin_resource(self):
         print("\n--- Scenario 4: No PIN (Resource Does NOT Require PIN) ---")
         booking_id = 2 # Booking for "Test Room NoPIN"
         pin = None # No PIN provided

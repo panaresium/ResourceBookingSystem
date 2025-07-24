@@ -121,8 +121,101 @@ class AppTests(unittest.TestCase):
 
 # --- Start of TestAdminBookingSettingsPINConfig ---
 # (Assuming TestAdminBookingSettingsPINConfig and other original classes are here)
-class TestAdminBookingSettingsPINConfig(AppTests):
-    def _create_admin_user(self, username="settings_pin_admin", email_ext="settings_pin_admin"):
+class AppTests(unittest.TestCase):
+
+    def setUp(self):
+        app.config['TESTING'] = True
+        app.config['WTF_CSRF_ENABLED'] = False
+        app.config['LOGIN_DISABLED'] = False
+        app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('TEST_DATABASE_URL', 'sqlite:///:memory:')
+        app.config['SCHEDULER_ENABLED'] = False # Default for most tests
+        app.config['MAIL_SUPPRESS_SEND'] = True
+        app.config['SERVER_NAME'] = 'localhost.test'
+
+        self.app_context = app.app_context()
+        self.app_context.push()
+
+        db.drop_all()
+        db.create_all()
+
+        email_log.clear()
+        teams_log.clear()
+        slack_log.clear()
+
+        user = User.query.filter_by(username='testuser').first()
+        if not user:
+            user = User(username='testuser', email='test@example.com', is_admin=False)
+            user.set_password('password')
+            db.session.add(user)
+            db.session.commit()
+
+        import uuid
+        unique_name = f"Test Map {uuid.uuid4()}"
+        unique_file = f"{uuid.uuid4()}.png"
+        # Ensure a FloorMap exists for resources
+        floor_map = FloorMap.query.first()
+        if not floor_map:
+            floor_map = FloorMap(name=unique_name, image_filename=unique_file)
+            db.session.add(floor_map)
+            db.session.commit()
+        self.floor_map = floor_map
+
+
+        res1 = Resource(
+            name='Room A', capacity=10, equipment='Projector,Whiteboard', tags='large',
+            floor_map_id=self.floor_map.id, status='published',
+            map_coordinates=json.dumps({'type': 'rect', 'x': 10, 'y': 20, 'width': 30, 'height': 30})
+        )
+        res2 = Resource(
+            name='Room B', capacity=4, equipment='Whiteboard', tags='small',
+            floor_map_id=self.floor_map.id, status='published',
+            map_coordinates=json.dumps({'type': 'rect', 'x': 50, 'y': 20, 'width': 30, 'height': 30})
+        )
+        # Add a third resource for tests that need it
+        res3 = Resource(
+            name='Room C', capacity=5, equipment='Monitor', tags='medium',
+            floor_map_id=self.floor_map.id, status='published'
+        )
+        db.session.add_all([res1, res2, res3])
+        db.session.commit()
+
+        self.resource1 = res1
+        self.resource2 = res2
+        self.resource3 = res3 # Make it available to tests
+
+        self.client = app.test_client()
+
+    def tearDown(self):
+        db.session.remove()
+        db.drop_all()
+        self.app_context.pop()
+
+    def login(self, username, password):
+        response = self.client.post('/api/auth/login',
+                                    data=json.dumps(dict(username=username, password=password)),
+                                    content_type='application/json',
+                                    follow_redirects=True)
+        return response
+
+    def logout(self):
+        return self.client.post('/api/auth/logout', follow_redirects=True)
+
+    def _create_booking(self, user_name, resource_id, start_offset_hours, duration_hours=1, title="Test Booking", status="approved"):
+        start_time = datetime_original.utcnow() + timedelta_original(hours=start_offset_hours) # Use datetime_original and timedelta_original
+        end_time = start_time + timedelta_original(hours=duration_hours) # Use timedelta_original
+        booking = Booking(
+            user_name=user_name,
+            resource_id=resource_id,
+            start_time=start_time,
+            end_time=end_time,
+            title=title,
+            status=status
+        )
+        db.session.add(booking)
+        db.session.commit()
+        return booking
+
+    def _create_admin_user(self, username="admin", email_ext="admin"):
         admin_user = User.query.filter_by(username=username).first()
         if not admin_user:
             admin_user = User(username=username, email=f"{email_ext}@example.com", is_admin=True)
@@ -248,7 +341,7 @@ class TestAutoCheckoutTask(AppTests):
         db.session.commit()
         booking_id = overdue_booking.id
 
-        auto_checkout_overdue_bookings(app_instance=app)
+        auto_checkout_overdue_bookings(app)
 
         checked_out_booking = db.session.get(Booking, booking_id)
         self.assertIsNotNone(checked_out_booking.checked_out_at, "checked_out_at should be populated")
@@ -273,7 +366,7 @@ class TestAutoCheckoutTask(AppTests):
             checked_in_at=booking_end_time - timedelta_original(minutes=30), status='checked_in' # Use timedelta_original
         )
         db.session.add(not_overdue_booking); db.session.commit()
-        auto_checkout_overdue_bookings(app_instance=app)
+        auto_checkout_overdue_bookings(app)
         db.session.refresh(not_overdue_booking)
         self.assertIsNone(not_overdue_booking.checked_out_at)
         self.assertEqual(not_overdue_booking.status, 'checked_in')
@@ -294,7 +387,7 @@ class TestAutoCheckoutTask(AppTests):
             checked_out_at=booking_end_time + timedelta_original(minutes=10), status='completed' # Use timedelta_original
         )
         db.session.add(already_checked_out_booking); db.session.commit()
-        auto_checkout_overdue_bookings(app_instance=app)
+        auto_checkout_overdue_bookings(app)
         mock_send_email.assert_not_called()
 
     @patch.dict(app.config, {'SCHEDULER_ENABLED': True})
@@ -311,7 +404,7 @@ class TestAutoCheckoutTask(AppTests):
             checked_in_at=None, status='approved'
         )
         db.session.add(not_checked_in_booking); db.session.commit()
-        auto_checkout_overdue_bookings(app_instance=app)
+        auto_checkout_overdue_bookings(app)
         mock_send_email.assert_not_called()
         db.session.refresh(not_checked_in_booking)
         self.assertEqual(not_checked_in_booking.status, 'approved')
@@ -342,7 +435,7 @@ class TestAutoCheckoutTask(AppTests):
         db.session.add_all([b_overdue, b_not_overdue, b_already_out]); db.session.commit()
         overdue_id = b_overdue.id
 
-        auto_checkout_overdue_bookings(app_instance=app)
+        auto_checkout_overdue_bookings(app)
 
         mock_send_email.assert_called_once()
         mock_add_audit_log.assert_called_once()
@@ -1272,19 +1365,6 @@ class TestAdminBackupSettingsRoutes(AppTests):
 import io
 
 class AdminAPITestCase(AppTests):
-    def _create_admin_user(self, username="admin_api_user", email_ext="admin_api"):
-        admin_user = User.query.filter_by(username=username).first()
-        if not admin_user:
-            admin_user = User(username=username, email=f"{email_ext}@example.com", is_admin=True)
-            admin_user.set_password("adminapipass")
-            role = Role.query.filter_by(name='Admin').first()
-            if not role:
-                role = Role(name='Admin', permissions=['manage_system', 'view_audit_logs']) # Add relevant permissions
-                db.session.add(role)
-            admin_user.roles.append(role)
-            db.session.add(admin_user)
-            db.session.commit()
-        return admin_user
 
     @patch('routes.api_system.list_available_backups', None)
     @patch('routes.api_system.current_app.logger.error')
@@ -2950,5 +3030,3 @@ class TestUnavailableDatesAPI(AppTests):
 
 if __name__ == '__main__':
     unittest.main()
-
-[end of tests/test_app.py]

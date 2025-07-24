@@ -269,14 +269,14 @@ class MaintenanceSchedule(db.Model):
     name = db.Column(db.String(100), nullable=False)
     schedule_type = db.Column(db.String(50), nullable=False)  # 'recurring_day', 'specific_day', 'date_range'
     day_of_week = db.Column(db.String(50), nullable=True)  # Comma-separated list of days (0-6)
-    day_of_month = db.Column(db.Integer, nullable=True)  # 1-31
+    day_of_month = db.Column(db.String(200), nullable=True)  # 1-31
     start_date = db.Column(db.Date, nullable=True)
     end_date = db.Column(db.Date, nullable=True)
     is_availability = db.Column(db.Boolean, default=False, nullable=False)
     resource_selection_type = db.Column(db.String(50), nullable=False)  # 'all', 'building', 'floor', 'specific'
     resource_ids = db.Column(db.Text, nullable=True)  # Comma-separated list of resource IDs
     building_id = db.Column(db.Integer, nullable=True)
-    floor_id = db.Column(db.Integer, nullable=True)
+    floor_ids = db.Column(db.Text, nullable=True)
 
     def __repr__(self):
         return f'<MaintenanceSchedule {self.name}>'
