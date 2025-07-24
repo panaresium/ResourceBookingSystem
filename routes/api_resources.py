@@ -187,61 +187,53 @@ def get_resource_available_slots(resource_id):
     return jsonify(available_slots), 200
 
 
-def get_unavailable_dates_from_schedules(start_date, end_date):
+def get_unavailable_dates_from_schedules(start_date, end_date, resources):
     unavailable_dates = set()
     schedules = MaintenanceSchedule.query.all()
 
-    availability_schedules = [s for s in schedules if s.is_availability]
-    maintenance_schedules = [s for s in schedules if not s.is_availability]
+    for resource in resources:
+        for schedule in schedules:
+            if schedule.resource_selection_type == 'all':
+                pass
+            elif schedule.resource_selection_type == 'building':
+                if not (resource.floor_map and resource.floor_map.location and schedule.building_id == resource.floor_map.location):
+                    continue
+            elif schedule.resource_selection_type == 'floor':
+                if not (resource.floor_map and str(resource.floor_map.id) in (schedule.floor_ids or '').split(',')):
+                    continue
+            elif schedule.resource_selection_type == 'specific':
+                if not (str(resource.id) in (schedule.resource_ids or '').split(',')):
+                    continue
 
-    if availability_schedules:
-        available_dates = set()
-        for schedule in availability_schedules:
             if schedule.schedule_type == 'date_range':
                 current_date = schedule.start_date
                 while current_date <= schedule.end_date:
-                    available_dates.add(current_date.strftime('%Y-%m-%d'))
+                    if start_date <= current_date <= end_date:
+                        if schedule.is_availability:
+                            pass
+                        else:
+                            unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
                     current_date += timedelta(days=1)
             elif schedule.schedule_type == 'recurring_day':
                 days = [int(d) for d in schedule.day_of_week.split(',')]
                 current_date = start_date
                 while current_date <= end_date:
                     if current_date.weekday() in days:
-                        available_dates.add(current_date.strftime('%Y-%m-%d'))
+                        if schedule.is_availability:
+                            pass
+                        else:
+                            unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
                     current_date += timedelta(days=1)
             elif schedule.schedule_type == 'specific_day':
+                days_of_month = [int(d) for d in schedule.day_of_month.split(',')]
                 current_date = start_date
                 while current_date <= end_date:
-                    if current_date.day == schedule.day_of_month:
-                        available_dates.add(current_date.strftime('%Y-%m-%d'))
+                    if current_date.day in days_of_month:
+                        if schedule.is_availability:
+                            pass
+                        else:
+                            unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
                     current_date += timedelta(days=1)
-
-        current_date = start_date
-        while current_date <= end_date:
-            if current_date.strftime('%Y-%m-%d') not in available_dates:
-                unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
-            current_date += timedelta(days=1)
-
-    for schedule in maintenance_schedules:
-        if schedule.schedule_type == 'date_range':
-            current_date = schedule.start_date
-            while current_date <= schedule.end_date:
-                unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
-                current_date += timedelta(days=1)
-        elif schedule.schedule_type == 'recurring_day':
-            days = [int(d) for d in schedule.day_of_week.split(',')]
-            current_date = start_date
-            while current_date <= end_date:
-                if current_date.weekday() in days:
-                    unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
-                current_date += timedelta(days=1)
-        elif schedule.schedule_type == 'specific_day':
-            current_date = start_date
-            while current_date <= end_date:
-                if current_date.day == schedule.day_of_month:
-                    unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
-                current_date += timedelta(days=1)
-
     return unavailable_dates
 
 @api_resources_bp.route('/resources/unavailable_dates', methods=['GET'])
@@ -530,7 +522,7 @@ def get_unavailable_dates():
 
         # The old 5 PM server logic block is now removed.
 
-        unavailable_dates_from_schedules = get_unavailable_dates_from_schedules(start_range_date, end_range_date)
+        unavailable_dates_from_schedules = get_unavailable_dates_from_schedules(start_range_date, end_range_date, all_published_resources)
         unavailable_dates_set.update(unavailable_dates_from_schedules)
 
         if not unavailable_dates_set:
