@@ -318,22 +318,14 @@ def get_unavailable_dates():
 
 
         # Generate Date Range
-        start_range_date = now.date().replace(day=1)
-        month_offset = 2
-        future_month_year = start_range_date.year
-        future_month_month = start_range_date.month + month_offset
-        if future_month_month > 12:
-            future_month_year += (future_month_month - 1) // 12
-            future_month_month = (future_month_month - 1) % 12 + 1
+        max_days_str = request.args.get('max_days', '365')
+        try:
+            max_days = int(max_days_str)
+        except ValueError:
+            max_days = 365
 
-        next_future_month_year = future_month_year
-        next_future_month_month = future_month_month + 1
-        if next_future_month_month > 12:
-            next_future_month_year += 1
-            next_future_month_month = 1
-
-        first_day_of_next_future_month = date(next_future_month_year, next_future_month_month, 1)
-        end_range_date = first_day_of_next_future_month - timedelta(days=1)
+        start_range_date = now.date()
+        end_range_date = start_range_date + timedelta(days=max_days)
 
         # Fetch all published resources once
         all_published_resources = Resource.query.filter_by(status='published').all()

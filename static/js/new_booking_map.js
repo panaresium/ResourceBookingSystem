@@ -97,22 +97,25 @@ document.addEventListener('DOMContentLoaded', function () {
         const calendarContainer = document.getElementById('inline-calendar-container');
         const userId = calendarContainer ? calendarContainer.dataset.userId : null;
 
-        const unavailableDatesPromise = userId && calendarContainer
-            ? apiCall(`/api/resources/unavailable_dates?user_id=${userId}`)
-            : Promise.resolve([]);
-
         const leadDaysPromise = apiCall('/api/system-settings/booking-lead-days');
 
-        Promise.all([unavailableDatesPromise, leadDaysPromise])
-            .then(([fetchedDates, leadDaysData]) => {
+        leadDaysPromise.then(leadDaysData => {
+            const maxBookingDays = (leadDaysData && leadDaysData.max_booking_days_in_future !== null) ? leadDaysData.max_booking_days_in_future : 365;
+            const unavailableDatesPromise = userId && calendarContainer
+                ? apiCall(`/api/resources/unavailable_dates?user_id=${userId}&max_days=${maxBookingDays}`)
+                : Promise.resolve([]);
+
+            unavailableDatesPromise.then(fetchedDates => {
                 console.log('[Debug] Fetched unavailable dates for Flatpickr:', fetchedDates);
-                const maxBookingDays = (leadDaysData && leadDaysData.max_booking_days_in_future !== null) ? leadDaysData.max_booking_days_in_future : 365;
                 initializeFlatpickr(fetchedDates, maxBookingDays);
-            })
-            .catch(error => {
-                console.error('Error fetching initial data for Flatpickr:', error);
-                initializeFlatpickr([], 365); // Default to 365 days on error
+            }).catch(error => {
+                console.error('Error fetching unavailable dates for Flatpickr:', error);
+                initializeFlatpickr([], maxBookingDays);
             });
+        }).catch(error => {
+            console.error('Error fetching booking lead days:', error);
+            initializeFlatpickr([], 365); // Default to 365 days on error
+        });
     }
 
     function initializeFlatpickr(unavailableDatesList = [], maxBookingDays) {
@@ -172,48 +175,6 @@ document.addEventListener('DOMContentLoaded', function () {
                             locationFloorWrapperDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
                         }
                     });
-                },
-                onMonthChange: function(selectedDates, dateStr, instance) {
-                    const userId = calendarContainer ? calendarContainer.dataset.userId : null;
-                    if (userId) {
-                        apiCall(`/api/resources/unavailable_dates?user_id=${userId}&month=${instance.currentMonth + 1}&year=${instance.currentYear}`)
-                            .then(fetchedDates => {
-                                console.log('[Debug] Fetched unavailable dates for Flatpickr:', fetchedDates);
-                                instance.set('disable', [
-                                    function(date) {
-                                        const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-                                        const today = new Date();
-                                        const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
-                                        if (dateStr === todayStr) {
-                                            const nowUtc = new Date(Date.UTC(
-                                                today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(),
-                                                today.getUTCHours(), today.getUTCMinutes(), today.getUTCSeconds()
-                                            ));
-                                            const effectiveVenueNow = new Date(nowUtc.getTime() + globalTimeOffsetHours * 60 * 60 * 1000);
-                                            const venueCutoffTime = new Date(effectiveVenueNow.getTime() - pastBookingAdjustmentHours * 60 * 60 * 1000);
-                                            const latestSlotEndTimeHour = 17;
-                                            const latestSlotEndTimeMinute = 0;
-                                            const latestSlotEndTodayVenueLocal = new Date(
-                                                effectiveVenueNow.getFullYear(),
-                                                effectiveVenueNow.getMonth(),
-                                                effectiveVenueNow.getDate(),
-                                                latestSlotEndTimeHour,
-                                                latestSlotEndTimeMinute
-                                            );
-
-                                            if (venueCutoffTime.getTime() >= latestSlotEndTodayVenueLocal.getTime()) {
-                                                return true;
-                                            }
-                                        }
-                                        return fetchedDates.includes(dateStr);
-                                    }
-                                ]);
-                            })
-                            .catch(error => {
-                                console.error('Error fetching unavailable dates for Flatpickr:', error);
-                            });
-                    }
                 }
             });
             if (mainBookingFormDateInput && mainBookingFormDateInput.value !== currentSelectedDateStr) {
