@@ -62,8 +62,17 @@
                 </div>
                 <div id="specific_day_fields" style="display: none;">
                     <div class="form-group">
-                        <label for="day_of_month">{{ _('Day of the Month') }}</label>
-                        <input type="number" class="form-control" id="day_of_month" name="day_of_month" min="1" max="31">
+                        <label>{{ _('Specific Days of the Month') }}</label>
+                        <div class="row">
+                            {% for day in range(1, 32) %}
+                            <div class="col-md-2 col-sm-3 col-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="day_of_month" value="{{ day }}">
+                                    <label class="form-check-label">{{ day }}</label>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
                     </div>
                 </div>
                 <div id="date_range_fields" style="display: none;">

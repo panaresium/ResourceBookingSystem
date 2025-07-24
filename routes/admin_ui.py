@@ -429,7 +429,7 @@ def update_booking_settings():
             settings.check_in_minutes_after = _parse_int_field('check_in_minutes_after', default_value=15, min_val=0)
             settings.checkin_reminder_minutes_before = _parse_int_field('checkin_reminder_minutes_before', default_value=30, min_val=0)
             settings.resource_checkin_url_requires_login = 'resource_checkin_url_requires_login' in request.form
-            settings.allow_check_in_without_pin = 'allow_check_in_without_pin' in request.form
+            settings.allow_check_in_without_pin = request.form.get('allow_check_in_without_pin') == 'on'
             settings.enable_auto_checkout = 'enable_auto_checkout' in request.form
             if settings.enable_auto_checkout:
                  settings.auto_checkout_delay_minutes = _parse_int_field('auto_checkout_delay_minutes', default_value=60, min_val=1)
@@ -441,7 +441,7 @@ def update_booking_settings():
             settings.check_in_minutes_after = 15
             settings.checkin_reminder_minutes_before = 30
             settings.resource_checkin_url_requires_login = False
-            settings.allow_check_in_without_pin = False
+            settings.allow_check_in_without_pin = True
             settings.enable_auto_checkout = False
             settings.auto_checkout_delay_minutes = 60
             settings.auto_release_if_not_checked_in_minutes = None

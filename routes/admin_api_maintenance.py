@@ -20,13 +20,19 @@ def create_maintenance_schedule():
         day_of_week = data.get('day_of_week')
         if isinstance(day_of_week, list):
             day_of_week = ','.join(day_of_week)
-        day_of_month = data.get('day_of_month') if data.get('day_of_month') else None
+        day_of_month = data.get('day_of_month')
+        if isinstance(day_of_month, list):
+            day_of_month = ','.join(day_of_month)
         start_date = date.fromisoformat(data['start_date']) if data.get('start_date') else None
         end_date = date.fromisoformat(data['end_date']) if data.get('end_date') else None
 
         is_availability = data.get('is_availability')
         if isinstance(is_availability, str):
             is_availability = is_availability.lower() == 'true'
+
+        floor_ids = data.get('floor_ids')
+        if isinstance(floor_ids, list):
+            floor_ids = ','.join(floor_ids)
 
         new_schedule = MaintenanceSchedule(
             name=data['name'],
@@ -39,7 +45,7 @@ def create_maintenance_schedule():
             resource_selection_type=data['resource_selection_type'],
             resource_ids=data.get('resource_ids'),
             building_id=data.get('building_id'),
-            floor_id=data.get('floor_id')
+            floor_ids=floor_ids
         )
         db.session.add(new_schedule)
         db.session.commit()
@@ -67,7 +73,7 @@ def get_maintenance_schedules():
             'resource_selection_type': s.resource_selection_type,
             'resource_ids': s.resource_ids,
             'building_id': s.building_id,
-            'floor_id': s.floor_id
+            'floor_ids': s.floor_ids
         } for s in schedules])
     except Exception as e:
         current_app.logger.error(f"Error getting maintenance schedules: {e}")
@@ -83,15 +89,24 @@ def update_maintenance_schedule(schedule_id):
     try:
         schedule.name = data.get('name', schedule.name)
         schedule.schedule_type = data.get('schedule_type', schedule.schedule_type)
-        schedule.day_of_week = data.get('day_of_week', schedule.day_of_week)
-        schedule.day_of_month = data.get('day_of_month', schedule.day_of_month)
+        day_of_week = data.get('day_of_week')
+        if isinstance(day_of_week, list):
+            day_of_week = ','.join(day_of_week)
+        schedule.day_of_week = day_of_week
+        day_of_month = data.get('day_of_month')
+        if isinstance(day_of_month, list):
+            day_of_month = ','.join(day_of_month)
+        schedule.day_of_month = day_of_month
         schedule.start_date = date.fromisoformat(data['start_date']) if data.get('start_date') else None
         schedule.end_date = date.fromisoformat(data['end_date']) if data.get('end_date') else None
         schedule.is_availability = data.get('is_availability', schedule.is_availability)
         schedule.resource_selection_type = data.get('resource_selection_type', schedule.resource_selection_type)
         schedule.resource_ids = data.get('resource_ids', schedule.resource_ids)
         schedule.building_id = data.get('building_id', schedule.building_id)
-        schedule.floor_id = data.get('floor_id', schedule.floor_id)
+        floor_ids = data.get('floor_ids')
+        if isinstance(floor_ids, list):
+            floor_ids = ','.join(floor_ids)
+        schedule.floor_ids = floor_ids
 
         db.session.commit()
         return jsonify({'message': 'Schedule updated successfully'})
