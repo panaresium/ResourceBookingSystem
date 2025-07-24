@@ -97,29 +97,25 @@ document.addEventListener('DOMContentLoaded', function () {
         const calendarContainer = document.getElementById('inline-calendar-container');
         const userId = calendarContainer ? calendarContainer.dataset.userId : null;
 
-        if (userId && calendarContainer) {
-            apiCall(`/api/resources/unavailable_dates?user_id=${userId}`)
-                .then(fetchedDates => {
-                    console.log('[Debug] Fetched unavailable dates for Flatpickr:', fetchedDates);
-                    initializeFlatpickr(fetchedDates);
-                })
-                .catch(error => {
-                    console.error('Error fetching unavailable dates for Flatpickr:', error);
-                    initializeFlatpickr([]);
-                });
-        } else {
-            if (!calendarContainer) {
-                 console.info('Calendar container not found, Flatpickr setup skipped.');
-            } else if (!userId) {
-                console.info('User ID not found. Initializing Flatpickr without user-specific unavailable dates.');
-            }
-            if (calendarContainer) {
-                initializeFlatpickr([]);
-            }
-        }
+        const unavailableDatesPromise = userId && calendarContainer
+            ? apiCall(`/api/resources/unavailable_dates?user_id=${userId}`)
+            : Promise.resolve([]);
+
+        const leadDaysPromise = apiCall('/api/system-settings/booking-lead-days');
+
+        Promise.all([unavailableDatesPromise, leadDaysPromise])
+            .then(([fetchedDates, leadDaysData]) => {
+                console.log('[Debug] Fetched unavailable dates for Flatpickr:', fetchedDates);
+                const maxBookingDays = (leadDaysData && leadDaysData.max_booking_days_in_future !== null) ? leadDaysData.max_booking_days_in_future : 365;
+                initializeFlatpickr(fetchedDates, maxBookingDays);
+            })
+            .catch(error => {
+                console.error('Error fetching initial data for Flatpickr:', error);
+                initializeFlatpickr([], 365); // Default to 365 days on error
+            });
     }
 
-    function initializeFlatpickr(unavailableDatesList = []) {
+    function initializeFlatpickr(unavailableDatesList = [], maxBookingDays) {
         if (calendarContainer) {
             currentSelectedDateStr = getTodayDateString();
 
@@ -127,7 +123,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 inline: true,
                 static: true,
                 dateFormat: "Y-m-d",
-                maxDate: new Date().fp_incr(13), // Add this line: 13 days from today for a 14-day window
+                maxDate: new Date().fp_incr(maxBookingDays),
                 disable: [
                     function(date) {
                         const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -135,63 +131,27 @@ document.addEventListener('DOMContentLoaded', function () {
                         const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
                         if (dateStr === todayStr) {
-                            // Get current UTC time
                             const nowUtc = new Date(Date.UTC(
                                 today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(),
                                 today.getUTCHours(), today.getUTCMinutes(), today.getUTCSeconds()
                             ));
-
-                            // Calculate effective venue 'now' by applying global offset
                             const effectiveVenueNow = new Date(nowUtc.getTime() + globalTimeOffsetHours * 60 * 60 * 1000);
-
-                            // Calculate the cutoff time at the venue
                             const venueCutoffTime = new Date(effectiveVenueNow.getTime() - pastBookingAdjustmentHours * 60 * 60 * 1000);
-
-                            const latestSlotEndTimeHour = 17; // Assuming venue local time
+                            const latestSlotEndTimeHour = 17;
                             const latestSlotEndTimeMinute = 0;
-
-                            // Create a datetime object for the end of the latest slot on the current day (venue local time)
                             const latestSlotEndTodayVenueLocal = new Date(
-                                effectiveVenueNow.getFullYear(), // Use year/month/day from effectiveVenueNow to handle date correctly
+                                effectiveVenueNow.getFullYear(),
                                 effectiveVenueNow.getMonth(),
                                 effectiveVenueNow.getDate(),
                                 latestSlotEndTimeHour,
                                 latestSlotEndTimeMinute
                             );
 
-                            let shouldDisableToday = false;
-                            // If the venue's cutoff time is at or after the end of the latest standard slot for that day
                             if (venueCutoffTime.getTime() >= latestSlotEndTodayVenueLocal.getTime()) {
-                                shouldDisableToday = true;
-                            }
-
-                            console.log(`[Debug] Flatpickr disable check for TODAY (${dateStr}):
-` +
-                                `  Client Local Now: ${today.toISOString()}
-` +
-                                `  UTC Now: ${nowUtc.toISOString()}
-` +
-                                `  Global Offset: ${globalTimeOffsetHours}h
-` +
-                                `  Effective Venue Now: ${effectiveVenueNow.toISOString()}
-` +
-                                `  Past Adjustment: ${pastBookingAdjustmentHours}h
-` +
-                                `  Venue Cutoff Time: ${venueCutoffTime.toISOString()}
-` +
-                                `  Latest Slot End (Venue Local): ${latestSlotEndTodayVenueLocal.toISOString()}
-` +
-                                `  Disabling Today?: ${shouldDisableToday}`);
-
-                            if (shouldDisableToday) {
-                                return true; // Disable the entire day
+                                return true;
                             }
                         }
-                        const isDisabledByUnavailableList = unavailableDatesList.includes(dateStr);
-                        if (! (dateStr === todayStr) && (unavailableDatesList.length > 0 || dateStr.startsWith("2025-06"))) {
-                           console.log(`[Debug] Flatpickr disable check for ${dateStr}: inList = ${isDisabledByUnavailableList} (list length: ${unavailableDatesList.length})`);
-                        }
-                        return isDisabledByUnavailableList;
+                        return unavailableDatesList.includes(dateStr);
                     }
                 ],
                 defaultDate: currentSelectedDateStr,
