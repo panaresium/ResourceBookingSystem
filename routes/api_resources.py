@@ -187,54 +187,69 @@ def get_resource_available_slots(resource_id):
     return jsonify(available_slots), 200
 
 
+def get_dates_for_schedule(schedule, start_range, end_range):
+    dates = set()
+    if schedule.schedule_type == 'date_range':
+        current_date = schedule.start_date
+        while current_date <= schedule.end_date:
+            if start_range <= current_date <= end_range:
+                dates.add(current_date)
+            current_date += timedelta(days=1)
+    elif schedule.schedule_type == 'recurring_day':
+        days_of_week = [int(d) for d in schedule.day_of_week.split(',')]
+        current_date = start_range
+        while current_date <= end_range:
+            if current_date.weekday() in days_of_week:
+                dates.add(current_date)
+            current_date += timedelta(days=1)
+    elif schedule.schedule_type == 'specific_day':
+        days_of_month = [int(d) for d in schedule.day_of_month.split(',')]
+        current_date = start_range
+        while current_date <= end_range:
+            if current_date.day in days_of_month:
+                dates.add(current_date)
+            current_date += timedelta(days=1)
+    return dates
+
 def get_unavailable_dates_from_schedules(start_date, end_date, resources):
-    unavailable_dates = set()
     schedules = MaintenanceSchedule.query.all()
+    resource_unavailable_dates = {resource.id: set() for resource in resources}
+    all_dates_in_range = {start_date + timedelta(days=x) for x in range((end_date - start_date).days + 1)}
 
     for resource in resources:
-        for schedule in schedules:
-            if schedule.resource_selection_type == 'all':
-                pass
-            elif schedule.resource_selection_type == 'building':
-                if not (resource.floor_map and resource.floor_map.location and schedule.building_id == resource.floor_map.location):
-                    continue
-            elif schedule.resource_selection_type == 'floor':
-                if not (resource.floor_map and str(resource.floor_map.id) in (schedule.floor_ids or '').split(',')):
-                    continue
-            elif schedule.resource_selection_type == 'specific':
-                if not (str(resource.id) in (schedule.resource_ids or '').split(',')):
-                    continue
+        applicable_schedules = [
+            s for s in schedules
+            if (s.resource_selection_type == 'all') or
+               (s.resource_selection_type == 'building' and resource.floor_map and s.building_id == resource.floor_map.location) or
+               (s.resource_selection_type == 'floor' and resource.floor_map and str(resource.floor_map.id) in (s.floor_ids or '').split(',')) or
+               (s.resource_selection_type == 'specific' and str(resource.id) in (s.resource_ids or '').split(','))
+        ]
 
-            if schedule.schedule_type == 'date_range':
-                current_date = schedule.start_date
-                while current_date <= schedule.end_date:
-                    if start_date <= current_date <= end_date:
-                        if schedule.is_availability:
-                            pass
-                        else:
-                            unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
-                    current_date += timedelta(days=1)
-            elif schedule.schedule_type == 'recurring_day':
-                days = [int(d) for d in schedule.day_of_week.split(',')]
-                current_date = start_date
-                while current_date <= end_date:
-                    if current_date.weekday() in days:
-                        if schedule.is_availability:
-                            pass
-                        else:
-                            unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
-                    current_date += timedelta(days=1)
-            elif schedule.schedule_type == 'specific_day':
-                days_of_month = [int(d) for d in schedule.day_of_month.split(',')]
-                current_date = start_date
-                while current_date <= end_date:
-                    if current_date.day in days_of_month:
-                        if schedule.is_availability:
-                            pass
-                        else:
-                            unavailable_dates.add(current_date.strftime('%Y-%m-%d'))
-                    current_date += timedelta(days=1)
-    return unavailable_dates
+        unavailable_dates = set()
+        # Process blacklists first
+        for schedule in [s for s in applicable_schedules if not s.is_availability]:
+            unavailable_dates.update(get_dates_for_schedule(schedule, start_date, end_date))
+
+        # Process whitelists
+        whitelists = [s for s in applicable_schedules if s.is_availability]
+        if whitelists:
+            # If there are whitelists, all dates are unavailable except those in the whitelists
+            available_dates = set.intersection(*(get_dates_for_schedule(s, start_date, end_date) for s in whitelists))
+            unavailable_dates.update(all_dates_in_range - available_dates)
+
+        resource_unavailable_dates[resource.id] = unavailable_dates
+
+    # At this point, resource_unavailable_dates contains dates that are unavailable for each resource.
+    # We need to return a single set of dates that are unavailable for the user.
+    # A date is unavailable for the user if it is unavailable for all resources.
+
+    if not resource_unavailable_dates:
+        return set()
+
+    # Get the intersection of all unavailable dates.
+    unavailable_for_all_resources = set.intersection(*resource_unavailable_dates.values())
+
+    return {d.strftime('%Y-%m-%d') for d in unavailable_for_all_resources}
 
 @api_resources_bp.route('/resources/unavailable_dates', methods=['GET'])
 @login_required

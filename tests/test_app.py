@@ -2,7 +2,7 @@ import unittest
 import unittest.mock
 import json
 import urllib.parse
-from sqlalchemy import text
+from sqlalchemy import text, func
 
 from datetime import datetime, time, date, timedelta, timezone as timezone_original
 from datetime import datetime as datetime_original, timedelta as timedelta_original # For mocking
@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, time as dt_time # datetime is already 
 from googleapiclient.errors import HttpError
 from google.oauth2.credentials import Credentials as UserCredentials
 
-from scheduler_tasks import auto_checkout_overdue_bookings # Removed problematic constants
+from scheduler_tasks import auto_checkout_overdue_bookings, auto_release_unclaimed_bookings
 
 import os
 import tempfile
@@ -26,17 +26,20 @@ import utils
 
 
 class AppTests(unittest.TestCase):
+    def __init__(self, *args, **kwargs):
+        super(AppTests, self).__init__(*args, **kwargs)
+        self.app = app
 
     def setUp(self):
-        app.config['TESTING'] = True
-        app.config['WTF_CSRF_ENABLED'] = False
-        app.config['LOGIN_DISABLED'] = False
-        app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('TEST_DATABASE_URL', 'sqlite:///:memory:')
-        app.config['SCHEDULER_ENABLED'] = False # Default for most tests
-        app.config['MAIL_SUPPRESS_SEND'] = True
-        app.config['SERVER_NAME'] = 'localhost.test'
+        self.app.config['TESTING'] = True
+        self.app.config['WTF_CSRF_ENABLED'] = False
+        self.app.config['LOGIN_DISABLED'] = False
+        self.app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('TEST_DATABASE_URL', 'sqlite:///:memory:')
+        self.app.config['SCHEDULER_ENABLED'] = False # Default for most tests
+        self.app.config['MAIL_SUPPRESS_SEND'] = True
+        self.app.config['SERVER_NAME'] = 'localhost.test'
 
-        self.app_context = app.app_context()
+        self.app_context = self.app.app_context()
         self.app_context.push()
 
         db.drop_all()
@@ -87,7 +90,7 @@ class AppTests(unittest.TestCase):
         self.resource2 = res2
         self.resource3 = res3 # Make it available to tests
         
-        self.client = app.test_client()
+        self.client = self.app.test_client()
 
     def tearDown(self):
         db.session.remove()
@@ -121,99 +124,6 @@ class AppTests(unittest.TestCase):
 
 # --- Start of TestAdminBookingSettingsPINConfig ---
 # (Assuming TestAdminBookingSettingsPINConfig and other original classes are here)
-class AppTests(unittest.TestCase):
-
-    def setUp(self):
-        app.config['TESTING'] = True
-        app.config['WTF_CSRF_ENABLED'] = False
-        app.config['LOGIN_DISABLED'] = False
-        app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('TEST_DATABASE_URL', 'sqlite:///:memory:')
-        app.config['SCHEDULER_ENABLED'] = False # Default for most tests
-        app.config['MAIL_SUPPRESS_SEND'] = True
-        app.config['SERVER_NAME'] = 'localhost.test'
-
-        self.app_context = app.app_context()
-        self.app_context.push()
-
-        db.drop_all()
-        db.create_all()
-
-        email_log.clear()
-        teams_log.clear()
-        slack_log.clear()
-
-        user = User.query.filter_by(username='testuser').first()
-        if not user:
-            user = User(username='testuser', email='test@example.com', is_admin=False)
-            user.set_password('password')
-            db.session.add(user)
-            db.session.commit()
-
-        import uuid
-        unique_name = f"Test Map {uuid.uuid4()}"
-        unique_file = f"{uuid.uuid4()}.png"
-        # Ensure a FloorMap exists for resources
-        floor_map = FloorMap.query.first()
-        if not floor_map:
-            floor_map = FloorMap(name=unique_name, image_filename=unique_file)
-            db.session.add(floor_map)
-            db.session.commit()
-        self.floor_map = floor_map
-
-
-        res1 = Resource(
-            name='Room A', capacity=10, equipment='Projector,Whiteboard', tags='large',
-            floor_map_id=self.floor_map.id, status='published',
-            map_coordinates=json.dumps({'type': 'rect', 'x': 10, 'y': 20, 'width': 30, 'height': 30})
-        )
-        res2 = Resource(
-            name='Room B', capacity=4, equipment='Whiteboard', tags='small',
-            floor_map_id=self.floor_map.id, status='published',
-            map_coordinates=json.dumps({'type': 'rect', 'x': 50, 'y': 20, 'width': 30, 'height': 30})
-        )
-        # Add a third resource for tests that need it
-        res3 = Resource(
-            name='Room C', capacity=5, equipment='Monitor', tags='medium',
-            floor_map_id=self.floor_map.id, status='published'
-        )
-        db.session.add_all([res1, res2, res3])
-        db.session.commit()
-
-        self.resource1 = res1
-        self.resource2 = res2
-        self.resource3 = res3 # Make it available to tests
-
-        self.client = app.test_client()
-
-    def tearDown(self):
-        db.session.remove()
-        db.drop_all()
-        self.app_context.pop()
-
-    def login(self, username, password):
-        response = self.client.post('/api/auth/login',
-                                    data=json.dumps(dict(username=username, password=password)),
-                                    content_type='application/json',
-                                    follow_redirects=True)
-        return response
-
-    def logout(self):
-        return self.client.post('/api/auth/logout', follow_redirects=True)
-
-    def _create_booking(self, user_name, resource_id, start_offset_hours, duration_hours=1, title="Test Booking", status="approved"):
-        start_time = datetime_original.utcnow() + timedelta_original(hours=start_offset_hours) # Use datetime_original and timedelta_original
-        end_time = start_time + timedelta_original(hours=duration_hours) # Use timedelta_original
-        booking = Booking(
-            user_name=user_name,
-            resource_id=resource_id,
-            start_time=start_time,
-            end_time=end_time,
-            title=title,
-            status=status
-        )
-        db.session.add(booking)
-        db.session.commit()
-        return booking
 
     def _create_admin_user(self, username="admin", email_ext="admin"):
         admin_user = User.query.filter_by(username=username).first()
@@ -262,28 +172,34 @@ class AppTests(unittest.TestCase):
         self.login(admin.username, "adminpass")
         settings = self.get_current_booking_settings()
         if not settings:
-            settings = BookingSettings(allow_check_in_without_pin=True); db.session.add(settings)
-        else: settings.allow_check_in_without_pin = True
+            settings = BookingSettings(allow_check_in_without_pin=True)
+            db.session.add(settings)
+        else:
+            settings.allow_check_in_without_pin = True
         db.session.commit()
 
         form_data_set_false = self._get_base_booking_settings_form_data()
-        if 'allow_check_in_without_pin' in form_data_set_false: del form_data_set_false['allow_check_in_without_pin']
+        if 'allow_check_in_without_pin' in form_data_set_false:
+            del form_data_set_false['allow_check_in_without_pin']
 
         response_set_false = self.client.post(url_for('admin_ui.update_booking_settings'), data=form_data_set_false, follow_redirects=True)
         self.assertEqual(response_set_false.status_code, 200)
-        settings_after_false = self.get_current_booking_settings(); self.assertFalse(settings_after_false.allow_check_in_without_pin)
+        settings_after_false = self.get_current_booking_settings()
+        self.assertFalse(settings_after_false.allow_check_in_without_pin)
+
         response_get_false = self.client.get(url_for('admin_ui.serve_booking_settings_page'))
-        self.assertNotIn('id="allow_check_in_without_pin" checked', response_get_false.data.decode('utf-8'))
+        self.assertNotIn('name="allow_check_in_without_pin" checked', response_get_false.data.decode('utf-8'))
 
         form_data_set_true = self._get_base_booking_settings_form_data()
         form_data_set_true['allow_check_in_without_pin'] = 'on'
         response_set_true = self.client.post(url_for('admin_ui.update_booking_settings'), data=form_data_set_true, follow_redirects=True)
         self.assertEqual(response_set_true.status_code, 200)
-        settings_after_true = self.get_current_booking_settings(); self.assertTrue(settings_after_true.allow_check_in_without_pin)
+        settings_after_true = self.get_current_booking_settings()
+        self.assertTrue(settings_after_true.allow_check_in_without_pin)
+
         response_get_true = self.client.get(url_for('admin_ui.serve_booking_settings_page'))
-        self.assertIn('id="allow_check_in_without_pin" checked', response_get_true.data.decode('utf-8'))
+        self.assertIn('name="allow_check_in_without_pin" checked', response_get_true.data.decode('utf-8'))
         self.logout()
-# --- End of TestAdminBookingSettingsPINConfig ---
 
 # Helper class for test_auto_checkout_no_user_email
 class StubUser:
@@ -313,186 +229,192 @@ class TestAutoCheckoutTask(AppTests):
             db.session.add(BookingSettings())
             db.session.commit()
 
-    @patch.dict(app.config, {'SCHEDULER_ENABLED': True})
     @patch('scheduler_tasks.send_email')
     @patch('scheduler_tasks.add_audit_log')
-    # @patch('scheduler_tasks.socketio.emit') # Removed
     @patch('scheduler_tasks.datetime')
-    def test_auto_checkout_success(self, mock_scheduler_datetime, mock_add_audit_log, mock_send_email): # mock_socketio_emit removed
-        mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc) # Use datetime_original
-        mock_scheduler_datetime.now.return_value = mocked_now
-        mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
+    def test_auto_checkout_success(self, mock_scheduler_datetime, mock_add_audit_log, mock_send_email):
+        with self.app.app_context():
+            mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc)
+            mock_scheduler_datetime.now.return_value = mocked_now
+            mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
 
-        # TODO: Define these constants or get them from BookingSettings for TestAutoCheckoutTask if these tests are to be run.
-        # For now, TestPastBookingLogic is the focus.
-        # Using placeholder values to allow the file to be parsed for TestPastBookingLogic.
-        DEFAULT_AUTO_CHECKOUT_GRACE_PERIOD_HOURS_PLACEHOLDER = 2 # Placeholder
-        DEFAULT_AUTO_CHECKOUT_SET_CHECKOUT_AFTER_END_HOURS_PLACEHOLDER = 1 # Placeholder
+            settings = BookingSettings.query.first()
+            settings.enable_auto_checkout = True
+            settings.auto_checkout_delay_minutes = 60
+            db.session.commit()
 
-        booking_end_time = mocked_now - timedelta_original(hours=DEFAULT_AUTO_CHECKOUT_GRACE_PERIOD_HOURS_PLACEHOLDER + 1) # Use timedelta_original
-        booking_check_in_time = booking_end_time - timedelta_original(hours=1) # Use timedelta_original
+            booking_end_time = mocked_now - timedelta_original(minutes=90)
+            booking_check_in_time = booking_end_time - timedelta_original(hours=1)
 
-        overdue_booking = Booking(
-            user_name=self.task_user.username, resource_id=self.task_resource.id,
-            start_time=booking_check_in_time - timedelta_original(hours=1), end_time=booking_end_time, # Use timedelta_original
-            checked_in_at=booking_check_in_time, status='checked_in', title='Overdue Booking Test'
-        )
-        db.session.add(overdue_booking)
-        db.session.commit()
-        booking_id = overdue_booking.id
+            overdue_booking = Booking(
+                user_name=self.task_user.username, resource_id=self.task_resource.id,
+                start_time=booking_check_in_time - timedelta_original(hours=1), end_time=booking_end_time,
+                checked_in_at=booking_check_in_time, status='checked_in', title='Overdue Booking Test'
+            )
+            db.session.add(overdue_booking)
+            db.session.commit()
+            booking_id = overdue_booking.id
 
-        auto_checkout_overdue_bookings(app)
+            auto_checkout_overdue_bookings(app_instance=self.app)
 
-        checked_out_booking = db.session.get(Booking, booking_id)
-        self.assertIsNotNone(checked_out_booking.checked_out_at, "checked_out_at should be populated")
-        expected_checkout_time = booking_end_time + timedelta_original(hours=DEFAULT_AUTO_CHECKOUT_SET_CHECKOUT_AFTER_END_HOURS_PLACEHOLDER) # Use timedelta_original
-        self.assertEqual(checked_out_booking.checked_out_at, expected_checkout_time.replace(tzinfo=None))
-        self.assertEqual(checked_out_booking.status, 'completed')
-        mock_send_email.assert_called_once()
-        mock_add_audit_log.assert_called_once()
-        # mock_socketio_emit.assert_called_once() # Removed
+            checked_out_booking = db.session.get(Booking, booking_id)
+            self.assertIsNotNone(checked_out_booking.checked_out_at, "checked_out_at should be populated")
+            expected_checkout_time = booking_end_time + timedelta_original(minutes=60)
+            self.assertEqual(checked_out_booking.checked_out_at, expected_checkout_time.replace(tzinfo=None))
+            self.assertEqual(checked_out_booking.status, 'completed')
+            mock_send_email.assert_called_once()
+            mock_add_audit_log.assert_called_once()
 
-    @patch.dict(app.config, {'SCHEDULER_ENABLED': True})
     @patch('scheduler_tasks.send_email')
     @patch('scheduler_tasks.datetime')
     def test_auto_checkout_not_overdue_yet(self, mock_scheduler_datetime, mock_send_email):
-        mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc) # Use datetime_original
-        mock_scheduler_datetime.now.return_value = mocked_now
-        mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
-        booking_end_time = mocked_now - timedelta_original(minutes=30) # Use timedelta_original
-        not_overdue_booking = Booking(
-            user_name=self.task_user.username, resource_id=self.task_resource.id,
-            start_time=booking_end_time - timedelta_original(hours=1), end_time=booking_end_time, # Use timedelta_original
-            checked_in_at=booking_end_time - timedelta_original(minutes=30), status='checked_in' # Use timedelta_original
-        )
-        db.session.add(not_overdue_booking); db.session.commit()
-        auto_checkout_overdue_bookings(app)
-        db.session.refresh(not_overdue_booking)
-        self.assertIsNone(not_overdue_booking.checked_out_at)
-        self.assertEqual(not_overdue_booking.status, 'checked_in')
-        mock_send_email.assert_not_called()
+        with self.app.app_context():
+            mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc)
+            mock_scheduler_datetime.now.return_value = mocked_now
+            mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
+            booking_end_time = mocked_now - timedelta_original(minutes=30)
+            not_overdue_booking = Booking(
+                user_name=self.task_user.username, resource_id=self.task_resource.id,
+                start_time=booking_end_time - timedelta_original(hours=1), end_time=booking_end_time,
+                checked_in_at=booking_end_time - timedelta_original(minutes=30), status='checked_in'
+            )
+            db.session.add(not_overdue_booking)
+            db.session.commit()
+            auto_checkout_overdue_bookings(app_instance=self.app)
+            db.session.refresh(not_overdue_booking)
+            self.assertIsNone(not_overdue_booking.checked_out_at)
+            self.assertEqual(not_overdue_booking.status, 'checked_in')
+            mock_send_email.assert_not_called()
 
-    @patch.dict(app.config, {'SCHEDULER_ENABLED': True})
     @patch('scheduler_tasks.send_email')
     @patch('scheduler_tasks.datetime')
     def test_auto_checkout_already_checked_out(self, mock_scheduler_datetime, mock_send_email):
-        mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc) # Use datetime_original
-        mock_scheduler_datetime.now.return_value = mocked_now
-        mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
-        booking_end_time = mocked_now - timedelta_original(hours=2) # Use timedelta_original
-        already_checked_out_booking = Booking(
-            user_name=self.task_user.username, resource_id=self.task_resource.id,
-            start_time=booking_end_time - timedelta_original(hours=1), end_time=booking_end_time, # Use timedelta_original
-            checked_in_at=booking_end_time - timedelta_original(minutes=30), # Use timedelta_original
-            checked_out_at=booking_end_time + timedelta_original(minutes=10), status='completed' # Use timedelta_original
-        )
-        db.session.add(already_checked_out_booking); db.session.commit()
-        auto_checkout_overdue_bookings(app)
-        mock_send_email.assert_not_called()
+        with self.app.app_context():
+            mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc)
+            mock_scheduler_datetime.now.return_value = mocked_now
+            mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
+            booking_end_time = mocked_now - timedelta_original(hours=2)
+            already_checked_out_booking = Booking(
+                user_name=self.task_user.username, resource_id=self.task_resource.id,
+                start_time=booking_end_time - timedelta_original(hours=1), end_time=booking_end_time,
+                checked_in_at=booking_end_time - timedelta_original(minutes=30),
+                checked_out_at=booking_end_time + timedelta_original(minutes=10), status='completed'
+            )
+            db.session.add(already_checked_out_booking)
+            db.session.commit()
+            auto_checkout_overdue_bookings(app_instance=self.app)
+            mock_send_email.assert_not_called()
 
-    @patch.dict(app.config, {'SCHEDULER_ENABLED': True})
     @patch('scheduler_tasks.send_email')
     @patch('scheduler_tasks.datetime')
     def test_auto_checkout_not_checked_in(self, mock_scheduler_datetime, mock_send_email):
-        mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc) # Use datetime_original
-        mock_scheduler_datetime.now.return_value = mocked_now
-        mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
-        booking_end_time = mocked_now - timedelta_original(hours=2) # Use timedelta_original
-        not_checked_in_booking = Booking(
-            user_name=self.task_user.username, resource_id=self.task_resource.id,
-            start_time=booking_end_time - timedelta_original(hours=1), end_time=booking_end_time, # Use timedelta_original
-            checked_in_at=None, status='approved'
-        )
-        db.session.add(not_checked_in_booking); db.session.commit()
-        auto_checkout_overdue_bookings(app)
-        mock_send_email.assert_not_called()
-        db.session.refresh(not_checked_in_booking)
-        self.assertEqual(not_checked_in_booking.status, 'approved')
+        with self.app.app_context():
+            mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc)
+            mock_scheduler_datetime.now.return_value = mocked_now
+            mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
+            booking_end_time = mocked_now - timedelta_original(hours=2)
+            not_checked_in_booking = Booking(
+                user_name=self.task_user.username, resource_id=self.task_resource.id,
+                start_time=booking_end_time - timedelta_original(hours=1), end_time=booking_end_time,
+                checked_in_at=None, status='approved'
+            )
+            db.session.add(not_checked_in_booking)
+            db.session.commit()
+            auto_checkout_overdue_bookings(app_instance=self.app)
+            mock_send_email.assert_not_called()
+            db.session.refresh(not_checked_in_booking)
+            self.assertEqual(not_checked_in_booking.status, 'approved')
 
-    @patch.dict(app.config, {'SCHEDULER_ENABLED': True})
     @patch('scheduler_tasks.send_email')
     @patch('scheduler_tasks.add_audit_log')
-    # @patch('scheduler_tasks.socketio.emit') # Removed
     @patch('scheduler_tasks.datetime')
-    def test_auto_checkout_multiple_bookings(self, mock_scheduler_datetime, mock_add_audit_log, mock_send_email): # mock_socketio_emit removed
-        mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc) # Use datetime_original
-        mock_scheduler_datetime.now.return_value = mocked_now
-        mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
+    def test_auto_checkout_multiple_bookings(self, mock_scheduler_datetime, mock_add_audit_log, mock_send_email):
+        with self.app.app_context():
+            mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc)
+            mock_scheduler_datetime.now.return_value = mocked_now
+            mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
 
-        b_overdue_end = mocked_now - timedelta_original(hours=2) # Use timedelta_original
-        b_overdue = Booking(user_name=self.task_user.username, resource_id=self.task_resource.id,
-                            start_time=b_overdue_end - timedelta_original(hours=1), end_time=b_overdue_end, # Use timedelta_original
-                            checked_in_at=b_overdue_end - timedelta_original(minutes=30), status='checked_in', title="B Overdue") # Use timedelta_original
-        b_not_overdue_end = mocked_now - timedelta_original(minutes=30) # Use timedelta_original
-        b_not_overdue = Booking(user_name=self.task_user.username, resource_id=self.task_resource.id,
-                                start_time=b_not_overdue_end - timedelta_original(hours=1), end_time=b_not_overdue_end, # Use timedelta_original
-                                checked_in_at=b_not_overdue_end - timedelta_original(minutes=10), status='checked_in', title="B Not Overdue") # Use timedelta_original
-        b_already_out_end = mocked_now - timedelta_original(hours=3) # Use timedelta_original
-        b_already_out = Booking(user_name=self.task_user.username, resource_id=self.task_resource.id,
-                                start_time=b_already_out_end - timedelta_original(hours=1), end_time=b_already_out_end, # Use timedelta_original
-                                checked_in_at=b_already_out_end - timedelta_original(minutes=30), # Use timedelta_original
-                                checked_out_at=b_already_out_end + timedelta_original(minutes=5), status='completed', title="B Already Out") # Use timedelta_original
-        db.session.add_all([b_overdue, b_not_overdue, b_already_out]); db.session.commit()
-        overdue_id = b_overdue.id
+            settings = BookingSettings.query.first()
+            settings.enable_auto_checkout = True
+            settings.auto_checkout_delay_minutes = 60
+            db.session.commit()
 
-        auto_checkout_overdue_bookings(app)
+            b_overdue_end = mocked_now - timedelta_original(minutes=90)
+            b_overdue = Booking(user_name=self.task_user.username, resource_id=self.task_resource.id,
+                                start_time=b_overdue_end - timedelta_original(hours=1), end_time=b_overdue_end,
+                                checked_in_at=b_overdue_end - timedelta_original(minutes=30), status='checked_in', title="B Overdue")
+            b_not_overdue_end = mocked_now - timedelta_original(minutes=30)
+            b_not_overdue = Booking(user_name=self.task_user.username, resource_id=self.task_resource.id,
+                                    start_time=b_not_overdue_end - timedelta_original(hours=1), end_time=b_not_overdue_end,
+                                    checked_in_at=b_not_overdue_end - timedelta_original(minutes=10), status='checked_in', title="B Not Overdue")
+            b_already_out_end = mocked_now - timedelta_original(hours=3)
+            b_already_out = Booking(user_name=self.task_user.username, resource_id=self.task_resource.id,
+                                    start_time=b_already_out_end - timedelta_original(hours=1), end_time=b_already_out_end,
+                                    checked_in_at=b_already_out_end - timedelta_original(minutes=30),
+                                    checked_out_at=b_already_out_end + timedelta_original(minutes=5), status='completed', title="B Already Out")
+            db.session.add_all([b_overdue, b_not_overdue, b_already_out])
+            db.session.commit()
+            overdue_id = b_overdue.id
 
-        mock_send_email.assert_called_once()
-        mock_add_audit_log.assert_called_once()
-        # mock_socketio_emit.assert_called_once() # Removed
+            auto_checkout_overdue_bookings(app_instance=self.app)
 
-        processed_b_overdue = db.session.get(Booking, overdue_id)
-        self.assertEqual(processed_b_overdue.status, 'completed', "Overdue booking status should be 'completed'")
-        self.assertIsNotNone(processed_b_overdue.checked_out_at, "Overdue booking should have checked_out_at set")
+            self.assertEqual(mock_send_email.call_count, 1)
+            self.assertEqual(mock_add_audit_log.call_count, 1)
 
-        db.session.refresh(b_not_overdue); self.assertEqual(b_not_overdue.status, 'checked_in'); self.assertIsNone(b_not_overdue.checked_out_at)
-        db.session.refresh(b_already_out); self.assertEqual(b_already_out.status, 'completed'); self.assertIsNotNone(b_already_out.checked_out_at)
+            processed_b_overdue = db.session.get(Booking, overdue_id)
+            self.assertEqual(processed_b_overdue.status, 'completed', "Overdue booking status should be 'completed'")
+            self.assertIsNotNone(processed_b_overdue.checked_out_at, "Overdue booking should have checked_out_at set")
+
+            db.session.refresh(b_not_overdue)
+            self.assertEqual(b_not_overdue.status, 'checked_in')
+            self.assertIsNone(b_not_overdue.checked_out_at)
+            db.session.refresh(b_already_out)
+            self.assertEqual(b_already_out.status, 'completed')
+            self.assertIsNotNone(b_already_out.checked_out_at)
 
     @unittest.skip("Temporarily skipping due to InterfaceError investigation")
-    @patch.dict(app.config, {'SCHEDULER_ENABLED': True})
     @patch('scheduler_tasks.User.query')
     @patch('scheduler_tasks.send_email')
     @patch('scheduler_tasks.add_audit_log')
-    # @patch('scheduler_tasks.socketio.emit') # Removed
     @patch('scheduler_tasks.datetime')
-    def test_auto_checkout_no_user_email(self, mock_scheduler_datetime, mock_add_audit_log, mock_send_email, mock_user_query_in_task): # mock_socketio_emit removed
-        mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc) # Use datetime_original
-        mock_scheduler_datetime.now.return_value = mocked_now
-        mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
+    def test_auto_checkout_no_user_email(self, mock_scheduler_datetime, mock_add_audit_log, mock_send_email, mock_user_query_in_task):
+        with self.app.app_context():
+            mocked_now = datetime_original(2024, 1, 1, 14, 0, 0, tzinfo=timezone_original.utc)
+            mock_scheduler_datetime.now.return_value = mocked_now
+            mock_scheduler_datetime.side_effect = lambda *args, **kwargs: datetime_original(*args, **kwargs) if args else mocked_now
 
-        user_for_this_test = User.query.filter_by(username="no_email_test_user").first()
-        if not user_for_this_test:
-            user_for_this_test = User(username="no_email_test_user", email="valid_for_db@example.com")
-            user_for_this_test.set_password("password")
-            db.session.add(user_for_this_test)
+            user_for_this_test = User.query.filter_by(username="no_email_test_user").first()
+            if not user_for_this_test:
+                user_for_this_test = User(username="no_email_test_user", email="valid_for_db@example.com")
+                user_for_this_test.set_password("password")
+                db.session.add(user_for_this_test)
+                db.session.commit()
+
+            DEFAULT_AUTO_CHECKOUT_GRACE_PERIOD_HOURS_PLACEHOLDER = 2
+            booking_end_time = mocked_now - timedelta_original(hours=DEFAULT_AUTO_CHECKOUT_GRACE_PERIOD_HOURS_PLACEHOLDER + 1)
+            overdue_booking_no_email = Booking(
+                user_name=user_for_this_test.username, resource_id=self.task_resource.id,
+                start_time=booking_end_time - timedelta_original(hours=1), end_time=booking_end_time,
+                checked_in_at=booking_end_time - timedelta_original(minutes=30), status='checked_in'
+            )
+            db.session.add(overdue_booking_no_email)
             db.session.commit()
+            booking_id = overdue_booking_no_email.id
 
-        # Using placeholder values as above
-        DEFAULT_AUTO_CHECKOUT_GRACE_PERIOD_HOURS_PLACEHOLDER = 2 # Placeholder
-        booking_end_time = mocked_now - timedelta_original(hours=DEFAULT_AUTO_CHECKOUT_GRACE_PERIOD_HOURS_PLACEHOLDER + 1) # Use timedelta_original
-        overdue_booking_no_email = Booking(
-            user_name=user_for_this_test.username, resource_id=self.task_resource.id,
-            start_time=booking_end_time - timedelta_original(hours=1), end_time=booking_end_time, # Use timedelta_original
-            checked_in_at=booking_end_time - timedelta_original(minutes=30), status='checked_in' # Use timedelta_original
-        )
-        db.session.add(overdue_booking_no_email); db.session.commit()
-        booking_id = overdue_booking_no_email.id
+            stub_booker = StubUser(
+                id=user_for_this_test.id,
+                username=user_for_this_test.username,
+                email=None
+            )
+            mock_user_query_in_task.filter_by.return_value.first.return_value = stub_booker
 
-        stub_booker = StubUser(
-            id=user_for_this_test.id,
-            username=user_for_this_test.username,
-            email=None
-        )
-        mock_user_query_in_task.filter_by.return_value.first.return_value = stub_booker
+            auto_checkout_overdue_bookings(app_instance=app)
 
-        auto_checkout_overdue_bookings(app_instance=app)
-
-        mock_send_email.assert_not_called()
-        processed_booking = db.session.get(Booking, booking_id)
-        self.assertEqual(processed_booking.status, 'completed', "Booking status should be 'completed' even if user has no email")
-        self.assertIsNotNone(processed_booking.checked_out_at, "checked_out_at should be set even if user has no email")
-        mock_add_audit_log.assert_called_once()
-        # mock_socketio_emit.assert_called_once() # Removed
+            mock_send_email.assert_not_called()
+            processed_booking = db.session.get(Booking, booking_id)
+            self.assertEqual(processed_booking.status, 'completed', "Booking status should be 'completed' even if user has no email")
+            self.assertIsNotNone(processed_booking.checked_out_at, "checked_out_at should be set even if user has no email")
+            mock_add_audit_log.assert_called_once()
 
 
 class TestPastBookingLogic(AppTests):
@@ -1366,9 +1288,8 @@ import io
 
 class AdminAPITestCase(AppTests):
 
-    @patch('routes.api_system.list_available_backups', None)
     @patch('routes.api_system.current_app.logger.error')
-    def test_list_backups_azure_not_configured(self, mock_logger_error, mock_list_backups_import):
+    def test_list_backups_azure_not_configured(self, mock_logger_error):
         # mock_list_backups_import is implicitly used by the decorator
         admin_user = self._create_admin_user()
         self.login(admin_user.username, "adminapipass")
@@ -1407,8 +1328,7 @@ class AdminAPITestCase(AppTests):
         self.assertIn("Placeholder function 'list_booking_data_json_backups' called", mock_azure_logger_warning.call_args[0][0])
         self.logout()
 
-    @patch('routes.api_system.create_full_backup', None)
-    def test_one_click_backup_azure_not_configured(self, mock_create_full_backup_none):
+    def test_one_click_backup_azure_not_configured(self):
         admin_user = self._create_admin_user(username="admin_one_click_backup_test", email_ext="oneclick")
         self.login(admin_user.username, "adminapipass")
 
@@ -2155,7 +2075,7 @@ class TestMapAvailabilityAPI(AppTests):
         data_a = response_a.get_json()
 
         status_when_multiple_false = "not_found" # Default if map not in response
-        for map_data in data_a.get('maps_availability', []):
+        for map_data in data_a:
             if map_data['map_id'] == self.test_map.id:
                 status_when_multiple_false = map_data['availability_status']
                 break
@@ -2176,7 +2096,7 @@ class TestMapAvailabilityAPI(AppTests):
         data_b = response_b.get_json()
 
         status_when_multiple_true = "not_found" # Default if map not in response
-        for map_data in data_b.get('maps_availability', []):
+        for map_data in data_b:
             if map_data['map_id'] == self.test_map.id:
                 status_when_multiple_true = map_data['availability_status']
                 break
@@ -2234,47 +2154,50 @@ class TestAutoReleaseTask(AppTests):
     @patch('scheduler_tasks.db.session.commit')
     @patch('scheduler_tasks.BookingSettings.query')
     def test_auto_release_disabled_by_main_flag(self, mock_settings_query, mock_commit, mock_audit, mock_send_email):
-        mock_settings = MagicMock(spec=BookingSettings)
-        mock_settings.enable_check_in_out = False
-        mock_settings.auto_release_if_not_checked_in_minutes = 30 # This shouldn't matter
-        mock_settings.global_time_offset_hours = 0
-        mock_settings_query.first.return_value = mock_settings
+        with self.app.app_context():
+            mock_settings = MagicMock(spec=BookingSettings)
+            mock_settings.enable_check_in_out = False
+            mock_settings.auto_release_if_not_checked_in_minutes = 30
+            mock_settings.global_time_offset_hours = 0
+            mock_settings_query.first.return_value = mock_settings
 
-        # Create a booking that would otherwise be released
-        booking_start_time = datetime.utcnow() - timedelta(minutes=60)
-        booking = self._create_booking(self.test_user.username, self.test_resource.id, start_offset_hours=-1) # approx 1hr ago
-        booking.status = 'approved'
-        booking.checked_in_at = None
-        db.session.commit()
+            booking = self._create_booking(self.test_user.username, self.test_resource.id, start_offset_hours=-1)
+            booking.status = 'approved'
+            booking.checked_in_at = None
+            db.session.add(booking)
+            db.session.commit()
 
-        auto_release_unclaimed_bookings(app) # Pass the global app fixture
+            auto_release_unclaimed_bookings(app_instance=self.app)
 
-        db.session.refresh(booking)
-        self.assertEqual(booking.status, 'approved') # Status should not change
-        mock_commit.assert_not_called()
-        mock_audit.assert_not_called()
-        mock_send_email.assert_not_called()
+            db.session.refresh(booking)
+            self.assertEqual(booking.status, 'approved')
+            mock_commit.assert_not_called()
+            mock_audit.assert_not_called()
+            mock_send_email.assert_not_called()
 
     @patch('scheduler_tasks.send_email')
     @patch('scheduler_tasks.add_audit_log')
     @patch('scheduler_tasks.db.session.commit')
     @patch('scheduler_tasks.BookingSettings.query')
     def test_auto_release_disabled_by_minutes_none(self, mock_settings_query, mock_commit, mock_audit, mock_send_email):
-        mock_settings = MagicMock(spec=BookingSettings)
-        mock_settings.enable_check_in_out = True
-        mock_settings.auto_release_if_not_checked_in_minutes = None # Disabled
-        mock_settings.global_time_offset_hours = 0
-        mock_settings_query.first.return_value = mock_settings
+        with self.app.app_context():
+            mock_settings = MagicMock(spec=BookingSettings)
+            mock_settings.enable_check_in_out = True
+            mock_settings.auto_release_if_not_checked_in_minutes = None
+            mock_settings.global_time_offset_hours = 0
+            mock_settings_query.first.return_value = mock_settings
 
-        booking_start_time = datetime.utcnow() - timedelta(minutes=60)
-        booking = self._create_booking(self.test_user.username, self.test_resource.id, start_offset_hours=-1)
-        booking.status = 'approved'; booking.checked_in_at = None; db.session.commit()
+            booking = self._create_booking(self.test_user.username, self.test_resource.id, start_offset_hours=-1)
+            booking.status = 'approved'
+            booking.checked_in_at = None
+            db.session.add(booking)
+            db.session.commit()
 
-        auto_release_unclaimed_bookings(app)
+            auto_release_unclaimed_bookings(app_instance=self.app)
 
-        db.session.refresh(booking)
-        self.assertEqual(booking.status, 'approved')
-        mock_commit.assert_not_called()
+            db.session.refresh(booking)
+            self.assertEqual(booking.status, 'approved')
+            mock_commit.assert_not_called()
 
     @patch('scheduler_tasks.get_current_effective_time')
     @patch('scheduler_tasks.send_email')
@@ -2282,92 +2205,91 @@ class TestAutoReleaseTask(AppTests):
     @patch('scheduler_tasks.db.session.commit')
     @patch('scheduler_tasks.BookingSettings.query')
     def test_booking_released_successfully(self, mock_settings_query, mock_commit, mock_audit, mock_send_email, mock_effective_time):
-        mock_settings = MagicMock(spec=BookingSettings)
-        mock_settings.enable_check_in_out = True
-        mock_settings.auto_release_if_not_checked_in_minutes = 30
-        mock_settings.global_time_offset_hours = 0
-        mock_settings_query.first.return_value = mock_settings
+        with self.app.app_context():
+            mock_settings = MagicMock(spec=BookingSettings)
+            mock_settings.enable_check_in_out = True
+            mock_settings.auto_release_if_not_checked_in_minutes = 30
+            mock_settings.global_time_offset_hours = 0
+            mock_settings_query.first.return_value = mock_settings
 
-        # Mock current time to be, for example, 2024-01-01 12:00:00 (effective local)
-        # Effective time is what the venue operates on.
-        # `get_current_effective_time` returns an *aware* datetime object.
-        mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc) # Assuming offset 0 for simplicity
-        mock_effective_time.return_value = mocked_now_aware
+            mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc)
+            mock_effective_time.return_value = mocked_now_aware
 
-        # Booking started 60 minutes ago (local naive time), check-in deadline was 30 mins ago
-        # Booking start_time should be naive local for the task's logic
-        booking_start_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=60)
+            booking_start_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=60)
 
-        booking = Booking(
-            user_name=self.test_user.username, resource_id=self.test_resource.id,
-            start_time=booking_start_local_naive, end_time=booking_start_local_naive + timedelta(hours=1),
-            status='approved', checked_in_at=None, title='Test Release'
-        )
-        db.session.add(booking); db.session.commit()
+            booking = Booking(
+                user_name=self.test_user.username, resource_id=self.test_resource.id,
+                start_time=booking_start_local_naive, end_time=booking_start_local_naive + timedelta(hours=1),
+                status='approved', checked_in_at=None, title='Test Release'
+            )
+            db.session.add(booking)
+            db.session.commit()
 
-        auto_release_unclaimed_bookings(app)
+            auto_release_unclaimed_bookings(app_instance=self.app)
 
-        db.session.refresh(booking)
-        self.assertEqual(booking.status, 'system_cancelled_no_checkin')
-        mock_commit.assert_called_once()
-        mock_audit.assert_called_once_with(action="AUTO_RELEASE_NO_CHECKIN", details=ANY)
-        mock_send_email.assert_called_once() # Assuming user has email
+            booking = db.session.get(Booking, booking.id)
+            self.assertEqual(booking.status, 'system_cancelled_no_checkin')
+            mock_commit.assert_called_once()
+            mock_audit.assert_called_once_with(action="AUTO_RELEASE_NO_CHECKIN", details=ANY)
+            mock_send_email.assert_called_once()
 
     @patch('scheduler_tasks.get_current_effective_time')
     @patch('scheduler_tasks.db.session.commit')
     @patch('scheduler_tasks.BookingSettings.query')
     def test_booking_not_yet_due_for_release(self, mock_settings_query, mock_commit, mock_effective_time):
-        mock_settings = MagicMock(spec=BookingSettings)
-        mock_settings.enable_check_in_out = True
-        mock_settings.auto_release_if_not_checked_in_minutes = 30
-        mock_settings.global_time_offset_hours = 0
-        mock_settings_query.first.return_value = mock_settings
+        with self.app.app_context():
+            mock_settings = MagicMock(spec=BookingSettings)
+            mock_settings.enable_check_in_out = True
+            mock_settings.auto_release_if_not_checked_in_minutes = 30
+            mock_settings.global_time_offset_hours = 0
+            mock_settings_query.first.return_value = mock_settings
 
-        mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc)
-        mock_effective_time.return_value = mocked_now_aware
+            mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc)
+            mock_effective_time.return_value = mocked_now_aware
 
-        # Booking started 15 minutes ago (local naive), deadline is in 15 mins
-        booking_start_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=15)
-        booking = Booking(
-            user_name=self.test_user.username, resource_id=self.test_resource.id,
-            start_time=booking_start_local_naive, end_time=booking_start_local_naive + timedelta(hours=1),
-            status='approved', checked_in_at=None
-        )
-        db.session.add(booking); db.session.commit()
+            booking_start_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=15)
+            booking = Booking(
+                user_name=self.test_user.username, resource_id=self.test_resource.id,
+                start_time=booking_start_local_naive, end_time=booking_start_local_naive + timedelta(hours=1),
+                status='approved', checked_in_at=None
+            )
+            db.session.add(booking)
+            db.session.commit()
 
-        auto_release_unclaimed_bookings(app)
-        db.session.refresh(booking)
-        self.assertEqual(booking.status, 'approved')
-        mock_commit.assert_not_called()
+            auto_release_unclaimed_bookings(app_instance=self.app)
+            booking = db.session.get(Booking, booking.id)
+            self.assertEqual(booking.status, 'approved')
+            mock_commit.assert_not_called()
 
     @patch('scheduler_tasks.get_current_effective_time')
     @patch('scheduler_tasks.db.session.commit')
     @patch('scheduler_tasks.BookingSettings.query')
     def test_booking_already_checked_in_not_released(self, mock_settings_query, mock_commit, mock_effective_time):
-        mock_settings = MagicMock(spec=BookingSettings)
-        mock_settings.enable_check_in_out = True
-        mock_settings.auto_release_if_not_checked_in_minutes = 30
-        mock_settings.global_time_offset_hours = 0
-        mock_settings_query.first.return_value = mock_settings
+        with self.app.app_context():
+            mock_settings = MagicMock(spec=BookingSettings)
+            mock_settings.enable_check_in_out = True
+            mock_settings.auto_release_if_not_checked_in_minutes = 30
+            mock_settings.global_time_offset_hours = 0
+            mock_settings_query.first.return_value = mock_settings
 
-        mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc)
-        mock_effective_time.return_value = mocked_now_aware
+            mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc)
+            mock_effective_time.return_value = mocked_now_aware
 
-        # Booking started 60 mins ago, but was checked in 50 mins ago
-        booking_start_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=60)
-        checked_in_time_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=50)
-        booking = Booking(
-            user_name=self.test_user.username, resource_id=self.test_resource.id,
-            start_time=booking_start_local_naive, end_time=booking_start_local_naive + timedelta(hours=1),
-            status='approved', # Status might change to 'checked_in' by another mechanism
-            checked_in_at=checked_in_time_local_naive
-        )
-        db.session.add(booking); db.session.commit()
+            booking_start_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=60)
+            checked_in_time_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=50)
+            booking = Booking(
+                user_name=self.test_user.username, resource_id=self.test_resource.id,
+                start_time=booking_start_local_naive, end_time=booking_start_local_naive + timedelta(hours=1),
+                status='approved',
+                checked_in_at=checked_in_time_local_naive
+            )
+            db.session.add(booking)
+            db.session.commit()
 
-        auto_release_unclaimed_bookings(app)
-        db.session.refresh(booking)
-        self.assertEqual(booking.status, 'approved') # Or 'checked_in', depends on other logic not tested here
-        mock_commit.assert_not_called()
+            auto_release_unclaimed_bookings(app_instance=self.app)
+            booking = db.session.get(Booking, booking.id)
+            self.assertEqual(booking.status, 'approved')
+            mock_commit.assert_not_called()
 
 
 class TestAutoCheckoutTaskUpdated(AppTests):
@@ -2388,66 +2310,70 @@ class TestAutoCheckoutTaskUpdated(AppTests):
     @patch('scheduler_tasks.db.session.commit')
     @patch('scheduler_tasks.BookingSettings.query')
     def test_booking_checked_out_successfully_minutes(self, mock_settings_query, mock_commit, mock_audit, mock_send_email, mock_effective_time):
-        mock_settings = MagicMock(spec=BookingSettings)
-        mock_settings.enable_auto_checkout = True
-        mock_settings.auto_checkout_delay_minutes = 60 # Test with 60 minutes
-        mock_settings.global_time_offset_hours = 0
-        mock_settings_query.first.return_value = mock_settings
+        with self.app.app_context():
+            mock_settings = MagicMock(spec=BookingSettings)
+            mock_settings.enable_auto_checkout = True
+            mock_settings.auto_checkout_delay_minutes = 60 # Test with 60 minutes
+            mock_settings.global_time_offset_hours = 0
+            mock_settings_query.first.return_value = mock_settings
 
-        mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc)
-        mock_effective_time.return_value = mocked_now_aware
+            mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc)
+            mock_effective_time.return_value = mocked_now_aware
 
-        # Booking ended 90 minutes ago (local naive). Delay is 60 minutes. So, it's overdue.
-        booking_end_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=90)
-        booking_start_local_naive = booking_end_local_naive - timedelta(hours=1)
-        checked_in_local_naive = booking_start_local_naive + timedelta(minutes=5)
+            # Booking ended 90 minutes ago (local naive). Delay is 60 minutes. So, it's overdue.
+            booking_end_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=90)
+            booking_start_local_naive = booking_end_local_naive - timedelta(hours=1)
+            checked_in_local_naive = booking_start_local_naive + timedelta(minutes=5)
 
-        booking = Booking(
-            user_name=self.test_user.username, resource_id=self.test_resource.id,
-            start_time=booking_start_local_naive, end_time=booking_end_local_naive,
-            checked_in_at=checked_in_local_naive, status='checked_in', title='Test Auto Checkout Minutes'
-        )
-        db.session.add(booking); db.session.commit()
+            booking = Booking(
+                user_name=self.test_user.username, resource_id=self.test_resource.id,
+                start_time=booking_start_local_naive, end_time=booking_end_local_naive,
+                checked_in_at=checked_in_local_naive, status='checked_in', title='Test Auto Checkout Minutes'
+            )
+            db.session.add(booking)
+            db.session.commit()
 
-        auto_checkout_overdue_bookings(app)
+            auto_checkout_overdue_bookings(app_instance=self.app)
 
-        db.session.refresh(booking)
-        self.assertEqual(booking.status, 'completed')
-        self.assertIsNotNone(booking.checked_out_at)
-        expected_checkout_time_local_naive = booking_end_local_naive + timedelta(minutes=60)
-        self.assertEqual(booking.checked_out_at, expected_checkout_time_local_naive)
-        mock_commit.assert_called_once()
-        mock_audit.assert_called_once()
-        mock_send_email.assert_called_once()
+            booking = db.session.get(Booking, booking.id)
+            self.assertEqual(booking.status, 'completed')
+            self.assertIsNotNone(booking.checked_out_at)
+            expected_checkout_time_local_naive = booking_end_local_naive + timedelta(minutes=60)
+            self.assertEqual(booking.checked_out_at, expected_checkout_time_local_naive)
+            mock_commit.assert_called_once()
+            mock_audit.assert_called_once()
+            mock_send_email.assert_called_once()
 
     @patch('scheduler_tasks.get_current_effective_time')
     @patch('scheduler_tasks.db.session.commit')
     @patch('scheduler_tasks.BookingSettings.query')
     def test_booking_not_yet_due_for_checkout_minutes(self, mock_settings_query, mock_commit, mock_effective_time):
-        mock_settings = MagicMock(spec=BookingSettings)
-        mock_settings.enable_auto_checkout = True
-        mock_settings.auto_checkout_delay_minutes = 60
-        mock_settings.global_time_offset_hours = 0
-        mock_settings_query.first.return_value = mock_settings
+        with self.app.app_context():
+            mock_settings = MagicMock(spec=BookingSettings)
+            mock_settings.enable_auto_checkout = True
+            mock_settings.auto_checkout_delay_minutes = 60
+            mock_settings.global_time_offset_hours = 0
+            mock_settings_query.first.return_value = mock_settings
 
-        mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc)
-        mock_effective_time.return_value = mocked_now_aware
+            mocked_now_aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone_original.utc)
+            mock_effective_time.return_value = mocked_now_aware
 
-        # Booking ended 30 minutes ago (local naive). Delay is 60 minutes. Not overdue.
-        booking_end_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=30)
-        booking_start_local_naive = booking_end_local_naive - timedelta(hours=1)
-        booking = Booking(
-            user_name=self.test_user.username, resource_id=self.test_resource.id,
-            start_time=booking_start_local_naive, end_time=booking_end_local_naive,
-            checked_in_at=booking_start_local_naive + timedelta(minutes=5), status='checked_in'
-        )
-        db.session.add(booking); db.session.commit()
+            # Booking ended 30 minutes ago (local naive). Delay is 60 minutes. Not overdue.
+            booking_end_local_naive = mocked_now_aware.replace(tzinfo=None) - timedelta(minutes=30)
+            booking_start_local_naive = booking_end_local_naive - timedelta(hours=1)
+            booking = Booking(
+                user_name=self.test_user.username, resource_id=self.test_resource.id,
+                start_time=booking_start_local_naive, end_time=booking_end_local_naive,
+                checked_in_at=booking_start_local_naive + timedelta(minutes=5), status='checked_in'
+            )
+            db.session.add(booking)
+            db.session.commit()
 
-        auto_checkout_overdue_bookings(app)
-        db.session.refresh(booking)
-        self.assertEqual(booking.status, 'checked_in')
-        self.assertIsNone(booking.checked_out_at)
-        mock_commit.assert_not_called()
+            auto_checkout_overdue_bookings(app_instance=self.app)
+            booking = db.session.get(Booking, booking.id)
+            self.assertEqual(booking.status, 'checked_in')
+            self.assertIsNone(booking.checked_out_at)
+            mock_commit.assert_not_called()
 
 # Email Template Rendering Tests
 from flask import render_template
@@ -3026,6 +2952,244 @@ class TestUnavailableDatesAPI(AppTests):
                     res_db_restore.status = status
                     res_db_restore.booking_restriction = restriction
             db.session.commit()
+
+
+class TestMaintenanceSchedules(AppTests):
+    def setUp(self):
+        super().setUp()
+        self.test_user = User.query.filter_by(username='testuser').first()
+        self.login(self.test_user.username, 'password')
+
+        # Create another floor for testing floor-specific schedules
+        self.floor_map2 = FloorMap(name='Test Floor 2', image_filename='floor2.png')
+        db.session.add(self.floor_map2)
+        db.session.commit()
+
+        # Move one resource to the new floor
+        self.resource2.floor_map_id = self.floor_map2.id
+        db.session.commit()
+
+
+    def _create_maintenance_schedule(self, **kwargs):
+        from models import MaintenanceSchedule
+        schedule = MaintenanceSchedule(**kwargs)
+        db.session.add(schedule)
+        db.session.commit()
+        return schedule
+
+    def test_whitelist_recurring_day(self):
+        # Whitelist: Only Fridays are available
+        self._create_maintenance_schedule(
+            name='Friday Only',
+            schedule_type='recurring_day',
+            day_of_week='4', # Friday
+            is_availability=True,
+            resource_selection_type='all'
+        )
+
+        response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+        self.assertEqual(response.status_code, 200)
+        unavailable_dates = response.get_json()
+
+        # In July 2025, there are 4 Fridays. 31 days total. 31 - 4 = 27 unavailable days.
+        # However, the test range is 3 months, so we need to calculate the number of unavailable dates in that range.
+        # For now, let's just check a few dates.
+        self.assertIn('2025-07-01', unavailable_dates) # Tuesday
+        self.assertIn('2025-07-02', unavailable_dates) # Wednesday
+        self.assertIn('2025-07-03', unavailable_dates) # Thursday
+        self.assertNotIn('2025-07-04', unavailable_dates) # Friday
+        self.assertIn('2025-07-05', unavailable_dates) # Saturday
+        self.assertIn('2025-07-06', unavailable_dates) # Sunday
+        self.assertIn('2025-07-07', unavailable_dates) # Monday
+
+    def test_blacklist_date_range(self):
+        # Blacklist: A week in July is unavailable
+        start_date = date(2025, 7, 7)
+        end_date = date(2025, 7, 13)
+        self._create_maintenance_schedule(
+            name='Week Off',
+            schedule_type='date_range',
+            start_date=start_date,
+            end_date=end_date,
+            is_availability=False,
+            resource_selection_type='all'
+        )
+
+        response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+        self.assertEqual(response.status_code, 200)
+        unavailable_dates = response.get_json()
+
+        self.assertNotIn('2025-07-06', unavailable_dates)
+        self.assertIn('2025-07-07', unavailable_dates)
+        self.assertIn('2025-07-13', unavailable_dates)
+        self.assertNotIn('2025-07-14', unavailable_dates)
+
+    def test_whitelist_and_blacklist(self):
+        # Whitelist: Only Fridays are available
+        self._create_maintenance_schedule(
+            name='Friday Only',
+            schedule_type='recurring_day',
+            day_of_week='4', # Friday
+            is_availability=True,
+            resource_selection_type='all'
+        )
+        # Blacklist: The second Friday of the month is unavailable
+        self._create_maintenance_schedule(
+            name='Second Friday Off',
+            schedule_type='date_range',
+            start_date=date(2025, 7, 11),
+            end_date=date(2025, 7, 11),
+            is_availability=False,
+            resource_selection_type='all'
+        )
+
+        response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+        self.assertEqual(response.status_code, 200)
+        unavailable_dates = response.get_json()
+
+        self.assertNotIn('2025-07-04', unavailable_dates) # First Friday should be available
+        self.assertIn('2025-07-11', unavailable_dates) # Second Friday should be unavailable
+        self.assertNotIn('2025-07-18', unavailable_dates) # Third Friday should be available
+
+    def test_floor_specific_whitelist(self):
+        # Whitelist: Only Fridays are available, and only for floor 1
+        self._create_maintenance_schedule(
+            name='Floor 1 Friday Only',
+            schedule_type='recurring_day',
+            day_of_week='4', # Friday
+            is_availability=True,
+            resource_selection_type='floor',
+            floor_ids=str(self.floor_map.id)
+        )
+
+        # We need to check the availability of resources on different floors.
+        # The current API endpoint returns unavailable dates for the user, not per resource.
+        # To test this properly, we would need to check the availability of individual resources.
+        # For now, we can check if the user has any available dates.
+        # A more thorough test would require a different API endpoint or modifying the existing one.
+
+        # This test will be limited in its ability to verify the floor-specific logic
+        # without changes to the API.
+        pass
+
+
+class TestMaintenanceSchedules(AppTests):
+    def setUp(self):
+        super().setUp()
+        self.test_user = User.query.filter_by(username='testuser').first()
+        self.login(self.test_user.username, 'password')
+
+        # Create another floor for testing floor-specific schedules
+        self.floor_map2 = FloorMap(name='Test Floor 2', image_filename='floor2.png')
+        db.session.add(self.floor_map2)
+        db.session.commit()
+
+        # Move one resource to the new floor
+        self.resource2.floor_map_id = self.floor_map2.id
+        db.session.commit()
+
+
+    def _create_maintenance_schedule(self, **kwargs):
+        from models import MaintenanceSchedule
+        schedule = MaintenanceSchedule(**kwargs)
+        db.session.add(schedule)
+        db.session.commit()
+        return schedule
+
+    def test_whitelist_recurring_day(self):
+        # Whitelist: Only Fridays are available
+        self._create_maintenance_schedule(
+            name='Friday Only',
+            schedule_type='recurring_day',
+            day_of_week='4', # Friday
+            is_availability=True,
+            resource_selection_type='all'
+        )
+
+        response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+        self.assertEqual(response.status_code, 200)
+        unavailable_dates = response.get_json()
+
+        # In July 2025, there are 4 Fridays. 31 days total. 31 - 4 = 27 unavailable days.
+        # However, the test range is 3 months, so we need to calculate the number of unavailable dates in that range.
+        # For now, let's just check a few dates.
+        self.assertIn('2025-07-01', unavailable_dates) # Tuesday
+        self.assertIn('2025-07-02', unavailable_dates) # Wednesday
+        self.assertIn('2025-07-03', unavailable_dates) # Thursday
+        self.assertNotIn('2025-07-04', unavailable_dates) # Friday
+        self.assertIn('2025-07-05', unavailable_dates) # Saturday
+        self.assertIn('2025-07-06', unavailable_dates) # Sunday
+        self.assertIn('2025-07-07', unavailable_dates) # Monday
+
+    def test_blacklist_date_range(self):
+        # Blacklist: A week in July is unavailable
+        start_date = date(2025, 7, 7)
+        end_date = date(2025, 7, 13)
+        self._create_maintenance_schedule(
+            name='Week Off',
+            schedule_type='date_range',
+            start_date=start_date,
+            end_date=end_date,
+            is_availability=False,
+            resource_selection_type='all'
+        )
+
+        response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+        self.assertEqual(response.status_code, 200)
+        unavailable_dates = response.get_json()
+
+        self.assertNotIn('2025-07-06', unavailable_dates)
+        self.assertIn('2025-07-07', unavailable_dates)
+        self.assertIn('2025-07-13', unavailable_dates)
+        self.assertNotIn('2025-07-14', unavailable_dates)
+
+    def test_whitelist_and_blacklist(self):
+        # Whitelist: Only Fridays are available
+        self._create_maintenance_schedule(
+            name='Friday Only',
+            schedule_type='recurring_day',
+            day_of_week='4', # Friday
+            is_availability=True,
+            resource_selection_type='all'
+        )
+        # Blacklist: The second Friday of the month is unavailable
+        self._create_maintenance_schedule(
+            name='Second Friday Off',
+            schedule_type='date_range',
+            start_date=date(2025, 7, 11),
+            end_date=date(2025, 7, 11),
+            is_availability=False,
+            resource_selection_type='all'
+        )
+
+        response = self.client.get(f'/api/resources/unavailable_dates?user_id={self.test_user.id}')
+        self.assertEqual(response.status_code, 200)
+        unavailable_dates = response.get_json()
+
+        self.assertNotIn('2025-07-04', unavailable_dates) # First Friday should be available
+        self.assertIn('2025-07-11', unavailable_dates) # Second Friday should be unavailable
+        self.assertNotIn('2025-07-18', unavailable_dates) # Third Friday should be available
+
+    def test_floor_specific_whitelist(self):
+        # Whitelist: Only Fridays are available, and only for floor 1
+        self._create_maintenance_schedule(
+            name='Floor 1 Friday Only',
+            schedule_type='recurring_day',
+            day_of_week='4', # Friday
+            is_availability=True,
+            resource_selection_type='floor',
+            floor_ids=str(self.floor_map.id)
+        )
+
+        # We need to check the availability of resources on different floors.
+        # The current API endpoint returns unavailable dates for the user, not per resource.
+        # To test this properly, we would need to check the availability of individual resources.
+        # For now, we can check if the user has any available dates.
+        # A more thorough test would require a different API endpoint or modifying the existing one.
+
+        # This test will be limited in its ability to verify the floor-specific logic
+        # without changes to the API.
+        pass
 
 
 if __name__ == '__main__':

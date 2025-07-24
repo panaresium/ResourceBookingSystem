@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request, current_app
-from flask_login import login_required, current_user
+from flask_login import login_user, logout_user, login_required, current_user
 from sqlalchemy import func # For func.lower in create_resource, and func.ilike in get_all_users
 
 # Local imports
@@ -14,6 +14,26 @@ api_users_bp = Blueprint('api_users', __name__, url_prefix='/api')
 # Initialization function
 def init_api_users_routes(app):
     app.register_blueprint(api_users_bp)
+
+@api_users_bp.route('/auth/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    current_app.logger.info(f"Login attempt for username: {username}")
+    user = User.query.filter_by(username=username).first()
+    if user and user.check_password(password):
+        login_user(user)
+        current_app.logger.info(f"User {username} logged in successfully.")
+        return jsonify({"success": True, "message": "Logged in successfully."})
+    current_app.logger.warning(f"Invalid login attempt for username: {username}")
+    return jsonify({"success": False, "message": "Invalid credentials"}), 401
+
+@api_users_bp.route('/auth/logout', methods=['POST'])
+@login_required
+def logout():
+    logout_user()
+    return jsonify({"success": True, "message": "Logged out successfully."})
 
 @api_users_bp.route('/profile', methods=['PUT'])
 @login_required
