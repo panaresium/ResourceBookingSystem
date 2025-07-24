@@ -172,6 +172,48 @@ document.addEventListener('DOMContentLoaded', function () {
                             locationFloorWrapperDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
                         }
                     });
+                },
+                onMonthChange: function(selectedDates, dateStr, instance) {
+                    const userId = calendarContainer ? calendarContainer.dataset.userId : null;
+                    if (userId) {
+                        apiCall(`/api/resources/unavailable_dates?user_id=${userId}&month=${instance.currentMonth + 1}&year=${instance.currentYear}`)
+                            .then(fetchedDates => {
+                                console.log('[Debug] Fetched unavailable dates for Flatpickr:', fetchedDates);
+                                instance.set('disable', [
+                                    function(date) {
+                                        const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                                        const today = new Date();
+                                        const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+                                        if (dateStr === todayStr) {
+                                            const nowUtc = new Date(Date.UTC(
+                                                today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(),
+                                                today.getUTCHours(), today.getUTCMinutes(), today.getUTCSeconds()
+                                            ));
+                                            const effectiveVenueNow = new Date(nowUtc.getTime() + globalTimeOffsetHours * 60 * 60 * 1000);
+                                            const venueCutoffTime = new Date(effectiveVenueNow.getTime() - pastBookingAdjustmentHours * 60 * 60 * 1000);
+                                            const latestSlotEndTimeHour = 17;
+                                            const latestSlotEndTimeMinute = 0;
+                                            const latestSlotEndTodayVenueLocal = new Date(
+                                                effectiveVenueNow.getFullYear(),
+                                                effectiveVenueNow.getMonth(),
+                                                effectiveVenueNow.getDate(),
+                                                latestSlotEndTimeHour,
+                                                latestSlotEndTimeMinute
+                                            );
+
+                                            if (venueCutoffTime.getTime() >= latestSlotEndTodayVenueLocal.getTime()) {
+                                                return true;
+                                            }
+                                        }
+                                        return fetchedDates.includes(dateStr);
+                                    }
+                                ]);
+                            })
+                            .catch(error => {
+                                console.error('Error fetching unavailable dates for Flatpickr:', error);
+                            });
+                    }
                 }
             });
             if (mainBookingFormDateInput && mainBookingFormDateInput.value !== currentSelectedDateStr) {
