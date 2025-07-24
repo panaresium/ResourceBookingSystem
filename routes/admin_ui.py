@@ -389,6 +389,7 @@ def serve_booking_settings_page():
 @permission_required('manage_system')
 def update_booking_settings():
     logger = current_app.logger
+    logger.info(f"Form data: {request.form}")
 
     def _parse_int_field(field_name, default_value=None, min_val=None, max_val=None, nullable=False):
         value_str = request.form.get(field_name)
@@ -429,7 +430,7 @@ def update_booking_settings():
             settings.check_in_minutes_after = _parse_int_field('check_in_minutes_after', default_value=15, min_val=0)
             settings.checkin_reminder_minutes_before = _parse_int_field('checkin_reminder_minutes_before', default_value=30, min_val=0)
             settings.resource_checkin_url_requires_login = 'resource_checkin_url_requires_login' in request.form
-            settings.allow_check_in_without_pin = request.form.get('allow_check_in_without_pin') == 'on'
+            settings.allow_check_in_without_pin = 'allow_check_in_without_pin' in request.form
             settings.enable_auto_checkout = 'enable_auto_checkout' in request.form
             if settings.enable_auto_checkout:
                  settings.auto_checkout_delay_minutes = _parse_int_field('auto_checkout_delay_minutes', default_value=60, min_val=1)

@@ -16,11 +16,12 @@ from azure_backup import (
 AUTO_CHECKOUT_INTERVAL_MINUTES_CONFIG_KEY = 'AUTO_CHECKOUT_INTERVAL_MINUTES'
 DEFAULT_AUTO_CHECKOUT_INTERVAL_MINUTES = 15
 
-def auto_checkout_overdue_bookings(app): # app is now a required argument
+def auto_checkout_overdue_bookings(app_instance=None):
     """
-    Automatically checks out bookings that are still 'checked_in'
-    and whose end_time is past a configured delay.
+    New version of the auto-checkout task.
+    Accepts an optional app_instance for testing.
     """
+    app = app_instance or current_app
     with app.app_context():
         logger = app.logger
         logger.info("Scheduler: Starting auto_checkout_overdue_bookings task...")
@@ -31,30 +32,27 @@ def auto_checkout_overdue_bookings(app): # app is now a required argument
             return
 
         enable_auto_checkout = booking_settings.enable_auto_checkout
-        auto_checkout_delay_minutes = booking_settings.auto_checkout_delay_minutes # Changed
-        current_offset_hours = booking_settings.global_time_offset_hours if hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
+        auto_checkout_delay_minutes = booking_settings.auto_checkout_delay_minutes
+        current_offset_hours = booking_settings.global_time_offset_hours or 0
 
-        logger.info(f"Scheduler: Auto-checkout enabled: {enable_auto_checkout}, Delay: {auto_checkout_delay_minutes} minutes, Offset: {current_offset_hours} hours.") # Changed
+        logger.info(f"Scheduler: Auto-checkout enabled: {enable_auto_checkout}, Delay: {auto_checkout_delay_minutes} minutes, Offset: {current_offset_hours} hours.")
 
         if not enable_auto_checkout:
             logger.info("Scheduler: Auto-checkout feature is disabled in settings. Task will not run.")
             return
 
-        effective_now_aware = get_current_effective_time() # Aware, in venue's effective timezone
-        effective_now_local_naive = effective_now_aware.replace(tzinfo=None) # Naive representation of venue's current time
-
-        # Cutoff time in naive venue local time
-        cutoff_time_local_naive = effective_now_local_naive - timedelta(minutes=auto_checkout_delay_minutes) # Changed
+        effective_now_aware = get_current_effective_time()
+        effective_now_local_naive = effective_now_aware.replace(tzinfo=None)
+        cutoff_time_local_naive = effective_now_local_naive - timedelta(minutes=auto_checkout_delay_minutes)
 
         try:
             overdue_bookings = Booking.query.filter(
                 Booking.status == 'checked_in',
-                Booking.checked_out_at.is_(None), # This is naive local
-                Booking.end_time < cutoff_time_local_naive # Booking.end_time is naive local
+                Booking.checked_out_at.is_(None),
+                Booking.end_time < cutoff_time_local_naive
             ).all()
         except Exception as e_query:
             logger.error(f"Scheduler: Error querying for overdue bookings: {e_query}", exc_info=True)
-            logger.info("Scheduler: Auto_checkout_overdue_bookings task finished due to query error.")
             return
 
         logger.info(f"Scheduler: Found {len(overdue_bookings)} overdue bookings to auto check-out.")
@@ -62,34 +60,25 @@ def auto_checkout_overdue_bookings(app): # app is now a required argument
         for booking in overdue_bookings:
             logger.info(f"Scheduler: Processing auto check-out for booking ID {booking.id}...")
             resource_name_for_log = booking.resource_booked.name if booking.resource_booked else f"Unknown Resource (ID: {booking.resource_id})"
-            user_name_for_log = booking.user_name if booking.user_name else "Unknown User"
+            user_name_for_log = booking.user_name or "Unknown User"
 
             try:
-                # Set actual checkout time based on configured delay; this will be naive local
-                actual_checkout_time_local_naive = booking.end_time + timedelta(minutes=auto_checkout_delay_minutes) # Changed
-
-                booking.checked_out_at = actual_checkout_time_local_naive # Store naive local
+                actual_checkout_time_local_naive = booking.end_time + timedelta(minutes=auto_checkout_delay_minutes)
+                booking.checked_out_at = actual_checkout_time_local_naive
                 booking.status = 'completed'
-
                 db.session.add(booking)
                 db.session.commit()
 
-                # For logging/display, convert to UTC
                 actual_checkout_time_utc = (actual_checkout_time_local_naive - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc)
                 add_audit_log(
                     action="AUTO_CHECKOUT_SUCCESS",
-                    details=(
-                        f"Booking ID {booking.id} for resource '{resource_name_for_log}' by user "
-                        f"'{user_name_for_log}' automatically checked out at "
-                        f"{actual_checkout_time_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}."
-                    )
+                    details=f"Booking ID {booking.id} for resource '{resource_name_for_log}' by user '{user_name_for_log}' automatically checked out at {actual_checkout_time_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}."
                 )
                 logger.info(f"Scheduler: Booking ID {booking.id} successfully auto checked-out in DB (local time: {actual_checkout_time_local_naive}).")
 
-                # Send Email Notification
                 user = User.query.filter_by(username=booking.user_name).first()
                 if user and user.email:
-                    resource = Resource.query.get(booking.resource_id)
+                    resource = db.session.get(Resource, booking.resource_id)
                     floor_map_location = "N/A"
                     floor_map_floor = "N/A"
                     resource_name_for_email = "Unknown Resource"
@@ -97,42 +86,27 @@ def auto_checkout_overdue_bookings(app): # app is now a required argument
                     if resource:
                         resource_name_for_email = resource.name
                         if resource.floor_map_id:
-                            floor_map = FloorMap.query.get(resource.floor_map_id)
+                            floor_map = db.session.get(FloorMap, resource.floor_map_id)
                             if floor_map:
                                 floor_map_location = floor_map.location or "N/A"
                                 floor_map_floor = floor_map.floor or "N/A"
 
-                    explanation = f"This booking was automatically checked out because it was still active more than {auto_checkout_delay_minutes} minute(s) past its scheduled end time." # Changed
-
-                    # Times for email: start_time and end_time are naive local. actual_checkout_time_local_naive is also naive local.
-                    # Display them as such, or convert to a specific display timezone if needed.
-                    # For consistency with previous UTC display in emails for checkout times:
-                    auto_checkout_at_utc_display = (actual_checkout_time_local_naive - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc)
-
+                    explanation = f"This booking was automatically checked out because it was still active more than {auto_checkout_delay_minutes} minute(s) past its scheduled end time."
                     email_data = {
-                        'user_name': user.username,
-                        'booking_title': booking.title or "N/A",
+                        'user_name': user.username, 'booking_title': booking.title or "N/A",
                         'resource_name': resource_name_for_email,
-                        'start_time': booking.start_time.strftime('%Y-%m-%d %H:%M'), # Naive local
-                        'end_time': booking.end_time.strftime('%Y-%m-%d %H:%M'),     # Naive local
-                        'auto_checked_out_at_time': auto_checkout_at_utc_display.strftime('%Y-%m-%d %H:%M:%S UTC'),
-                        'location': floor_map_location,
-                        'floor': floor_map_floor,
-                        'explanation': explanation
+                        'start_time': booking.start_time.strftime('%Y-%m-%d %H:%M'),
+                        'end_time': booking.end_time.strftime('%Y-%m-%d %H:%M'),
+                        'auto_checked_out_at_time': actual_checkout_time_utc.strftime('%Y-%m-%d %H:%M:%S UTC'),
+                        'location': floor_map_location, 'floor': floor_map_floor, 'explanation': explanation
                     }
-
                     subject = f"Booking Automatically Checked Out: {email_data.get('resource_name', 'N/A')} - {email_data.get('booking_title', 'N/A')}"
-
-                    try:
-                        html_body = render_template('email/booking_auto_checkout.html', **email_data)
-                        text_body = render_template('email/booking_auto_checkout_text.html', **email_data)
-                        send_email(to_address=user.email, subject=subject, body=text_body, html_body=html_body)
-                        logger.info(f"Scheduler: Auto check-out email initiated for booking ID {booking.id} to {user.email}.")
-                    except Exception as e_email:
-                        logger.error(f"Scheduler: Error sending auto check-out email for booking {booking.id} to {user.email}: {e_email}", exc_info=True)
+                    html_body = render_template('email/booking_auto_checkout.html', **email_data)
+                    text_body = render_template('email/booking_auto_checkout_text.html', **email_data)
+                    send_email(to_address=user.email, subject=subject, body=text_body, html_body=html_body)
+                    logger.info(f"Scheduler: Auto check-out email initiated for booking ID {booking.id} to {user.email}.")
                 else:
                     logger.warning(f"Scheduler: User {booking.user_name} not found or has no email. Skipping auto check-out email for booking {booking.id}.")
-
             except Exception as e:
                 db.session.rollback()
                 logger.error(f"Scheduler: Error processing auto check-out for booking ID {booking.id}: {e}", exc_info=True)
@@ -140,7 +114,6 @@ def auto_checkout_overdue_bookings(app): # app is now a required argument
                     action="AUTO_CHECKOUT_FAILED",
                     details=f"Scheduler: Failed to auto check-out booking ID {booking.id}. Error: {str(e)}"
                 )
-
         logger.info("Scheduler: Auto_checkout_overdue_bookings task finished.")
 
 def cancel_unchecked_bookings(app):
@@ -273,11 +246,12 @@ def run_scheduled_backup_job(app=None):
 
         logger.info("Scheduler: Task 'run_scheduled_backup_job' finished.")
 
-def auto_release_unclaimed_bookings(app):
+def auto_release_unclaimed_bookings(app_instance=None):
     """
-    Automatically cancels bookings that are 'approved' but not checked in
-    within a configured number of minutes after their start time.
+    New version of the auto-release task.
+    Accepts an optional app_instance for testing.
     """
+    app = app_instance or current_app
     with app.app_context():
         logger = app.logger
         logger.info("Scheduler: Starting auto_release_unclaimed_bookings task...")
@@ -289,7 +263,7 @@ def auto_release_unclaimed_bookings(app):
 
         enable_check_in_out = booking_settings.enable_check_in_out
         release_minutes = booking_settings.auto_release_if_not_checked_in_minutes
-        current_offset_hours = booking_settings.global_time_offset_hours if hasattr(booking_settings, 'global_time_offset_hours') and booking_settings.global_time_offset_hours is not None else 0
+        current_offset_hours = booking_settings.global_time_offset_hours or 0
 
         logger.info(f"Scheduler: Auto-release settings: Check-in/out enabled: {enable_check_in_out}, Release minutes: {release_minutes}, Offset: {current_offset_hours} hours.")
 
@@ -301,28 +275,25 @@ def auto_release_unclaimed_bookings(app):
             logger.info("Scheduler: Auto-release minutes not configured or is zero/negative. Auto-release task will not run.")
             return
 
-        effective_now_aware = get_current_effective_time()  # Aware, in venue's effective timezone
-        effective_now_local_naive = effective_now_aware.replace(tzinfo=None)  # Naive representation of venue's current time
+        effective_now_aware = get_current_effective_time()
+        effective_now_local_naive = effective_now_aware.replace(tzinfo=None)
 
         try:
-            # Query for bookings that are 'approved' and have not been checked in
             unclaimed_bookings = Booking.query.filter(
                 Booking.status == 'approved',
                 Booking.checked_in_at.is_(None)
             ).all()
         except Exception as e_query:
             logger.error(f"Scheduler: Error querying for unclaimed bookings: {e_query}", exc_info=True)
-            logger.info("Scheduler: auto_release_unclaimed_bookings task finished due to query error.")
             return
 
         logger.info(f"Scheduler: Found {len(unclaimed_bookings)} unclaimed 'approved' bookings to evaluate for auto-release.")
 
         for booking in unclaimed_bookings:
             resource_name_for_log = booking.resource_booked.name if booking.resource_booked else f"Unknown Resource (ID: {booking.resource_id})"
-            user_name_for_log = booking.user_name if booking.user_name else "Unknown User"
+            user_name_for_log = booking.user_name or "Unknown User"
 
             try:
-                # booking.start_time is naive local
                 start_time_local_naive = booking.start_time
                 deadline_local_naive = start_time_local_naive + timedelta(minutes=release_minutes)
 
@@ -331,16 +302,10 @@ def auto_release_unclaimed_bookings(app):
 
                     original_status = booking.status
                     booking.status = 'system_cancelled_no_checkin'
-                    # Optionally, set a specific field for release reason or time if model has one
-                    # booking.cancellation_reason = "Auto-released due to no check-in"
-                    # booking.cancelled_at = effective_now_local_naive # Or use UTC time
-
                     db.session.add(booking)
                     db.session.commit()
 
-                    # Convert deadline to UTC for consistent logging if desired
                     deadline_utc_aware = (deadline_local_naive - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc)
-
                     audit_log_details = (
                         f"Booking ID {booking.id} for resource '{resource_name_for_log}' by user '{user_name_for_log}' "
                         f"(original status: {original_status}) auto-released. "
@@ -350,10 +315,9 @@ def auto_release_unclaimed_bookings(app):
                     add_audit_log(action="AUTO_RELEASE_NO_CHECKIN", details=audit_log_details)
                     logger.info(f"Scheduler: Booking ID {booking.id} status changed to '{booking.status}'. {audit_log_details}")
 
-                    # Send Email Notification (similar to auto_checkout_overdue_bookings)
                     user = User.query.filter_by(username=booking.user_name).first()
                     if user and user.email:
-                        resource = Resource.query.get(booking.resource_id)
+                        resource = db.session.get(Resource, booking.resource_id)
                         floor_map_location = "N/A"
                         floor_map_floor = "N/A"
                         resource_name_for_email = "Unknown Resource"
@@ -361,54 +325,31 @@ def auto_release_unclaimed_bookings(app):
                         if resource:
                             resource_name_for_email = resource.name
                             if resource.floor_map_id:
-                                floor_map = FloorMap.query.get(resource.floor_map_id)
+                                floor_map = db.session.get(FloorMap, resource.floor_map_id)
                                 if floor_map:
                                     floor_map_location = floor_map.location or "N/A"
                                     floor_map_floor = floor_map.floor or "N/A"
 
-                        explanation = (
-                            f"This booking was automatically cancelled because it was not checked-in "
-                            f"within {release_minutes} minutes of its scheduled start time."
-                        )
-
-                        # Times for email: start_time and end_time are naive local.
-                        # deadline_local_naive is also naive local.
-                        # Display them as such, or convert to a specific display timezone if needed.
-                        # For consistency, let's display deadline in local time.
+                        explanation = f"This booking was automatically cancelled because it was not checked-in within {release_minutes} minutes of its scheduled start time."
                         email_data = {
-                            'user_name': user.username,
-                            'booking_title': booking.title or "N/A",
+                            'user_name': user.username, 'booking_title': booking.title or "N/A",
                             'resource_name': resource_name_for_email,
-                            'start_time_local': booking.start_time.strftime('%Y-%m-%d %H:%M'), # Naive local
-                            'end_time_local': booking.end_time.strftime('%Y-%m-%d %H:%M'),     # Naive local
+                            'start_time_local': booking.start_time.strftime('%Y-%m-%d %H:%M'),
+                            'end_time_local': booking.end_time.strftime('%Y-%m-%d %H:%M'),
                             'check_in_deadline_local': deadline_local_naive.strftime('%Y-%m-%d %H:%M:%S'),
-                            'location': floor_map_location,
-                            'floor': floor_map_floor,
-                            'explanation': explanation
+                            'location': floor_map_location, 'floor': floor_map_floor, 'explanation': explanation
                         }
-
                         subject = f"Booking Automatically Cancelled (No Check-in): {email_data.get('resource_name', 'N/A')} - {email_data.get('booking_title', 'N/A')}"
-
-                        try:
-                            # Ensure email templates exist for this scenario
-                            html_body = render_template('email/booking_auto_cancelled_no_checkin.html', **email_data)
-                            text_body = render_template('email/booking_auto_cancelled_no_checkin_text.html', **email_data)
-                            send_email(to_address=user.email, subject=subject, body=text_body, html_body=html_body)
-                            logger.info(f"Scheduler: Auto-release (no check-in) email initiated for booking ID {booking.id} to {user.email}.")
-                        except Exception as e_email:
-                            # Check if it's a Jinja template not found error
-                            if "TemplateNotFound" in str(type(e_email)):
-                                logger.warning(f"Scheduler: Email template for auto-release not found. Skipping email for booking {booking.id}. Error: {e_email}")
-                            else:
-                                logger.error(f"Scheduler: Error sending auto-release email for booking {booking.id} to {user.email}: {e_email}", exc_info=True)
-                    elif booking.user_name: # User exists but no email, or user object not found
+                        html_body = render_template('email/booking_auto_cancelled_no_checkin.html', **email_data)
+                        text_body = render_template('email/booking_auto_cancelled_no_checkin_text.html', **email_data)
+                        send_email(to_address=user.email, subject=subject, body=text_body, html_body=html_body)
+                        logger.info(f"Scheduler: Auto-release (no check-in) email initiated for booking ID {booking.id} to {user.email}.")
+                    elif booking.user_name:
                         logger.warning(f"Scheduler: User {booking.user_name} not found or has no email. Skipping auto-release email for booking {booking.id}.")
-                    else: # booking.user_name is None or empty
+                    else:
                          logger.warning(f"Scheduler: Booking ID {booking.id} has no associated user_name. Skipping auto-release email.")
-
                 else:
                     logger.debug(f"Scheduler: Booking ID {booking.id} for '{resource_name_for_log}' by '{user_name_for_log}' is not yet past its check-in deadline ({deadline_local_naive}). Effective local time: {effective_now_local_naive}")
-
             except Exception as e_booking_process:
                 db.session.rollback()
                 logger.error(f"Scheduler: Error processing auto-release for booking ID {booking.id}: {e_booking_process}", exc_info=True)
@@ -416,7 +357,6 @@ def auto_release_unclaimed_bookings(app):
                     action="AUTO_RELEASE_NO_CHECKIN_FAILED",
                     details=f"Scheduler: Failed to auto-release booking ID {booking.id} for '{resource_name_for_log}'. Error: {str(e_booking_process)}"
                 )
-
         logger.info("Scheduler: auto_release_unclaimed_bookings task finished.")
 
 
