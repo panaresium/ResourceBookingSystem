@@ -123,6 +123,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 inline: true,
                 static: true,
                 dateFormat: "Y-m-d",
+                minDate: "today",
                 maxDate: new Date().fp_incr(maxBookingDays),
                 disable: [
                     function(date) {
