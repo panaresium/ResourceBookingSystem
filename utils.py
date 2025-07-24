@@ -204,6 +204,7 @@ def check_booking_permission(user: User, resource: Resource, logger_instance) ->
 
 
 def get_detailed_map_availability_for_user(resources_list: list[Resource], target_date: date, user: User, primary_slots: list[tuple[time, time]], logger_instance) -> dict:
+    from models import MaintenanceSchedule
     logger_instance.debug(f"get_detailed_map_availability_for_user called for date: {target_date}, user: {user.username}, {len(resources_list)} resources.")
     total_primary_slots_on_map = 0
     available_primary_slots_for_user_on_map = 0
@@ -234,9 +235,32 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
     ).all()
     logger_instance.debug(f"User {user.username} has {len(user_all_bookings_for_date)} bookings on {target_date} for conflict checking.")
 
+    # Fetch maintenance schedules once
+    schedules = MaintenanceSchedule.query.all()
+
     for resource in resources_list:
         logger_instance.debug(f"Processing resource: {resource.name} (ID: {resource.id})")
         has_permission, perm_reason = check_booking_permission(user, resource, logger_instance)
+
+        # Check maintenance schedules for the resource
+        is_blacklisted = False
+        is_whitelisted = False
+        applicable_schedules = [s for s in schedules if (s.resource_selection_type == 'all') or (s.resource_selection_type == 'building' and resource.floor_map and s.building_id == resource.floor_map.location) or (s.resource_selection_type == 'floor' and resource.floor_map and str(resource.floor_map.id) in (s.floor_ids or '').split(',')) or (s.resource_selection_type == 'specific' and str(resource.id) in (s.resource_ids or '').split(','))]
+
+        for schedule in applicable_schedules:
+            if schedule.schedule_type == 'date_range' and schedule.start_date <= target_date <= schedule.end_date:
+                if schedule.is_availability: is_whitelisted = True
+                else: is_blacklisted = True
+            elif schedule.schedule_type == 'recurring_day' and target_date.weekday() in [int(d) for d in schedule.day_of_week.split(',')]:
+                if schedule.is_availability: is_whitelisted = True
+                else: is_blacklisted = True
+            elif schedule.schedule_type == 'specific_day' and target_date.day in [int(d) for d in schedule.day_of_month.split(',')]:
+                if schedule.is_availability: is_whitelisted = True
+                else: is_blacklisted = True
+
+        if is_blacklisted and not is_whitelisted:
+            logger_instance.debug(f"Resource {resource.name} is blacklisted for {target_date}.")
+            continue
 
         is_resource_unavailable_all_day_due_to_maintenance = resource.is_under_maintenance and \
             (resource.maintenance_until is None or target_date <= resource.maintenance_until.date())
