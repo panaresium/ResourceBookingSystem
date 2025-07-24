@@ -121,8 +121,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (slotsSelect.options.length <= 1) { // Only the default "-- Select a time slot --" is present
                 slotsSelect.innerHTML = '<option value="">No Available Resource</option>';
+                slotsSelect.disabled = true;
+            } else {
+                slotsSelect.disabled = false;
             }
-            slotsSelect.disabled = false;
 
             if (statusMessage) statusMessage.textContent = ''; // Clear loading/previous status
         } catch (error) {
@@ -625,17 +627,20 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(dates => {
                 unavailableDates = dates; // Populate the global array
                 console.log("Unavailable dates fetched:", unavailableDates);
-            })
-            .catch(error => {
-                console.error('Error fetching unavailable dates:', error);
-                // Proceed without unavailable dates functionality
-            })
-            .finally(() => {
-                initializeCalendar(); // Initialize calendar after API call attempt
                 flatpickr("#cebm-booking-date", {
                     disable: unavailableDates,
                     dateFormat: "Y-m-d",
                 });
+            })
+            .catch(error => {
+                console.error('Error fetching unavailable dates:', error);
+                // Proceed without unavailable dates functionality
+                flatpickr("#cebm-booking-date", {
+                    dateFormat: "Y-m-d",
+                });
+            })
+            .finally(() => {
+                initializeCalendar(); // Initialize calendar after API call attempt
             });
     } else {
         console.info('User ID not found for this calendar instance. Skipping fetching unavailable dates. This is normal for "My Calendar" view.');
