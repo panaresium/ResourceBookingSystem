@@ -235,31 +235,34 @@ def get_detailed_map_availability_for_user(resources_list: list[Resource], targe
     ).all()
     logger_instance.debug(f"User {user.username} has {len(user_all_bookings_for_date)} bookings on {target_date} for conflict checking.")
 
-    # Fetch maintenance schedules once
     schedules = MaintenanceSchedule.query.all()
+    whitelists_exist = any(s.is_availability for s in schedules)
 
     for resource in resources_list:
         logger_instance.debug(f"Processing resource: {resource.name} (ID: {resource.id})")
         has_permission, perm_reason = check_booking_permission(user, resource, logger_instance)
 
-        # Check maintenance schedules for the resource
         is_blacklisted = False
         is_whitelisted = False
         applicable_schedules = [s for s in schedules if (s.resource_selection_type == 'all') or (s.resource_selection_type == 'building' and resource.floor_map and s.building_id == resource.floor_map.location) or (s.resource_selection_type == 'floor' and resource.floor_map and str(resource.floor_map.id) in (s.floor_ids or '').split(',')) or (s.resource_selection_type == 'specific' and str(resource.id) in (s.resource_ids or '').split(','))]
 
         for schedule in applicable_schedules:
-            if schedule.schedule_type == 'date_range' and schedule.start_date <= target_date <= schedule.end_date:
-                if schedule.is_availability: is_whitelisted = True
-                else: is_blacklisted = True
-            elif schedule.schedule_type == 'recurring_day' and target_date.weekday() in [int(d) for d in schedule.day_of_week.split(',')]:
-                if schedule.is_availability: is_whitelisted = True
-                else: is_blacklisted = True
-            elif schedule.schedule_type == 'specific_day' and target_date.day in [int(d) for d in schedule.day_of_month.split(',')]:
-                if schedule.is_availability: is_whitelisted = True
-                else: is_blacklisted = True
+            day_of_week_check = schedule.schedule_type == 'recurring_day' and str(target_date.weekday()) in (schedule.day_of_week or '').split(',')
+            day_of_month_check = schedule.schedule_type == 'specific_day' and str(target_date.day) in (schedule.day_of_month or '').split(',')
+            date_range_check = schedule.schedule_type == 'date_range' and schedule.start_date <= target_date <= schedule.end_date if schedule.start_date and schedule.end_date else False
 
-        if is_blacklisted and not is_whitelisted:
+            if day_of_week_check or day_of_month_check or date_range_check:
+                if schedule.is_availability:
+                    is_whitelisted = True
+                else:
+                    is_blacklisted = True
+
+        if is_blacklisted:
             logger_instance.debug(f"Resource {resource.name} is blacklisted for {target_date}.")
+            continue
+
+        if whitelists_exist and not is_whitelisted:
+            logger_instance.debug(f"Resource {resource.name} is not in any whitelist for {target_date}.")
             continue
 
         is_resource_unavailable_all_day_due_to_maintenance = resource.is_under_maintenance and \
