@@ -18,11 +18,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // const cebmEndTime = document.getElementById('cebm-end-time');   // Replaced by date and select
     const cebmBookingDate = document.getElementById('cebm-booking-date');
     const cebmAvailableSlotsSelect = document.getElementById('cebm-available-slots-select');
-    const cebmSaveChangesBtn = document.getElementById('cebm-save-changes-btn');
     const cebmStatusMessage = document.getElementById('cebm-status-message');
     const cebmDeleteBookingBtn = document.getElementById('cebm-delete-booking-btn'); // Added
 
-    if (!calendarEl || !calendarStatusFilterSelect || !calendarEditBookingModal || !cebmSaveChangesBtn || !cebmDeleteBookingBtn) { // Added !cebmSaveChangesBtn to the check
+    if (!calendarEl || !calendarStatusFilterSelect || !calendarEditBookingModal || !cebmDeleteBookingBtn) { // Added !cebmSaveChangesBtn to the check
         console.error("Required calendar elements (calendar, filter, modal, save button, or delete button) not found.");
         return;
     }
@@ -160,102 +159,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Function to handle saving changes from the modal
-    async function saveBookingChanges(buttonElement, bookingId, title, calendarEventToUpdate) { // Signature updated
-        buttonElement.disabled = true;
-        buttonElement.textContent = 'Processing...';
-        cebmStatusMessage.textContent = '';
-        cebmStatusMessage.className = 'status-message';
-
-        const bookingDateStr = document.getElementById('cebm-booking-date').value;
-        const selectedSlotValue = document.getElementById('cebm-available-slots-select').value;
-
-        if (!bookingDateStr || !selectedSlotValue) {
-            cebmStatusMessage.textContent = 'Please select a date and a time slot.';
-            cebmStatusMessage.className = 'status-message error-message';
-            return;
-        }
-
-        const [slotStartTime, slotEndTime] = selectedSlotValue.split(',');
-
-        // Construct naive local ISO strings directly
-        const naiveLocalISOStart = `${bookingDateStr}T${slotStartTime}:00`;
-        const naiveLocalISOEnd = `${bookingDateStr}T${slotEndTime}:00`;
-
-        // Corrected validation:
-        if (naiveLocalISOEnd <= naiveLocalISOStart) {
-            cebmStatusMessage.textContent = 'End time must be after start time.';
-            cebmStatusMessage.className = 'status-message error-message';
-            // Ensure button state is correctly managed if validation fails
-            if (buttonElement) { // Check if buttonElement is passed and valid
-                 buttonElement.disabled = false;
-                 buttonElement.textContent = 'Save Changes';
-            }
-            return;
-        }
-
-        const eventPayload = {
-            title: title,
-            start_time: naiveLocalISOStart,
-            end_time: naiveLocalISOEnd,
-        };
-
-        try {
-            const response = await apiCall(`/api/bookings/${bookingId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(eventPayload)
-            });
-
-            console.log('Booking update successful:', response);
-            
-            // Update the event on the calendar
-            if (calendarEventToUpdate) {
-                calendarEventToUpdate.setProp('title', title);
-                // Use the naiveLocalISOStart and naiveLocalISOEnd, FullCalendar (with timeZone: 'local')
-                // will interpret these as local time.
-                calendarEventToUpdate.setStart(naiveLocalISOStart);
-                calendarEventToUpdate.setEnd(naiveLocalISOEnd);
-            }
-            // calendarInstance.refetchEvents(); // Corrected, but the original instruction implies this was a standalone line to change
-
-            cebmStatusMessage.textContent = response.message || 'Booking updated successfully!';
-            cebmStatusMessage.className = 'status-message success-message'; // Ensure you have .success-message CSS
-
-            allUserEvents = []; // Clear the cache to force a fresh fetch
-            calendarInstance.refetchEvents(); // Refresh calendar events
-
-            // Close modal and clear message after a short delay
-            setTimeout(() => {
-                calendarEditBookingModal.style.display = 'none';
-                cebmStatusMessage.textContent = ''; // Clear message
-                cebmStatusMessage.className = 'status-message'; // Reset class
-                // window.location.href = '/my_bookings'; // REMOVED
-            }, 1500);
-
-        } catch (error) {
-            console.error('Error updating booking:', error);
-            if (error.message && error.message.includes("No changes supplied.")) {
-                cebmStatusMessage.textContent = 'No changes detected. Booking details are already up to date.';
-                cebmStatusMessage.className = 'status-message success-message'; // Treat as success
-
-                allUserEvents = []; // Clear the cache
-                calendarInstance.refetchEvents(); // Refresh calendar events
-
-                setTimeout(() => {
-                    calendarEditBookingModal.style.display = 'none';
-                    cebmStatusMessage.textContent = ''; // Clear message
-                    cebmStatusMessage.className = 'status-message'; // Reset class
-                    // window.location.href = '/my_bookings'; // REMOVED
-                }, 1500);
-            } else {
-                cebmStatusMessage.textContent = error.message || 'Failed to update booking.';
-                cebmStatusMessage.className = 'status-message error-message';
-            }
-        } finally {
-            buttonElement.disabled = false;
-            buttonElement.textContent = 'Save Changes';
-        }
-    }
 
     // Populate the new status filter dropdown
     populateStatusFilter(calendarStatusFilterSelect);
@@ -358,78 +261,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const cebmResourceIdInput = document.getElementById('cebm-resource-id');
                 cebmResourceIdInput.value = info.event.extendedProps.resource_id;
 
-                const cebmBookingDateInput = document.getElementById('cebm-booking-date');
-
-                if (info.event.start) {
-                    const originalEventStartForDate = new Date(info.event.start); // This is a local Date object
-
-                    // For date input, use local date parts
-                    const year = originalEventStartForDate.getFullYear();
-                    const month = (originalEventStartForDate.getMonth() + 1).toString().padStart(2, '0'); // getMonth() is 0-indexed
-                    const day = originalEventStartForDate.getDate().toString().padStart(2, '0');
-                    cebmBookingDateInput.value = `${year}-${month}-${day}`;
-
-                    let selectedStartTimeHHMM;
-                    if (info.event.extendedProps.booking_display_start_time) {
-                        selectedStartTimeHHMM = info.event.extendedProps.booking_display_start_time; // "HH:MM"
-                    } else {
-                        // Fallback for older events: use UTC time parts from original event start
-                        const fallbackStart = new Date(info.event.start); // Already a Date object
-                        const optionsTimeUTC = { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' };
-                        selectedStartTimeHHMM = fallbackStart.toLocaleTimeString(undefined, optionsTimeUTC);
-                        // No " UTC" suffix here as it's for internal logic, not direct display in this variable.
-                    }
-
-                    fetchAndDisplayAvailableSlots(info.event.extendedProps.resource_id, cebmBookingDateInput.value, selectedStartTimeHHMM);
-                } else {
-                    cebmBookingDateInput.value = ''; // Or today's date
-                    // Optionally fetch slots for a default date or leave selector empty
-                    document.getElementById('cebm-available-slots-select').innerHTML = '<option value="">-- Select a date first --</option>';
-                }
-
-                cebmBookingDateInput.onchange = () => {
-                    const resourceId = cebmResourceIdInput.value;
-                    if (resourceId && cebmBookingDateInput.value) {
-                        fetchAndDisplayAvailableSlots(resourceId, cebmBookingDateInput.value, null);
-                    }
-                };
-
                 cebmStatusMessage.textContent = ''; // Clear previous messages
                 cebmStatusMessage.className = 'status-message';
                 calendarEditBookingModal.style.display = 'block';
 
-                // Re-assign to the new button for the current scope
-                // let currentSaveBtn = cebmSaveChangesBtn; // Initialize with the original button // Will be assigned after cloning
-
-                const currentSaveBtnElement = document.getElementById('cebm-save-changes-btn');
                 const currentDeleteBtnElement = document.getElementById('cebm-delete-booking-btn');
-                let currentSaveBtn; // Will hold the (potentially new) save button
-
-                // Remove previous event listener to avoid multiple bindings if any
-                if (currentSaveBtnElement && currentSaveBtnElement.parentNode) {
-                    const newSaveBtn = currentSaveBtnElement.cloneNode(true);
-                    currentSaveBtnElement.parentNode.replaceChild(newSaveBtn, currentSaveBtnElement);
-                    currentSaveBtn = newSaveBtn; // Assign the new button to currentSaveBtn
-                } else {
-                    console.error("Error: Could not find 'currentSaveBtnElement' (ID: cebm-save-changes-btn) or its parent node. Cannot re-attach event listener for save button.");
-                    currentSaveBtn = currentSaveBtnElement; // Fallback to original if not found or no parent, though problematic
-                }
-
-                // Ensure currentSaveBtn is valid before attaching onclick
-                if (currentSaveBtn) {
-                    currentSaveBtn.onclick = () => {
-                        saveBookingChanges(
-                            currentSaveBtn, // Pass the button instance
-                            cebmBookingId.value,
-                            cebmBookingTitle.value,
-                            info.event
-                        );
-                    };
-                } else {
-                    // This case should ideally not be reached if cebmSaveChangesBtn was initially found.
-                    // If it is reached, it means the original button was also null.
-                    console.error("Error: Save changes button ('currentSaveBtnElement', ID: cebm-save-changes-btn) not found. Save functionality will be unavailable.");
-                }
 
                 // Logic for delete button
                 if (currentDeleteBtnElement && currentDeleteBtnElement.parentNode) {
