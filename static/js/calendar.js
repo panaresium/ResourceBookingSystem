@@ -249,17 +249,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Populate existing editable fields (ensure this logic is preserved)
                 cebmBookingId.value = info.event.id;
-                cebmBookingTitle.value = info.event.title; // This is the input field for editing
 
                 // This was the old way of setting the general resource name, ensure it's not needed or adapt
                 // cebmResourceName.textContent = info.event.extendedProps.resource_name || info.event.title || 'N/A';
                 // Since we hid the parent paragraph of 'cebm-resource-name', this line is not strictly necessary for display,
                 // but if other JS logic relies on its textContent, it should be reviewed.
                 // For now, the new 'cebm-ro-resource-name' handles the display.
-
-                // Store resource_id in hidden input (preserve this)
-                const cebmResourceIdInput = document.getElementById('cebm-resource-id');
-                cebmResourceIdInput.value = info.event.extendedProps.resource_id;
 
                 cebmStatusMessage.textContent = ''; // Clear previous messages
                 cebmStatusMessage.className = 'status-message';
