@@ -35,7 +35,7 @@ def is_resource_unavailable(resource, start_time, end_time):
     if availability_schedules:
         is_available = False
         for schedule in availability_schedules:
-            if check_schedule_conflict(schedule, start_time, end_time):
+            if check_schedule_conflict(schedule, start_time, end_time, resource):
                 is_available = True
                 break
         if not is_available:
@@ -43,23 +43,40 @@ def is_resource_unavailable(resource, start_time, end_time):
 
     # Check for maintenance schedules
     for schedule in maintenance_schedules:
-        if check_schedule_conflict(schedule, start_time, end_time):
+        if check_schedule_conflict(schedule, start_time, end_time, resource):
             return True
 
     return False
 
-def check_schedule_conflict(schedule, start_time, end_time):
+def check_schedule_conflict(schedule, start_time, end_time, resource):
     conflict = False
+    # First, check if the resource is affected by the schedule
+    if schedule.resource_selection_type == 'all':
+        conflict = True
+    elif schedule.resource_selection_type == 'building':
+        if resource.floor_map and resource.floor_map.location and schedule.building_id == resource.floor_map.location:
+            conflict = True
+    elif schedule.resource_selection_type == 'floor':
+        if resource.floor_map and str(resource.floor_map.id) in (schedule.floor_ids or '').split(','):
+            conflict = True
+    elif schedule.resource_selection_type == 'specific':
+        if str(resource.id) in (schedule.resource_ids or '').split(','):
+            conflict = True
+
+    if not conflict:
+        return False
+
+    # If the resource is affected, check the time
     if schedule.schedule_type == 'date_range':
         if schedule.start_date <= start_time.date() <= schedule.end_date:
-            conflict = True
+            return True
     elif schedule.schedule_type == 'recurring_day':
         if schedule.day_of_week and str(start_time.weekday()) in schedule.day_of_week.split(','):
-            conflict = True
+            return True
     elif schedule.schedule_type == 'specific_day':
-        if start_time.day == schedule.day_of_month:
-            conflict = True
-    return conflict
+        if schedule.day_of_month and str(start_time.day) in schedule.day_of_month.split(','):
+            return True
+    return False
 
 # Initialization function
 def init_api_bookings_routes(app):
