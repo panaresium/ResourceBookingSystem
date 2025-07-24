@@ -282,7 +282,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const defaultOpacity = 0.7;
         let uiOpacity;
         try {
-            const response = await fetch('/api/admin/system-settings/map-opacity');
+            const response = await fetch('/api/public/system-settings/map-opacity');
             if (response.ok) {
                 const data = await response.json();
                 if (data.opacity !== undefined && typeof data.opacity === 'number' && data.opacity >= 0.0 && data.opacity <= 1.0) {
