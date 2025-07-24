@@ -216,37 +216,50 @@ def get_unavailable_dates_from_schedules(start_date, end_date, resources):
     resource_unavailable_dates = {resource.id: set() for resource in resources}
     all_dates_in_range = {start_date + timedelta(days=x) for x in range((end_date - start_date).days + 1)}
 
-    for resource in resources:
-        applicable_schedules = [
-            s for s in schedules
-            if (s.resource_selection_type == 'all') or
-               (s.resource_selection_type == 'building' and resource.floor_map and s.building_id == resource.floor_map.location) or
-               (s.resource_selection_type == 'floor' and resource.floor_map and str(resource.floor_map.id) in (s.floor_ids or '').split(',')) or
-               (s.resource_selection_type == 'specific' and str(resource.id) in (s.resource_ids or '').split(','))
-        ]
+    # Separate schedules into blacklists (maintenance) and whitelists (availability)
+    blacklists = [s for s in schedules if not s.is_availability]
+    whitelists = [s for s in schedules if s.is_availability]
 
-        unavailable_dates = set()
-        # Process blacklists first
-        for schedule in [s for s in applicable_schedules if not s.is_availability]:
-            unavailable_dates.update(get_dates_for_schedule(schedule, start_date, end_date))
+    # If there are any whitelists, the logic changes:
+    # We start by assuming all dates are unavailable, and then add back available dates.
+    if whitelists:
+        # Initially, all dates are unavailable for all resources
+        for resource in resources:
+            resource_unavailable_dates[resource.id] = all_dates_in_range.copy()
 
-        # Process whitelists
-        whitelists = [s for s in applicable_schedules if s.is_availability]
-        if whitelists:
-            # If there are whitelists, all dates are unavailable except those in the whitelists
-            available_dates = set.intersection(*(get_dates_for_schedule(s, start_date, end_date) for s in whitelists))
-            unavailable_dates.update(all_dates_in_range - available_dates)
+        # For each whitelist, find the resources it applies to and mark the corresponding dates as available
+        for schedule in whitelists:
+            available_dates_for_schedule = get_dates_for_schedule(schedule, start_date, end_date)
+            for resource in resources:
+                applies = (
+                    (schedule.resource_selection_type == 'all') or
+                    (schedule.resource_selection_type == 'building' and resource.floor_map and schedule.building_id == resource.floor_map.location) or
+                    (schedule.resource_selection_type == 'floor' and resource.floor_map and str(resource.floor_map.id) in (schedule.floor_ids or '').split(',')) or
+                    (schedule.resource_selection_type == 'specific' and str(resource.id) in (schedule.resource_ids or '').split(','))
+                )
+                if applies:
+                    # Remove the available dates from this resource's unavailable set
+                    resource_unavailable_dates[resource.id] -= available_dates_for_schedule
 
-        resource_unavailable_dates[resource.id] = unavailable_dates
+    # Process blacklists: these add to the unavailable dates regardless of whitelists
+    for schedule in blacklists:
+        unavailable_dates_for_schedule = get_dates_for_schedule(schedule, start_date, end_date)
+        for resource in resources:
+            applies = (
+                (schedule.resource_selection_type == 'all') or
+                (schedule.resource_selection_type == 'building' and resource.floor_map and schedule.building_id == resource.floor_map.location) or
+                (schedule.resource_selection_type == 'floor' and resource.floor_map and str(resource.floor_map.id) in (schedule.floor_ids or '').split(',')) or
+                (schedule.resource_selection_type == 'specific' and str(resource.id) in (schedule.resource_ids or '').split(','))
+            )
+            if applies:
+                resource_unavailable_dates[resource.id].update(unavailable_dates_for_schedule)
 
-    # At this point, resource_unavailable_dates contains dates that are unavailable for each resource.
-    # We need to return a single set of dates that are unavailable for the user.
-    # A date is unavailable for the user if it is unavailable for all resources.
-
+    # A date is unavailable for the user if it's unavailable for ALL resources they can potentially book.
     if not resource_unavailable_dates:
         return set()
 
-    # Get the intersection of all unavailable dates.
+    # The final set of unavailable dates is the intersection of all individual resource unavailable date sets.
+    # This means a date is only truly unavailable if every single resource is unavailable on that day.
     unavailable_for_all_resources = set.intersection(*resource_unavailable_dates.values())
 
     return {d.strftime('%Y-%m-%d') for d in unavailable_for_all_resources}
