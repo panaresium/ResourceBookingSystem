@@ -27,16 +27,25 @@ def is_resource_unavailable(resource, start_time, end_time):
     Checks if a resource is unavailable due to a maintenance schedule.
     """
     schedules = MaintenanceSchedule.query.all()
-    for schedule in schedules:
-        if schedule.resource_selection_type == 'all':
+
+    availability_schedules = [s for s in schedules if s.is_availability]
+    maintenance_schedules = [s for s in schedules if not s.is_availability]
+
+    # If there are any availability schedules, the resource is only available if it falls within one of them
+    if availability_schedules:
+        is_available = False
+        for schedule in availability_schedules:
             if check_schedule_conflict(schedule, start_time, end_time):
-                return not schedule.is_availability
-        elif schedule.resource_selection_type == 'specific':
-            if schedule.resource_ids:
-                resource_ids = [int(id) for id in schedule.resource_ids.split(',')]
-                if resource.id in resource_ids:
-                    if check_schedule_conflict(schedule, start_time, end_time):
-                        return not schedule.is_availability
+                is_available = True
+                break
+        if not is_available:
+            return True
+
+    # Check for maintenance schedules
+    for schedule in maintenance_schedules:
+        if check_schedule_conflict(schedule, start_time, end_time):
+            return True
+
     return False
 
 def check_schedule_conflict(schedule, start_time, end_time):
@@ -50,11 +59,7 @@ def check_schedule_conflict(schedule, start_time, end_time):
     elif schedule.schedule_type == 'specific_day':
         if start_time.day == schedule.day_of_month:
             conflict = True
-
-    current_app.logger.info(f"Schedule {schedule.id} conflict: {conflict}, is_availability: {schedule.is_availability}")
-    if conflict:
-        return not schedule.is_availability
-    return False
+    return conflict
 
 # Initialization function
 def init_api_bookings_routes(app):
