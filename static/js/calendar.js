@@ -622,12 +622,39 @@ document.addEventListener('DOMContentLoaded', () => {
         currentUserId = window.currentUserId;
     }
 
+    const floorSelector = document.getElementById('floor-selector');
+    let flatpickrInstance;
+
+    function fetchUnavailableDates() {
+        if (currentUserId) {
+            const floorId = floorSelector.value;
+            let apiUrl = `/api/resources/unavailable_dates?user_id=${currentUserId}`;
+            if (floorId) {
+                apiUrl += `&floor_ids=${floorId}`;
+            }
+            apiCall(apiUrl)
+                .then(dates => {
+                    unavailableDates = dates; // Populate the global array
+                    console.log("Unavailable dates fetched:", unavailableDates);
+                    if (flatpickrInstance) {
+                        flatpickrInstance.set('disable', unavailableDates);
+                    }
+                    if (calendarInstance) {
+                        calendarInstance.refetchEvents();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching unavailable dates:', error);
+                });
+        }
+    }
+
     if (currentUserId) {
         apiCall(`/api/resources/unavailable_dates?user_id=${currentUserId}`)
             .then(dates => {
                 unavailableDates = dates; // Populate the global array
                 console.log("Unavailable dates fetched:", unavailableDates);
-                flatpickr("#cebm-booking-date", {
+                flatpickrInstance = flatpickr("#cebm-booking-date", {
                     disable: unavailableDates,
                     dateFormat: "Y-m-d",
                 });
@@ -635,7 +662,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .catch(error => {
                 console.error('Error fetching unavailable dates:', error);
                 // Proceed without unavailable dates functionality
-                flatpickr("#cebm-booking-date", {
+                flatpickrInstance = flatpickr("#cebm-booking-date", {
                     dateFormat: "Y-m-d",
                 });
             })
@@ -645,10 +672,12 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
         console.info('User ID not found for this calendar instance. Skipping fetching unavailable dates. This is normal for "My Calendar" view.');
         initializeCalendar(); // Initialize calendar immediately if no user ID
-        flatpickr("#cebm-booking-date", {
+        flatpickrInstance = flatpickr("#cebm-booking-date", {
             dateFormat: "Y-m-d",
         });
     }
+
+    floorSelector.addEventListener('change', fetchUnavailableDates);
 
 
     // Event listener for the modal's close button

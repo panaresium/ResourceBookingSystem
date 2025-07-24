@@ -211,8 +211,17 @@ def get_dates_for_schedule(schedule, start_range, end_range):
             current_date += timedelta(days=1)
     return dates
 
-def get_unavailable_dates_from_schedules(start_date, end_date, resources):
-    schedules = MaintenanceSchedule.query.all()
+def get_unavailable_dates_from_schedules(start_date, end_date, resources, floor_ids=None):
+    schedules_query = MaintenanceSchedule.query
+    if floor_ids:
+        # Assuming floor_ids is a comma-separated string of IDs
+        floor_id_list = [int(fid) for fid in floor_ids.split(',') if fid.isdigit()]
+        if floor_id_list:
+            schedules_query = schedules_query.filter(
+                (MaintenanceSchedule.floor_ids.op('regexp')(fr'(^|,)({",".join(map(str, floor_id_list))})(,|$)')) |
+                (MaintenanceSchedule.resource_selection_type.in_(['all', 'building']))
+            )
+    schedules = schedules_query.all()
     resource_unavailable_dates = {resource.id: set() for resource in resources}
     all_dates_in_range = {start_date + timedelta(days=x) for x in range((end_date - start_date).days + 1)}
 
@@ -269,6 +278,7 @@ def get_unavailable_dates_from_schedules(start_date, end_date, resources):
 def get_unavailable_dates():
     logger = current_app.logger
     user_id_str = request.args.get("user_id")
+    floor_ids_str = request.args.get("floor_ids")
     logger.debug(f"--- get_unavailable_dates called for user_id {user_id_str} ---")
     if not user_id_str:
         logger.warning("get_unavailable_dates: user_id missing")
@@ -550,7 +560,7 @@ def get_unavailable_dates():
 
         # The old 5 PM server logic block is now removed.
 
-        unavailable_dates_from_schedules = get_unavailable_dates_from_schedules(start_range_date, end_range_date, all_published_resources)
+        unavailable_dates_from_schedules = get_unavailable_dates_from_schedules(start_range_date, end_range_date, all_published_resources, floor_ids=floor_ids_str)
         unavailable_dates_set.update(unavailable_dates_from_schedules)
 
         if not unavailable_dates_set:

@@ -11,7 +11,7 @@ from flask_login import login_required, current_user, logout_user
 from datetime import datetime, timezone, timedelta
 
 # Assuming Booking model is in models.py
-from models import db, Booking, Resource, User, BookingSettings # Added Resource, User, db, BookingSettings
+from models import db, Booking, Resource, User, BookingSettings, FloorMap # Added Resource, User, db, BookingSettings
 # Assuming add_audit_log is in utils.py
 from utils import add_audit_log
 # Assuming socketio is in extensions.py # Removed: from extensions import socketio
@@ -142,7 +142,8 @@ def serve_calendar():
     except Exception as e:
         current_app.logger.error(f"Error fetching BookingSettings for calendar page: {e}", exc_info=True)
         # time_offset_value remains 0
-    return render_template("calendar.html", global_time_offset_hours=time_offset_value)
+    floors = FloorMap.query.order_by(FloorMap.display_order).all()
+    return render_template("calendar.html", global_time_offset_hours=time_offset_value, floors=floors)
 
 @ui_bp.route('/map_view/<int:map_id>')
 def serve_map_view(map_id):
