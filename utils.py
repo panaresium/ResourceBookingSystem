@@ -2170,3 +2170,43 @@ def _import_general_configurations_data(config_data: dict) -> tuple[dict, int]:
     }
     return summary, status_code
 
+
+def get_map_opacity_value():
+    """
+    Retrieves the map opacity value.
+    Priority:
+    1. Value from MAP_OPACITY_CONFIG_FILE (if configured and valid).
+    2. Value from current_app.config['MAP_RESOURCE_OPACITY'] (which handles env var and default).
+    """
+    config_file_path = current_app.config.get('MAP_OPACITY_CONFIG_FILE')
+
+    if config_file_path: # Ensure path is configured
+        try:
+            # Ensure config_file_path is usable, Path objects from config.py should be fine
+            if os.path.exists(config_file_path):
+                with open(config_file_path, 'r') as f:
+                    data = json.load(f)
+                    opacity_val = data.get('map_resource_opacity')
+                    if opacity_val is not None: # Check if key exists
+                        try:
+                            opacity_float = float(opacity_val)
+                            if 0.0 <= opacity_float <= 1.0:
+                                current_app.logger.debug(f"Opacity {opacity_float} loaded from file {config_file_path}")
+                                return opacity_float
+                            else:
+                                current_app.logger.warning(f"Opacity value {opacity_float} from {config_file_path} is out of range (0.0-1.0). File value ignored.")
+                        except ValueError:
+                            current_app.logger.warning(f"Invalid opacity value '{opacity_val}' in {config_file_path}. Not a float. File value ignored.")
+        except (IOError, json.JSONDecodeError, TypeError) as e: # Catch errors related to file access/parsing
+            current_app.logger.error(f"Error reading/parsing {config_file_path}: {e}. Fallback will be used.")
+        except Exception as e: # Catch any other unexpected errors
+            current_app.logger.error(f"Unexpected error with config file {config_file_path}: {e}. Fallback will be used.")
+
+    # Fallback to the value already processed by config.py (env var or its default in config.py)
+    default_from_config = current_app.config.get('MAP_RESOURCE_OPACITY') # Should exist due to config.py
+    if default_from_config is None: # Should not happen if config.py is loaded correctly
+        current_app.logger.error("MAP_RESOURCE_OPACITY not found in app.config. This is unexpected. Using hardcoded default 0.7.")
+        return 0.7
+
+    current_app.logger.debug(f"Using opacity from app.config['MAP_RESOURCE_OPACITY']: {default_from_config} (derived from env var or default in config.py).")
+    return default_from_config

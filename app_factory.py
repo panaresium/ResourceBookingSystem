@@ -26,6 +26,7 @@ from routes.api_system import init_api_system_routes
 from routes.admin_api_bookings import init_admin_api_bookings_routes # New import
 from routes.admin_api_maintenance import admin_api_maintenance_bp
 from routes.api_system_settings import init_api_system_settings_routes
+from routes.api_public import init_api_public_routes
 from routes.gmail_auth import init_gmail_auth_routes # Added for Gmail OAuth flow
 
 # For scheduler
@@ -292,6 +293,7 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
     init_admin_api_bookings_routes(app) # Register new blueprint
     app.register_blueprint(admin_api_maintenance_bp)
     init_api_system_settings_routes(app) # Register new blueprint
+    init_api_public_routes(app)
     init_gmail_auth_routes(app) # Added for Gmail OAuth flow
 
     # 8. Register Error Handlers - Skip if testing
