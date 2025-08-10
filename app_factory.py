@@ -114,7 +114,9 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
     # but messages sent to it should be buffered or handled once logging is set up.
     # For immediate critical output if needed, standard print() or logging.warning() could be used
     # before app.logger is reliably configured. However, standard practice is to use app.logger.
-    app.logger.error("ERROR_DIAG: APP_FACTORY - create_app function entered.")
+    # Ensure early logs are emitted at INFO level
+    app.logger.setLevel(logging.INFO)
+    app.logger.info("ERROR_DIAG: APP_FACTORY - create_app function entered.")
     # from extensions import mail # mail has been removed from imports
     # app.logger.error(f"ERROR_DIAG: APP_FACTORY - Initial mail object ID in create_app: {id(mail)}") # mail removed
 
