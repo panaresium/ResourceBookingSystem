@@ -5,9 +5,8 @@ from models import Booking, User, Resource, FloorMap, BookingSettings
 from utils import add_audit_log, send_email, _get_map_configuration_data, _get_resource_configurations_data, _get_user_configurations_data, get_current_effective_time
 from azure_backup import (
     create_full_backup,
-    create_full_backup,
-    create_incremental_booking_backup, # Added for the new incremental backup logic
-    # backup_full_booking_data_json_azure # This was for the old unified full, can be removed if not used elsewhere
+    create_incremental_booking_backup,  # Added for the new incremental backup logic
+    backup_full_bookings_json,
 )
 # Ensure current_app is available if not passed directly
 # from flask import current_app # current_app is already imported by the other functions
@@ -697,27 +696,32 @@ def run_scheduled_incremental_booking_data_task(app):
             logger.error(f"Scheduler: Exception during run_scheduled_incremental_booking_data_task (Run ID: {run_instance_id}): {e}", exc_info=True)
         logger.info(f"Scheduler: run_scheduled_incremental_booking_data_task (Run ID: {run_instance_id}) finished.")
 
-# TODO: This task depended on the obsolete function azure_backup.backup_full_booking_data_json_azure.
-# Review for permanent removal or refactor if core scheduling purpose is still valid via other means.
-# def run_periodic_full_booking_data_task(app):
-#     """
-#     Scheduled task entry point to run the new unified FULL booking data JSON backup to Azure.
-#     This is intended to be run periodically (e.g., daily).
-#     """
-#     with app.app_context():
-#         logger = app.logger
-#         logger.info("Scheduler: Starting run_periodic_full_booking_data_task (unified full JSON backup)...")
-#         task_id_for_log = f"periodic_full_booking_data_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-#         try:
-#             success = backup_full_booking_data_json_azure(
-#                 app=app,
-#                 socketio_instance=None,
-#                 task_id=task_id_for_log
-#             )
-#             if success:
-#                 logger.info(f"Scheduler: Unified full booking data backup task (ID: {task_id_for_log}) executed successfully.")
-#             else:
-#                 logger.warning(f"Scheduler: Unified full booking data backup task (ID: {task_id_for_log}) reported issues. Check azure_backup logs.")
-#         except Exception as e:
-#             logger.error(f"Scheduler: Exception during run_periodic_full_booking_data_task (ID: {task_id_for_log}): {e}", exc_info=True)
-#         logger.info(f"Scheduler: run_periodic_full_booking_data_task (ID: {task_id_for_log}) finished.")
+
+def run_periodic_full_booking_data_task(app):
+    """Scheduled task to create a full booking data JSON backup."""
+    with app.app_context():
+        logger = app.logger
+        logger.info(
+            "Scheduler: Starting run_periodic_full_booking_data_task (unified full JSON backup)..."
+        )
+        task_id_for_log = (
+            f"periodic_full_booking_data_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        )
+        try:
+            success = backup_full_bookings_json(app=app, task_id=task_id_for_log)
+            if success:
+                logger.info(
+                    f"Scheduler: Unified full booking data backup task (ID: {task_id_for_log}) executed successfully."
+                )
+            else:
+                logger.warning(
+                    f"Scheduler: Unified full booking data backup task (ID: {task_id_for_log}) reported issues. Check azure_backup logs."
+                )
+        except Exception as e:
+            logger.error(
+                f"Scheduler: Exception during run_periodic_full_booking_data_task (ID: {task_id_for_log}): {e}",
+                exc_info=True,
+            )
+        logger.info(
+            f"Scheduler: run_periodic_full_booking_data_task (ID: {task_id_for_log}) finished."
+        )

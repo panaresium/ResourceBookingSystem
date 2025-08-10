@@ -31,18 +31,15 @@ from routes.gmail_auth import init_gmail_auth_routes # Added for Gmail OAuth flo
 
 # For scheduler
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.jobstores.base import JobLookupError # Added import
-# TODO: Imports for 'run_scheduled_incremental_booking_data_task' and 'run_periodic_full_booking_data_task' commented out as these functions are obsolete in scheduler_tasks.py.
 from scheduler_tasks import (
     cancel_unchecked_bookings,
     apply_scheduled_resource_status_changes,
     run_scheduled_backup_job,
-    # run_scheduled_booking_csv_backup, # LEGACY - Removed
     auto_checkout_overdue_bookings,
     auto_release_unclaimed_bookings,
     send_checkin_reminders,
-    # run_scheduled_incremental_booking_data_task, # New task for unified incrementals
-    # run_periodic_full_booking_data_task # New task for unified periodic fulls
+    run_scheduled_incremental_booking_data_task,
+    run_periodic_full_booking_data_task,
 )
 # Conditional import for azure_backup
 # Only import 'backup_if_changed' as 'perform_startup_restore_sequence' is no longer used here.
@@ -63,14 +60,13 @@ except ImportError as e_import_azure_bifc: # Capture the exception
 
 # Imports for processing downloaded configs during startup restore
 from utils import (
-    load_scheduler_settings, # Added for new setting
-    DEFAULT_FULL_BACKUP_SCHEDULE, # Added for full backup job scheduling
+    load_scheduler_settings,  # Added for new setting
+    DEFAULT_FULL_BACKUP_SCHEDULE,  # Added for full backup job scheduling
     _import_map_configuration_data,
     _import_resource_configurations_data,
     _import_user_configurations_data,
     add_audit_log,
     send_email,
-    load_unified_backup_schedule_settings
 )
 
 # For SQLite pragmas - these functions will be moved here
@@ -451,122 +447,52 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
             # # else: # LEGACY - run_scheduled_booking_csv_backup was commented out
             # #     app.logger.warning("run_scheduled_booking_csv_backup function not found or commented out in scheduler_tasks. Legacy CSV backup job not added.") # This line and related block removed.
 
-            # Load new unified schedule settings
-            # Ensure load_unified_backup_schedule_settings uses current_app or is passed app
-            # For now, assuming it uses current_app which is fine if called within app_context
-            # or if the function itself is designed to fetch current_app.
-            # If app_context is needed: with app.app_context(): unified_schedule_settings = load_unified_backup_schedule_settings()
-            # However, load_unified_backup_schedule_settings uses current_app.config directly, which should be fine here.
-            # Updated: load_unified_backup_schedule_settings now requires 'app' argument.
-            unified_schedule_settings = load_unified_backup_schedule_settings(app)
-            app.logger.info(f"Loaded unified backup schedule settings: {unified_schedule_settings}")
+            # Configure unified booking data backup jobs using simple config flags
+            if app.config.get("UNIFIED_INCREMENTAL_BACKUP_ENABLED", False):
+                try:
+                    interval = int(app.config.get("UNIFIED_INCREMENTAL_BACKUP_INTERVAL_MINUTES", 30))
+                    scheduler.add_job(
+                        func=run_scheduled_incremental_booking_data_task,
+                        trigger="interval",
+                        minutes=interval,
+                        id="unified_incremental_booking_backup_job",
+                        replace_existing=True,
+                        args=[app],
+                    )
+                    app.logger.info(
+                        f"Scheduled unified incremental booking backup job to run every {interval} minutes."
+                    )
+                except Exception as e:
+                    app.logger.error(
+                        f"Error scheduling unified incremental booking backup job: {e}",
+                        exc_info=True,
+                    )
+            else:
+                app.logger.info("Unified incremental booking backup job disabled in configuration.")
 
-            # Remove Old Job Configuration for Incrementals (ID: scheduled_booking_data_protection_job)
-            # This was the previous job for run_scheduled_incremental_booking_data_task
-            # The new logic below will re-add it with a new ID if enabled.
-            # If the old ID was different, adjust here. The old code block for this job is removed.
-            app.logger.info("Attempting to remove old incremental backup job (ID: scheduled_booking_data_protection_job) if it exists.")
-            try:
-                scheduler.remove_job('scheduled_booking_data_protection_job')
-                app.logger.info("Successfully removed old job 'scheduled_booking_data_protection_job' at startup.")
-            except JobLookupError:
-                app.logger.info("Old job 'scheduled_booking_data_protection_job' not found at startup, skipping removal.")
-            except Exception as e:
-                app.logger.error(f"Error removing old job 'scheduled_booking_data_protection_job' at startup: {e}")
-
-            # TODO: Logic dependent on obsolete task 'run_scheduled_incremental_booking_data_task' commented out.
-            # # Configure Unified Incremental Backup Job
-            # if run_scheduled_incremental_booking_data_task:
-            #     incremental_config = unified_schedule_settings.get('unified_incremental_backup', {})
-            #     if incremental_config.get('is_enabled'):
-            #         try:
-            #             interval_minutes = int(incremental_config.get('interval_minutes', 30))
-            #             if interval_minutes <= 0:
-            #                 app.logger.error(f"Invalid interval_minutes ({interval_minutes}) for unified incremental backup. Must be positive. Job not scheduled.")
-            #             else:
-            #                 scheduler.add_job(
-            #                     func=run_scheduled_incremental_booking_data_task,
-            #                     trigger='interval',
-            #                     minutes=interval_minutes,
-            #                     id='unified_incremental_booking_backup_job', # New ID
-            #                     replace_existing=True,
-            #                     args=[app]
-            #                 )
-            #                 app.logger.info(f"Scheduled unified incremental booking backup job to run every {interval_minutes} minutes.")
-            #         except ValueError as e:
-            #             app.logger.error(f"Error parsing interval_minutes for unified incremental backup: {e}. Job not scheduled.", exc_info=True)
-            #         except Exception as e_job_add:
-            #              app.logger.error(f"Error adding unified incremental booking backup job to scheduler: {e_job_add}. Job not scheduled.", exc_info=True)
-            #     else:
-            #         app.logger.info("Unified incremental booking backup is disabled in settings.")
-            # else:
-            #     app.logger.warning("run_scheduled_incremental_booking_data_task function not found. Unified incremental backup job not added.")
-
-            # Remove Old Hardcoded Job for Full Unified Backup (ID: periodic_full_booking_data_job)
-            app.logger.info("Attempting to remove old hardcoded full backup job (ID: periodic_full_booking_data_job) if it exists.")
-            try:
-                scheduler.remove_job('periodic_full_booking_data_job')
-                app.logger.info("Successfully removed old hardcoded job 'periodic_full_booking_data_job' at startup.")
-            except JobLookupError:
-                app.logger.info("Old hardcoded job 'periodic_full_booking_data_job' not found at startup, skipping removal.")
-            except Exception as e:
-                app.logger.error(f"Error removing old hardcoded job 'periodic_full_booking_data_job' at startup: {e}")
-
-            # TODO: Logic dependent on obsolete task 'run_periodic_full_booking_data_task' commented out.
-            # # Configure Unified Full Backup Job
-            # if run_periodic_full_booking_data_task:
-            #     full_config = unified_schedule_settings.get('unified_full_backup', {})
-            #     if full_config.get('is_enabled'):
-            #         schedule_type = full_config.get('schedule_type', 'daily')
-            #         time_of_day_str = full_config.get('time_of_day', '02:00')
-
-            #         try:
-            #             time_parts = time_of_day_str.split(':')
-            #             hour = int(time_parts[0])
-            #             minute = int(time_parts[1])
-            #             if not (0 <= hour <= 23 and 0 <= minute <= 59):
-            #                 raise ValueError("Hour or minute out of range.")
-
-            #             trigger_args = {'hour': hour, 'minute': minute}
-
-            #             if schedule_type == 'weekly':
-            #                 day_of_week = full_config.get('day_of_week') # Should be 0-6
-            #                 if day_of_week is None or not (0 <= int(day_of_week) <= 6):
-            #                     app.logger.error(f"Invalid day_of_week ({day_of_week}) for weekly unified full backup. Must be 0-6. Job not scheduled.")
-            #                     raise ValueError("Invalid day_of_week for weekly schedule.")
-            #                 trigger_args['day_of_week'] = str(day_of_week)
-            #                 app.logger.info(f"Configuring weekly unified full backup: Day {day_of_week} at {hour:02d}:{minute:02d}.")
-            #             elif schedule_type == 'monthly':
-            #                 day_of_month = full_config.get('day_of_month') # Should be 1-31
-            #                 if day_of_month is None or not (1 <= int(day_of_month) <= 31):
-            #                     app.logger.error(f"Invalid day_of_month ({day_of_month}) for monthly unified full backup. Must be 1-31. Job not scheduled.")
-            #                     raise ValueError("Invalid day_of_month for monthly schedule.")
-            #                 trigger_args['day'] = str(day_of_month)
-            #                 app.logger.info(f"Configuring monthly unified full backup: Day {day_of_month} at {hour:02d}:{minute:02d}.")
-            #             elif schedule_type == 'daily':
-            #                  app.logger.info(f"Configuring daily unified full backup at {hour:02d}:{minute:02d}.")
-            #             else:
-            #                 app.logger.error(f"Unknown schedule_type '{schedule_type}' for unified full backup. Job not scheduled.")
-            #                 raise ValueError(f"Unknown schedule_type: {schedule_type}")
-
-            #             scheduler.add_job(
-            #                 func=run_periodic_full_booking_data_task,
-            #                 trigger='cron',
-            #                 id='unified_full_booking_backup_job', # New ID
-            #                 replace_existing=True,
-            #                 args=[app],
-            #                 **trigger_args
-            #             )
-            #             app.logger.info(f"Scheduled unified full booking backup job with type '{schedule_type}' and args {trigger_args}.")
-
-            #         except ValueError as e:
-            #             app.logger.error(f"Error parsing schedule parameters for unified full backup: {e}. Job not scheduled.", exc_info=True)
-            #         except Exception as e_job_add:
-            #             app.logger.error(f"Error adding unified full backup job to scheduler: {e_job_add}. Job not scheduled.", exc_info=True)
-            #     else:
-            #         app.logger.info("Unified full booking backup is disabled in settings.")
-            # else:
-            #     app.logger.warning("run_periodic_full_booking_data_task function not found. Unified full backup job not added.")
+            if app.config.get("UNIFIED_FULL_BACKUP_ENABLED", False):
+                time_of_day = app.config.get("UNIFIED_FULL_BACKUP_TIME_OF_DAY", "02:00")
+                try:
+                    hour, minute = [int(x) for x in time_of_day.split(":")]
+                    scheduler.add_job(
+                        func=run_periodic_full_booking_data_task,
+                        trigger="cron",
+                        id="unified_full_booking_backup_job",
+                        replace_existing=True,
+                        args=[app],
+                        hour=hour,
+                        minute=minute,
+                    )
+                    app.logger.info(
+                        f"Scheduled unified full booking backup job daily at {hour:02d}:{minute:02d}."
+                    )
+                except Exception as e:
+                    app.logger.error(
+                        f"Error scheduling unified full booking backup job: {e}",
+                        exc_info=True,
+                    )
+            else:
+                app.logger.info("Unified full booking backup job disabled in configuration.")
 
             # Add the new auto_checkout_overdue_bookings job
             if auto_checkout_overdue_bookings:

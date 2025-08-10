@@ -160,6 +160,13 @@ AZURE_BOOKING_DATA_PROTECTION_BASE_DIR_NAME = os.environ.get('AZURE_BOOKING_DATA
 # BOOKINGS_CSV_BACKUP_INTERVAL_MINUTES has been removed as it's related to legacy CSV backups.
 
 
+# Unified booking data backup jobs
+UNIFIED_FULL_BACKUP_ENABLED = os.environ.get('UNIFIED_FULL_BACKUP_ENABLED', 'false').lower() in ['true', '1', 'yes']
+UNIFIED_FULL_BACKUP_TIME_OF_DAY = os.environ.get('UNIFIED_FULL_BACKUP_TIME_OF_DAY', '02:00')  # HH:MM 24-hour format
+UNIFIED_INCREMENTAL_BACKUP_ENABLED = os.environ.get('UNIFIED_INCREMENTAL_BACKUP_ENABLED', 'false').lower() in ['true', '1', 'yes']
+UNIFIED_INCREMENTAL_BACKUP_INTERVAL_MINUTES = int(os.environ.get('UNIFIED_INCREMENTAL_BACKUP_INTERVAL_MINUTES', 30))
+
+
 # --- Notification Webhooks ---
 SLACK_WEBHOOK_URL = os.environ.get('SLACK_WEBHOOK_URL')
 TEAMS_WEBHOOK_URL = os.environ.get('TEAMS_WEBHOOK_URL')
