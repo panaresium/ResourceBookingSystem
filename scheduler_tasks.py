@@ -118,22 +118,133 @@ def auto_checkout_overdue_bookings(app_instance=None):
 
 def cancel_unchecked_bookings(app):
     """
-    Placeholder for the scheduled task to cancel bookings that were not checked in
-    within the allowed window.
+    Cancel bookings that have not been checked in within the allowed
+    "grace period" after their start time.
+
+    A booking qualifies for cancellation when all of the following are true:
+      * BookingSettings.enable_check_in_out is enabled.
+      * The booking status is ``approved``.
+      * ``checked_in_at`` is ``NULL``.
+      * The current time is greater than ``start_time + check_in_minutes_after``.
+
+    For each qualifying booking, the status is updated to
+    ``cancelled_by_system`` and an audit log is created.  If the user has an
+    email address, a notification is sent.
     """
+
     with app.app_context():
-        logger = app.logger # Corrected: use app.logger after context
-        logger.info("Scheduler: Task 'cancel_unchecked_bookings' called.")
-        logger.warning("Scheduler: The logic for 'cancel_unchecked_bookings' is not yet fully implemented. This is a placeholder.")
-        # TODO: Implement logic to query 'approved' bookings where:
-    # - check_in_out is enabled (BookingSettings)
-    # - current_time > booking.start_time + check_in_minutes_after (grace period)
-    # - booking.checked_in_at is NULL
-    # For each such booking:
-    # - Update status to 'cancelled_by_system' (or a new status).
-    # - Add an audit log.
-    # - Optionally, send a notification to the user.
-    logger.info("Scheduler: Task 'cancel_unchecked_bookings' finished (placeholder).")
+        logger = app.logger
+        logger.info("Scheduler: Starting cancel_unchecked_bookings task...")
+
+        booking_settings = BookingSettings.query.first()
+        if not booking_settings:
+            logger.warning("Scheduler: BookingSettings not found. Task will not run.")
+            return
+
+        if not booking_settings.enable_check_in_out:
+            logger.info("Scheduler: Check-in/out feature is disabled. Task will not run.")
+            return
+
+        grace_minutes = booking_settings.check_in_minutes_after or 0
+        current_offset_hours = booking_settings.global_time_offset_hours or 0
+
+        effective_now_aware = get_current_effective_time()
+        effective_now_local_naive = effective_now_aware.replace(tzinfo=None)
+        cutoff_time_local_naive = effective_now_local_naive - timedelta(minutes=grace_minutes)
+
+        try:
+            bookings_to_cancel = Booking.query.filter(
+                Booking.status == 'approved',
+                Booking.checked_in_at.is_(None),
+                Booking.start_time < cutoff_time_local_naive
+            ).all()
+        except Exception as e_query:
+            logger.error(f"Scheduler: Error querying for unchecked bookings: {e_query}", exc_info=True)
+            return
+
+        logger.info(f"Scheduler: Found {len(bookings_to_cancel)} booking(s) past check-in grace period to cancel.")
+
+        for booking in bookings_to_cancel:
+            resource_name = booking.resource_booked.name if booking.resource_booked else f"Unknown Resource (ID: {booking.resource_id})"
+            user_name = booking.user_name or "Unknown User"
+
+            try:
+                original_status = booking.status
+                booking.status = 'cancelled_by_system'
+                db.session.add(booking)
+                db.session.commit()
+
+                deadline_local_naive = booking.start_time + timedelta(minutes=grace_minutes)
+                deadline_utc_aware = (deadline_local_naive - timedelta(hours=current_offset_hours)).replace(tzinfo=timezone.utc)
+                audit_details = (
+                    f"Booking ID {booking.id} for resource '{resource_name}' by user '{user_name}' "
+                    f"(original status: {original_status}) cancelled by system due to no check-in. "
+                    f"Check-in deadline (local): {deadline_local_naive.strftime('%Y-%m-%d %H:%M:%S')}, "
+                    f"Deadline (UTC): {deadline_utc_aware.strftime('%Y-%m-%d %H:%M:%S UTC')}."
+                )
+                add_audit_log(action="AUTO_CANCEL_NO_CHECKIN", details=audit_details)
+                logger.info(f"Scheduler: Booking ID {booking.id} status changed to 'cancelled_by_system'. {audit_details}")
+
+                user = User.query.filter_by(username=booking.user_name).first() if booking.user_name else None
+                if user and user.email:
+                    resource = db.session.get(Resource, booking.resource_id)
+                    floor_map_location = "N/A"
+                    floor_map_floor = "N/A"
+                    resource_name_for_email = "Unknown Resource"
+
+                    if resource:
+                        resource_name_for_email = resource.name
+                        if resource.floor_map_id:
+                            floor_map = db.session.get(FloorMap, resource.floor_map_id)
+                            if floor_map:
+                                floor_map_location = floor_map.location or "N/A"
+                                floor_map_floor = floor_map.floor or "N/A"
+
+                    explanation = (
+                        f"This booking was automatically cancelled because it was not checked-in "
+                        f"within {grace_minutes} minutes of its scheduled start time."
+                    )
+                    email_data = {
+                        'user_name': user.username,
+                        'booking_title': booking.title or "N/A",
+                        'resource_name': resource_name_for_email,
+                        'start_time_local': booking.start_time.strftime('%Y-%m-%d %H:%M'),
+                        'end_time_local': booking.end_time.strftime('%Y-%m-%d %H:%M'),
+                        'check_in_deadline_local': deadline_local_naive.strftime('%Y-%m-%d %H:%M:%S'),
+                        'location': floor_map_location,
+                        'floor': floor_map_floor,
+                        'explanation': explanation,
+                    }
+                    subject = (
+                        f"Booking Automatically Cancelled (No Check-in): "
+                        f"{email_data.get('resource_name', 'N/A')} - {email_data.get('booking_title', 'N/A')}"
+                    )
+                    html_body = render_template('email/booking_auto_cancelled_no_checkin.html', **email_data)
+                    text_body = render_template('email/booking_auto_cancelled_no_checkin_text.html', **email_data)
+                    send_email(to_address=user.email, subject=subject, body=text_body, html_body=html_body)
+                    logger.info(f"Scheduler: Cancellation email initiated for booking ID {booking.id} to {user.email}.")
+                elif booking.user_name:
+                    logger.warning(
+                        f"Scheduler: User {booking.user_name} not found or has no email. Skipping cancellation email for booking {booking.id}."
+                    )
+                else:
+                    logger.warning(
+                        f"Scheduler: Booking ID {booking.id} has no associated user_name. Skipping cancellation email."
+                    )
+            except Exception as e_booking:
+                db.session.rollback()
+                logger.error(
+                    f"Scheduler: Error processing cancellation for booking ID {booking.id}: {e_booking}",
+                    exc_info=True,
+                )
+                add_audit_log(
+                    action="AUTO_CANCEL_NO_CHECKIN_FAILED",
+                    details=(
+                        f"Scheduler: Failed to cancel booking ID {booking.id} for '{resource_name}'. Error: {str(e_booking)}"
+                    ),
+                )
+
+        logger.info("Scheduler: cancel_unchecked_bookings task finished.")
 
 def apply_scheduled_resource_status_changes(app=None):
     """
