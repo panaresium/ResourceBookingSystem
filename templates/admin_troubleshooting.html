@@ -460,7 +460,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const label = document.createElement('label');
         label.htmlFor = "db_browser_per_page_select";
         label.className = 'form-label me-2';
-        label.textContent = 'Per Page:'; // TODO: Localize
+        label.textContent = "{{ _('Per Page:') }}";
         const select = document.createElement('select');
         select.id = "db_browser_per_page_select";
         select.className = 'form-select form-select-sm d-inline-block';
