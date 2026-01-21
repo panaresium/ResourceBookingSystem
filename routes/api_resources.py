@@ -4,6 +4,7 @@ from datetime import datetime, date, time, timedelta, timezone
 from flask import Blueprint, jsonify, request, url_for, current_app
 from flask_login import login_required, current_user
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 from werkzeug.utils import secure_filename
 import secrets # For PIN generation
 import string # For PIN generation
@@ -24,7 +25,10 @@ api_resources_bp = Blueprint('api_resources', __name__, url_prefix='/api')
 def get_resources():
     logger = current_app.logger
     try:
-        query = Resource.query.filter_by(status='published')
+        query = Resource.query.options(
+            joinedload(Resource.pins),
+            joinedload(Resource.roles)
+        ).filter_by(status='published')
         capacity = request.args.get('capacity', type=int)
         if capacity is not None:
             query = query.filter(Resource.capacity >= capacity)
@@ -578,7 +582,10 @@ def get_all_resources_admin():
     logger = current_app.logger
     try:
         map_id_str = request.args.get('map_id')
-        query = Resource.query
+        query = Resource.query.options(
+            joinedload(Resource.pins),
+            joinedload(Resource.roles)
+        )
 
         if map_id_str:
             try:
@@ -819,7 +826,11 @@ def upload_resource_image_admin(resource_id):
 def export_all_resources_admin():
     logger = current_app.logger
     try:
-        resources_list = [resource_to_dict(r) for r in Resource.query.all()]
+        resources = Resource.query.options(
+            joinedload(Resource.pins),
+            joinedload(Resource.roles)
+        ).all()
+        resources_list = [resource_to_dict(r) for r in resources]
         response = jsonify(resources_list)
         response.headers['Content-Disposition'] = 'attachment; filename=resources_export.json'
         response.mimetype = 'application/json'
