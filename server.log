@@ -1,0 +1,63 @@
+[2026-01-20 06:05:41 +0000] [6699] [INFO] Starting gunicorn 23.0.0
+[2026-01-20 06:05:41 +0000] [6699] [ERROR] Connection in use: ('0.0.0.0', 5000)
+[2026-01-20 06:05:41 +0000] [6699] [ERROR] connection to ('0.0.0.0', 5000) failed: [Errno 98] Address already in use
+[2026-01-20 06:05:42 +0000] [6699] [INFO] Listening at: http://0.0.0.0:5000 (6699)
+[2026-01-20 06:05:42 +0000] [6699] [INFO] Using worker: gthread
+[2026-01-20 06:05:42 +0000] [6815] [INFO] Booting worker with pid: 6815
+[2026-01-20 06:05:42 +0000] [6816] [INFO] Booting worker with pid: 6816
+[2026-01-20 06:05:44,028] INFO in app_factory: ERROR_DIAG: APP_FACTORY - create_app function entered.
+INFO:root:Flask app.logger level set to INFO (effective: 20).
+INFO:root:Cleared existing handlers from app.logger.
+INFO:root:Added new explicit StreamHandler to app.logger.
+INFO:root:Ensured app.logger.propagate is False.
+INFO:root:Application log level is INFO. Setting verbose Azure SDK loggers to WARNING.
+[2026-01-20 06:05:44,045] INFO in app_factory: SQLite database configured for WAL mode and related settings via factory.
+[2026-01-20 06:05:44,063] INFO in app_factory: ERROR_DIAG: APP_FACTORY - create_app function entered.
+INFO:root:Flask app.logger level set to INFO (effective: 20).
+INFO:root:Cleared existing handlers from app.logger.
+INFO:root:Added new explicit StreamHandler to app.logger.
+INFO:root:Ensured app.logger.propagate is False.
+INFO:root:Application log level is INFO. Setting verbose Azure SDK loggers to WARNING.
+[2026-01-20 06:05:44,080] INFO in app_factory: SQLite database configured for WAL mode and related settings via factory.
+INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+[2026-01-20 06:05:44,151] INFO in app_factory: Scheduled full system backup job (scheduled_full_system_backup_job) is disabled in settings.
+[2026-01-20 06:05:44,151] INFO in app_factory: Unified incremental booking backup job disabled in configuration.
+[2026-01-20 06:05:44,151] INFO in app_factory: Unified full booking backup job disabled in configuration.
+INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+[2026-01-20 06:05:44,151] INFO in app_factory: Scheduled auto_checkout_overdue_bookings job: Interval 15 minutes.
+INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+[2026-01-20 06:05:44,151] INFO in app_factory: Scheduled auto_release_unclaimed_bookings job: Interval 10 minutes.
+INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+[2026-01-20 06:05:44,151] INFO in app_factory: Scheduled send_checkin_reminders job: Interval 5 minutes.
+INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+INFO:apscheduler.scheduler:Added job "cancel_unchecked_bookings" to job store "default"
+INFO:apscheduler.scheduler:Added job "apply_scheduled_resource_status_changes" to job store "default"
+INFO:apscheduler.scheduler:Added job "auto_checkout_overdue_bookings" to job store "default"
+INFO:apscheduler.scheduler:Added job "auto_release_unclaimed_bookings" to job store "default"
+INFO:apscheduler.scheduler:Added job "send_checkin_reminders" to job store "default"
+INFO:apscheduler.scheduler:Added job "backup_if_changed" to job store "default"
+INFO:apscheduler.scheduler:Scheduler started
+[2026-01-20 06:05:44,153] INFO in app_factory: Background scheduler started.
+[2026-01-20 06:05:44,153] INFO in app_factory: Flask app created and configured via factory.
+INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+[2026-01-20 06:05:44,185] INFO in app_factory: Scheduled full system backup job (scheduled_full_system_backup_job) is disabled in settings.
+[2026-01-20 06:05:44,186] INFO in app_factory: Unified incremental booking backup job disabled in configuration.
+[2026-01-20 06:05:44,186] INFO in app_factory: Unified full booking backup job disabled in configuration.
+INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+[2026-01-20 06:05:44,186] INFO in app_factory: Scheduled auto_checkout_overdue_bookings job: Interval 15 minutes.
+INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+[2026-01-20 06:05:44,186] INFO in app_factory: Scheduled auto_release_unclaimed_bookings job: Interval 10 minutes.
+INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+[2026-01-20 06:05:44,186] INFO in app_factory: Scheduled send_checkin_reminders job: Interval 5 minutes.
+INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
+INFO:apscheduler.scheduler:Added job "cancel_unchecked_bookings" to job store "default"
+INFO:apscheduler.scheduler:Added job "apply_scheduled_resource_status_changes" to job store "default"
+INFO:apscheduler.scheduler:Added job "auto_checkout_overdue_bookings" to job store "default"
+INFO:apscheduler.scheduler:Added job "auto_release_unclaimed_bookings" to job store "default"
+INFO:apscheduler.scheduler:Added job "send_checkin_reminders" to job store "default"
+INFO:apscheduler.scheduler:Added job "backup_if_changed" to job store "default"
+INFO:apscheduler.scheduler:Scheduler started
+[2026-01-20 06:05:44,188] INFO in app_factory: Background scheduler started.
+[2026-01-20 06:05:44,188] INFO in app_factory: Flask app created and configured via factory.
