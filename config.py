@@ -34,9 +34,13 @@ WTF_CSRF_SECRET_KEY = os.environ.get('WTF_CSRF_SECRET_KEY', 'another_secret_for_
 
 # --- Database Configuration ---
 # Use AZURE_SQL_CONNECTION_STRING if available, otherwise DATABASE_URL, finally local SQLite.
+database_url = os.environ.get('DATABASE_URL')
+if database_url and database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
 SQLALCHEMY_DATABASE_URI = os.environ.get(
     'AZURE_SQL_CONNECTION_STRING',
-    os.environ.get('DATABASE_URL', f"sqlite:///{basedir / 'data' / 'site.db'}")
+    database_url or f"sqlite:///{basedir / 'data' / 'site.db'}"
 )
 SQLALCHEMY_TRACK_MODIFICATIONS = False
 
@@ -46,6 +50,13 @@ BABEL_DEFAULT_LOCALE = 'en'
 # Absolute path for translations directory
 BABEL_TRANSLATION_DIRECTORIES = str(basedir / 'translations')
 
+
+# --- Cloudflare R2 Configuration ---
+R2_ACCESS_KEY = os.environ.get('R2_ACCESS_KEY')
+R2_SECRET_KEY = os.environ.get('R2_SECRET_KEY')
+R2_BUCKET_NAME = os.environ.get('R2_BUCKET_NAME')
+R2_ENDPOINT_URL = os.environ.get('R2_ENDPOINT_URL')
+STORAGE_PROVIDER = os.environ.get('STORAGE_PROVIDER', 'r2' if R2_ACCESS_KEY else 'local')
 
 # --- File Upload Configurations ---
 # Define base upload folder, then specific subfolders.

@@ -12,6 +12,7 @@ from sqlalchemy.sql import func as sqlfunc # Added for explicit use of sqlfunc.t
 
 # Local imports
 from extensions import db
+from r2_storage import r2_storage
 from models import FloorMap, Resource, Booking, Role # Role removed if no longer needed
 from auth import permission_required
 # Assuming these utils will be moved to utils.py or are already there
@@ -161,8 +162,16 @@ def get_maps_availability():
 def get_public_floor_maps():
     try:
         maps = FloorMap.query.all()
+        storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
         maps_list = []
         for m in maps:
+            image_url = None
+            if m.image_filename:
+                if storage_provider == 'r2':
+                    image_url = r2_storage.generate_presigned_url(m.image_filename, 'floor_map_uploads')
+                else:
+                    image_url = url_for('static', filename=f'floor_map_uploads/{m.image_filename}', _external=False)
+
             maps_list.append({
                 'id': m.id,
                 'name': m.name,
@@ -171,7 +180,7 @@ def get_public_floor_maps():
                 'floor': m.floor,
                 'offset_x': m.offset_x,
                 'offset_y': m.offset_y,
-                'image_url': url_for('static', filename=f'floor_map_uploads/{m.image_filename}', _external=False) # Ensure local URL
+                'image_url': image_url
             })
         return jsonify(maps_list), 200
     except Exception as e:
@@ -229,26 +238,34 @@ def upload_floor_map():
             current_app.logger.warning(f"Attempt to upload map with duplicate name: {map_name}")
             return jsonify({'error': 'A map with this name already exists.'}), 409
 
+        storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
         file_path = None
         try:
-            # Use current_app.config for UPLOAD_FOLDER
-            upload_folder = current_app.config.get('UPLOAD_FOLDER', os.path.join(current_app.root_path, 'static', 'floor_map_uploads'))
-            if not os.path.exists(upload_folder): # Ensure folder exists
-                os.makedirs(upload_folder)
+            if storage_provider == 'r2':
+                if not r2_storage.upload_file(file, filename, 'floor_map_uploads'):
+                    raise Exception("Failed to upload map to R2.")
 
-            # Use standardized filename for saving
-            file_path = os.path.join(upload_folder, filename) # Standardized
-            current_app.logger.info(f"Saving uploaded file to: {file_path}")
-            file.save(file_path)
+                image_url = r2_storage.generate_presigned_url(filename, 'floor_map_uploads')
+            else:
+                # Use current_app.config for UPLOAD_FOLDER
+                upload_folder = current_app.config.get('UPLOAD_FOLDER', os.path.join(current_app.root_path, 'static', 'floor_map_uploads'))
+                if not os.path.exists(upload_folder): # Ensure folder exists
+                    os.makedirs(upload_folder)
 
-            if save_floor_map_to_share: # Conditional Azure upload
-                try:
-                    current_app.logger.info(f"Attempting to save '{filename}' to Azure File Share.")
-                    save_floor_map_to_share(file_path, filename) # Standardized
-                    current_app.logger.info(f"Successfully saved '{filename}' to Azure File Share.")
-                except Exception as azure_e:
-                    current_app.logger.exception(f'Failed to upload floor map to Azure File Share: {azure_e}')
-                    # Decide if this is a critical failure or just a warning
+                # Use standardized filename for saving
+                file_path = os.path.join(upload_folder, filename) # Standardized
+                current_app.logger.info(f"Saving uploaded file to: {file_path}")
+                file.save(file_path)
+                image_url = url_for('static', filename=f'floor_map_uploads/{filename}', _external=False)
+
+                if save_floor_map_to_share: # Conditional Azure upload
+                    try:
+                        current_app.logger.info(f"Attempting to save '{filename}' to Azure File Share.")
+                        save_floor_map_to_share(file_path, filename) # Standardized
+                        current_app.logger.info(f"Successfully saved '{filename}' to Azure File Share.")
+                    except Exception as azure_e:
+                        current_app.logger.exception(f'Failed to upload floor map to Azure File Share: {azure_e}')
+                        # Decide if this is a critical failure or just a warning
 
             current_app.logger.info(f"Creating FloorMap object with name='{map_name}', image_filename='{filename}', location='{location}', floor='{floor}', offset_x={offset_x}, offset_y={offset_y}")
             new_map = FloorMap(name=map_name, image_filename=filename, # Use standardized filename
@@ -269,11 +286,11 @@ def upload_floor_map():
                 'id': new_map.id, 'name': new_map.name, 'image_filename': new_map.image_filename, # This is the standardized filename
                 'location': new_map.location, 'floor': new_map.floor,
                 'offset_x': new_map.offset_x, 'offset_y': new_map.offset_y, # Already included
-                'image_url': url_for('static', filename=f'floor_map_uploads/{new_map.image_filename}', _external=False) # Uses standardized filename
+                'image_url': image_url # Uses standardized filename
             }), 201
         except Exception as e:
             db.session.rollback()
-            if file_path and os.path.exists(file_path):
+            if storage_provider != 'r2' and file_path and os.path.exists(file_path):
                  os.remove(file_path)
                  current_app.logger.info(f"Cleaned up partially uploaded file: {file_path} (original: {original_filename})")
             current_app.logger.error(f"Error during DB commit or file handling for map '{map_name}' (standardized filename: '{filename}'). Exception: {str(e)}", exc_info=True)
@@ -291,13 +308,21 @@ def upload_floor_map():
 def get_floor_maps():
     try:
         maps = FloorMap.query.all()
+        storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
         maps_list = []
         for m in maps:
+            image_url = None
+            if m.image_filename:
+                if storage_provider == 'r2':
+                    image_url = r2_storage.generate_presigned_url(m.image_filename, 'floor_map_uploads')
+                else:
+                    image_url = url_for('static', filename=f'floor_map_uploads/{m.image_filename}', _external=False)
+
             maps_list.append({
                 'id': m.id, 'name': m.name, 'image_filename': m.image_filename,
                 'location': m.location, 'floor': m.floor,
                 'offset_x': m.offset_x, 'offset_y': m.offset_y,
-                'image_url': url_for('static', filename=f'floor_map_uploads/{m.image_filename}', _external=False)
+                'image_url': image_url
                 # 'assigned_role_ids' removed
             })
         current_app.logger.info(f"Admin {current_user.username} fetched all floor maps.") # Log message reverted
@@ -329,15 +354,19 @@ def delete_floor_map(map_id):
         db.session.delete(floor_map)
 
         if floor_map.image_filename:
-            image_path = os.path.join(upload_folder, floor_map.image_filename)
-            try:
-                if os.path.exists(image_path):
-                    os.remove(image_path)
-                    current_app.logger.info(f"Successfully deleted map image file: {image_path}")
-                else:
-                    current_app.logger.warning(f"Map image file not found for deletion: {image_path}")
-            except OSError as e_os:
-                current_app.logger.error(f"Error deleting map image file {image_path}: {e_os}", exc_info=True)
+            storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
+            if storage_provider == 'r2':
+                r2_storage.delete_file(floor_map.image_filename, 'floor_map_uploads')
+            else:
+                image_path = os.path.join(upload_folder, floor_map.image_filename)
+                try:
+                    if os.path.exists(image_path):
+                        os.remove(image_path)
+                        current_app.logger.info(f"Successfully deleted map image file: {image_path}")
+                    else:
+                        current_app.logger.warning(f"Map image file not found for deletion: {image_path}")
+                except OSError as e_os:
+                    current_app.logger.error(f"Error deleting map image file {image_path}: {e_os}", exc_info=True)
 
         db.session.commit()
         current_app.logger.info(f"Floor map ID {map_id} ('{map_name_for_log}') and image '{image_filename_for_log}' deleted by {current_user.username}.")
@@ -445,12 +474,20 @@ def import_map_configuration():
                     image_save_path = os.path.join(upload_folder_maps, s_filename)
                     try:
                         image_data = zip_ref.read(member_name)
-                        with open(image_save_path, 'wb') as f_img:
-                            f_img.write(image_data)
-                        current_app.logger.info(f"Extracted and saved map image: {s_filename} to {image_save_path}")
-                        extracted_images_count += 1
+                        storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
+                        if storage_provider == 'r2':
+                            if r2_storage.upload_file(io.BytesIO(image_data), s_filename, 'floor_map_uploads'):
+                                current_app.logger.info(f"Extracted and uploaded map image to R2: {s_filename}")
+                                extracted_images_count += 1
+                            else:
+                                current_app.logger.error(f"Failed to upload image '{s_filename}' to R2.")
+                        else:
+                            with open(image_save_path, 'wb') as f_img:
+                                f_img.write(image_data)
+                            current_app.logger.info(f"Extracted and saved map image: {s_filename} to {image_save_path}")
+                            extracted_images_count += 1
                     except Exception as e_img_save:
-                        current_app.logger.error(f"Error saving image '{s_filename}' from ZIP to '{image_save_path}': {e_img_save}", exc_info=True)
+                        current_app.logger.error(f"Error saving image '{s_filename}' from ZIP: {e_img_save}", exc_info=True)
                         # Decide if this is a critical error. For now, log and continue.
                         # Could collect these errors and report them in summary.
 
@@ -501,9 +538,17 @@ def get_map_details(map_id):
             current_app.logger.warning(f"Map details requested for non-existent map ID: {map_id}")
             return jsonify({'error': 'Floor map not found.'}), 404
 
+        storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
+        map_image_url = None
+        if floor_map.image_filename:
+            if storage_provider == 'r2':
+                map_image_url = r2_storage.generate_presigned_url(floor_map.image_filename, 'floor_map_uploads')
+            else:
+                map_image_url = url_for('static', filename=f'floor_map_uploads/{floor_map.image_filename}', _external=False)
+
         map_details_response = {
             'id': floor_map.id, 'name': floor_map.name,
-            'image_url': url_for('static', filename=f'floor_map_uploads/{floor_map.image_filename}', _external=False),
+            'image_url': map_image_url,
             'location': floor_map.location, 'floor': floor_map.floor,
             'offset_x': floor_map.offset_x, 'offset_y': floor_map.offset_y
         }
@@ -580,10 +625,17 @@ def get_map_details(map_id):
                               'start_time': b.start_time.strftime('%H:%M:%S'),
                               'end_time': b.end_time.strftime('%H:%M:%S')} for b in bookings_on_date]
 
+            resource_image_url = None
+            if resource.image_filename:
+                if storage_provider == 'r2':
+                    resource_image_url = r2_storage.generate_presigned_url(resource.image_filename, 'resource_uploads')
+                else:
+                    resource_image_url = url_for('static', filename=f'resource_uploads/{resource.image_filename}', _external=False)
+
             resource_info = {
                 'id': resource.id, 'name': resource.name, 'capacity': resource.capacity,
                 'equipment': resource.equipment,
-                'image_url': url_for('static', filename=f'resource_uploads/{resource.image_filename}', _external=False) if resource.image_filename else None,
+                'image_url': resource_image_url,
                 'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
                 'booking_restriction': resource.booking_restriction, 'status': resource.status,
                 'published_at': resource.published_at.isoformat() if resource.published_at else None,
