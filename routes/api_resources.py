@@ -11,6 +11,7 @@ import string # For PIN generation
 
 # Assuming db is initialized in extensions.py
 from extensions import db
+from r2_storage import r2_storage
 # Assuming models are defined in models.py
 from models import User, Resource, Booking, FloorMap, Role, ResourcePIN, BookingSettings # Added User, Role, ResourcePIN, BookingSettings
 # Assuming utility functions are in utils.py
@@ -752,8 +753,12 @@ def delete_resource_admin(resource_id):
     resource_name_for_log = resource.name
     try:
         if resource.image_filename:
-            old_path = os.path.join(current_app.config['RESOURCE_UPLOAD_FOLDER'], resource.image_filename)
-            if os.path.exists(old_path): os.remove(old_path)
+            storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
+            if storage_provider == 'r2':
+                r2_storage.delete_file(resource.image_filename, 'resource_uploads')
+            else:
+                old_path = os.path.join(current_app.config['RESOURCE_UPLOAD_FOLDER'], resource.image_filename)
+                if os.path.exists(old_path): os.remove(old_path)
         db.session.delete(resource) # Bookings cascade delete
         db.session.commit()
         add_audit_log(action="DELETE_RESOURCE", details=f"Resource ID {resource_id} ('{resource_name_for_log}') deleted by {current_user.username}.")
@@ -800,21 +805,43 @@ def upload_resource_image_admin(resource_id):
         # if existing_by_filename and existing_by_filename.id != resource_id:
         #     return jsonify({'error': 'A resource with this image filename already exists.'}), 409
 
-        file_path = os.path.join(current_app.config['RESOURCE_UPLOAD_FOLDER'], filename)
-        old_image_path = None
-        if resource.image_filename and resource.image_filename != filename:
-             old_image_path = os.path.join(current_app.config['RESOURCE_UPLOAD_FOLDER'], resource.image_filename)
+        storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
+        file_path = None # Initialize for potential cleanup use
+
         try:
-            file.save(file_path)
-            resource.image_filename = filename
-            db.session.commit()
-            if old_image_path and os.path.exists(old_image_path):
-                os.remove(old_image_path)
-            add_audit_log(action="UPLOAD_RESOURCE_IMAGE", details=f"Image for resource ID {resource.id} uploaded by {current_user.username}.")
-            return jsonify({'message': 'Image uploaded.', 'image_url': url_for('static', filename=f'resource_uploads/{filename}')}), 200
+            if storage_provider == 'r2':
+                # Upload to R2
+                if r2_storage.upload_file(file, filename, 'resource_uploads'):
+                    # Delete old image from R2 if it exists and is different
+                    if resource.image_filename and resource.image_filename != filename:
+                        r2_storage.delete_file(resource.image_filename, 'resource_uploads')
+
+                    resource.image_filename = filename
+                    db.session.commit()
+
+                    image_url = r2_storage.generate_presigned_url(filename, 'resource_uploads')
+                    add_audit_log(action="UPLOAD_RESOURCE_IMAGE", details=f"Image for resource ID {resource.id} uploaded to R2 by {current_user.username}.")
+                    return jsonify({'message': 'Image uploaded.', 'image_url': image_url}), 200
+                else:
+                    raise Exception("R2 Upload failed")
+            else:
+                # Local Storage
+                file_path = os.path.join(current_app.config['RESOURCE_UPLOAD_FOLDER'], filename)
+                old_image_path = None
+                if resource.image_filename and resource.image_filename != filename:
+                     old_image_path = os.path.join(current_app.config['RESOURCE_UPLOAD_FOLDER'], resource.image_filename)
+
+                file.save(file_path)
+                resource.image_filename = filename
+                db.session.commit()
+                if old_image_path and os.path.exists(old_image_path):
+                    os.remove(old_image_path)
+                add_audit_log(action="UPLOAD_RESOURCE_IMAGE", details=f"Image for resource ID {resource.id} uploaded by {current_user.username}.")
+                return jsonify({'message': 'Image uploaded.', 'image_url': url_for('static', filename=f'resource_uploads/{filename}')}), 200
         except Exception as e:
             db.session.rollback()
-            if os.path.exists(file_path): os.remove(file_path) # Clean up if save failed
+            if storage_provider != 'r2' and file_path and os.path.exists(file_path):
+                 os.remove(file_path) # Clean up if save failed
             logger.exception(f"Error uploading image for resource {resource_id}:")
             return jsonify({'error': 'Failed to upload image.'}), 500
     else:
@@ -1173,13 +1200,18 @@ def delete_resources_bulk_admin():
 
         if image_filename_for_log:
             try:
-                # Use RESOURCE_IMAGE_UPLOAD_FOLDER from config.py
-                image_path = os.path.join(current_app.config['RESOURCE_IMAGE_UPLOAD_FOLDER'], image_filename_for_log)
-                if os.path.exists(image_path):
-                    os.remove(image_path)
-                    logger.info(f"Successfully deleted image file {image_path} for resource ID {resource_id} ('{resource_name_for_log}').")
+                storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
+                if storage_provider == 'r2':
+                    r2_storage.delete_file(image_filename_for_log, 'resource_uploads')
+                    logger.info(f"Successfully deleted R2 image file {image_filename_for_log} for resource ID {resource_id}.")
                 else:
-                    logger.warning(f"Image file {image_path} not found for resource ID {resource_id} ('{resource_name_for_log}').")
+                    # Use RESOURCE_IMAGE_UPLOAD_FOLDER from config.py
+                    image_path = os.path.join(current_app.config['RESOURCE_IMAGE_UPLOAD_FOLDER'], image_filename_for_log)
+                    if os.path.exists(image_path):
+                        os.remove(image_path)
+                        logger.info(f"Successfully deleted image file {image_path} for resource ID {resource_id} ('{resource_name_for_log}').")
+                    else:
+                        logger.warning(f"Image file {image_path} not found for resource ID {resource_id} ('{resource_name_for_log}').")
             except Exception as e_img:
                 logger.error(f"Error deleting image file for resource ID {resource_id} ('{resource_name_for_log}'): {str(e_img)}")
                 # Do not add to errors list for API response, as DB deletion is more critical

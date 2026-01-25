@@ -28,6 +28,8 @@ from routes.admin_api_maintenance import admin_api_maintenance_bp
 from routes.api_system_settings import init_api_system_settings_routes
 from routes.api_public import init_api_public_routes
 from routes.gmail_auth import init_gmail_auth_routes # Added for Gmail OAuth flow
+from routes.legacy_file_proxy import init_legacy_file_proxy_routes
+from r2_storage import r2_storage
 
 # For scheduler
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -118,6 +120,9 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
 
     # 1. Load Configuration
     app.config.from_object(config_object)
+
+    # Initialize R2 Storage
+    r2_storage.init_app(app)
 
     # Add ProxyFix middleware
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
@@ -293,6 +298,7 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
     init_api_system_settings_routes(app) # Register new blueprint
     init_api_public_routes(app)
     init_gmail_auth_routes(app) # Added for Gmail OAuth flow
+    init_legacy_file_proxy_routes(app)
 
     # 8. Register Error Handlers - Skip if testing
     if not testing:

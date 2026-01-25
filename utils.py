@@ -23,8 +23,10 @@ import io
 import zipfile
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+import boto3 # For S3/R2 check if needed explicitly, though r2_storage should handle it
 
 from extensions import db
+from r2_storage import r2_storage
 from models import AuditLog, User, Resource, FloorMap, Role, Booking, BookingSettings, ResourcePIN # Ensure Role and ResourcePIN are imported
 from sqlalchemy import func, exc
 from sqlalchemy.sql import func as sqlfunc
@@ -422,6 +424,14 @@ def add_audit_log(action: str, details: str, user_id: int = None, username: str 
 def resource_to_dict(resource: Resource) -> dict:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
 
+    storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
+    image_url = None
+    if resource.image_filename:
+        if storage_provider == 'r2':
+            image_url = r2_storage.generate_presigned_url(resource.image_filename, 'resource_uploads')
+        else:
+            image_url = url_for('static', filename=f'resource_uploads/{resource.image_filename}', _external=False)
+
     # Prepare resource_pins data
     resource_pins_list = []
     if hasattr(resource, 'pins'): # Check if the relationship exists
@@ -443,6 +453,7 @@ def resource_to_dict(resource: Resource) -> dict:
         'tags': resource.tags,
         'booking_restriction': resource.booking_restriction,
         'image_filename': resource.image_filename, # Changed from image_url to image_filename
+        'image_url': image_url, # Added image_url
         'published_at': resource.published_at.isoformat() if resource.published_at else None,
         'allowed_user_ids': resource.allowed_user_ids, # Assuming this is already a string or None
         'roles': [{'id': r.id, 'name': r.name} for r in resource.roles],
@@ -479,11 +490,34 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
             logger.warning(f"UPLOAD_FOLDER_MAPS not set, defaulting to: {upload_folder_maps}")
 
         image_path = os.path.join(upload_folder_maps, floor_map.image_filename)
-        if not os.path.exists(image_path):
-            logger.error(f"Floor map image file not found at {image_path}")
-            return None
 
-        img = Image.open(image_path)
+        # Check storage provider
+        storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
+
+        if storage_provider == 'r2':
+            # Download from R2 to memory
+            try:
+                # Assuming r2_storage is available and initialized
+                # We need to access the underlying client or add a download method to R2Storage
+                # For now, let's assume we can add a download method or access client
+                if not r2_storage.client:
+                     logger.error("R2 client not initialized for generate_booking_image")
+                     return None
+
+                key = f"floor_map_uploads/{floor_map.image_filename}"
+                file_stream = io.BytesIO()
+                r2_storage.client.download_fileobj(r2_storage.bucket_name, key, file_stream)
+                file_stream.seek(0)
+                img = Image.open(file_stream)
+                logger.info(f"Downloaded floor map image from R2: {key}")
+            except Exception as e:
+                logger.error(f"Error downloading floor map from R2: {e}")
+                return None
+        else:
+            if not os.path.exists(image_path):
+                logger.error(f"Floor map image file not found at {image_path}")
+                return None
+            img = Image.open(image_path)
 
         # Parse coordinates from input string (these are relative to ref_width, ref_height)
         try:
@@ -1052,6 +1086,8 @@ def _get_map_configuration_data_zip():
 
             logger.info(f"Using image upload folder: {upload_folder_maps}")
 
+            storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
+
             for filename in image_filenames:
                 if not filename or not isinstance(filename, str): # Basic validation
                     logger.warning(f"Invalid image filename found: {filename}. Skipping.")
@@ -1063,17 +1099,30 @@ def _get_map_configuration_data_zip():
                 secure_filename = filename # Placeholder if further sanitization like werkzeug.secure_filename is needed
                                           # but that's typically for *saving* uploads, not archive paths.
 
-                image_path = os.path.join(upload_folder_maps, secure_filename)
-
-                if os.path.exists(image_path) and os.path.isfile(image_path):
+                if storage_provider == 'r2':
                     try:
-                        with open(image_path, 'rb') as f_img:
-                            zip_file.writestr(secure_filename, f_img.read())
-                        logger.debug(f"Added image {secure_filename} to ZIP from {image_path}.")
-                    except Exception as e_img:
-                        logger.error(f"Error reading image file {secure_filename} from {image_path}: {e_img}", exc_info=True)
+                        key = f"floor_map_uploads/{secure_filename}"
+                        file_stream = io.BytesIO()
+                        if r2_storage.client:
+                            r2_storage.client.download_fileobj(r2_storage.bucket_name, key, file_stream)
+                            zip_file.writestr(secure_filename, file_stream.getvalue())
+                            logger.debug(f"Added image {secure_filename} to ZIP from R2.")
+                        else:
+                            logger.error("R2 client not initialized during ZIP export.")
+                    except Exception as e_r2:
+                        logger.error(f"Error downloading image {secure_filename} from R2 for ZIP: {e_r2}")
                 else:
-                    logger.warning(f"Map image file {secure_filename} not found or is not a file at {image_path} during ZIP export.")
+                    image_path = os.path.join(upload_folder_maps, secure_filename)
+
+                    if os.path.exists(image_path) and os.path.isfile(image_path):
+                        try:
+                            with open(image_path, 'rb') as f_img:
+                                zip_file.writestr(secure_filename, f_img.read())
+                            logger.debug(f"Added image {secure_filename} to ZIP from {image_path}.")
+                        except Exception as e_img:
+                            logger.error(f"Error reading image file {secure_filename} from {image_path}: {e_img}", exc_info=True)
+                    else:
+                        logger.warning(f"Map image file {secure_filename} not found or is not a file at {image_path} during ZIP export.")
 
         zip_buffer.seek(0)
         zip_filename = 'map_configuration_export.zip'
