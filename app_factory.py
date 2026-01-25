@@ -316,14 +316,23 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
         try:
             # We need to be careful about DB not existing yet or table not existing
             # If table doesn't exist, we definitely need setup (or at least migrations).
-            # But here we assume migrations run, just data missing.
             from models import User
+            from sqlalchemy.exc import OperationalError, ProgrammingError
+
             # We specifically look for an admin.
-            admin_exists = db.session.query(User.id).filter_by(is_admin=True).first() is not None
-            if not admin_exists:
+            # Using try/except within the query execution to catch missing tables
+            try:
+                admin_exists = db.session.query(User.id).filter_by(is_admin=True).first() is not None
+                if not admin_exists:
+                    return redirect(url_for('setup.setup_system'))
+            except (OperationalError, ProgrammingError) as e:
+                # Table might not exist. This is a critical setup case.
+                app.logger.warning(f"Database check failed (tables likely missing): {e}. Redirecting to setup.")
                 return redirect(url_for('setup.setup_system'))
-        except Exception:
+
+        except Exception as e:
             # If DB error (e.g. table missing), redirect to setup where db.create_all() can fix it
+            app.logger.error(f"Unexpected error in setup check: {e}")
             return redirect(url_for('setup.setup_system'))
 
     # 8. Register Error Handlers - Skip if testing
