@@ -7,26 +7,22 @@ PORT=${PORT:-8080}
 echo "INFO: Starting docker-entrypoint.sh..."
 
 # Run database migrations
-echo "INFO: Running database migrations..."
+echo "INFO: Attempting database migrations..."
+# We allow this to fail (e.g. if DB is empty or fresh),
+# because the app logic now redirects to /setup which handles initialization (db.create_all).
+# OR if migrations are just applying updates to an existing schema.
 if flask db upgrade; then
     echo "INFO: Database migrations completed successfully."
 else
-    echo "ERROR: Database migrations failed."
-    exit 1
+    echo "WARNING: Database migrations failed. This is expected if the database is fresh. The application will redirect to the Setup page to initialize the schema."
 fi
 
-# Seed initial data
-echo "INFO: Seeding initial data..."
-if python seed_data.py; then
-    echo "INFO: Initial data seeding completed successfully."
-else
-    echo "ERROR: Initial data seeding failed."
-    exit 1
-fi
+# We skip seed_data.py here because the Setup page handles creating the Admin/Roles explicitly.
+# If you want auto-seeding for existing DBs, you could keep it, but it might conflict with the Setup flow logic.
+# For now, let's rely on the Setup page for the "clean slate" experience.
 
 # Start Gunicorn
 echo "INFO: Starting Gunicorn on 0.0.0.0:$PORT..."
-# Using --access-logfile - and --error-logfile - to ensure logs go to stdout/stderr for Cloud Logging
 exec gunicorn --workers 2 --threads 4 --worker-class gthread \
     --bind 0.0.0.0:$PORT \
     --timeout 120 \

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title mb-0">System Setup</h3>
+                </div>
+                <div class="card-body">
+                    <p class="lead">Welcome! The system needs to be initialized. Please create an administrator account to get started.</p>
+
+                    {% with messages = get_flashed_messages(with_categories=true) %}
+                      {% if messages %}
+                        {% for category, message in messages %}
+                          <div class="alert alert-{{ category }}">{{ message }}</div>
+                        {% endfor %}
+                      {% endif %}
+                    {% endwith %}
+
+                    <form method="POST" action="{{ url_for('setup.setup_system') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+                        <div class="mb-3">
+                            <label for="admin_email" class="form-label">Administrator Email</label>
+                            <input type="email" class="form-control" id="admin_email" name="admin_email" required placeholder="admin@example.com">
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="admin_username" class="form-label">Administrator Username</label>
+                            <input type="text" class="form-control" id="admin_username" name="admin_username" required placeholder="admin">
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="admin_password" class="form-label">Administrator Password</label>
+                            <input type="password" class="form-control" id="admin_password" name="admin_password" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="confirm_password" class="form-label">Confirm Password</label>
+                            <input type="password" class="form-control" id="confirm_password" name="confirm_password" required>
+                        </div>
+
+                        <hr>
+
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-success btn-lg">Initialize System</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

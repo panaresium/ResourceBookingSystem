@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request # jsonify for error handler, request for error handlers
+from flask import Flask, jsonify, request, redirect, url_for # jsonify for error handler, request for error handlers
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 import json # Added for json.load and json.dumps
@@ -29,6 +29,7 @@ from routes.api_system_settings import init_api_system_settings_routes
 from routes.api_public import init_api_public_routes
 from routes.gmail_auth import init_gmail_auth_routes # Added for Gmail OAuth flow
 from routes.legacy_file_proxy import init_legacy_file_proxy_routes
+from routes.setup_routes import setup_bp
 from r2_storage import r2_storage
 
 # For scheduler
@@ -299,6 +300,31 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
     init_api_public_routes(app)
     init_gmail_auth_routes(app) # Added for Gmail OAuth flow
     init_legacy_file_proxy_routes(app)
+    app.register_blueprint(setup_bp)
+
+    # 7.5 Setup Redirect Middleware
+    @app.before_request
+    def check_setup_required():
+        if request.endpoint and 'static' in request.endpoint:
+            return
+        if request.endpoint and 'setup.' in request.endpoint:
+            return
+
+        # Check if setup is needed (no admin user)
+        # Using a simple query. Performance hit is negligible for low traffic or initial setup.
+        # For production with high traffic, this check should be cached or disabled after setup.
+        try:
+            # We need to be careful about DB not existing yet or table not existing
+            # If table doesn't exist, we definitely need setup (or at least migrations).
+            # But here we assume migrations run, just data missing.
+            from models import User
+            # We specifically look for an admin.
+            admin_exists = db.session.query(User.id).filter_by(is_admin=True).first() is not None
+            if not admin_exists:
+                return redirect(url_for('setup.setup_system'))
+        except Exception:
+            # If DB error (e.g. table missing), redirect to setup where db.create_all() can fix it
+            return redirect(url_for('setup.setup_system'))
 
     # 8. Register Error Handlers - Skip if testing
     if not testing:
