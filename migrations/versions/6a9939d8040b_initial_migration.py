@@ -1,8 +1,8 @@
-"""add_display_order_to_floor_map
+"""Initial Migration
 
-Revision ID: 44d956e882f7
+Revision ID: 6a9939d8040b
 Revises:
-Create Date: 2025-06-19 13:12:32.694690
+Create Date: 2026-01-25 15:40:49.911245
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '44d956e882f7'
+revision = '6a9939d8040b'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -55,6 +55,21 @@ def upgrade():
     sa.Column('map_data_json', sa.Text(), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('image_filename')
+    )
+    op.create_table('maintenance_schedule',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(length=100), nullable=False),
+    sa.Column('schedule_type', sa.String(length=50), nullable=False),
+    sa.Column('day_of_week', sa.String(length=50), nullable=True),
+    sa.Column('day_of_month', sa.String(length=200), nullable=True),
+    sa.Column('start_date', sa.Date(), nullable=True),
+    sa.Column('end_date', sa.Date(), nullable=True),
+    sa.Column('is_availability', sa.Boolean(), nullable=False),
+    sa.Column('resource_selection_type', sa.String(length=50), nullable=False),
+    sa.Column('resource_ids', sa.Text(), nullable=True),
+    sa.Column('building_id', sa.Integer(), nullable=True),
+    sa.Column('floor_ids', sa.Text(), nullable=True),
+    sa.PrimaryKeyConstraint('id')
     )
     op.create_table('role',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -192,6 +207,7 @@ def downgrade():
     op.drop_table('audit_log')
     op.drop_table('user')
     op.drop_table('role')
+    op.drop_table('maintenance_schedule')
     op.drop_table('floor_map')
     op.drop_table('booking_settings')
     # ### end Alembic commands ###

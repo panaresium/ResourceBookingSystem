@@ -35,8 +35,12 @@ WTF_CSRF_SECRET_KEY = os.environ.get('WTF_CSRF_SECRET_KEY', 'another_secret_for_
 # --- Database Configuration ---
 # Use AZURE_SQL_CONNECTION_STRING if available, otherwise DATABASE_URL, finally local SQLite.
 database_url = os.environ.get('DATABASE_URL')
-if database_url and database_url.startswith("postgres://"):
-    database_url = database_url.replace("postgres://", "postgresql://", 1)
+if database_url:
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+    print(f"INFO: [config.py] Using Postgres database from DATABASE_URL.")
+else:
+    print(f"WARNING: [config.py] DATABASE_URL not found. Falling back to local SQLite.")
 
 SQLALCHEMY_DATABASE_URI = os.environ.get(
     'AZURE_SQL_CONNECTION_STRING',
