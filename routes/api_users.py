@@ -5,7 +5,7 @@ from sqlalchemy import func # For func.lower in create_resource, and func.ilike 
 # Local imports
 from extensions import db
 from models import User, Role # Assuming Role is needed for export/import and updates
-from utils import add_audit_log
+from utils import add_audit_log, retry_on_db_error
 from auth import permission_required
 
 # Blueprint Configuration
@@ -16,6 +16,7 @@ def init_api_users_routes(app):
     app.register_blueprint(api_users_bp)
 
 @api_users_bp.route('/auth/login', methods=['POST'])
+@retry_on_db_error
 def login():
     data = request.get_json()
     username = data.get('username')
@@ -31,12 +32,14 @@ def login():
 
 @api_users_bp.route('/auth/logout', methods=['POST'])
 @login_required
+@retry_on_db_error
 def logout():
     logout_user()
     return jsonify({"success": True, "message": "Logged out successfully."})
 
 @api_users_bp.route('/profile', methods=['PUT'])
 @login_required
+@retry_on_db_error
 def update_profile():
     """Update current user's email or password."""
     data = request.get_json()
@@ -122,6 +125,7 @@ def update_profile():
 @api_users_bp.route('/admin/users', methods=['GET'])
 @login_required
 @permission_required('manage_users')
+@retry_on_db_error
 def get_all_users():
     try:
         username_filter = request.args.get('username_filter')
@@ -164,6 +168,7 @@ def get_all_users():
 @api_users_bp.route('/admin/users', methods=['POST'])
 @login_required
 @permission_required('manage_users')
+@retry_on_db_error
 def create_user():
     data = request.get_json()
     if not data:
@@ -214,6 +219,7 @@ def create_user():
 @api_users_bp.route('/admin/users/<int:user_id>', methods=['PUT'])
 @login_required
 @permission_required('manage_users')
+@retry_on_db_error
 def update_user(user_id):
     user_to_update = User.query.get(user_id)
     if not user_to_update:
@@ -289,6 +295,7 @@ def update_user(user_id):
 @api_users_bp.route('/admin/users/<int:user_id>', methods=['DELETE'])
 @login_required
 @permission_required('manage_users')
+@retry_on_db_error
 def delete_user(user_id):
     user_to_delete = User.query.get(user_id)
     if not user_to_delete:
@@ -327,6 +334,7 @@ def delete_user(user_id):
 @api_users_bp.route('/admin/users/<int:user_id>/assign_google_auth', methods=['POST'])
 @login_required
 @permission_required('manage_users')
+@retry_on_db_error
 def assign_google_auth(user_id):
     user_to_update = User.query.get(user_id)
     if not user_to_update:
@@ -369,6 +377,7 @@ def assign_google_auth(user_id):
 @api_users_bp.route('/admin/users/bulk', methods=['DELETE'])
 @login_required
 @permission_required('manage_users')
+@retry_on_db_error
 def delete_users_bulk():
     data = request.get_json()
     if not data or 'ids' not in data or not isinstance(data['ids'], list):
@@ -429,6 +438,7 @@ def delete_users_bulk():
 @api_users_bp.route('/admin/users/export', methods=['GET'])
 @login_required
 @permission_required('manage_users')
+@retry_on_db_error
 def export_users():
     users = User.query.all()
     roles = Role.query.all() # Also export roles for context
@@ -462,6 +472,7 @@ def export_users():
 @api_users_bp.route('/admin/users/import', methods=['POST'])
 @login_required
 @permission_required('manage_users')
+@retry_on_db_error
 def import_users():
     data = request.get_json()
     if not data or ('users' not in data and 'roles' not in data) : # Check if at least users or roles are present
@@ -609,6 +620,7 @@ def import_users():
 @api_users_bp.route('/admin/users/export/csv', methods=['GET'])
 @login_required
 @permission_required('manage_users')
+@retry_on_db_error
 def export_users_csv():
     try:
         users = User.query.all()
@@ -656,6 +668,7 @@ def export_users_csv():
 @api_users_bp.route('/admin/users/import/csv', methods=['POST'])
 @login_required
 @permission_required('manage_users')
+@retry_on_db_error
 def import_users_csv():
     if 'file' not in request.files:
         return jsonify({'error': 'No file part in the request.'}), 400
@@ -837,6 +850,7 @@ def import_users_csv():
 @api_users_bp.route('/admin/users/bulk_add_pattern', methods=['POST'])
 @login_required
 @permission_required('manage_users')
+@retry_on_db_error
 def bulk_add_users_pattern():
     data = request.get_json()
     if not data:
@@ -952,6 +966,7 @@ def bulk_add_users_pattern():
 @api_users_bp.route('/admin/users/bulk_add', methods=['POST'])
 @login_required
 @permission_required('manage_users')
+@retry_on_db_error
 def bulk_add_users():
     data = request.get_json()
     if not data or not isinstance(data, list):
@@ -1050,6 +1065,7 @@ def bulk_add_users():
 @api_users_bp.route('/admin/users/bulk_edit', methods=['PUT'])
 @login_required
 @permission_required('manage_users')
+@retry_on_db_error
 def bulk_edit_users():
     data = request.get_json()
     if not data or not isinstance(data, list):

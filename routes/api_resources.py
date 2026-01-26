@@ -15,7 +15,7 @@ from r2_storage import r2_storage
 # Assuming models are defined in models.py
 from models import User, Resource, Booking, FloorMap, Role, ResourcePIN, BookingSettings # Added User, Role, ResourcePIN, BookingSettings
 # Assuming utility functions are in utils.py
-from utils import add_audit_log, resource_to_dict, allowed_file, _import_resource_configurations_data, check_booking_permission
+from utils import add_audit_log, resource_to_dict, allowed_file, _import_resource_configurations_data, check_booking_permission, retry_on_db_error
 # Assuming permission_required is in auth.py
 from auth import permission_required
 from models import MaintenanceSchedule
@@ -23,6 +23,7 @@ from models import MaintenanceSchedule
 api_resources_bp = Blueprint('api_resources', __name__, url_prefix='/api')
 
 @api_resources_bp.route('/resources', methods=['GET'])
+@retry_on_db_error
 def get_resources():
     logger = current_app.logger
     try:
@@ -50,6 +51,7 @@ def get_resources():
         return jsonify({'error': 'Failed to fetch resources due to a server error.'}), 500
 
 @api_resources_bp.route('/resources/<int:resource_id>/availability', methods=['GET'])
+@retry_on_db_error
 def get_resource_availability(resource_id):
     logger = current_app.logger
     active_booking_statuses = ['approved', 'pending', 'checked_in', 'confirmed']
@@ -155,6 +157,7 @@ def get_resource_availability(resource_id):
 
 @api_resources_bp.route('/resources/<int:resource_id>/available_slots', methods=['GET'])
 @login_required
+@retry_on_db_error
 def get_resource_available_slots(resource_id):
     logger = current_app.logger
     date_str = request.args.get('date')
@@ -280,6 +283,7 @@ def get_unavailable_dates_from_schedules(start_date, end_date, resources, floor_
 
 @api_resources_bp.route('/resources/unavailable_dates', methods=['GET'])
 @login_required
+@retry_on_db_error
 def get_unavailable_dates():
     logger = current_app.logger
     user_id_str = request.args.get("user_id")
@@ -579,6 +583,7 @@ def get_unavailable_dates():
 @api_resources_bp.route('/admin/resources', methods=['GET'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def get_all_resources_admin():
     logger = current_app.logger
     try:
@@ -606,6 +611,7 @@ def get_all_resources_admin():
 @api_resources_bp.route('/admin/resources', methods=['POST'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def create_resource():
     logger = current_app.logger
     data = request.get_json()
@@ -650,6 +656,7 @@ def create_resource():
 @api_resources_bp.route('/admin/resources/<int:resource_id>', methods=['GET'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def get_resource_details_admin(resource_id):
     resource = Resource.query.get_or_404(resource_id) # Use get_or_404 for convenience
     resource_data = resource_to_dict(resource) # Assuming this helper serializes main resource fields
@@ -669,6 +676,7 @@ def get_resource_details_admin(resource_id):
 @api_resources_bp.route('/admin/resources/<int:resource_id>', methods=['PUT'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def update_resource_details_admin(resource_id):
     logger = current_app.logger
     resource = Resource.query.get(resource_id)
@@ -746,6 +754,7 @@ def update_resource_details_admin(resource_id):
 @api_resources_bp.route('/admin/resources/<int:resource_id>', methods=['DELETE'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def delete_resource_admin(resource_id):
     logger = current_app.logger
     resource = Resource.query.get(resource_id)
@@ -771,6 +780,7 @@ def delete_resource_admin(resource_id):
 @api_resources_bp.route('/admin/resources/<int:resource_id>/publish', methods=['POST'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def publish_resource_admin(resource_id):
     logger = current_app.logger
     resource = Resource.query.get(resource_id)
@@ -790,6 +800,7 @@ def publish_resource_admin(resource_id):
 @api_resources_bp.route('/admin/resources/<int:resource_id>/image', methods=['POST'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def upload_resource_image_admin(resource_id):
     logger = current_app.logger
     resource = Resource.query.get(resource_id)
@@ -850,6 +861,7 @@ def upload_resource_image_admin(resource_id):
 @api_resources_bp.route('/admin/resources/export', methods=['GET'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def export_all_resources_admin():
     logger = current_app.logger
     try:
@@ -870,6 +882,7 @@ def export_all_resources_admin():
 @api_resources_bp.route('/admin/resources/import', methods=['POST'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def import_resources_admin():
     # This function relies on _import_resource_configurations_data from utils.py
     # which is already designed to handle the logic.
@@ -982,6 +995,7 @@ def _apply_resource_changes(resource: Resource, changes: dict, resource_errors: 
 @api_resources_bp.route('/admin/resources/bulk', methods=['POST'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def create_resources_bulk_admin():
     logger = current_app.logger
     data = request.get_json()
@@ -1020,6 +1034,7 @@ def create_resources_bulk_admin():
 @api_resources_bp.route('/admin/resources/bulk', methods=['PUT'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def update_resources_bulk_admin():
     logger = current_app.logger
     data = request.get_json()
@@ -1170,6 +1185,7 @@ def update_resources_bulk_admin():
 @api_resources_bp.route('/admin/resources/bulk', methods=['DELETE'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def delete_resources_bulk_admin():
     logger = current_app.logger
     data = request.get_json()
@@ -1255,6 +1271,7 @@ def delete_resources_bulk_admin():
 
 @api_resources_bp.route('/resources/<int:resource_id>/all_bookings', methods=['GET'])
 @login_required # Or public, depending on requirements
+@retry_on_db_error
 def get_all_bookings_for_resource_api(resource_id):
     logger = current_app.logger
     start_str = request.args.get('start')
@@ -1286,6 +1303,7 @@ def get_all_bookings_for_resource_api(resource_id):
 @api_resources_bp.route('/admin/resources/<int:resource_id>/map_info', methods=['PUT'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def update_resource_map_info_admin(resource_id):
     logger = current_app.logger
     resource = Resource.query.get(resource_id)
@@ -1309,6 +1327,7 @@ def update_resource_map_info_admin(resource_id):
 @api_resources_bp.route('/admin/resources/<int:resource_id>/map_info', methods=['DELETE'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def delete_resource_map_info_admin(resource_id):
     logger = current_app.logger
     resource = Resource.query.get(resource_id)
@@ -1336,6 +1355,7 @@ def generate_unique_pin(resource_id, length):
 @api_resources_bp.route('/resources/<int:resource_id>/pins', methods=['POST'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def add_resource_pin(resource_id):
     logger = current_app.logger
     resource = Resource.query.get_or_404(resource_id)
@@ -1409,6 +1429,7 @@ def add_resource_pin(resource_id):
 @api_resources_bp.route('/resources/<int:resource_id>/pins/<int:pin_id>', methods=['PUT'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def update_resource_pin(resource_id, pin_id):
     logger = current_app.logger
     pin = ResourcePIN.query.filter_by(id=pin_id, resource_id=resource_id).first_or_404()
@@ -1487,6 +1508,7 @@ def update_resource_pin(resource_id, pin_id):
 @api_resources_bp.route('/resources/<int:resource_id>/pins/<int:pin_id>', methods=['DELETE'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def delete_resource_pin(resource_id, pin_id):
     logger = current_app.logger
     pin = ResourcePIN.query.filter_by(id=pin_id, resource_id=resource_id).first()
@@ -1568,6 +1590,7 @@ def _update_resource_current_pin(resource_obj):
 @api_resources_bp.route('/resources/pins/bulk_action', methods=['POST'])
 @login_required
 @permission_required('manage_resources')
+@retry_on_db_error
 def bulk_resource_pin_action():
     logger = current_app.logger
     data = request.get_json()
