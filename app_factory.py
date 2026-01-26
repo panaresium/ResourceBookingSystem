@@ -1,8 +1,11 @@
-from flask import Flask, jsonify, request, redirect, url_for # jsonify for error handler, request for error handlers
+from flask import Flask, jsonify, request, redirect, url_for, render_template_string # jsonify for error handler, request for error handlers
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 import json # Added for json.load and json.dumps
 import logging
+import time
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 # Import configurations, extensions, and initialization functions
 import config
@@ -123,6 +126,34 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
     # Initialize Migrate immediately after DB and App, and before startup restore sequence
     migrate.init_app(app, db)
 
+    # 2. Check Database Connection (Startup Check)
+    if not testing:
+        db_connected = False
+        retry_count = 0
+        max_retries = app.config.get('DB_CONNECT_MAX_RETRIES', 3)
+        retry_delay = app.config.get('DB_CONNECT_RETRY_DELAY', 3)
+
+        while retry_count <= max_retries:
+            try:
+                # Attempt to connect and execute a simple query
+                with app.app_context():
+                    # We use a new connection to verify connectivity
+                     with db.engine.connect() as connection:
+                         connection.execute(text('SELECT 1'))
+                db_connected = True
+                app.logger.info("Database connection verified successfully at startup.")
+                break
+            except Exception as e:
+                retry_count += 1
+                app.logger.warning(f"Database connection failed (Attempt {retry_count}/{max_retries + 1}): {e}")
+                if retry_count <= max_retries:
+                    app.logger.info(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                else:
+                    app.logger.error("All database connection attempts failed.")
+                    app.config['DB_CONNECTION_FAILED'] = True
+                    app.config['DB_CONNECTION_ERROR'] = str(e)
+
     if testing:
         # EXTREMELY MINIMAL SETUP FOR TESTING when create_app(testing=True)
         app.logger.setLevel(logging.DEBUG)
@@ -139,7 +170,7 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
     # app.config['BOOKING_CSV_SCHEDULE_SETTINGS'] = load_booking_csv_schedule_settings(app) # Removed
     # Note: app.logger is not fully configured yet here, so logging these settings is deferred
 
-    # 2. Initialize Logging (this block is now only for non-testing)
+    # 3. Initialize Logging (this block is now only for non-testing)
     # Full logging setup for production/development
     default_log_level_str = 'INFO'
     log_level_str = os.environ.get('APP_GLOBAL_LOG_LEVEL', default_log_level_str).upper()
@@ -246,16 +277,17 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
 
     # 4. Setup SQLite Pragmas (if using SQLite) - Skip if testing
     if not testing and app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite'):
-        with app.app_context():
-            configure_sqlite_pragmas_factory(app, db)
+        if not app.config.get('DB_CONNECTION_FAILED'): # Skip if DB connection failed
+            with app.app_context():
+                configure_sqlite_pragmas_factory(app, db)
 
-        @app.before_request
-        def ensure_sqlite_configured_wrapper():
-           # Also check if not testing here, and URI starts with sqlite
-           # Use 'app.config' from the closure instead of 'current_app.config'
-           if not app.config.get('TESTING', False) and \
-              app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite'):
-               _ensure_sqlite_configured_factory_hook(app, db)
+            @app.before_request
+            def ensure_sqlite_configured_wrapper():
+               # Also check if not testing here, and URI starts with sqlite
+               # Use 'app.config' from the closure instead of 'current_app.config'
+               if not app.config.get('TESTING', False) and \
+                  app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite'):
+                   _ensure_sqlite_configured_factory_hook(app, db)
 
     # CSRF exemption for Socket.IO paths has been removed as Socket.IO is no longer used.
 
@@ -292,6 +324,21 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
         if request.endpoint and 'setup.' in request.endpoint:
             return
 
+        # Check if DB connection failed at startup
+        if app.config.get('DB_CONNECTION_FAILED'):
+            error_message = app.config.get('DB_CONNECTION_ERROR', 'Unknown Error')
+            return render_template_string("""
+                <html>
+                <head><title>Database Error</title></head>
+                <body style="font-family: sans-serif; padding: 20px; text-align: center;">
+                    <h1>Database Connection Failed</h1>
+                    <p>The application could not connect to the database after multiple attempts.</p>
+                    <p style="color: red;">Error: {{ error }}</p>
+                    <p>Please check your configuration and ensure the database server is running.</p>
+                </body>
+                </html>
+            """, error=error_message), 503
+
         # Check if setup is needed (no admin user)
         # Using a simple query. Performance hit is negligible for low traffic or initial setup.
         # For production with high traffic, this check should be cached or disabled after setup.
@@ -299,7 +346,7 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
             # We need to be careful about DB not existing yet or table not existing
             # If table doesn't exist, we definitely need setup (or at least migrations).
             from models import User
-            from sqlalchemy.exc import OperationalError, ProgrammingError
+            # sqlalchemy.exc.OperationalError, ProgrammingError are imported at the top
 
             # We specifically look for an admin.
             # Using try/except within the query execution to catch missing tables
@@ -338,8 +385,7 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
             return "Internal Server Error (HTML - create a template for this)", 500 # Placeholder
 
     # 9. Initialize Scheduler
-    # Internal scheduler DISABLED for Cloud Run environment to ensure statelessness.
-    # Scheduled tasks should be triggered externally (e.g., Cloud Scheduler) hitting the endpoints in `routes/tasks.py`.
+    # Internal scheduler DISABLED for Cloud Run compatibility. External scheduler (e.g. Cloud Scheduler) should hit endpoints in routes/tasks.py
     # Backup tasks are now manual "Import/Export" or triggered via API.
     app.scheduler = None
     app.logger.info("Internal APScheduler disabled for Cloud Run compatibility. Use external scheduler to trigger tasks via API.")
