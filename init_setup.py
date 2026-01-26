@@ -28,7 +28,7 @@ from models import (
     WaitlistEntry, resource_roles_table, user_roles_table
 )
 from add_resource_tags_column import add_tags_column
-from azure_backup import perform_startup_restore_sequence
+# from azure_backup import perform_startup_restore_sequence # Azure backup replaced by R2
 
 AZURE_PRIMARY_STORAGE = bool(os.environ.get("AZURE_PRIMARY_STORAGE"))
 if AZURE_PRIMARY_STORAGE:
@@ -286,17 +286,17 @@ def main(force_init=False):
     enable_auto_restore_env = os.environ.get("ENABLE_AUTO_STARTUP_RESTORE", "false").lower() == "true"
 
     if restore_from_azure_flag or enable_auto_restore_env:
-        print("Azure restoration requested.")
-        app_for_restore = create_app(start_scheduler=False)
-        with app_for_restore.app_context():
-            app_for_restore.logger.info("Attempting to restore from Azure Backup...")
-            try:
-                restore_result = perform_startup_restore_sequence(app_for_restore)
-                app_for_restore.logger.info(f"Azure restore sequence completed: {restore_result.get('status')}, {restore_result.get('message')}")
-                if restore_result.get('status') == 'failure':
-                    app_for_restore.logger.error("Azure restoration failed.")
-            except Exception as e_restore:
-                app_for_restore.logger.error(f"Critical error during Azure restoration: {e_restore}", exc_info=True)
+        print("Azure restoration requested. (Disabled in R2 migration)")
+        # app_for_restore = create_app(start_scheduler=False)
+        # with app_for_restore.app_context():
+        #     app_for_restore.logger.info("Attempting to restore from Azure Backup...")
+        #     try:
+        #         restore_result = perform_startup_restore_sequence(app_for_restore)
+        #         app_for_restore.logger.info(f"Azure restore sequence completed: {restore_result.get('status')}, {restore_result.get('message')}")
+        #         if restore_result.get('status') == 'failure':
+        #             app_for_restore.logger.error("Azure restoration failed.")
+        #     except Exception as e_restore:
+        #         app_for_restore.logger.error(f"Critical error during Azure restoration: {e_restore}", exc_info=True)
         print("-" * 30)
 
     # Database Initialization Logic

@@ -6,7 +6,7 @@ import re
 from PIL import Image, ImageDraw, ImageFont
 import requests
 from datetime import datetime, date, timedelta, time, timezone # Ensure all are here
-from flask import url_for, jsonify, current_app
+from flask import url_for, jsonify, current_app, has_app_context
 from flask_login import current_user
 # import csv # Removed as no longer used after CSV function deletions
 # import io # Removed as no longer used after CSV function deletions
@@ -46,6 +46,11 @@ active_booking_statuses_for_conflict = ['approved', 'pending', 'checked_in', 'co
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 DATA_DIR = os.path.join(basedir, 'data')
+TASKS_DIR = os.path.join(DATA_DIR, 'tasks')
+# Ensure TASKS_DIR exists
+if not os.path.exists(TASKS_DIR):
+    os.makedirs(TASKS_DIR, exist_ok=True)
+
 SCHEDULER_SETTINGS_FILE_PATH = os.path.join(DATA_DIR, 'scheduler_settings.json')
 
 DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE = {
@@ -57,9 +62,7 @@ DEFAULT_SCHEDULER_SETTINGS = {
     "auto_restore_booking_records_on_startup": False
 }
 
-# --- Task Management Infrastructure ---
-task_statuses = {}
-task_lock = threading.Lock()
+# --- Task Management Infrastructure (File-Based for Multi-Worker Support) ---
 
 def retry_on_db_error(f):
     @wraps(f)
@@ -82,78 +85,107 @@ def retry_on_db_error(f):
                 raise e
     return decorated_function
 
+def _get_task_file_path(task_id):
+    # Sanitize task_id to prevent traversal
+    safe_task_id = "".join([c for c in task_id if c.isalnum() or c in ('-', '_')])
+    return os.path.join(TASKS_DIR, f"{safe_task_id}.json")
+
+def _load_task(task_id):
+    filepath = _get_task_file_path(task_id)
+    if not os.path.exists(filepath):
+        return None
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def _save_task(task_id, data):
+    filepath = _get_task_file_path(task_id)
+    try:
+        # Atomic write
+        tmp_path = filepath + ".tmp"
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, filepath)
+        return True
+    except Exception as e:
+        if has_app_context():
+            current_app.logger.error(f"Error saving task {task_id}: {e}")
+        return False
+
 def create_task(task_type="generic"):
-    # Creates a new task entry and returns its ID.
+    # Creates a new task entry (persisted to file) and returns its ID.
     task_id = uuid.uuid4().hex
-    with task_lock:
-        task_statuses[task_id] = {
-            'type': task_type,
-            'status_summary': 'Initializing...', # A brief summary string
-            'log_entries': [], # List of log dicts
-            'started_at': datetime.utcnow().isoformat() + 'Z',
-            'updated_at': datetime.utcnow().isoformat() + 'Z',
-            'is_done': False,
-            'success': None, # True, False, or None if not done
-            'result_message': None # Final message or error details
-        }
-    current_app.logger.info(f"Task created with ID: {task_id}, type: {task_type}")
+    initial_data = {
+        'id': task_id,
+        'type': task_type,
+        'status_summary': 'Initializing...', # A brief summary string
+        'log_entries': [], # List of log dicts
+        'started_at': datetime.utcnow().isoformat() + 'Z',
+        'updated_at': datetime.utcnow().isoformat() + 'Z',
+        'is_done': False,
+        'success': None, # True, False, or None if not done
+        'result_message': None # Final message or error details
+    }
+    _save_task(task_id, initial_data)
+    if has_app_context():
+        current_app.logger.info(f"Task created with ID: {task_id}, type: {task_type}")
     return task_id
 
 def get_task_status(task_id):
-    # Returns the status of a specific task.
-    with task_lock:
-        return task_statuses.get(task_id) # Returns None if not found
+    # Returns the status of a specific task from file.
+    return _load_task(task_id)
 
 def update_task_log(task_id, message, detail="", level="info"):
-    # Adds a log entry to the task.
-    with task_lock:
-        if task_id in task_statuses:
-            entry = {
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
-                'level': level,
-                'message': message,
-                'detail': detail
-            }
-            task_statuses[task_id]['log_entries'].append(entry)
-            task_statuses[task_id]['status_summary'] = message # Update summary to the latest message
-            task_statuses[task_id]['updated_at'] = datetime.utcnow().isoformat() + 'Z'
-            # current_app.logger.debug(f"Task {task_id} log updated: {message} - {detail}") # Can be too verbose
-            return True
-        current_app.logger.warning(f"Attempted to update log for non-existent task ID: {task_id}")
+    # Adds a log entry to the task file.
+    # Note: Assumes single-writer (worker thread) for the task file to avoid race conditions.
+    task_data = _load_task(task_id)
+    if not task_data:
+        if has_app_context():
+            current_app.logger.warning(f"Attempted to update log for non-existent task ID: {task_id}")
         return False
+
+    entry = {
+        'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'level': level,
+        'message': message,
+        'detail': detail
+    }
+    task_data['log_entries'].append(entry)
+    task_data['status_summary'] = message # Update summary to the latest message
+    task_data['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+
+    return _save_task(task_id, task_data)
 
 def mark_task_done(task_id, success, result_message=""):
-    # Marks a task as completed (successfully or failed).
-    with task_lock:
-        if task_id in task_statuses:
-            task_statuses[task_id]['is_done'] = True
-            task_statuses[task_id]['success'] = success
-            task_statuses[task_id]['result_message'] = result_message
-            task_statuses[task_id]['status_summary'] = result_message if result_message else ("Completed successfully" if success else "Failed")
-            task_statuses[task_id]['updated_at'] = datetime.utcnow().isoformat() + 'Z'
-
-            final_log_level = "info" if success else "error"
-            # Use a temporary list for log entries if update_task_log is called from within the same lock
-            # to avoid re-locking if update_task_log is not designed for reentrancy.
-            # However, current update_task_log re-acquires the lock, which is fine for non-reentrant locks.
-            # For simplicity, direct append might be okay if we ensure no deadlocks,
-            # but calling update_task_log is cleaner.
-            # The previous implementation of update_task_log re-acquires the lock, so this is fine.
-            log_entry_message = "Task finished."
-            log_entry_detail = result_message
-
-            # Add final log entry directly to avoid re-locking issues if update_task_log changes
-            entry = {
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
-                'level': final_log_level,
-                'message': log_entry_message,
-                'detail': log_entry_detail
-            }
-            task_statuses[task_id]['log_entries'].append(entry)
-            current_app.logger.info(f"Task {task_id} marked done. Success: {success}. Message: {result_message}")
-            return True
-        current_app.logger.warning(f"Attempted to mark non-existent task ID {task_id} as done.")
+    # Marks a task as completed (successfully or failed) in the file.
+    task_data = _load_task(task_id)
+    if not task_data:
+        if has_app_context():
+            current_app.logger.warning(f"Attempted to mark non-existent task ID {task_id} as done.")
         return False
+
+    task_data['is_done'] = True
+    task_data['success'] = success
+    task_data['result_message'] = result_message
+    task_data['status_summary'] = result_message if result_message else ("Completed successfully" if success else "Failed")
+    task_data['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+
+    final_log_level = "info" if success else "error"
+
+    entry = {
+        'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'level': final_log_level,
+        'message': "Task finished.",
+        'detail': result_message
+    }
+    task_data['log_entries'].append(entry)
+
+    saved = _save_task(task_id, task_data)
+    if has_app_context():
+        current_app.logger.info(f"Task {task_id} marked done. Success: {success}. Saved: {saved}")
+    return saved
 # --- End Task Management Infrastructure ---
 
 
@@ -1986,94 +2018,26 @@ def save_unified_backup_schedule_settings(data):
 from apscheduler.jobstores.base import JobLookupError
 
 def reschedule_unified_backup_jobs(app_instance):
-    app_instance.logger.info("Attempting to reschedule unified backup jobs.")
+    app_instance.logger.info("Scheduled system backups are disabled/removed per configuration.")
     scheduler = getattr(app_instance, 'scheduler', None)
 
     if scheduler is None or not scheduler.running:
-        app_instance.logger.warning("Scheduler not available or not running. Cannot reschedule unified backup jobs.")
         return
 
-    unified_schedule_settings = load_unified_backup_schedule_settings(app_instance)
-    app_instance.logger.info(f"Loaded settings for rescheduling: {unified_schedule_settings}")
+    # Ensure jobs are removed if they exist
+    try:
+        scheduler.remove_job('unified_incremental_booking_backup_job')
+    except JobLookupError:
+        pass
+    except Exception as e:
+        app_instance.logger.error(f"Error removing job 'unified_incremental_booking_backup_job': {e}")
 
     try:
-        app_instance.logger.info("Attempting to remove job 'unified_incremental_booking_backup_job' during reschedule.")
-        try:
-            scheduler.remove_job('unified_incremental_booking_backup_job')
-            app_instance.logger.info("Job 'unified_incremental_booking_backup_job' removed successfully during reschedule.")
-        except JobLookupError:
-            app_instance.logger.info("Job 'unified_incremental_booking_backup_job' not found during reschedule, skipping removal.")
-        except Exception as e:
-            app_instance.logger.error(f"Error removing job 'unified_incremental_booking_backup_job' during reschedule: {e}")
-
-        incremental_config = unified_schedule_settings.get('unified_incremental_backup', {})
-        if incremental_config.get('is_enabled'):
-            interval_minutes = incremental_config.get('interval_minutes', 30)
-            if not isinstance(interval_minutes, int) or interval_minutes <= 0:
-                app_instance.logger.error(f"Invalid interval_minutes ({interval_minutes}) for incremental backup. Must be a positive integer. Job not scheduled.")
-            else:
-                scheduler.add_job(
-                    id='unified_incremental_booking_backup_job',
-                    func='scheduler_tasks:run_scheduled_incremental_booking_data_task', # Path to the task function
-                    trigger='interval',
-                    minutes=interval_minutes,
-                    args=[app_instance], # Pass the app instance
-                    replace_existing=True,
-                    misfire_grace_time=300 # 5 minutes
-                )
-                app_instance.logger.info(f"Scheduled unified incremental booking backup job to run every {interval_minutes} minutes.")
-        else:
-            app_instance.logger.info("Unified incremental booking backup is disabled. Job not rescheduled.")
+        scheduler.remove_job('unified_full_booking_backup_job')
+    except JobLookupError:
+        pass
     except Exception as e:
-        app_instance.logger.exception(f"Error rescheduling unified incremental backup job: {e}")
-
-    try:
-        app_instance.logger.info("Attempting to remove job 'unified_full_booking_backup_job' during reschedule.")
-        try:
-            scheduler.remove_job('unified_full_booking_backup_job')
-            app_instance.logger.info("Job 'unified_full_booking_backup_job' removed successfully during reschedule.")
-        except JobLookupError:
-            app_instance.logger.info("Job 'unified_full_booking_backup_job' not found during reschedule, skipping removal.")
-        except Exception as e:
-            app_instance.logger.error(f"Error removing job 'unified_full_booking_backup_job' during reschedule: {e}")
-
-        full_config = unified_schedule_settings.get('unified_full_backup', {})
-        if full_config.get('is_enabled'):
-            schedule_type = full_config.get('schedule_type', 'daily')
-            time_of_day_str = full_config.get('time_of_day', '02:00')
-
-            time_parts = time_of_day_str.split(':')
-            hour = int(time_parts[0])
-            minute = int(time_parts[1])
-            if not (0 <= hour <= 23 and 0 <= minute <= 59):
-                raise ValueError("Hour or minute out of range for full backup reschedule.")
-
-            trigger_args = {'hour': hour, 'minute': minute}
-
-            if schedule_type == 'weekly':
-                day_of_week = full_config.get('day_of_week')
-                if day_of_week is None or not (0 <= int(day_of_week) <= 6):
-                    app_instance.logger.error(f"Invalid day_of_week ({day_of_week}) for weekly unified full backup. Must be 0-6. Job not scheduled.")
-                    raise ValueError("Invalid day_of_week for weekly schedule.")
-                trigger_args['day_of_week'] = str(day_of_week)
-            elif schedule_type == 'monthly':
-                day_of_month = full_config.get('day_of_month')
-                if day_of_month is None or not (1 <= int(day_of_month) <= 31):
-                    app_instance.logger.error(f"Invalid day_of_month ({day_of_month}) for monthly unified full backup. Must be 1-31. Job not scheduled.")
-                    raise ValueError("Invalid day_of_month for monthly schedule.")
-                trigger_args['day'] = str(day_of_month)
-            elif schedule_type != 'daily':
-                 app_instance.logger.error(f"Unknown schedule_type '{schedule_type}' for full backup reschedule.")
-                 raise ValueError(f"Unknown schedule_type: {schedule_type}")
-
-            # The scheduler.add_job(...) block for run_periodic_full_booking_data_task has been removed.
-            app_instance.logger.warning("Unified full backup is enabled in settings, but the target task 'run_periodic_full_booking_data_task' is obsolete and will not be scheduled.")
-        else:
-            app_instance.logger.info("Unified full booking backup is disabled. Job not rescheduled.")
-    except Exception as e:
-        app_instance.logger.exception(f"Error rescheduling unified full backup job: {e}")
-
-    app_instance.logger.info("Finished rescheduling unified backup jobs.")
+        app_instance.logger.error(f"Error removing job 'unified_full_booking_backup_job': {e}")
 
 # Ensure all functions that might be used by other modules are explicitly available.
 # If utils.py were a package, __all__ would be useful. For a single file, direct imports work.

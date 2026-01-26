@@ -27,6 +27,7 @@ import json
 from apscheduler.jobstores.base import JobLookupError
 # from scheduler_tasks import run_scheduled_booking_csv_backup # run_scheduled_booking_csv_backup is legacy
 from translations import _ # For flash messages and other translatable strings
+from r2_storage import r2_storage
 
 admin_ui_bp = Blueprint('admin_ui', __name__, url_prefix='/admin', template_folder='../templates')
 
@@ -128,7 +129,10 @@ def serve_backup_system_page():
         elif not booking_settings: current_app.logger.info("No BookingSettings found for system page, defaulting offset to 0.")
         else: current_app.logger.warning("BookingSettings.global_time_offset_hours is None for system page, defaulting offset to 0.")
     except Exception as e: current_app.logger.error(f"Error fetching BookingSettings for system page: {e}", exc_info=True)
-    return render_template('admin/backup_system.html', global_time_offset_hours=time_offset_value)
+
+    is_r2_configured = r2_storage.client is not None
+
+    return render_template('admin/backup_system.html', global_time_offset_hours=time_offset_value, is_r2_configured=is_r2_configured)
 
 @admin_ui_bp.route('/backup/booking_data', methods=['GET'])
 @login_required
