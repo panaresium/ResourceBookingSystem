@@ -42,10 +42,9 @@ import utils # Added for selective restore of scheduler_settings
 # Global variable to store Azure import error messages
 azure_import_error_message = None
 
-# Conditional imports for Azure Backup functionality
+# Conditional imports for R2 Backup functionality
 try:
-    print(f"DEBUG api_system.py: Attempting to import from azure_backup (again)...") # New debug
-    from azure_backup import (
+    from r2_backup import (
         create_full_backup,
         list_available_backups,
         restore_full_backup,
@@ -60,29 +59,26 @@ try:
         download_resource_config_component,
         download_user_config_component,
         download_scheduler_settings_component,
-        download_general_config_component, # Added for selective restore of general configs
-        download_unified_schedule_component, # Added for selective restore of unified schedule
+        download_general_config_component,
+        download_unified_schedule_component,
         restore_media_component,
         restore_bookings_from_full_db_backup,
-        backup_incremental_bookings,
+        # backup_incremental_bookings, # Not implemented in r2_backup yet
         backup_full_bookings_json,
-        # restore_bookings_from_full_json_export, # REMOVED
-        # delete_incremental_booking_backup, # Removed unused import
         list_booking_data_json_backups,
         delete_booking_data_json_backup,
         restore_booking_data_to_point_in_time,
         download_booking_data_json_backup,
-        download_backup_set_as_zip # Added new function
+        download_backup_set_as_zip
     )
-    import azure_backup # This line can remain
-    print(f"DEBUG api_system.py: Successfully imported from azure_backup (again). create_full_backup type: {type(create_full_backup)}") # New debug
-except (ImportError, RuntimeError) as e_detailed_azure_import: # Capture the exception instance
-    azure_import_error_message = f"Azure Storage connection might be missing or Azure SDK not installed. Error: {e_detailed_azure_import}"
-    print(f"CRITICAL_DEBUG api_system.py: Caught ImportError or RuntimeError when importing from azure_backup. Exception type: {type(e_detailed_azure_import)}, Error: {e_detailed_azure_import}")
-    import traceback
-    print("CRITICAL_DEBUG api_system.py: Full traceback of the import error:")
-    traceback.print_exc()
+    import r2_backup as azure_backup # Alias for compatibility with existing code
 
+    # Mock missing exports if needed
+    backup_incremental_bookings = None
+
+except (ImportError, RuntimeError) as e_detailed_azure_import:
+    azure_import_error_message = f"R2 Storage connection might be missing. Error: {e_detailed_azure_import}"
+    # ... error handling logic ...
     create_full_backup = None
     list_available_backups = None
     restore_full_backup = None
@@ -101,13 +97,12 @@ except (ImportError, RuntimeError) as e_detailed_azure_import: # Capture the exc
     restore_bookings_from_full_db_backup = None
     backup_incremental_bookings = None
     backup_full_bookings_json = None
-    # restore_bookings_from_full_json_export = None # REMOVED
-    # delete_incremental_booking_backup = None # Removed corresponding None assignment
     list_booking_data_json_backups = None
     delete_booking_data_json_backup = None
     restore_booking_data_to_point_in_time = None
     download_booking_data_json_backup = None
     azure_backup = None
+    download_backup_set_as_zip = None
 
 api_system_bp = Blueprint('api_system', __name__)
 
