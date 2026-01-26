@@ -35,13 +35,37 @@
         <p>{{ _('Resource:') }} <strong id="cebm-resource-name">N/A</strong></p>
 
         <!-- Read-only details -->
-        <div>{{ _('Resource name:') }} <strong id="cebm-ro-resource-name">N/A</strong></div>
-        <div>{{ _('Location:') }} <strong id="cebm-ro-location-floor">N/A</strong></div>
-        <div>{{ _('Booking Title:') }} <strong id="cebm-ro-booking-title">N/A</strong></div>
-        <div>{{ _('Date:') }} <strong id="cebm-ro-datetime-range">N/A</strong></div>
+        <div id="cebm-readonly-details">
+            <div>{{ _('Resource name:') }} <strong id="cebm-ro-resource-name">N/A</strong></div>
+            <div>{{ _('Location:') }} <strong id="cebm-ro-location-floor">N/A</strong></div>
+            <div>{{ _('Booking Title:') }} <strong id="cebm-ro-booking-title">N/A</strong></div>
+            <div>{{ _('Date:') }} <strong id="cebm-ro-datetime-range">N/A</strong></div>
+        </div>
+
+        <!-- Edit Section (Hidden by default) -->
+        <div id="cebm-edit-section" style="display:none; margin-top: 15px; border-top: 1px solid #ccc; padding-top: 10px;">
+            <h4>{{ _('Edit Booking') }}</h4>
+            <div class="mb-2">
+                <label for="cebm-edit-date" class="form-label">{{ _('Date:') }}</label>
+                <input type="text" id="cebm-edit-date" class="form-control" placeholder="{{ _('Select Date') }}">
+            </div>
+            <div class="mb-2">
+                <label for="cebm-edit-slots" class="form-label">{{ _('Time Slot:') }}</label>
+                <select id="cebm-edit-slots" class="form-select">
+                    <option value="">{{ _('-- Select a time slot --') }}</option>
+                </select>
+            </div>
+            <div style="margin-top: 10px;">
+                <button id="cebm-save-changes-btn" class="button button-primary">{{ _('Save Changes') }}</button>
+                <button id="cebm-cancel-edit-btn" class="button" style="margin-left: 5px;">{{ _('Cancel') }}</button>
+            </div>
+        </div>
 
         <input type="hidden" id="cebm-booking-id">
-        <button id="cebm-delete-booking-btn" class="button" style="margin-top: 15px; background-color: #dc3545; color: white; margin-left: 10px;">{{ _('Delete Booking') }}</button>
+        <div id="cebm-action-buttons" style="margin-top: 15px;">
+            <button id="cebm-edit-booking-btn" class="button" style="background-color: #007bff; color: white;">{{ _('Edit Booking') }}</button>
+            <button id="cebm-delete-booking-btn" class="button" style="background-color: #dc3545; color: white; margin-left: 10px;">{{ _('Delete Booking') }}</button>
+        </div>
         <div id="cebm-status-message" class="status-message" style="margin-top:10px;"></div>
     </div>
 </div>

@@ -1,9 +1,10 @@
 document.addEventListener('DOMContentLoaded', () => {
     let calendarInstance;
     const calendarEl = document.getElementById('calendar');
-    const calendarStatusFilterSelect = document.getElementById('calendar-status-filter'); // Changed ID
+    const calendarStatusFilterSelect = document.getElementById('calendar-status-filter');
 
     const calendarElementForOffset = document.getElementById('calendar');
+    // offsetHours might be used for logic if we were doing client-side time calc, but we rely on server now mostly.
     const offsetHours = calendarElementForOffset ? parseInt(calendarElementForOffset.dataset.globalOffset) || 0 : 0;
 
     let unavailableDates = []; // Store fetched unavailable dates
@@ -13,130 +14,137 @@ document.addEventListener('DOMContentLoaded', () => {
     const cebmCloseModalBtn = document.getElementById('cebm-close-modal-btn');
     const cebmResourceName = document.getElementById('cebm-resource-name');
     const cebmBookingId = document.getElementById('cebm-booking-id');
-    const cebmBookingTitle = document.getElementById('cebm-booking-title');
-    // const cebmStartTime = document.getElementById('cebm-start-time'); // Replaced by date and select
-    // const cebmEndTime = document.getElementById('cebm-end-time');   // Replaced by date and select
-    const cebmBookingDate = document.getElementById('cebm-booking-date');
-    const cebmAvailableSlotsSelect = document.getElementById('cebm-available-slots-select');
     const cebmStatusMessage = document.getElementById('cebm-status-message');
-    const cebmDeleteBookingBtn = document.getElementById('cebm-delete-booking-btn'); // Added
 
-    if (!calendarEl || !calendarStatusFilterSelect || !calendarEditBookingModal || !cebmDeleteBookingBtn) { // Added !cebmSaveChangesBtn to the check
-        console.error("Required calendar elements (calendar, filter, modal, save button, or delete button) not found.");
+    // Edit specific elements
+    const cebmEditBookingBtn = document.getElementById('cebm-edit-booking-btn');
+    const cebmDeleteBookingBtn = document.getElementById('cebm-delete-booking-btn');
+    const cebmEditSection = document.getElementById('cebm-edit-section');
+    const cebmEditDate = document.getElementById('cebm-edit-date');
+    const cebmEditSlots = document.getElementById('cebm-edit-slots');
+    const cebmSaveChangesBtn = document.getElementById('cebm-save-changes-btn');
+    const cebmCancelEditBtn = document.getElementById('cebm-cancel-edit-btn');
+    const cebmReadOnlyDetails = document.getElementById('cebm-readonly-details');
+    const cebmActionButtons = document.getElementById('cebm-action-buttons');
+
+    if (!calendarEl || !calendarStatusFilterSelect || !calendarEditBookingModal) {
+        console.error("Required calendar elements not found.");
         return;
+    }
+
+    // Initialize flatpickr on the edit date input once
+    let editDateFlatpickr;
+    if (cebmEditDate) {
+        editDateFlatpickr = flatpickr(cebmEditDate, {
+            dateFormat: "Y-m-d",
+            disable: [], // Will be updated
+            onChange: function(selectedDates, dateStr, instance) {
+                const bookingId = cebmBookingId.value;
+                const resourceId = calendarEditBookingModal.dataset.resourceId; // We'll store this on open
+                if (resourceId && bookingId) {
+                    fetchAndDisplayAvailableSlots(resourceId, dateStr, bookingId);
+                }
+            }
+        });
     }
 
     let allUserEvents = []; // Store all user bookings
 
-    // Helper function to format Date objects for datetime-local input
-    // function formatDateForDatetimeLocal(date) { // No longer needed for datetime-local inputs
-    //     if (!date) return '';
-    //     const year = date.getUTCFullYear();
-    //     const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
-    //     const day = date.getUTCDate().toString().padStart(2, '0');
-    //     const hours = date.getUTCHours().toString().padStart(2, '0');
-    //     const minutes = date.getUTCMinutes().toString().padStart(2, '0');
-    //     return `${year}-${month}-${day}T${hours}:${minutes}`;
-    // }
+    async function fetchAndDisplayAvailableSlots(resourceId, dateStr, bookingIdToExclude = null) {
+        if (!cebmEditSlots) return;
 
-    async function fetchAndDisplayAvailableSlots(resourceId, dateStr, selectedStartTimeStr) {
-        const slotsSelect = document.getElementById('cebm-available-slots-select');
-        const statusMessage = document.getElementById('cebm-status-message'); // Or a dedicated message area for slots
-
-        slotsSelect.innerHTML = '<option value="">Loading slots...</option>';
-        slotsSelect.disabled = true;
+        cebmEditSlots.innerHTML = '<option value="">Loading...</option>';
+        cebmEditSlots.disabled = true;
+        cebmStatusMessage.textContent = '';
 
         try {
-            const availableSlots = await apiCall(`/api/resources/${resourceId}/available_slots?date=${dateStr}`);
+            const apiData = await apiCall(`/api/resources/${resourceId}/availability?date=${dateStr}`);
 
-            // API call to availableSlots is kept (as per previous logic), but its direct output isn't used to populate slots here.
-            // It could be used for general resource availability checks in a more advanced version.
-            if (!availableSlots) {
-                console.warn('API call for resource slots returned no data, or resource might be generally unavailable. Proceeding with predefined slots and user conflict check.');
-            }
+            // apiData structure: { booked_slots: [], standard_slot_statuses: { "first_half": {...}, ... } }
+            const bookedSlots = apiData.booked_slots || [];
+            const slotStatuses = apiData.standard_slot_statuses || {};
 
-            const allCalendarEvents = calendarInstance.getEvents();
-            const currentEditingBookingId = document.getElementById('cebm-booking-id').value;
-
-            // PROACTIVE FIX APPLIED HERE based on prompt's suggestion
-            const otherUserBookingsOnDate = allCalendarEvents.filter(event => {
-                // Ensure event.id is string if currentEditingBookingId is string.
-                if (String(event.id) === String(currentEditingBookingId)) { // Explicitly cast to string for safety
-                    return false;
-                }
-                if (!event.start) {
-                    return false;
-                }
-                // Date comparison: event.start is a Date object. dateStr is 'YYYY-MM-DD'.
-                // Convert event.start to a 'YYYY-MM-DD' string in UTC for reliable comparison.
-                const eventDateString = event.start.toISOString().split('T')[0];
-                return eventDateString === dateStr;
-            });
-
-            // Define the predefined slots
-            const predefinedSlots = [
-                { text: "08:00 - 12:00", value: "08:00,12:00" }, // Removed UTC
-                { text: "13:00 - 17:00", value: "13:00,17:00" }, // Removed UTC
-                { text: "08:00 - 17:00", value: "08:00,17:00" }  // Removed UTC
+            const standardSlots = [
+                { key: 'first_half', text: "08:00 - 12:00", value: "08:00:00,12:00:00" },
+                { key: 'second_half', text: "13:00 - 17:00", value: "13:00:00,17:00:00" },
+                { key: 'full_day', text: "08:00 - 17:00", value: "08:00:00,17:00:00" }
             ];
 
-            slotsSelect.innerHTML = '<option value="">-- Select a time slot --</option>'; // Reset
+            cebmEditSlots.innerHTML = '<option value="">-- Select a time slot --</option>';
 
-            predefinedSlots.forEach(pSlot => {
-                const [pSlotStartStr, pSlotEndStr] = pSlot.value.split(',');
-                // Construct Date objects for the predefined slot in Local Time
-                const predefinedSlotStartLocal = new Date(dateStr + 'T' + pSlotStartStr + ':00'); // No 'Z', parsed as local
-                const predefinedSlotEndLocal = new Date(dateStr + 'T' + pSlotEndStr + ':00');     // No 'Z', parsed as local
+            standardSlots.forEach(slot => {
+                const statusInfo = slotStatuses[slot.key];
 
-                let isConflicting = false;
-                for (const existingEvent of otherUserBookingsOnDate) {
-                    // FullCalendar events store start/end as Date objects (now local due to timeZone: 'local')
-                    const existingBookingStart = existingEvent.start;
-                    const existingBookingEnd = existingEvent.end;
+                // Check if passed
+                if (statusInfo && statusInfo.is_passed) {
+                    // Optionally show passed slots but disabled?
+                    // For now, let's just skip them to keep list clean, or show as (Passed)
+                    // Showing them as disabled might be better UX.
+                    const option = document.createElement('option');
+                    option.value = slot.value;
+                    option.textContent = `${slot.text} (Passed)`;
+                    option.disabled = true;
+                    cebmEditSlots.appendChild(option);
+                    return;
+                }
 
-                    if (existingBookingStart && existingBookingEnd) { // Standard check for events with duration
-                        if ((predefinedSlotStartLocal < existingBookingEnd) && (predefinedSlotEndLocal > existingBookingStart)) {
-                            isConflicting = true;
-                            break;
-                        }
-                    } else if (existingBookingStart) {
-                        // Handle events that might be point-in-time or have missing end dates
-                        // This logic assumes such events conflict if they are within the predefined slot
-                        if (predefinedSlotStartLocal <= existingBookingStart && predefinedSlotEndLocal > existingBookingStart) {
-                           // isConflicting = true; // Uncomment and refine if point-in-time events need specific handling
-                           // break;
-                        }
+                // Check for booking conflicts, excluding the current booking
+                let isBooked = false;
+                const [slotStartStr, slotEndStr] = slot.value.split(',');
+
+                // Convert slot strings to comparable minutes
+                const parseTime = (t) => {
+                    // Handle HH:MM:SS or HH:MM
+                    const [h, m] = t.split(':').map(Number);
+                    return h * 60 + m;
+                };
+                const slotStartMins = parseTime(slotStartStr);
+                const slotEndMins = parseTime(slotEndStr);
+
+                for (const booking of bookedSlots) {
+                    if (String(booking.booking_id) === String(bookingIdToExclude)) continue;
+
+                    const bStartMins = parseTime(booking.start_time);
+                    const bEndMins = parseTime(booking.end_time);
+
+                    // Check overlap
+                    if (slotStartMins < bEndMins && slotEndMins > bStartMins) {
+                        isBooked = true;
+                        break;
                     }
                 }
-                if (!isConflicting) {
-                    const option = new Option(pSlot.text, pSlot.value);
-                    // Regarding selectedStartTimeStr:
-                    // The original instruction was "we will not attempt to pre-select any of these fixed slots based on selectedStartTimeStr."
-                    // If pre-selection for non-conflicting matching slots is desired later, it would be added here.
-                    // Example: if (selectedStartTimeStr && pSlotStartStr === selectedStartTimeStr) { option.selected = true; }
-                    slotsSelect.add(option);
+
+                if (isBooked) {
+                    const option = document.createElement('option');
+                    option.value = slot.value;
+                    option.textContent = `${slot.text} (Unavailable)`;
+                    option.disabled = true;
+                    cebmEditSlots.appendChild(option);
+                } else {
+                    const option = document.createElement('option');
+                    option.value = slot.value;
+                    option.textContent = slot.text;
+                    cebmEditSlots.appendChild(option);
                 }
             });
 
-            if (slotsSelect.options.length <= 1) { // Only the default "-- Select a time slot --" is present
-                slotsSelect.innerHTML = '<option value="">No Available Resource</option>';
-                slotsSelect.disabled = true;
-            } else {
-                slotsSelect.disabled = false;
+            cebmEditSlots.disabled = false;
+            // If all options are disabled (except default), show message?
+            const enabledOptions = Array.from(cebmEditSlots.options).filter(o => !o.disabled && o.value !== "");
+            if (enabledOptions.length === 0) {
+                // cebmEditSlots.innerHTML = '<option value="">No slots available</option>';
+                // cebmEditSlots.disabled = true;
             }
 
-            if (statusMessage) statusMessage.textContent = ''; // Clear loading/previous status
         } catch (error) {
-            console.error('Error fetching available slots or processing conflicts:', error);
-            slotsSelect.innerHTML = '<option value="">Error loading or checking slots</option>';
-            if (statusMessage) {
-                statusMessage.textContent = error.message || 'Failed to load available slots.';
-                statusMessage.className = 'status-message error-message';
+            console.error('Error fetching slots:', error);
+            cebmEditSlots.innerHTML = '<option value="">Error loading slots</option>';
+            if (cebmStatusMessage) {
+                cebmStatusMessage.textContent = 'Failed to load availability.';
+                cebmStatusMessage.className = 'status-message error-message';
             }
         }
     }
-
-    // Removed populateResourceSelector function
 
     function populateStatusFilter(selectElement) {
         selectElement.innerHTML = ''; // Clear existing options
@@ -158,9 +166,6 @@ document.addEventListener('DOMContentLoaded', () => {
         selectElement.disabled = false;
     }
 
-    // Function to handle saving changes from the modal
-
-    // Populate the new status filter dropdown
     populateStatusFilter(calendarStatusFilterSelect);
 
     // --- Logic to initialize and render the calendar ---
@@ -171,18 +176,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         calendarInstance = new FullCalendar.Calendar(calendarEl, {
             initialView: determinedInitialView,
-            timeZone: 'local', // Keep timezone as UTC for consistency with server
+            timeZone: 'local',
             selectAllow: function(selectInfo) {
-                // Convert startStr to 'YYYY-MM-DD' format
                 const startDateStr = selectInfo.startStr.split('T')[0];
                 if (unavailableDates.includes(startDateStr)) {
-                    // console.log(`Selection blocked for unavailable date: ${startDateStr}`);
-                    return false; // Date is in the unavailable list, prevent selection
+                    return false;
                 }
-                return true; // Date is not in the list, allow selection
+                return true;
             },
             dayCellDidMount: function(arg) {
-                // Convert arg.date (Date object) to 'YYYY-MM-DD' string
                 const dateStr = arg.date.toISOString().split('T')[0];
                 if (unavailableDates.includes(dateStr)) {
                     arg.el.classList.add('fc-unavailable-date');
@@ -193,11 +195,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 center: 'title',
                 right: 'dayGridMonth,timeGridWeek,timeGridDay'
             },
-            editable: false, // Disable drag-and-drop and resize
+            editable: false,
             eventClick: function(info) {
                 // Populate modal with event details
-
-                // Get references to new read-only display elements
                 const roResourceName = document.getElementById('cebm-ro-resource-name');
                 const roLocationFloor = document.getElementById('cebm-ro-location-floor');
                 const roBookingTitle = document.getElementById('cebm-ro-booking-title');
@@ -247,25 +247,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     roDatetimeRange.textContent = 'N/A';
                 }
 
-                // Populate existing editable fields (ensure this logic is preserved)
                 cebmBookingId.value = info.event.id;
+                calendarEditBookingModal.dataset.resourceId = info.event.extendedProps.resource_id;
 
-                // This was the old way of setting the general resource name, ensure it's not needed or adapt
-                // cebmResourceName.textContent = info.event.extendedProps.resource_name || info.event.title || 'N/A';
-                // Since we hid the parent paragraph of 'cebm-resource-name', this line is not strictly necessary for display,
-                // but if other JS logic relies on its textContent, it should be reviewed.
-                // For now, the new 'cebm-ro-resource-name' handles the display.
-
-                cebmStatusMessage.textContent = ''; // Clear previous messages
+                cebmStatusMessage.textContent = '';
                 cebmStatusMessage.className = 'status-message';
+
+                // Reset Edit UI state
+                if (cebmEditSection) cebmEditSection.style.display = 'none';
+                if (cebmReadOnlyDetails) cebmReadOnlyDetails.style.display = 'block';
+                if (cebmActionButtons) cebmActionButtons.style.display = 'block';
+
                 calendarEditBookingModal.style.display = 'block';
 
-                const currentDeleteBtnElement = document.getElementById('cebm-delete-booking-btn');
-
-                // Logic for delete button
-                if (currentDeleteBtnElement && currentDeleteBtnElement.parentNode) {
-                    const newDeleteBtn = currentDeleteBtnElement.cloneNode(true);
-                    currentDeleteBtnElement.parentNode.replaceChild(newDeleteBtn, currentDeleteBtnElement);
+                // Setup Delete Button (Existing Logic)
+                if (cebmDeleteBookingBtn) {
+                    // Clone to remove previous listeners
+                    const newDeleteBtn = cebmDeleteBookingBtn.cloneNode(true);
+                    cebmDeleteBookingBtn.parentNode.replaceChild(newDeleteBtn, cebmDeleteBookingBtn);
 
                     newDeleteBtn.onclick = () => {
                         if (confirm("Are you sure you want to delete this booking?")) {
@@ -276,7 +275,6 @@ document.addEventListener('DOMContentLoaded', () => {
                                 return;
                             }
 
-                            // Disable button to prevent multiple clicks
                             newDeleteBtn.disabled = true;
                             newDeleteBtn.textContent = 'Deleting...';
                             cebmStatusMessage.textContent = '';
@@ -286,14 +284,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 .then(response => {
                                     cebmStatusMessage.textContent = response.message || 'Booking deleted successfully!';
                                     cebmStatusMessage.className = 'status-message success-message';
-
-                                    // Remove event from calendar
                                     const eventToRemove = calendarInstance.getEventById(bookingId);
-                                    if (eventToRemove) {
-                                        eventToRemove.remove();
-                                    }
-
-                                    // Close modal after a short delay
+                                    if (eventToRemove) eventToRemove.remove();
                                     setTimeout(() => {
                                         calendarEditBookingModal.style.display = 'none';
                                         cebmStatusMessage.textContent = '';
@@ -306,14 +298,37 @@ document.addEventListener('DOMContentLoaded', () => {
                                     cebmStatusMessage.className = 'status-message error-message';
                                 })
                                 .finally(() => {
-                                    // Re-enable button
                                     newDeleteBtn.disabled = false;
                                     newDeleteBtn.textContent = 'Delete Booking';
                                 });
                         }
                     };
-                } else {
-                    console.error("Error: Could not find 'currentDeleteBtnElement' (ID: cebm-delete-booking-btn) or its parent node.");
+                }
+
+                // Setup Edit Button
+                if (cebmEditBookingBtn) {
+                    const newEditBtn = cebmEditBookingBtn.cloneNode(true);
+                    cebmEditBookingBtn.parentNode.replaceChild(newEditBtn, cebmEditBookingBtn);
+
+                    newEditBtn.onclick = () => {
+                        // Switch UI to Edit Mode
+                        if (cebmReadOnlyDetails) cebmReadOnlyDetails.style.display = 'none';
+                        if (cebmActionButtons) cebmActionButtons.style.display = 'none';
+                        if (cebmEditSection) cebmEditSection.style.display = 'block';
+
+                        // Initialize/Update Date Picker
+                        const eventDateObj = info.event.start;
+                        const dateStr = eventDateObj.toISOString().split('T')[0]; // YYYY-MM-DD
+
+                        if (editDateFlatpickr) {
+                            editDateFlatpickr.setDate(dateStr);
+                        } else if (cebmEditDate) {
+                             cebmEditDate.value = dateStr; // Fallback if flatpickr failed
+                        }
+
+                        // Fetch slots for this date
+                        fetchAndDisplayAvailableSlots(info.event.extendedProps.resource_id, dateStr, info.event.id);
+                    };
                 }
             },
             eventSources: [
@@ -331,7 +346,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             apiUrl += `?status_filter=${encodeURIComponent(selectedStatusValue)}`;
                         }
 
-                        allUserEvents = []; // Clear cache before every fetch for simplicity with filter changes
+                        allUserEvents = [];
 
                         apiCall(apiUrl)
                             .then(bookings => {
@@ -350,7 +365,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     };
                                     return eventObject;
                                 });
-                                allUserEvents = mappedEvents; // Re-populate cache (optional, but kept for now)
+                                allUserEvents = mappedEvents;
                                 successCallback(mappedEvents);
                             })
                             .catch(error => {
@@ -367,9 +382,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 return 0;
             },
             eventContent: function(arg) {
-                // Preserve existing logic for title and time display for dayGridMonth view
                 if (arg.view.type === 'dayGridMonth') {
-                    const MAX_TITLE_LENGTH = 20; // Adjusted for potentially longer content
+                    const MAX_TITLE_LENGTH = 20;
                     const MAX_TIME_LENGTH = 18;
 
                     let displayTitle = arg.event.title;
@@ -377,13 +391,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         displayTitle = arg.event.title.substring(0, MAX_TITLE_LENGTH - 3) + "...";
                     }
 
-                    // Access new properties
                     const location = arg.event.extendedProps.location || "N/A";
                     const floor = arg.event.extendedProps.floor || "N/A";
                     const resourceName = arg.event.extendedProps.resource_name || "N/A";
 
-                    // Construct HTML without labels, each on a new line
-                    let eventHtml = `<b>${displayTitle}</b>`; // Title is bold
+                    let eventHtml = `<b>${displayTitle}</b>`;
                     eventHtml += `<br>${location} - ${floor}`;
                     eventHtml += `<br>${resourceName}`;
 
@@ -414,47 +426,26 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (fullTimeString.length > MAX_TIME_LENGTH) {
                                 displayTime = fullTimeString.substring(0, MAX_TIME_LENGTH - 3) + "...";
                             }
-                            eventHtml += `<br>${displayTime}`; // Time string on a new line
+                            eventHtml += `<br>${displayTime}`;
                         }
                     }
                     return { html: eventHtml };
                 }
-                // For other views, retain original behavior (bold title, FC handles time)
-                // Or apply a similar detailed view if desired for other views as well.
-                // For now, only modifying month view as per typical calendar detail levels.
-                let displayTitleOtherView = arg.event.title;
-                // Potentially add location/floor/resource here as well if desired for week/day views
-                // const locationOther = arg.event.extendedProps.location || "N/A";
-                // const floorOther = arg.event.extendedProps.floor || "N/A";
-                // const resourceNameOther = arg.event.extendedProps.resource_name || "N/A";
-                // let otherViewHtml = `<b>${displayTitleOtherView}</b><br>L: ${locationOther}-${floorOther}<br>R: ${resourceNameOther}`;
-                // return { html: otherViewHtml };
-                return { html: `<b>${arg.event.title}</b>` }; // Original behavior for other views
+                return { html: `<b>${arg.event.title}</b>` };
             }
         });
         calendarInstance.render();
-        console.log('FullCalendar effective timeZone:', calendarInstance.getOption('timeZone')); // Log effective timezone
-
-        // Attach event listeners that depend on the calendar object here, after it's rendered.
-        if (calendarStatusFilterSelect) {
-            calendarStatusFilterSelect.addEventListener('change', () => {
-                if (calendarInstance) {
-                     calendarInstance.refetchEvents();
-                }
-            });
-        }
     };
 
     // --- Fetching user ID and then potentially unavailable dates ---
     let currentUserId = null;
     if (calendarEl && calendarEl.dataset.userId) {
         currentUserId = calendarEl.dataset.userId;
-    } else if (typeof window.currentUserId !== 'undefined') { // Fallback to a global variable
+    } else if (typeof window.currentUserId !== 'undefined') {
         currentUserId = window.currentUserId;
     }
 
     const floorSelector = document.getElementById('floor-selector');
-    let flatpickrInstance;
 
     function fetchUnavailableDates() {
         if (currentUserId) {
@@ -465,10 +456,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             apiCall(apiUrl)
                 .then(dates => {
-                    unavailableDates = dates; // Populate the global array
-                    console.log("Unavailable dates fetched:", unavailableDates);
-                    if (flatpickrInstance) {
-                        flatpickrInstance.set('disable', unavailableDates);
+                    unavailableDates = dates;
+                    if (editDateFlatpickr) {
+                        editDateFlatpickr.set('disable', unavailableDates);
                     }
                     if (calendarInstance) {
                         calendarInstance.refetchEvents();
@@ -483,48 +473,104 @@ document.addEventListener('DOMContentLoaded', () => {
     if (currentUserId) {
         apiCall(`/api/resources/unavailable_dates?user_id=${currentUserId}`)
             .then(dates => {
-                unavailableDates = dates; // Populate the global array
-                console.log("Unavailable dates fetched:", unavailableDates);
-                flatpickrInstance = flatpickr("#cebm-booking-date", {
-                    disable: unavailableDates,
-                    dateFormat: "Y-m-d",
-                });
+                unavailableDates = dates;
+                if (editDateFlatpickr) {
+                    editDateFlatpickr.set('disable', unavailableDates);
+                }
             })
             .catch(error => {
                 console.error('Error fetching unavailable dates:', error);
-                // Proceed without unavailable dates functionality
-                flatpickrInstance = flatpickr("#cebm-booking-date", {
-                    dateFormat: "Y-m-d",
-                });
             })
             .finally(() => {
-                initializeCalendar(); // Initialize calendar after API call attempt
+                initializeCalendar();
             });
     } else {
-        console.info('User ID not found for this calendar instance. Skipping fetching unavailable dates. This is normal for "My Calendar" view.');
-        initializeCalendar(); // Initialize calendar immediately if no user ID
-        flatpickrInstance = flatpickr("#cebm-booking-date", {
-            dateFormat: "Y-m-d",
-        });
+        console.info('User ID not found for this calendar instance.');
+        initializeCalendar();
     }
 
-    floorSelector.addEventListener('change', fetchUnavailableDates);
+    if (floorSelector) {
+        floorSelector.addEventListener('change', fetchUnavailableDates);
+    }
 
-
-    // Event listener for the modal's close button
+    // Modal Close
     if (cebmCloseModalBtn) {
         cebmCloseModalBtn.addEventListener('click', () => {
             calendarEditBookingModal.style.display = 'none';
         });
     }
 
-    // Close modal if user clicks outside of the modal content
     window.addEventListener('click', (event) => {
         if (event.target === calendarEditBookingModal) {
             calendarEditBookingModal.style.display = 'none';
         }
     });
 
-    // Note: calendarStatusFilterSelect event listener is now inside initializeCalendar
-    // to ensure 'calendar' object is available.
+    // Edit Section Buttons
+    if (cebmCancelEditBtn) {
+        cebmCancelEditBtn.addEventListener('click', () => {
+            if (cebmEditSection) cebmEditSection.style.display = 'none';
+            if (cebmReadOnlyDetails) cebmReadOnlyDetails.style.display = 'block';
+            if (cebmActionButtons) cebmActionButtons.style.display = 'block';
+            cebmStatusMessage.textContent = '';
+            cebmStatusMessage.className = 'status-message';
+        });
+    }
+
+    if (cebmSaveChangesBtn) {
+        cebmSaveChangesBtn.addEventListener('click', async () => {
+            const bookingId = cebmBookingId.value;
+            const newDate = cebmEditDate.value;
+            const selectedSlot = cebmEditSlots.value;
+
+            if (!bookingId || !newDate || !selectedSlot) {
+                cebmStatusMessage.textContent = 'Please select a date and a time slot.';
+                cebmStatusMessage.className = 'status-message error-message';
+                return;
+            }
+
+            const [startTime, endTime] = selectedSlot.split(',');
+            const startDateTime = `${newDate}T${startTime}`;
+            const endDateTime = `${newDate}T${endTime}`;
+
+            cebmSaveChangesBtn.disabled = true;
+            cebmSaveChangesBtn.textContent = 'Saving...';
+            cebmStatusMessage.textContent = '';
+
+            try {
+                const response = await apiCall(`/api/bookings/${bookingId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        start_time: startDateTime,
+                        end_time: endDateTime
+                    })
+                });
+
+                cebmStatusMessage.textContent = 'Booking updated successfully!';
+                cebmStatusMessage.className = 'status-message success-message';
+
+                // Refresh calendar
+                if (calendarInstance) calendarInstance.refetchEvents();
+
+                setTimeout(() => {
+                    calendarEditBookingModal.style.display = 'none';
+                    cebmStatusMessage.textContent = '';
+                    cebmStatusMessage.className = 'status-message';
+                    // Reset UI
+                    if (cebmEditSection) cebmEditSection.style.display = 'none';
+                    if (cebmReadOnlyDetails) cebmReadOnlyDetails.style.display = 'block';
+                    if (cebmActionButtons) cebmActionButtons.style.display = 'block';
+                }, 1500);
+
+            } catch (error) {
+                console.error('Error updating booking:', error);
+                cebmStatusMessage.textContent = error.message || 'Failed to update booking.';
+                cebmStatusMessage.className = 'status-message error-message';
+            } finally {
+                cebmSaveChangesBtn.disabled = false;
+                cebmSaveChangesBtn.textContent = 'Save Changes';
+            }
+        });
+    }
 });
