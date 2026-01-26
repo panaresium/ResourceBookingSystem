@@ -47,7 +47,11 @@
 
                     <h5>{{ _("Export Bookings") }}</h5>
                     <div class="mb-3">
-                        <a href="{{ url_for('admin_ui.export_all_bookings_json') }}" class="btn btn-primary">{{ _("Export All Bookings (JSON)") }}</a>
+                        <form action="{{ url_for('admin_ui.export_all_bookings_json') }}" method="get">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-file-export"></i> {{ _("Export All Bookings (JSON)") }}
+                            </button>
+                        </form>
                     </div>
                     <hr>
 
