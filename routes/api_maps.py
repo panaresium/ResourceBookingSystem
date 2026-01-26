@@ -18,9 +18,9 @@ from auth import permission_required
 # Assuming these utils will be moved to utils.py or are already there
 from utils import add_audit_log, allowed_file, _get_map_configuration_data, _import_map_configuration_data, check_resources_availability_for_user, get_detailed_map_availability_for_user, _get_map_configuration_data_zip
 
-# Conditional import for Azure
+# Conditional import for Storage (R2)
 try:
-    from azure_backup import save_floor_map_to_share
+    from r2_backup import save_floor_map_to_share
 except ImportError:
     save_floor_map_to_share = None
 
@@ -258,14 +258,13 @@ def upload_floor_map():
                 file.save(file_path)
                 image_url = url_for('static', filename=f'floor_map_uploads/{filename}', _external=False)
 
-                if save_floor_map_to_share: # Conditional Azure upload
+                if save_floor_map_to_share: # Conditional R2 upload via backup helper (for sync/redundancy)
                     try:
-                        current_app.logger.info(f"Attempting to save '{filename}' to Azure File Share.")
+                        current_app.logger.info(f"Attempting to save '{filename}' to R2 Storage.")
                         save_floor_map_to_share(file_path, filename) # Standardized
-                        current_app.logger.info(f"Successfully saved '{filename}' to Azure File Share.")
-                    except Exception as azure_e:
-                        current_app.logger.exception(f'Failed to upload floor map to Azure File Share: {azure_e}')
-                        # Decide if this is a critical failure or just a warning
+                        current_app.logger.info(f"Successfully saved '{filename}' to R2 Storage.")
+                    except Exception as r2_e:
+                        current_app.logger.exception(f'Failed to upload floor map to R2 Storage: {r2_e}')
 
             current_app.logger.info(f"Creating FloorMap object with name='{map_name}', image_filename='{filename}', location='{location}', floor='{floor}', offset_x={offset_x}, offset_y={offset_y}")
             new_map = FloorMap(name=map_name, image_filename=filename, # Use standardized filename

@@ -3,7 +3,7 @@ from flask import current_app, render_template, url_for
 from extensions import db
 from models import Booking, User, Resource, FloorMap, BookingSettings
 from utils import add_audit_log, send_email, _get_map_configuration_data, _get_resource_configurations_data, _get_user_configurations_data, get_current_effective_time
-from azure_backup import (
+from r2_backup import (
     create_full_backup,
     create_incremental_booking_backup,  # Added for the new incremental backup logic
     backup_full_bookings_json,
