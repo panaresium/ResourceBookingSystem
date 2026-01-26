@@ -11,15 +11,10 @@ Flask-Mail>=0.9
 requests>=2.25
 gunicorn
 
-# azure-storage-file-share # Removed
-
-# APScheduler # Removed as internal scheduler is disabled
-
 Flask-Migrate
 Pillow>=9.0.0
 google-api-python-client>=2.0.0
 
-# New Stack Dependencies
 boto3>=1.28.0
 psycopg2-binary>=2.9.0
 python-dotenv>=1.0.0
