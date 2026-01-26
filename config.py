@@ -1,9 +1,13 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Application directory
 # Resolve to get absolute path, ensuring consistency.
 basedir = Path(__file__).resolve().parent
+
+# Load environment variables from .env file
+load_dotenv(basedir / '.env')
 
 # --- Core Flask App Configurations ---
 SECRET_KEY = os.environ.get('SECRET_KEY', 'dev_secret_key_123!@#_fallback_for_config.py')
