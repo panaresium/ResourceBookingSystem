@@ -635,18 +635,18 @@ def import_bookings_json():
                         fail_count += 1
                         continue
 
+                    # Handle Foreign Keys - Resource ID is mandatory
+                    # Check this BEFORE creating or fetching the booking to avoid adding invalid objects to session
+                    resource_id = b_data.get('resource_id')
+                    if not resource_id or not Resource.query.get(resource_id):
+                        logger.warning(f"Skipping booking {booking_id}: Resource {resource_id} not found.")
+                        fail_count += 1
+                        continue # Cannot import without valid resource
+
                     booking = Booking.query.get(booking_id)
                     if not booking:
                         booking = Booking(id=booking_id)
                         db.session.add(booking)
-
-                    # Update fields
-                    # Handle Foreign Keys - Resource ID is mandatory
-                    resource_id = b_data.get('resource_id')
-                    if not Resource.query.get(resource_id):
-                        logger.warning(f"Skipping booking {booking_id}: Resource {resource_id} not found.")
-                        fail_count += 1
-                        continue # Cannot import without valid resource
 
                     booking.resource_id = resource_id
                     booking.user_name = b_data.get('user_name')
