@@ -35,165 +35,48 @@
         </div>
     </div>
 
-    <!-- Unified Azure JSON Booking Data Backups Section -->
+    <!-- Booking Records Export/Import Section -->
     <div class="row mt-4">
         <div class="col-md-12">
             <div class="card mb-4">
                 <div class="card-header bg-primary text-white">
-                    <h4 class="mb-0"><i class="fas fa-cloud-upload-alt"></i> {{ _("Unified Azure JSON Booking Data Backups") }}</h4>
+                    <h4 class="mb-0"><i class="fas fa-file-export"></i> {{ _("Booking Records Export & Import") }}</h4>
                 </div>
                 <div class="card-body">
-                    <p class="card-text">{{ _("This is the recommended method for robust backup and point-in-time recovery of your booking data.") }}</p>
+                    <p class="card-text">{{ _("Export all booking records to a JSON file or import records from a JSON file.") }}</p>
+
+                    <h5>{{ _("Export Bookings") }}</h5>
                     <div class="mb-3">
-                        <button id="btnManualUnifiedBackup" class="btn btn-primary" onclick="manualUnifiedBackup()">{{ _("Run Manual Full JSON Backup Now") }}</button>
-                        <button id="btnRefreshUnifiedList" class="btn btn-info" onclick="refreshUnifiedAzureBackupList()">{{ _("Refresh Backup List") }}</button>
-                    </div>
-
-                    <h5>{{ _("Restore from Unified Azure JSON Backup") }}</h5>
-                    <div class="form-group">
-                        <label for="selectUnifiedAzureBackup">{{ _("Select Backup to Restore (Point-in-Time):") }}</label>
-                        <select id="selectUnifiedAzureBackup" class="form-control mb-2"></select>
-                        <button id="btnRestoreFromUnifiedAzure" class="btn btn-warning" onclick="restoreSelectedUnifiedBackup()">{{ _("Restore Selected Backup") }}</button>
+                        <a href="{{ url_for('admin_ui.export_all_bookings_json') }}" class="btn btn-primary">{{ _("Export All Bookings (JSON)") }}</a>
                     </div>
                     <hr>
-                    <h5>{{ _("Manage Unified Azure JSON Backups") }}</h5>
-                    <div class="table-responsive">
-                        <table class="table table-bordered table-striped">
-                            <thead>
-                                <tr>
-                                    <th>{{ _("Backup Details (Display Name)") }}</th>
-                                    <th>{{ _("Type") }}</th>
-                                    <th>{{ _("Filename") }}</th>
-                                    <th>{{ _("Timestamp (UTC)") }}</th>
-                                    <th>{{ _("Actions") }}</th>
-                                </tr>
-                            </thead>
-                            <tbody id="listManageAzureBackups">
-                                <!-- Backup items will be populated here by JavaScript -->
-                            </tbody>
-                        </table>
-                    </div>
+
+                    <h5>{{ _("Import Bookings") }}</h5>
+                    <p>{{ _("Upload a JSON file containing booking records to import. Existing records with matching IDs will be updated.") }}</p>
+                    <form action="{{ url_for('admin_ui.import_bookings_json') }}" method="post" enctype="multipart/form-data">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <div class="form-group">
+                            <label for="bookingJsonFile">{{ _("Select JSON File") }}</label>
+                            <input type="file" class="form-control-file" id="bookingJsonFile" name="file" accept=".json" required>
+                        </div>
+                        <button type="submit" class="btn btn-warning">{{ _("Import Bookings (JSON)") }}</button>
+                    </form>
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- Unified Backup Schedule Settings Section -->
-    <div class="row mt-4">
-        <div class="col-md-12">
-            <div class="card">
-                <div class="card-header bg-info text-white">
-                    <h4 class="mb-0"><i class="fas fa-calendar-alt"></i> {{ _("Unified Backup Schedule Settings") }}</h4>
-                </div>
-                <div class="card-body">
-                    <p class="card-text">{{ _("Configure the schedule for automatic unified full and incremental backups. These settings determine when backups are created by the system scheduler.") }}</p>
-
-                    <!-- Full Backup Sub-section -->
-                    <h5>{{ _("Full Backup Schedule") }}</h5>
-                    <div class="form-group">
-                        <div class="form-check">
-                            <input type="checkbox" class="form-check-input" id="unified_full_enabled">
-                            <label class="form-check-label" for="unified_full_enabled">{{ _("Enable Scheduled Full Backup") }}</label>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group col-md-4">
-                            <label for="unified_full_schedule_type">{{ _("Schedule Type") }}</label>
-                            <select id="unified_full_schedule_type" class="form-control">
-                                <option value="daily">{{ _("Daily") }}</option>
-                                <option value="weekly">{{ _("Weekly") }}</option>
-                                <option value="monthly">{{ _("Monthly") }}</option>
-                            </select>
-                        </div>
-                        <div class="form-group col-md-4">
-                            <label for="unified_full_time_of_day">{{ _("Time of Day (UTC)") }}</label>
-                            <input type="time" class="form-control" id="unified_full_time_of_day" required>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group col-md-4" id="unified_full_day_of_week_group" style="display: none;">
-                            <label for="unified_full_day_of_week">{{ _("Day of Week") }}</label>
-                            <select id="unified_full_day_of_week" class="form-control">
-                                <option value="0">{{ _("Monday") }}</option>
-                                <option value="1">{{ _("Tuesday") }}</option>
-                                <option value="2">{{ _("Wednesday") }}</option>
-                                <option value="3">{{ _("Thursday") }}</option>
-                                <option value="4">{{ _("Friday") }}</option>
-                                <option value="5">{{ _("Saturday") }}</option>
-                                <option value="6">{{ _("Sunday") }}</option>
-                            </select>
-                        </div>
-                        <div class="form-group col-md-4" id="unified_full_day_of_month_group" style="display: none;">
-                            <label for="unified_full_day_of_month">{{ _("Day of Month") }}</label>
-                            <input type="number" class="form-control" id="unified_full_day_of_month" min="1" max="31">
-                        </div>
-                    </div>
-                    <hr>
-
-                    <!-- Incremental Backup Sub-section -->
-                    <h5>{{ _("Incremental Backup Schedule") }}</h5>
-                     <div class="form-group">
-                        <div class="form-check">
-                            <input type="checkbox" class="form-check-input" id="unified_incremental_enabled">
-                            <label class="form-check-label" for="unified_incremental_enabled">{{ _("Enable Scheduled Incremental Backup") }}</label>
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group col-md-4">
-                            <label for="unified_incremental_interval_minutes">{{ _("Interval (minutes)") }}</label>
-                            <input type="number" class="form-control" id="unified_incremental_interval_minutes" min="1">
-                            <small class="form-text text-muted">{{ _("How often to run the incremental backup. E.g., 30 for every 30 minutes.") }}</small>
-                        </div>
-                    </div>
-                    <hr>
-
-                    <button id="saveUnifiedBackupScheduleBtn" class="btn btn-success">{{ _("Save Schedule Settings") }}</button>
-                    <div id="unifiedScheduleFeedback" class="mt-2"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Automatic Restore Settings Section -->
-    <div class="row mt-4">
-        <div class="col-md-12">
-            <div class="card">
-                <div class="card-header">
-                    <h4 class="mb-0"><i class="fas fa-power-off"></i> {{ _("Startup Settings") }}</h4>
-                </div>
-                <div class="card-body">
-                    <p class="card-text">{{ _("Configure settings related to server startup behavior.") }}</p>
-                    <div class="form-group">
-                        <div class="form-check">
-                            <input type="checkbox" class="form-check-input" id="autoRestoreBookingDataOnStartup">
-                            <label class="form-check-label" for="autoRestoreBookingDataOnStartup">{{ _("Enable Automatic Restore of Booking Data on Server Restart") }}</label>
-                        </div>
-                        <small class="form-text text-muted">{{ _("If enabled, the system will attempt to restore the latest booking data backup automatically when the server starts. This uses the primary unified backup system.") }}</small>
-                    </div>
-                    <button id="saveAutoRestoreBookingDataSettingBtn" class="btn btn-success mt-2">{{ _("Save Setting") }}</button>
-                    <div id="autoRestoreSettingFeedback" class="mt-2"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Legacy & Other Booking Data Operations - Section Removed -->
-    <!-- Section has been removed as per requirements -->
-
-    <!-- Available Booking CSV Backups Table (Legacy) - Section Removed -->
-    <!-- Section has been removed as per requirements -->
 
     <!-- Destructive Actions Section -->
     <div class="row mt-4">
         <div class="col-md-12">
-            <div class="card border-danger"> <!-- Added border-danger for more visual warning -->
+            <div class="card border-danger">
                 <div class="card-header bg-danger text-white">
                     <h5 class="mb-0"><i class="fas fa-exclamation-triangle"></i> {{ _("Destructive Actions") }}</h5>
                 </div>
                 <div class="card-body">
                     <p class="card-text">{{ _("These actions can lead to data loss if not used carefully. Ensure you have adequate backups before proceeding.") }}</p>
                     <!-- Clear All Booking Data -->
-                    <div class="mt-3"> <!-- Added margin for spacing -->
+                    <div class="mt-3">
                         <h6>{{ _("Clear All Booking Data") }}</h6>
                         <p>{{ _("This will permanently delete all booking entries from the database. This action cannot be undone.") }}</p>
                         <button class="btn btn-danger" onclick="confirmClearAllBookingData()">{{ _("Clear All Booking Data Now") }}</button>
@@ -203,8 +86,8 @@
             </div>
         </div>
     </div>
-{# Removed duplicate footer section from here. The main footer is in base.html #}
-</div> {# End of main-content #}
+
+</div>
 
 <!-- Modals -->
 <div class="modal fade" id="confirmClearAllModal" tabindex="-1" role="dialog" style="display: none !important;"> <div class="modal-dialog"> <div class="modal-content"> <div class="modal-header"> <h5 class="modal-title">{{ _("Confirm Clear All Booking Data") }}</h5> <button type="button" class="close" data-dismiss="modal">&times;</button> </div> <div class="modal-body"> {{ _("Are you sure you want to permanently delete all booking data? This action cannot be undone.") }} </div> <div class="modal-footer"> <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ _("Cancel") }}</button> <button type="button" class="btn btn-danger" onclick="executeClearAllBookingData()">{{ _("Clear All Data") }}</button> </div> </div> </div> </div>
@@ -232,33 +115,9 @@
 {{ super() }}
 <script src="{{ url_for('static', filename='js/admin_backup_common.js') }}" defer></script>
 <script>
-    // Task ID variables for polling
-    let currentManualUnifiedBackupTaskId = null;
-    let currentRestoreBookingsFullSysTaskId = null;
-    // currentSelectiveRestoreTaskId is assumed to be available from admin_backup_common.js
-    // along with pollTaskStatus, activePolls, displayedLogCounts,
-    // showTaskProgressModal, hideTaskProgressModal, disablePageInteractions, enablePageInteractions.
-
     // Utility functions (showProgressModal, hideProgressModal, updateServerTime)
-    // For this refactor, we keep the local showProgressModal/hideProgressModal,
-    // but disablePageInteractions will be called explicitly.
     function showProgressModal(message) { $('#actionProgressMessage').text(message); $('#actionProgressModal').modal({backdrop: 'static', keyboard: false}); }
     function hideProgressModal() { $('#actionProgressModal').modal('hide'); }
-
-    function handleManualBackupCompletion(taskData) {
-        hideProgressModal(); // Always hide the modal
-        if (taskData && taskData.success) {
-            console.log("Manual backup successful, refreshing unified backup list.");
-            refreshUnifiedAzureBackupList();
-        } else if (taskData) {
-            // Optional: handle the case where taskData is present but not successful,
-            // though pollTaskStatus usually logs errors.
-            console.warn("Manual backup task completed but was not successful. List not refreshed.");
-        } else {
-            // Fallback if taskData is not provided to the callback for some reason
-            console.warn("Manual backup task completion callback received no task data. List not refreshed.");
-        }
-    }
 
     function updateServerTime() {
         fetch("{{ url_for('api_system.ping') }}")
@@ -276,246 +135,6 @@
         });
     }
 
-
-    // --- Unified Azure JSON Backups ---
-    // All functions (refreshUnifiedAzureBackupList, populateUnifiedBackupSelect, renderUnifiedBackupListForManagement,
-    // manualUnifiedBackup, restoreSelectedUnifiedBackup, deleteUnifiedBackup) remain unchanged from the previous version.
-    // For brevity, their full code is not repeated here.
-    function refreshUnifiedAzureBackupList() {
-        // showProgressModal("{{ _('Loading Unified Azure JSON backups list...') }}"); // Removed
-        fetch("{{ url_for('api_system.api_list_booking_data_backups') }}")
-            .then(response => response.json())
-            .then(data => {
-                // hideProgressModal(); // Removed
-                if (data.success && data.backups) {
-                    populateUnifiedBackupSelect(data.backups);
-                    renderUnifiedBackupListForManagement(data.backups);
-                } else {
-                    alert("{{ _('Error loading Unified Azure JSON backups:') }} " + (data.message || "{{ _('Unknown error') }}"));
-                    populateUnifiedBackupSelect([]);
-                    renderUnifiedBackupListForManagement([]);
-                }
-            })
-            .catch(error => {
-                // hideProgressModal(); // Removed
-                console.error("{{ _('Error fetching Unified Azure JSON backups list:') }}", error);
-                alert("{{ _('Error fetching Unified Azure JSON backups list.') }}");
-                populateUnifiedBackupSelect([]); renderUnifiedBackupListForManagement([]);
-            })
-            .finally(() => { // Simulating finally
-                // loadFullBackupsForRestore(); // Removed call
-                hideProgressModal(); // Now called directly here
-            });
-    }
-
-    function populateUnifiedBackupSelect(backups) {
-        const select = $('#selectUnifiedAzureBackup');
-        select.empty();
-        if (backups && backups.length > 0) {
-            backups.forEach(backup => {
-                select.append($('<option>', {
-                    value: backup.filename,
-                    text: backup.display_name,
-                    'data-type': backup.type,
-                    'data-timestamp': backup.timestamp_str // ISO string from backend
-                }));
-            });
-        } else {
-            select.append($('<option>', { text: "{{ _('No Unified Azure JSON backups found') }}" }));
-        }
-    }
-
-    function renderUnifiedBackupListForManagement(backups) {
-        const tableBody = $('#listManageAzureBackups');
-        tableBody.empty();
-        if (backups && backups.length > 0) {
-            backups.forEach((fullBackup, index) => {
-                // Full backup row
-                let fullBackupActionsHtml = `
-                    <button class="btn btn-sm btn-success mr-1" onclick="downloadUnifiedBackup('${fullBackup.filename}', 'full')" title="{{ _('Download this backup set (ZIP)') }}"><i class="fas fa-file-archive"></i></button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteUnifiedBackup('${fullBackup.filename}', 'full')" title="{{ _('Delete this full backup and its incrementals') }}"><i class="fas fa-trash"></i></button>`;
-
-                let incrementalToggleId = `incrementals-for-${fullBackup.base_timestamp}`;
-                let incrementalCount = fullBackup.incrementals ? fullBackup.incrementals.length : 0;
-                let toggleButtonHtml = "";
-                if (incrementalCount > 0) {
-                    toggleButtonHtml = `<button class="btn btn-sm btn-outline-info mr-1" type="button" data-toggle="collapse" data-target="#${incrementalToggleId}" aria-expanded="false" aria-controls="${incrementalToggleId}" title="{{ _('Show/Hide Incrementals') }}"><i class="fas fa-sitemap"></i> (${incrementalCount})</button>`;
-                }
-
-                tableBody.append(`
-                    <tr class="table-primary">
-                        <td>${toggleButtonHtml} ${fullBackup.display_name}</td>
-                        <td>{{ _("Full") }}</td>
-                        <td>${fullBackup.filename}</td>
-                        <td>${fullBackup.timestamp_str ? new Date(fullBackup.timestamp_str).toLocaleString() : 'N/A'}</td>
-                        <td>${fullBackupActionsHtml}</td>
-                    </tr>
-                `);
-
-                // Incremental backups rows (collapsible)
-                if (incrementalCount > 0) {
-                    let incrementalsHtml = "";
-                    fullBackup.incrementals.forEach(incBackup => {
-                        // For individual incremental deletion, we might need a more specific delete function or pass more info.
-                        // For now, let's assume deleteUnifiedBackup can handle deleting a single incremental.
-                        let incBackupActionsHtml = `
-                            <button class="btn btn-sm btn-danger" onclick="deleteUnifiedBackup('${incBackup.filename}', 'incremental', '${incBackup.base_timestamp}')" title="{{ _('Delete this incremental backup') }}"><i class="fas fa-trash"></i></button>
-                            <!-- Individual download for incremental might not be needed if main download is a set -->
-                            `;
-                        incrementalsHtml += `
-                            <tr class="table-info">
-                                <td style="padding-left: 40px;">${incBackup.display_name}</td>
-                                <td>{{ _("Incremental") }}</td>
-                                <td>${incBackup.filename}</td>
-                                <td>${incBackup.timestamp_str ? new Date(incBackup.timestamp_str).toLocaleString() : 'N/A'}</td>
-                                <td>${incBackupActionsHtml}</td>
-                            </tr>
-                        `;
-                    });
-                    // Add a row that contains a div for collapse, and inside that div, a table for incrementals
-                    tableBody.append(`
-                        <tr class="collapse-row">
-                            <td colspan="5" style="padding: 0;">
-                                <div class="collapse" id="${incrementalToggleId}">
-                                    <table class="table mb-0">
-                                        <tbody>
-                                            ${incrementalsHtml}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </td>
-                        </tr>
-                    `);
-                }
-            });
-        } else {
-            tableBody.append(`<tr><td colspan="5" class="text-center">{{ _("No Unified Azure JSON backups found.") }}</td></tr>`);
-        }
-    }
-
-    function manualUnifiedBackup() {
-        if (!confirm("{{ _('Are you sure you want to run a manual full JSON backup now? This may take some time.') }}")) return;
-        showProgressModal("{{ _('Starting manual full Unified Azure JSON backup...') }}");
-        disablePageInteractions(); // Disable UI
-
-        fetch("{{ url_for('api_system.api_manual_booking_data_backup_json') }}", {
-            method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token() }}' }
-        }).then(response => response.json()).then(data => {
-            if (data.success && data.task_id) {
-                const statusEl = document.getElementById('actionProgressMessage');
-                statusEl.textContent = "{{ _('Manual backup task started. Task ID:') }} " + data.task_id;
-
-                currentManualUnifiedBackupTaskId = data.task_id;
-
-                // Clear any existing poll for this task_id if it somehow exists (defensive)
-                if (activePolls[data.task_id]) {
-                    clearInterval(activePolls[data.task_id]);
-                }
-                displayedLogCounts[data.task_id] = 0; // Reset log count for this new task instance
-
-                // Setup the polling interval
-                const newIntervalId = setInterval(() => {
-                    // If the task's interval has been cleared from activePolls by pollTaskStatus itself,
-                    // then this specific interval (newIntervalId) should also be cleared to stop further execution.
-                    if (!activePolls[currentManualUnifiedBackupTaskId]) {
-                        clearInterval(newIntervalId); // Clear this page's interval for this task.
-                        return;
-                    }
-                    pollTaskStatus(currentManualUnifiedBackupTaskId, null, statusEl, 'manual_unified_booking_backup', handleManualBackupCompletion);
-                }, POLLING_INTERVAL_MS);
-                activePolls[currentManualUnifiedBackupTaskId] = newIntervalId;
-
-            } else {
-                // Task initiation failed (e.g., backend couldn't create task)
-                hideProgressModal(); // Ensure modal is hidden
-                enablePageInteractions(); // Ensure UI is re-enabled
-                throw new Error(data.message || "{{ _('Unknown error starting manual backup.') }}");
-            }
-        }).catch(error => {
-            hideProgressModal();
-            alert("{{ _('Error starting manual backup:') }} " + error.message);
-            enablePageInteractions();
-        });
-
-    }
-
-    function restoreSelectedUnifiedBackup() {
-        const selectedOption = $('#selectUnifiedAzureBackup option:selected');
-        const backupFilename = selectedOption.val();
-        const backupType = selectedOption.data('type');
-        const backupTimestampIso = selectedOption.data('timestamp');
-
-        if (!backupFilename || backupFilename === "{{ _('No Unified Azure JSON backups found') }}") { alert("{{ _('Please select a backup.') }}"); return; }
-        if (!backupType || !backupTimestampIso) { alert("{{ _('Selected backup missing type/timestamp.') }}"); return; }
-
-        let confirmMsg = `{{ _('Restore from backup') }} '${backupFilename}' (${backupType}, ${new Date(backupTimestampIso).toLocaleString()})? `;
-        confirmMsg += (backupType === 'full') ? `{{ _('This ERAASES current data.') }}` : `{{ _('This applies changes to current data.') }}`;
-        if (!confirm(confirmMsg + ` {{ _('Cannot be undone.') }}`)) return;
-
-        showProgressModal(`{{ _('Starting restore from') }} ${backupFilename}...`);
-        disablePageInteractions(); // Disable UI
-
-        fetch("{{ url_for('api_system.api_unified_booking_data_point_in_time_restore') }}", {
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
-            body: JSON.stringify({ filename: backupFilename, backup_type: backupType, backup_timestamp_iso: backupTimestampIso })
-        }).then(response => response.json()).then(data => {
-            if (data.success && data.task_id) {
-                const statusEl = document.getElementById('actionProgressMessage');
-                let initialMsg = (data.summary && data.summary.message) ? data.summary.message : "{{ _('Restore task started...') }}";
-                statusEl.textContent = `{{ _('Task ID:') }} ${data.task_id}. ${initialMsg}`;
-
-                currentSelectiveRestoreTaskId = data.task_id; // Assuming this var is from admin_backup_common.js
-                if (activePolls[data.task_id]) clearInterval(activePolls[data.task_id]);
-                displayedLogCounts[data.task_id] = 0;
-                pollTaskStatus(data.task_id, null, statusEl, 'unified_booking_data_restore');
-            } else if (data.summary && data.summary.status === 'failure') {
-                throw new Error(data.summary.message || `{{ _('Failed to start restore task.') }}`);
-            } else {
-                throw new Error(data.message || `{{ _('Unknown error starting restore task.') }}`);
-            }
-        }).catch(error => {
-            hideProgressModal();
-            alert("{{ _('Error starting restore:') }} " + error.message);
-            enablePageInteractions(); // Re-enable UI on fetch error
-        });
-
-        // Socket.IO event handler removed
-    }
-
-    function deleteUnifiedBackup(filename, backupType, baseTimestampForIncremental = null) {
-        let confirmMessage = `{{ _('Delete backup') }} '${filename}' (Type: ${backupType})? {{ _('Cannot be undone.') }}`;
-        if (backupType === 'full') {
-            confirmMessage += ` {{ _('This will also delete all its associated incremental backups.') }}`;
-        }
-        if (!confirm(confirmMessage)) return;
-
-        showProgressModal(`{{ _('Deleting backup') }} ${filename}...`);
-        fetch("{{ url_for('api_system.api_delete_booking_data_backup') }}", {
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
-            body: JSON.stringify({
-                backup_filename: filename,
-                backup_type: backupType,
-                base_timestamp: baseTimestampForIncremental // Pass this if it's an incremental being deleted, though backend logic for full delete handles most.
-            })
-        }).then(response => response.json()).then(data => {
-            hideProgressModal();
-            if (data.success) { alert("{{ _('Backup deletion process completed.') }}"); refreshUnifiedAzureBackupList(); } // Changed message slightly
-            else { alert("{{ _('Error deleting backup:') }} " + (data.message || "{{ _('Unknown error') }}")); }
-        }).catch(error => { hideProgressModal(); alert("{{ _('Error deleting backup.') }}"); console.error(error); });
-    }
-
-    // --- Legacy and Other Restore/Backup Functions ---
-    // Note: All CSV related JS functions have been removed.
-    // Functions like confirmClearAllBookingData, executeClearAllBookingData remain if they handle non-CSV operations.
-
-    // loadFullBackupsForRestore() function removed.
-    // restoreBookingsFromFullSystemBackup() function removed.
-
-    // CSV related functions were previously removed.
-    // loadCsvBackupsForRestore, restoreBookingsFromCsvBackup, deleteCsvBackup,
-    // loadLegacyCsvBackups, renderLegacyCsvPagination, directRestoreFromCsv, directDeleteCsv
-    // have been confirmed as removed.
-
     function confirmClearAllBookingData() {
         $('#confirmClearAllModal').modal('show');
     }
@@ -523,7 +142,7 @@
     function executeClearAllBookingData() {
         $('#confirmClearAllModal').modal('hide');
         showProgressModal("{{ _('Clearing all booking data...') }}");
-        fetch("{{ url_for('admin_ui.clear_all_bookings_data') }}", { // Ensure this API endpoint is correct
+        fetch("{{ url_for('admin_ui.clear_all_bookings_data') }}", {
             method: 'POST',
             headers: { 'X-CSRFToken': '{{ csrf_token() }}' }
         })
@@ -567,241 +186,13 @@
 
         updateServerTime(); setInterval(updateServerTime, 60000);
 
-        showProgressModal("{{ _('Loading initial page data...') }}");
-
-        // Unified Azure JSON Backups - This will start the chain.
-        // refreshUnifiedAzureBackupList will now call hideProgressModal in its finally block,
-        // effectively ending the initial data load sequence for this part of the page.
-        refreshUnifiedAzureBackupList();
-
-        // Load Unified Backup Schedule Settings - this happens in parallel / independently.
-        loadUnifiedBackupSchedule();
-
-        // Load Automatic Restore on Startup Setting
-        loadAutoRestoreBookingDataSetting();
+        // Check for flash messages and show alerts if needed (standard Flask behavior usually handles this in base.html,
+        // but if we need specific handling here it can be added. For now relying on base.html)
 
         $('#actionProgressModal').on('hide.bs.modal', function (e) {
-            $(e.target).blur(); // Explicitly blur the modal
-            // Explicitly move focus to the body before the modal is hidden
-            // to prevent aria-hidden conflicts if the modal or its content had focus.
+            $(e.target).blur();
             document.body.focus();
         });
-
-        // Attach event listeners for new schedule section
-        $('#unified_full_schedule_type').on('change', handleScheduleTypeChange);
-        $('#saveUnifiedBackupScheduleBtn').on('click', saveUnifiedBackupSchedule);
-
-        // Attach event listener for Auto Restore setting
-        $('#saveAutoRestoreBookingDataSettingBtn').on('click', saveAutoRestoreBookingDataSetting);
-
-
-        // Check if socket event for manualUnifiedBackup needs correction.
-        // It was 'booking_data_protection_backup_progress', changed to 'full_booking_data_backup_progress'.
-        // This might be specific to the type of backup (full vs incremental) if those events differ.
-        // For now, assuming 'full_booking_data_backup_progress' is correct for the manual full backup.
-        // The incremental backup process (if it has a manual trigger and separate event) would need its own handler.
     });
-
-    // --- Unified Backup Schedule JS ---
-
-    // --- Automatic Restore on Startup JS ---
-    function loadAutoRestoreBookingDataSetting() {
-        const feedbackDiv = $('#autoRestoreSettingFeedback');
-        feedbackDiv.html(''); // Clear previous feedback
-        console.log("Loading auto restore booking data on startup setting...");
-
-        fetch("{{ url_for('api_system.get_auto_restore_booking_data_setting') }}")
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`{{ _('Network response was not ok:') }} ${response.statusText}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                if (data.error) { // Assuming error is a key for server-side handled errors
-                    throw new Error(data.message || data.error);
-                }
-                $('#autoRestoreBookingDataOnStartup').prop('checked', data.is_enabled);
-                feedbackDiv.html(`<div class="alert alert-info mt-2">{{ _('Current setting loaded.') }}</div>`);
-                console.log("Auto restore setting loaded:", data.is_enabled);
-            })
-            .catch(error => {
-                console.error("{{ _('Error loading auto restore setting:') }}", error);
-                feedbackDiv.html(`<div class="alert alert-danger mt-2">{{ _('Error loading setting:') }} ${error.message}</div>`);
-            });
-    }
-
-    function saveAutoRestoreBookingDataSetting() {
-        const feedbackDiv = $('#autoRestoreSettingFeedback');
-        feedbackDiv.html(''); // Clear previous feedback
-        const isEnabled = $('#autoRestoreBookingDataOnStartup').is(':checked');
-        console.log("Saving auto restore setting:", isEnabled);
-
-        fetch("{{ url_for('api_system.update_auto_restore_booking_data_setting') }}", {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': '{{ csrf_token() }}'
-            },
-            body: JSON.stringify({ is_enabled: isEnabled })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                feedbackDiv.html(`<div class="alert alert-success mt-2">${data.message || "{{ _('Setting saved successfully.') }}"}</div>`);
-                console.log("Auto restore setting saved successfully.");
-            } else {
-                throw new Error(data.message || "{{ _('Error saving setting.') }}");
-            }
-        })
-        .catch(error => {
-            console.error("{{ _('Error saving auto restore setting:') }}", error);
-            feedbackDiv.html(`<div class="alert alert-danger mt-2">{{ _('Error saving setting:') }} ${error.message}</div>`);
-        });
-    }
-
-    function downloadUnifiedBackup(filename, backupType) {
-        // If it's a 'full' backup, we download the set (ZIP).
-        // If it's an 'incremental', the current spec doesn't require individual download,
-        // but we could adapt if needed. For now, this function primarily targets full backup sets.
-        if (backupType === 'full') {
-            let downloadUrlTemplate = "{{ url_for('api_system.api_download_backup_set_zip', full_backup_filename='FILENAME_PLACEHOLDER') }}";
-            let downloadUrl = downloadUrlTemplate.replace('FILENAME_PLACEHOLDER', encodeURIComponent(filename));
-
-            console.log(`Attempting to download backup set (ZIP): ${downloadUrl}`);
-            // Trigger the download by navigating to the URL
-            window.location.href = downloadUrl;
-        } else if (backupType === 'incremental') {
-            // Individual incremental download - currently not planned as part of this feature set.
-            // If needed, this would call a different endpoint or the old one.
-            alert("{{ _('Individual download for incremental backups is not currently supported. Download the full backup set to get all related files.') }}");
-            console.warn(`Download requested for incremental backup '${filename}', but only full set downloads are supported via this button.`);
-        } else {
-            // Fallback or handling for other types if any (e.g., old single file download)
-            // This part can be adapted from the original downloadUnifiedBackup if needed for other types.
-            console.warn(`Download requested for unknown backup type '${backupType}' for file '${filename}'.`);
-            alert(`{{ _('Download for this backup type (${backupType}) is not supported through this interface.') }}`);
-        }
-    }
-
-    function handleScheduleTypeChange() {
-        const type = $('#unified_full_schedule_type').val();
-        $('#unified_full_day_of_week_group').toggle(type === 'weekly');
-        $('#unified_full_day_of_month_group').toggle(type === 'monthly');
-    }
-
-    function loadUnifiedBackupSchedule() {
-        console.log("Loading unified backup schedule settings...");
-        fetch("{{ url_for('api_system.get_unified_backup_schedule') }}")
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`{{ _('Network response was not ok:') }} ${response.statusText}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                console.log("Received schedule data:", data);
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-                // Full Backup
-                $('#unified_full_enabled').prop('checked', data.unified_full_backup.is_enabled);
-                $('#unified_full_schedule_type').val(data.unified_full_backup.schedule_type);
-                $('#unified_full_time_of_day').val(data.unified_full_backup.time_of_day);
-                if (data.unified_full_backup.day_of_week !== null) {
-                    $('#unified_full_day_of_week').val(data.unified_full_backup.day_of_week);
-                }
-                if (data.unified_full_backup.day_of_month !== null) {
-                    $('#unified_full_day_of_month').val(data.unified_full_backup.day_of_month);
-                }
-
-                // Incremental Backup
-                $('#unified_incremental_enabled').prop('checked', data.unified_incremental_backup.is_enabled);
-                $('#unified_incremental_interval_minutes').val(data.unified_incremental_backup.interval_minutes);
-
-                handleScheduleTypeChange(); // Update visibility of day/month fields
-                $('#unifiedScheduleFeedback').html(`<div class="alert alert-info mt-2">{{ _('Schedule settings loaded.') }}</div>`);
-            })
-            .catch(error => {
-                console.error("{{ _('Error loading unified backup schedule:') }}", error);
-                $('#unifiedScheduleFeedback').html(`<div class="alert alert-danger mt-2">{{ _('Error loading schedule settings:') }} ${error.message}</div>`);
-            });
-    }
-
-    function saveUnifiedBackupSchedule() {
-        const feedbackDiv = $('#unifiedScheduleFeedback');
-        feedbackDiv.html(''); // Clear previous feedback
-
-        // Full Backup Data
-        const fullEnabled = $('#unified_full_enabled').is(':checked');
-        const fullScheduleType = $('#unified_full_schedule_type').val();
-        const fullTimeOfDay = $('#unified_full_time_of_day').val();
-        let fullDayOfWeek = null;
-        if (fullScheduleType === 'weekly') {
-            fullDayOfWeek = parseInt($('#unified_full_day_of_week').val());
-            if (isNaN(fullDayOfWeek) || fullDayOfWeek < 0 || fullDayOfWeek > 6) {
-                feedbackDiv.html(`<div class="alert alert-danger">{{ _('Invalid day of week for full backup.') }}</div>`);
-                return;
-            }
-        }
-        let fullDayOfMonth = null;
-        if (fullScheduleType === 'monthly') {
-            fullDayOfMonth = parseInt($('#unified_full_day_of_month').val());
-            if (isNaN(fullDayOfMonth) || fullDayOfMonth < 1 || fullDayOfMonth > 31) {
-                feedbackDiv.html(`<div class="alert alert-danger">{{ _('Invalid day of month for full backup.') }}</div>`);
-                return;
-            }
-        }
-        // Validate time format HH:MM
-        if (!/^\d{2}:\d{2}$/.test(fullTimeOfDay)) {
-             feedbackDiv.html(`<div class="alert alert-danger">{{ _('Invalid time format for full backup. Use HH:MM.') }}</div>`);
-            return;
-        }
-
-        // Incremental Backup Data
-        const incrementalEnabled = $('#unified_incremental_enabled').is(':checked');
-        const incrementalIntervalMinutes = parseInt($('#unified_incremental_interval_minutes').val());
-        if (incrementalEnabled && (isNaN(incrementalIntervalMinutes) || incrementalIntervalMinutes < 1)) {
-            feedbackDiv.html(`<div class="alert alert-danger">{{ _('Invalid interval for incremental backup. Must be a positive number.') }}</div>`);
-            return;
-        }
-
-        const payload = {
-            "unified_full_backup": {
-                "is_enabled": fullEnabled,
-                "schedule_type": fullScheduleType,
-                "time_of_day": fullTimeOfDay,
-                "day_of_week": fullDayOfWeek,
-                "day_of_month": fullDayOfMonth
-            },
-            "unified_incremental_backup": {
-                "is_enabled": incrementalEnabled,
-                "interval_minutes": incrementalEnabled ? incrementalIntervalMinutes : 30 // Send default if disabled
-            }
-        };
-        console.log("Saving unified backup schedule:", payload);
-
-        fetch("{{ url_for('api_system.update_unified_backup_schedule') }}", {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': '{{ csrf_token() }}'
-            },
-            body: JSON.stringify(payload)
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                feedbackDiv.html(`<div class="alert alert-success mt-2">${data.message || "{{ _('Schedule settings saved successfully.') }}"}</div>`);
-            } else {
-                feedbackDiv.html(`<div class="alert alert-danger mt-2">${data.message || "{{ _('Error saving schedule settings.') }}"}</div>`);
-            }
-        })
-        .catch(error => {
-            console.error("{{ _('Error saving unified backup schedule:') }}", error);
-            feedbackDiv.html(`<div class="alert alert-danger mt-2">{{ _('Error saving schedule settings:') }} ${error.message}</div>`);
-        });
-    }
-
 </script>
 {% endblock %}

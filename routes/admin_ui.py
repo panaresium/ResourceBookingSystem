@@ -555,18 +555,152 @@ def init_admin_ui_routes(app):
 @login_required
 @permission_required('manage_system')
 def export_all_bookings_json():
-    # ... (implementation as provided) ...
-    return Response(
-        json_data_string,
-        mimetype="application/json",
-        headers={"Content-Disposition": f"attachment;filename={filename}"}
-    )
+    try:
+        all_bookings = Booking.query.all()
+        booking_list_for_json = []
+        for booking in all_bookings:
+            booking_dict = {
+                'id': booking.id,
+                'resource_id': booking.resource_id,
+                'user_name': booking.user_name,
+                'start_time': booking.start_time.isoformat() if booking.start_time else None,
+                'end_time': booking.end_time.isoformat() if booking.end_time else None,
+                'title': booking.title,
+                'checked_in_at': booking.checked_in_at.isoformat() if booking.checked_in_at else None,
+                'checked_out_at': booking.checked_out_at.isoformat() if booking.checked_out_at else None,
+                'status': booking.status,
+                'recurrence_rule': booking.recurrence_rule,
+                'admin_deleted_message': booking.admin_deleted_message,
+                'check_in_token': booking.check_in_token,
+                'check_in_token_expires_at': booking.check_in_token_expires_at.isoformat() if booking.check_in_token_expires_at else None,
+                'checkin_reminder_sent_at': booking.checkin_reminder_sent_at.isoformat() if booking.checkin_reminder_sent_at else None,
+                'last_modified': booking.last_modified.isoformat() if booking.last_modified else None,
+                'booking_display_start_time': booking.booking_display_start_time.isoformat() if booking.booking_display_start_time else None,
+                'booking_display_end_time': booking.booking_display_end_time.isoformat() if booking.booking_display_end_time else None
+            }
+            booking_list_for_json.append(booking_dict)
+
+        export_data = {
+            "export_timestamp": datetime.now(timezone.utc).isoformat(),
+            "bookings": booking_list_for_json
+        }
+        json_data_string = json.dumps(export_data, indent=4)
+        timestamp_str = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+        filename = f"booking_records_export_{timestamp_str}.json"
+
+        add_audit_log(action='EXPORT_ALL_BOOKINGS_JSON', details=f'Exported {len(booking_list_for_json)} bookings.', user_id=current_user.id)
+        current_app.logger.info(f"User {current_user.username} exported {len(booking_list_for_json)} bookings to JSON.")
+
+        return Response(
+            json_data_string,
+            mimetype="application/json",
+            headers={"Content-Disposition": f"attachment;filename={filename}"}
+        )
+    except Exception as e:
+        current_app.logger.error(f"Error exporting bookings to JSON: {e}", exc_info=True)
+        flash(_('Error exporting bookings: %(error)s', error=str(e)), 'error')
+        return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
 
 @admin_ui_bp.route('/import_bookings_json', methods=['POST'])
 @login_required
 @permission_required('manage_system')
 def import_bookings_json():
-    # ... (implementation as provided) ...
+    logger = current_app.logger
+    if 'file' not in request.files:
+        flash(_('No file part'), 'error')
+        return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+    file = request.files['file']
+    if file.filename == '':
+        flash(_('No selected file'), 'error')
+        return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+    if file and file.filename.endswith('.json'):
+        try:
+            content = file.read().decode('utf-8')
+            backup_data = json.loads(content)
+            bookings_data = backup_data.get('bookings', [])
+
+            if not isinstance(bookings_data, list):
+                flash(_('Invalid JSON format: "bookings" list not found.'), 'error')
+                return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
+
+            success_count = 0
+            fail_count = 0
+
+            for b_data in bookings_data:
+                try:
+                    booking_id = b_data.get('id')
+                    if not booking_id:
+                        fail_count += 1
+                        continue
+
+                    booking = Booking.query.get(booking_id)
+                    if not booking:
+                        booking = Booking(id=booking_id)
+                        db.session.add(booking)
+
+                    # Update fields
+                    # Handle Foreign Keys - Resource ID is mandatory
+                    resource_id = b_data.get('resource_id')
+                    if not Resource.query.get(resource_id):
+                        logger.warning(f"Skipping booking {booking_id}: Resource {resource_id} not found.")
+                        fail_count += 1
+                        continue # Cannot import without valid resource
+
+                    booking.resource_id = resource_id
+                    booking.user_name = b_data.get('user_name')
+                    booking.title = b_data.get('title')
+                    booking.status = b_data.get('status', 'approved')
+                    booking.recurrence_rule = b_data.get('recurrence_rule')
+                    booking.admin_deleted_message = b_data.get('admin_deleted_message')
+                    booking.check_in_token = b_data.get('check_in_token')
+
+                    # Helper for datetimes
+                    def parse_dt(dt_str):
+                        if not dt_str: return None
+                        if isinstance(dt_str, str) and dt_str.endswith('Z'):
+                            return datetime.fromisoformat(dt_str[:-1] + '+00:00')
+                        return datetime.fromisoformat(dt_str)
+
+                    # Helper for times
+                    def parse_time(t_str):
+                        if not t_str: return None
+                        try:
+                            return datetime.strptime(t_str, '%H:%M:%S').time()
+                        except ValueError:
+                            # Try without seconds
+                            return datetime.strptime(t_str, '%H:%M').time()
+
+                    booking.start_time = parse_dt(b_data.get('start_time'))
+                    booking.end_time = parse_dt(b_data.get('end_time'))
+                    booking.checked_in_at = parse_dt(b_data.get('checked_in_at'))
+                    booking.checked_out_at = parse_dt(b_data.get('checked_out_at'))
+                    booking.check_in_token_expires_at = parse_dt(b_data.get('check_in_token_expires_at'))
+                    booking.checkin_reminder_sent_at = parse_dt(b_data.get('checkin_reminder_sent_at'))
+                    booking.last_modified = parse_dt(b_data.get('last_modified')) or datetime.now(timezone.utc)
+                    booking.booking_display_start_time = parse_time(b_data.get('booking_display_start_time'))
+                    booking.booking_display_end_time = parse_time(b_data.get('booking_display_end_time'))
+
+                    success_count += 1
+
+                except Exception as inner_e:
+                    logger.error(f"Error importing single booking: {inner_e}")
+                    fail_count += 1
+
+            db.session.commit()
+            flash(_('Import completed. Success: %(success)d, Failed/Skipped: %(failed)d') % {'success': success_count, 'failed': fail_count}, 'success')
+            add_audit_log(action='IMPORT_BOOKINGS_JSON', details=f'Imported {success_count} bookings, {fail_count} failed.', user_id=current_user.id)
+
+        except json.JSONDecodeError:
+            flash(_('Invalid JSON file.'), 'error')
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error importing bookings JSON: {e}", exc_info=True)
+            flash(_('Error importing bookings: %(error)s') % {'error': str(e)}, 'error')
+    else:
+        flash(_('Invalid file type. Please upload a JSON file.'), 'error')
+
     return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
 
 @admin_ui_bp.route('/clear_all_bookings', methods=['POST'])
@@ -585,4 +719,4 @@ def clear_all_bookings_data():
         db.session.rollback()
         logger.error(f"Error clearing all booking data by user {current_user.username}: {e}", exc_info=True)
         # flash(_('An error occurred while clearing booking data: %(error)s', error=str(e)), 'error')
-        return jsonify({'success': False, 'message': _('An error occurred while clearing booking data: %(error)s', error=str(e))}), 500
+        return jsonify({'success': False, 'message': _('An error occurred while clearing booking data: %(error)s') % {'error': str(e)}}), 500
