@@ -55,6 +55,10 @@ else:
 
 SQLALCHEMY_TRACK_MODIFICATIONS = False
 
+# Database connection retry settings
+DB_CONNECT_MAX_RETRIES = int(os.environ.get('DB_CONNECT_MAX_RETRIES', 3))
+DB_CONNECT_RETRY_DELAY = int(os.environ.get('DB_CONNECT_RETRY_DELAY', 3))
+
 # --- Internationalization and Localization (i18n/l10n) ---
 LANGUAGES = ['en', 'es', 'th', 'fr'] # Supported languages
 BABEL_DEFAULT_LOCALE = 'en'
