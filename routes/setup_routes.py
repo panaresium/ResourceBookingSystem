@@ -51,7 +51,7 @@ def setup_system():
             db.session.commit()
 
             flash('System initialized successfully! Please log in.', 'success')
-            return redirect(url_for('auth.login'))
+            return redirect(url_for('ui.serve_login'))
 
         except Exception as e:
             db.session.rollback()
