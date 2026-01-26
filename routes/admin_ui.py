@@ -158,8 +158,6 @@ def serve_backup_booking_data_page():
 @permission_required('manage_system')
 def serve_backup_settings_page():
     current_app.logger.info(f"User {current_user.username} accessed Backup General Settings page.")
-    scheduler_settings = load_scheduler_settings()
-    auto_restore_booking_records_on_startup = scheduler_settings.get('auto_restore_booking_records_on_startup', False)
     booking_settings = BookingSettings.query.first()
     if not booking_settings:
         current_app.logger.info("No BookingSettings found, creating default with global_time_offset_hours = 0.")
@@ -177,7 +175,6 @@ def serve_backup_settings_page():
     current_app.logger.debug(f"Rendering backup_settings_page for {current_user.username}. Gmail Configured: {is_gmail_configured}")
 
     return render_template('admin/backup_settings.html',
-                           auto_restore_booking_records_on_startup=auto_restore_booking_records_on_startup,
                            global_time_offset_hours=global_time_offset_hours,
                            is_gmail_configured=is_gmail_configured,
                            gmail_sender_address=gmail_sender_address if is_gmail_configured else None)
@@ -206,30 +203,6 @@ def serve_backup_settings_page():
 def save_booking_data_protection_schedule():
     # ... (implementation as provided) ...
     return redirect(url_for('admin_ui.serve_backup_booking_data_page'))
-
-@admin_ui_bp.route('/settings/startup/auto_restore_bookings', methods=['POST'])
-@login_required
-@permission_required('manage_system')
-def save_auto_restore_booking_records_settings():
-    logger = current_app.logger
-    try:
-        # Checkbox value is 'true' if checked, otherwise not present in form data
-        auto_restore_enabled_str = request.form.get('auto_restore_booking_records_enabled')
-        auto_restore_enabled_bool = auto_restore_enabled_str == 'true'
-
-        scheduler_settings = load_scheduler_settings()
-        scheduler_settings['auto_restore_booking_records_on_startup'] = auto_restore_enabled_bool
-        save_scheduler_settings(scheduler_settings)
-
-        flash(_('Startup behavior settings saved successfully.'), 'success')
-        add_audit_log(action='Update Startup Behavior Settings', details=f'Automatic booking restore on startup set to {auto_restore_enabled_bool}')
-        logger.info(f"Startup behavior settings (auto_restore_booking_records_on_startup) set to {auto_restore_enabled_bool} by user {current_user.username}.")
-
-    except Exception as e:
-        flash(_('Error saving startup behavior settings: %(error)s', error=str(e)), 'error')
-        logger.error(f"Error saving startup behavior settings: {e}", exc_info=True)
-
-    return redirect(url_for('admin_ui.serve_backup_settings_page'))
 
 @admin_ui_bp.route('/backup/settings/time_offset', methods=['POST'], endpoint='save_backup_time_offset')
 @login_required

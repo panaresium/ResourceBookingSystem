@@ -1198,52 +1198,6 @@ class TestAdminBackupSettingsRoutes(AppTests):
         self.assertEqual(audit_log.user_id, admin.id)
 
 
-    @patch('routes.admin_ui.save_scheduler_settings') # utils.save_scheduler_settings is called by this
-    @patch('routes.admin_ui.load_scheduler_settings') # utils.load_scheduler_settings is called by this
-    def test_save_auto_restore_startup_behavior_enabled(self, mock_load_settings, mock_save_settings):
-        admin = self._create_admin_user_for_backup_settings()
-        # Simulate that current settings have this disabled
-        mock_load_settings.return_value = {'auto_restore_booking_records_on_startup': False, 'other_setting': 'value'}
-
-        response = self.client.post(url_for('admin_ui.save_auto_restore_booking_records_settings'),
-                                    data={'auto_restore_booking_records_enabled': 'true'}, # This is the name in the form
-                                    follow_redirects=True)
-        self.assertIn(b"Startup behavior settings saved successfully.", response.data)
-
-        mock_save_settings.assert_called_once()
-        args_called = mock_save_settings.call_args[0][0] # First argument to the mock
-        self.assertTrue(args_called['auto_restore_booking_records_on_startup'])
-        self.assertEqual(args_called['other_setting'], 'value') # Ensure other settings are preserved
-
-        audit_log = AuditLog.query.filter_by(action='Update Startup Behavior Settings').order_by(AuditLog.id.desc()).first()
-        self.assertIsNotNone(audit_log)
-        self.assertIn('set to True', audit_log.details) # Based on new implementation
-        self.assertEqual(audit_log.user_id, admin.id)
-
-    @patch('routes.admin_ui.save_scheduler_settings')
-    @patch('routes.admin_ui.load_scheduler_settings')
-    def test_save_auto_restore_startup_behavior_disabled(self, mock_load_settings, mock_save_settings):
-        admin = self._create_admin_user_for_backup_settings()
-        # Simulate that current settings have this enabled
-        mock_load_settings.return_value = {'auto_restore_booking_records_on_startup': True, 'other_setting': 'value'}
-
-        # If checkbox is unchecked, 'auto_restore_booking_records_enabled' is not in request.form
-        response = self.client.post(url_for('admin_ui.save_auto_restore_booking_records_settings'),
-                                    data={},
-                                    follow_redirects=True)
-        self.assertIn(b"Startup behavior settings saved successfully.", response.data)
-
-        mock_save_settings.assert_called_once()
-        args_called = mock_save_settings.call_args[0][0]
-        # The route logic converts absence of 'auto_restore_booking_records_enabled' or value not 'true' to False
-        self.assertFalse(args_called['auto_restore_booking_records_on_startup'])
-        self.assertEqual(args_called['other_setting'], 'value')
-
-        audit_log = AuditLog.query.filter_by(action='Update Startup Behavior Settings').order_by(AuditLog.id.desc()).first()
-        self.assertIsNotNone(audit_log)
-        self.assertIn('set to False', audit_log.details) # Based on new implementation
-        self.assertEqual(audit_log.user_id, admin.id)
-
     def test_save_settings_permission_denied_non_admin(self):
         # Create a non-admin user (no 'manage_system' permission)
         non_admin_user = User.query.filter_by(username='non_admin_backup_test').first()
@@ -1271,14 +1225,6 @@ class TestAdminBackupSettingsRoutes(AppTests):
         # Example: flash message check after redirect
         # redirected_page_offset = self.client.get(response_offset.location)
         # self.assertIn(b"You do not have permission to access this page.", redirected_page_offset.data)
-
-
-        response_startup = self.client.post(url_for('admin_ui.save_auto_restore_booking_records_settings'),
-                                            data={'auto_restore_booking_records_enabled': 'true'},
-                                            follow_redirects=False)
-        self.assertEqual(response_startup.status_code, 302)
-        # redirected_page_startup = self.client.get(response_startup.location)
-        # self.assertIn(b"You do not have permission to access this page.", redirected_page_startup.data)
 
         self.logout()
 

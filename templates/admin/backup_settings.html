@@ -79,28 +79,6 @@
         </div>
     </div>
 
-    <!-- Startup Behavior Settings Card -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h2 class="card-title h5">{{ _('Startup Behavior Settings') }}</h2>
-        </div>
-        <div class="card-body">
-            <form method="POST" action="{{ url_for('admin_ui.save_auto_restore_booking_records_settings') }}" id="startup-settings-form">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                <div class="form-group mb-2">
-                    <div class="form-check">
-                        <input type="checkbox" class="form-check-input" id="auto_restore_booking_records_enabled" name="auto_restore_booking_records_enabled" value="true" {% if auto_restore_booking_records_on_startup %}checked{% endif %}>
-                        <label class="form-check-label" for="auto_restore_booking_records_enabled">
-                            {{ _('Enable Automatic Restore of Booking Records on Application Startup') }}
-                            <small class="form-text text-muted">{{ _('(Applies incremental booking backups if available)') }}</small>
-                        </label>
-                    </div>
-                </div>
-                <button type="submit" class="btn btn-success"><i class="fas fa-save"></i> {{ _('Save Startup Settings') }}</button>
-            </form>
-        </div>
-    </div>
-
     <!-- Gmail Sending Authorization Card -->
     <div class="card mb-4">
         <div class="card-header">
