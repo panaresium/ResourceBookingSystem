@@ -143,7 +143,7 @@ GMAIL_SENDER_ADDRESS = os.environ.get('GMAIL_SENDER_ADDRESS') # e.g., 'rmsunicef
 
 # The Redirect URI for the Gmail authorization flow.
 # This MUST be added to your Google Cloud Console "Authorized redirect URIs" for the OAuth 2.0 Client ID.
-# Example: 'http://localhost:5000/authorize_gmail_callback' or 'https://yourdomain.com/authorize_gmail_callback'
+# Example: 'http://localhost:5000/admin/gmail_auth/authorize_callback' or 'https://yourdomain.com/admin/gmail_auth/authorize_callback'
 GMAIL_OAUTH_REDIRECT_URI = os.environ.get('GMAIL_OAUTH_REDIRECT_URI')
 
 # The Refresh Token obtained after the one-time authorization for GMAIL_SENDER_ADDRESS.
