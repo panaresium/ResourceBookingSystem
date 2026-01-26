@@ -11,10 +11,9 @@ from auth import permission_required
 gmail_auth_bp = Blueprint('gmail_auth', __name__, url_prefix='/admin/gmail_auth')
 
 def get_gmail_oauth_flow():
-    # Ensure GMAIL_OAUTH_REDIRECT_URI is correctly configured in config.py and Google Cloud Console
-    redirect_uri = current_app.config.get('GMAIL_OAUTH_REDIRECT_URI')
-    if not redirect_uri:
-        raise ValueError("GMAIL_OAUTH_REDIRECT_URI is not configured in the application.")
+    # Dynamically generate the redirect URI to ensure it matches the current environment (e.g., localhost or production)
+    # This avoids configuration errors where the env var doesn't match the actual running host.
+    redirect_uri = url_for('gmail_auth.authorize_gmail_callback', _external=True)
 
     # Scopes for sending email
     scopes = ['https://www.googleapis.com/auth/gmail.send']
@@ -130,7 +129,9 @@ def authorize_gmail_callback():
 
     except OAuthError as oe:
         current_app.logger.error(f"OAuthError during Gmail token exchange: {str(oe)}", exc_info=True)
-        flash(f"OAuth error during token exchange: {str(oe)}. Please ensure your client ID/secret and redirect URI are correct.", "danger")
+        # Construct the expected redirect URI to help the user debug
+        expected_redirect_uri = url_for('gmail_auth.authorize_gmail_callback', _external=True)
+        flash(f"OAuth error during token exchange: {str(oe)}. <br>Ensure that <strong>{expected_redirect_uri}</strong> is added to 'Authorized redirect URIs' in your Google Cloud Console.", "danger")
         # Redirect to the new target page: /admin/backup/settings
         return redirect(url_for('admin_ui.serve_backup_settings_page'))
     except Exception as e:
