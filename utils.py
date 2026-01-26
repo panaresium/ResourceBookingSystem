@@ -58,8 +58,7 @@ DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE = {
     "booking_backup_type": "full_export", "range": "all"
 }
 DEFAULT_SCHEDULER_SETTINGS = {
-    "booking_csv_backup": DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy(),
-    "auto_restore_booking_records_on_startup": False
+    "booking_csv_backup": DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy()
 }
 
 # --- Task Management Infrastructure (File-Based for Multi-Worker Support) ---
