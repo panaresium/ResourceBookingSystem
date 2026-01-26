@@ -18,8 +18,8 @@ if SERVER_NAME_FROM_ENV:
     SERVER_NAME = SERVER_NAME_FROM_ENV
     print(f"INFO: [config.py] SERVER_NAME configured from environment variable: {SERVER_NAME}")
 else:
-    SERVER_NAME = 'localhost:5000' # Default fallback
-    print(f"WARNING: [config.py] SERVER_NAME environment variable not set. Using default: {SERVER_NAME}. This may not be suitable for production or external URL generation by the scheduler.")
+    SERVER_NAME = None # Let Flask use the request's Host header
+    print(f"INFO: [config.py] SERVER_NAME environment variable not set. Flask will use the request's Host header.")
 
 # Ensure APPLICATION_ROOT and PREFERRED_URL_SCHEME also have their existing defaults
 APPLICATION_ROOT = os.environ.get('APPLICATION_ROOT', '/')
