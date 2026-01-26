@@ -39,13 +39,15 @@ if database_url:
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
     print(f"INFO: [config.py] Using Postgres database from DATABASE_URL.")
+    SQLALCHEMY_DATABASE_URI = database_url
 else:
     print(f"WARNING: [config.py] DATABASE_URL not found. Falling back to local SQLite.")
+    SQLALCHEMY_DATABASE_URI = f"sqlite:///{basedir / 'data' / 'site.db'}"
 
-SQLALCHEMY_DATABASE_URI = os.environ.get(
-    'AZURE_SQL_CONNECTION_STRING',
-    database_url or f"sqlite:///{basedir / 'data' / 'site.db'}"
-)
+# Fallback/Legacy Override
+if os.environ.get('AZURE_SQL_CONNECTION_STRING'):
+     SQLALCHEMY_DATABASE_URI = os.environ.get('AZURE_SQL_CONNECTION_STRING')
+
 SQLALCHEMY_TRACK_MODIFICATIONS = False
 
 # --- Internationalization and Localization (i18n/l10n) ---

@@ -145,9 +145,13 @@ def mark_task_done(task_id, success, result_message=""):
 def get_current_effective_time():
     offset_hours = 0
     try:
+        from sqlalchemy.exc import OperationalError, ProgrammingError
         settings = BookingSettings.query.first()
         if settings and settings.global_time_offset_hours is not None:
             offset_hours = settings.global_time_offset_hours
+    except (OperationalError, ProgrammingError):
+        # Table doesn't exist yet, suppress error and use default
+        pass
     except Exception as e:
         logger = current_app.logger if current_app else logging.getLogger(__name__)
         logger.error(f"Error fetching time offset from BookingSettings: {e}. Defaulting offset to 0.")
