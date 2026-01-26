@@ -2,12 +2,7 @@ from datetime import datetime, timedelta, timezone
 from flask import current_app, render_template, url_for
 from extensions import db
 from models import Booking, User, Resource, FloorMap, BookingSettings
-from utils import add_audit_log, send_email, _get_map_configuration_data, _get_resource_configurations_data, _get_user_configurations_data, get_current_effective_time
-from r2_backup import (
-    create_full_backup,
-    create_incremental_booking_backup,  # Added for the new incremental backup logic
-    backup_full_bookings_json,
-)
+from utils import add_audit_log, send_email, get_current_effective_time
 # Ensure current_app is available if not passed directly
 # from flask import current_app # current_app is already imported by the other functions
 
@@ -312,49 +307,6 @@ def apply_scheduled_resource_status_changes(app=None):
             logger.error(f"Scheduler: Error querying for resources with scheduled status changes: {e_query}", exc_info=True)
 
         logger.info("Scheduler: Task 'apply_scheduled_resource_status_changes' finished.")
-
-def run_scheduled_backup_job(app=None):
-    """
-    Scheduled task entry point to run a full system backup.
-    """
-    with app.app_context():
-        logger = app.logger # Corrected: use app.logger after context
-        logger.info("Scheduler: Starting run_scheduled_backup_job (full system backup)...")
-
-        try:
-            timestamp_str = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
-
-            # Gather configuration data
-            logger.info("Scheduler: Gathering map configuration data for backup...")
-            map_config_data = _get_map_configuration_data()
-
-            logger.info("Scheduler: Gathering resource configurations data for backup...")
-            resource_configs_data = _get_resource_configurations_data()
-
-            logger.info("Scheduler: Gathering user and role configurations data for backup...")
-            user_configs_data = _get_user_configurations_data()
-
-            # Call the main backup function from azure_backup.py
-            # SocketIO and task_id are None for a non-interactive scheduled job
-            logger.info(f"Scheduler: Calling create_full_backup for timestamp {timestamp_str}...")
-            success = create_full_backup(
-                timestamp_str=timestamp_str,
-                map_config_data=map_config_data,
-                resource_configs_data=resource_configs_data,
-                user_configs_data=user_configs_data,
-                socketio_instance=None,
-                task_id=None
-            )
-
-            if success:
-                logger.info(f"Scheduler: Full system backup job completed successfully for timestamp {timestamp_str}.")
-            else:
-                logger.error(f"Scheduler: Full system backup job encountered errors for timestamp {timestamp_str}. Check azure_backup logs.")
-
-        except Exception as e:
-            logger.error(f"Scheduler: Critical error in run_scheduled_backup_job: {e}", exc_info=True)
-
-        logger.info("Scheduler: Task 'run_scheduled_backup_job' finished.")
 
 def auto_release_unclaimed_bookings(app_instance=None):
     """
@@ -668,60 +620,3 @@ def send_checkin_reminders(app):
             logger.error(f"Scheduler: Error in send_checkin_reminders task's main try block: {e_task}", exc_info=True)
         finally:
             logger.info("Scheduler: Task 'send_checkin_reminders' finished.")
-
-# --- New Unified Scheduled Backup Tasks ---
-
-def run_scheduled_incremental_booking_data_task(app):
-    """
-    Scheduled task entry point to run the new unified INCREMENTAL booking data JSON backup to Azure.
-    This is intended to be run frequently (e.g., every few minutes).
-    """
-    with app.app_context():
-        logger = app.logger
-        logger.info("Scheduler: Starting run_scheduled_incremental_booking_data_task (unified incremental JSON backup)...")
-        # Generate a unique ID for this run, can be used if azure_backup function supports task_id for logging
-        run_instance_id = f"sched_inc_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
-        try:
-            # Call the new function in azure_backup.py
-            # Pass the app instance, and optionally the run_instance_id if create_incremental_booking_backup supports it for logging
-            success = create_incremental_booking_backup(
-                app=app,
-                task_id=run_instance_id # Pass instance_id as task_id for consistent logging if supported
-            )
-            if success:
-                logger.info(f"Scheduler: Unified incremental booking data backup task (Run ID: {run_instance_id}) executed successfully.")
-            else:
-                logger.warning(f"Scheduler: Unified incremental booking data backup task (Run ID: {run_instance_id}) reported issues or no changes. Check azure_backup logs.")
-        except Exception as e:
-            logger.error(f"Scheduler: Exception during run_scheduled_incremental_booking_data_task (Run ID: {run_instance_id}): {e}", exc_info=True)
-        logger.info(f"Scheduler: run_scheduled_incremental_booking_data_task (Run ID: {run_instance_id}) finished.")
-
-
-def run_periodic_full_booking_data_task(app):
-    """Scheduled task to create a full booking data JSON backup."""
-    with app.app_context():
-        logger = app.logger
-        logger.info(
-            "Scheduler: Starting run_periodic_full_booking_data_task (unified full JSON backup)..."
-        )
-        task_id_for_log = (
-            f"periodic_full_booking_data_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-        )
-        try:
-            success = backup_full_bookings_json(app=app, task_id=task_id_for_log)
-            if success:
-                logger.info(
-                    f"Scheduler: Unified full booking data backup task (ID: {task_id_for_log}) executed successfully."
-                )
-            else:
-                logger.warning(
-                    f"Scheduler: Unified full booking data backup task (ID: {task_id_for_log}) reported issues. Check azure_backup logs."
-                )
-        except Exception as e:
-            logger.error(
-                f"Scheduler: Exception during run_periodic_full_booking_data_task (ID: {task_id_for_log}): {e}",
-                exc_info=True,
-            )
-        logger.info(
-            f"Scheduler: run_periodic_full_booking_data_task (ID: {task_id_for_log}) finished."
-        )

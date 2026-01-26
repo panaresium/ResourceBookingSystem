@@ -13,7 +13,7 @@ from extensions import db # socketio removed
 # Assuming permission_required is in auth.py
 from auth import permission_required # Corrected: auth.py is at root
 from datetime import datetime, timedelta, timezone # Add datetime imports
-from utils import load_scheduler_settings, save_scheduler_settings, DEFAULT_FULL_BACKUP_SCHEDULE, DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE, add_audit_log # Ensure add_audit_log is imported
+from utils import load_scheduler_settings, save_scheduler_settings, DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE, add_audit_log # Ensure add_audit_log is imported
 
 # Import backup/restore functions
 # Other legacy imports (list_available_booking_csv_backups, list_available_backups, etc.) removed
@@ -121,11 +121,6 @@ def serve_backup_restore_page():
 @permission_required('manage_system')
 def serve_backup_system_page():
     current_app.logger.info(f"User {current_user.username} accessed System Backup & Restore page.")
-    scheduler_settings = load_scheduler_settings()
-    full_backup_settings = scheduler_settings.get('full_backup', DEFAULT_FULL_BACKUP_SCHEDULE.copy())
-    full_backup_settings.setdefault('interval_value', 60); full_backup_settings.setdefault('interval_unit', 'minutes')
-    full_backup_settings.setdefault('schedule_type', 'daily'); full_backup_settings.setdefault('time_of_day', '02:00')
-    full_backup_settings.setdefault('day_of_week', None if full_backup_settings['schedule_type'] != 'weekly' else 0)
     time_offset_value = 0
     try:
         booking_settings = BookingSettings.query.first()
@@ -133,7 +128,7 @@ def serve_backup_system_page():
         elif not booking_settings: current_app.logger.info("No BookingSettings found for system page, defaulting offset to 0.")
         else: current_app.logger.warning("BookingSettings.global_time_offset_hours is None for system page, defaulting offset to 0.")
     except Exception as e: current_app.logger.error(f"Error fetching BookingSettings for system page: {e}", exc_info=True)
-    return render_template('admin/backup_system.html', full_backup_settings=full_backup_settings, global_time_offset_hours=time_offset_value)
+    return render_template('admin/backup_system.html', global_time_offset_hours=time_offset_value)
 
 @admin_ui_bp.route('/backup/booking_data', methods=['GET'])
 @login_required
@@ -186,64 +181,6 @@ def serve_backup_settings_page():
 # LEGACY - Azure CSV Restore Route - Body fully commented out.
 # LEGACY CSV Routes are fully removed.
 
-@admin_ui_bp.route('/settings/schedule/full_backup', methods=['POST'])
-@login_required
-@permission_required('manage_system')
-def save_full_backup_schedule_settings():
-    try:
-        is_enabled = request.form.get('full_backup_enabled') == 'true'
-
-        scheduler_settings = load_scheduler_settings()
-        if 'full_backup' not in scheduler_settings:
-            scheduler_settings['full_backup'] = DEFAULT_FULL_BACKUP_SCHEDULE.copy()
-
-        scheduler_settings['full_backup']['is_enabled'] = is_enabled
-
-        schedule_type = request.form.get('full_backup_schedule_type', 'daily')
-        time_of_day = request.form.get('full_backup_time_of_day')
-        day_of_week_str = request.form.get('full_backup_day_of_week')
-        interval_value_str = request.form.get('full_backup_interval_value')
-        interval_unit = request.form.get('full_backup_interval_unit', 'minutes')
-
-        scheduler_settings['full_backup']['schedule_type'] = schedule_type
-
-        if schedule_type == 'daily' or schedule_type == 'weekly':
-            scheduler_settings['full_backup']['time_of_day'] = time_of_day
-            if schedule_type == 'weekly':
-                try:
-                    day_of_week = int(day_of_week_str)
-                    scheduler_settings['full_backup']['day_of_week'] = day_of_week
-                except (ValueError, TypeError):
-                    current_app.logger.warning(f"Invalid day_of_week value: {day_of_week_str}. Skipping update for day_of_week.")
-            # Remove interval settings if they exist
-            scheduler_settings['full_backup'].pop('interval_value', None)
-            scheduler_settings['full_backup'].pop('interval_unit', None)
-        elif schedule_type == 'interval':
-            interval_value = 60 # Default value
-            try:
-                interval_value = int(interval_value_str)
-                if interval_value < 1:
-                    current_app.logger.warning(f"Interval value must be at least 1. Received {interval_value}. Defaulting to 60.")
-                    interval_value = 60
-            except (ValueError, TypeError):
-                current_app.logger.warning(f"Invalid interval_value: {interval_value_str}. Defaulting to 60.")
-
-            scheduler_settings['full_backup']['interval_value'] = interval_value
-            scheduler_settings['full_backup']['interval_unit'] = interval_unit
-            # Remove daily/weekly settings if they exist
-            scheduler_settings['full_backup'].pop('time_of_day', None)
-            scheduler_settings['full_backup'].pop('day_of_week', None)
-
-        save_scheduler_settings(scheduler_settings)
-        add_audit_log(action='Update Full Backup Schedule', details=f'Updated full backup schedule settings. Enabled: {is_enabled}, Type: {schedule_type}')
-        flash(_('Full backup schedule settings saved successfully.'), 'success')
-        current_app.logger.info(f"Full backup schedule settings saved by {current_user.username}. Enabled: {is_enabled}, Type: {schedule_type}")
-
-    except Exception as e:
-        current_app.logger.error(f"Error saving full backup schedule settings: {e}", exc_info=True)
-        flash(_('An error occurred while saving full backup schedule settings: %(error)s', error=str(e)), 'error')
-
-    return redirect(url_for('admin_ui.serve_backup_system_page'))
 
 # LEGACY - This route was for the old CSV schedule, now handled by booking_data_protection_schedule or removed.
 # @admin_ui_bp.route('/settings/schedule/booking_csv', methods=['POST'])

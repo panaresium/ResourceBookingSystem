@@ -697,20 +697,18 @@ def download_scheduler_settings_component(client, path, task_id=None, dry_run=Fa
 def download_general_config_component(client, path, task_id=None, dry_run=False): return download_component_generic(path, dry_run)
 def download_unified_schedule_component(client, path, task_id=None, dry_run=False): return download_component_generic(path, dry_run)
 
-def restore_media_component(client, azure_path, local_target, name, task_id=None, dry_run=False):
-    # azure_path is like full_system_backups/backup_ts/media/floor_map_uploads
-    # We need to list files in that prefix and download them to local_target
+def restore_media_component(share_client, azure_component_path_on_share, local_target_folder_base, media_component_name, task_id=None, dry_run=False):
+    # share_client is ignored (R2 uses global client)
+    # azure_component_path_on_share is the prefix in R2 (e.g. full_system_backups/backup_ts/media/floor_map_uploads)
+
     if dry_run: return True, "Dry run media", None
 
-    files = r2_storage.list_files(prefix=azure_path)
+    files = r2_storage.list_files(prefix=azure_component_path_on_share)
     count = 0
     for f in files:
         key = f['name']
         filename = os.path.basename(key)
-        # r2_storage.download_file expects folder/filename or just key if folder is empty/part of key
-        # r2_storage.download_file(key, folder=None, target_path=...)
-        # We can pass the full key as filename and None as folder if we modify r2_storage or just act smart
-        if r2_storage.download_file(key, folder=None, target_path=os.path.join(local_target, filename)):
+        if r2_storage.download_file(key, folder=None, target_path=os.path.join(local_target_folder_base, filename)):
             count += 1
 
     return True, f"Restored {count} files", None
