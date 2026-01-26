@@ -28,7 +28,6 @@ def get_resources():
     logger = current_app.logger
     try:
         query = Resource.query.options(
-            joinedload(Resource.pins),
             joinedload(Resource.roles)
         ).filter_by(status='published')
         capacity = request.args.get('capacity', type=int)
@@ -589,7 +588,6 @@ def get_all_resources_admin():
     try:
         map_id_str = request.args.get('map_id')
         query = Resource.query.options(
-            joinedload(Resource.pins),
             joinedload(Resource.roles)
         )
 
@@ -866,7 +864,6 @@ def export_all_resources_admin():
     logger = current_app.logger
     try:
         resources = Resource.query.options(
-            joinedload(Resource.pins),
             joinedload(Resource.roles)
         ).all()
         resources_list = [resource_to_dict(r) for r in resources]

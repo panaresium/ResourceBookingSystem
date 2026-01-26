@@ -77,6 +77,7 @@ def retry_on_db_error(f):
                 logger = current_app.logger if current_app else logging.getLogger(__name__)
                 if i < retries - 1:
                     logger.warning(f"DB OperationalError in {f.__name__}: {e}. Retrying in {delay} seconds... (Attempt {i+1}/{retries})")
+                    db.session.rollback()
                     time_module.sleep(delay)
                 else:
                     logger.error(f"DB OperationalError in {f.__name__}: {e}. Max retries reached.")
