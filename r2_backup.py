@@ -494,6 +494,37 @@ def create_full_backup(timestamp_str, map_config_data=None, resource_configs_dat
     return overall_success
 
 
+def list_available_backups():
+    """
+    Lists full system backups from R2.
+    Returns a list of timestamp strings (e.g. ['20230101_120000', ...]) sorted newest first.
+    """
+    if not r2_storage.client:
+        logger.error("R2 Storage client not initialized for list_available_backups.")
+        return []
+
+    backups = set()
+    try:
+        # We look for manifest files to identify valid backups
+        # Path pattern: full_system_backups/backup_{timestamp}/manifest/backup_manifest_{timestamp}.json
+        # Prefix: full_system_backups/
+        files = r2_storage.list_files(prefix=FULL_SYSTEM_BACKUPS_BASE_DIR)
+
+        for file_info in files:
+            key = file_info['name']
+            # Regex to extract timestamp from key
+            # key example: full_system_backups/backup_20230101_120000/manifest/backup_manifest_20230101_120000.json
+            match = re.search(r'backup_(\d{8}_\d{6})/', key)
+            if match:
+                backups.add(match.group(1))
+
+        # Sort desc
+        return sorted(list(backups), reverse=True)
+    except Exception as e:
+        logger.error(f"Error listing available backups: {e}", exc_info=True)
+        return []
+
+
 def list_booking_data_json_backups():
     """
     Lists booking data backups from R2.
