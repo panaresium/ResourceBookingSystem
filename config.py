@@ -26,14 +26,17 @@ print(f"INFO: [config.py] Final effective APPLICATION_ROOT: {APPLICATION_ROOT}")
 print(f"INFO: [config.py] Final effective PREFERRED_URL_SCHEME: {PREFERRED_URL_SCHEME}")
 
 # For Flask-Session type extension
-SESSION_TYPE = os.environ.get('SESSION_TYPE', 'filesystem')
-SESSION_FILE_DIR = basedir / 'flask_session' # Directory for session files
+# Switched to 'cookie' (default/null in Flask-Session) or native Flask client-side sessions for Cloud Run statelessness
+SESSION_TYPE = os.environ.get('SESSION_TYPE', 'null') # 'null' usually means fallback to native Flask sessions if Flask-Session is used, or we disable Flask-Session
+SESSION_FILE_DIR = None # Not needed for cookie sessions
+SESSION_PERMANENT = False
+SESSION_USE_SIGNER = True
 # For CSRF protection (Flask-WTF)
 WTF_CSRF_ENABLED = True # Default is True, but explicit
 WTF_CSRF_SECRET_KEY = os.environ.get('WTF_CSRF_SECRET_KEY', 'another_secret_for_csrf_in_config.py')
 
 # --- Database Configuration ---
-# Use AZURE_SQL_CONNECTION_STRING if available, otherwise DATABASE_URL, finally local SQLite.
+# Prioritize DATABASE_URL for PostgreSQL.
 database_url = os.environ.get('DATABASE_URL')
 if database_url:
     if database_url.startswith("postgres://"):
@@ -41,12 +44,10 @@ if database_url:
     print(f"INFO: [config.py] Using Postgres database from DATABASE_URL.")
     SQLALCHEMY_DATABASE_URI = database_url
 else:
+    # Only fall back to SQLite if strictly necessary (dev mode without DB env)
+    # Ideally for Cloud Run, DATABASE_URL should be mandatory.
     print(f"WARNING: [config.py] DATABASE_URL not found. Falling back to local SQLite.")
     SQLALCHEMY_DATABASE_URI = f"sqlite:///{basedir / 'data' / 'site.db'}"
-
-# Fallback/Legacy Override
-if os.environ.get('AZURE_SQL_CONNECTION_STRING'):
-     SQLALCHEMY_DATABASE_URI = os.environ.get('AZURE_SQL_CONNECTION_STRING')
 
 SQLALCHEMY_TRACK_MODIFICATIONS = False
 
@@ -148,29 +149,27 @@ CHECK_IN_GRACE_MINUTES = int(os.environ.get('CHECK_IN_GRACE_MINUTES', 15)) # Gra
 # How often the background job checks for bookings to auto-cancel if not checked in
 AUTO_CANCEL_CHECK_INTERVAL_MINUTES = int(os.environ.get('AUTO_CANCEL_CHECK_INTERVAL_MINUTES', 5))
 
-# --- Azure Backup Configuration ---
-# Interval for the legacy Azure backup job (if `backup_if_changed` is used)
+# --- Azure Backup Configuration (Legacy) ---
+# Interval for the legacy backup job (if `backup_if_changed` is used)
 AZURE_BACKUP_INTERVAL_MINUTES = int(os.environ.get('AZURE_BACKUP_INTERVAL_MINUTES', 60)) # Default to 1 hour
-# Connection string for Azure Blob Storage (used by the newer azure_backup.py module)
+# Connection string for Azure Blob Storage (legacy/removed)
 AZURE_STORAGE_CONNECTION_STRING = os.environ.get('AZURE_STORAGE_CONNECTION_STRING')
 # Default container name for backups in Azure Blob Storage
 AZURE_CONTAINER_NAME = os.environ.get('AZURE_CONTAINER_NAME', 'roombookingbackup')
-# Names for shares within Azure File Storage (if used by azure_backup.py)
-AZURE_DB_SHARE = os.environ.get('AZURE_DB_SHARE', 'db-backups') # Legacy or specific component share
-AZURE_CONFIG_SHARE = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups') # Legacy or specific component share
-AZURE_MEDIA_SHARE = os.environ.get('AZURE_MEDIA_SHARE', 'media') # Legacy or specific component share
+# Names for shares within Azure File Storage (legacy/removed)
+AZURE_DB_SHARE = os.environ.get('AZURE_DB_SHARE', 'db-backups')
+AZURE_CONFIG_SHARE = os.environ.get('AZURE_CONFIG_SHARE', 'config-backups')
+AZURE_MEDIA_SHARE = os.environ.get('AZURE_MEDIA_SHARE', 'media')
 
-# Unified Azure File Share for full system backups (used by azure_backup.py's new system)
+# Unified Share for full system backups (legacy reference)
 AZURE_SYSTEM_BACKUP_SHARE = os.environ.get('AZURE_SYSTEM_BACKUP_SHARE', 'system-backups')
 # Base directory name within the AZURE_SYSTEM_BACKUP_SHARE where 'backup_YYYYMMDD_HHMMSS' folders are stored
-# This corresponds to FULL_SYSTEM_BACKUPS_BASE_DIR in azure_backup.py
 AZURE_FULL_SYSTEM_BACKUPS_BASE_DIR_NAME = os.environ.get('AZURE_FULL_SYSTEM_BACKUPS_BASE_DIR_NAME', 'full_system_backups')
 
 
 # Share for booking data protection backups (JSON exports, etc.)
 AZURE_BOOKING_DATA_SHARE = os.environ.get('AZURE_BOOKING_DATA_SHARE', 'booking-data-backups')
 # Base directory name within AZURE_BOOKING_DATA_SHARE for these backups
-# Corresponds to AZURE_BOOKING_DATA_PROTECTION_DIR in azure_backup.py
 AZURE_BOOKING_DATA_PROTECTION_BASE_DIR_NAME = os.environ.get('AZURE_BOOKING_DATA_PROTECTION_BASE_DIR_NAME', 'booking_data_protection_backups')
 
 
@@ -236,7 +235,7 @@ def ensure_dir_exists(dir_path: Path):
     dir_path.mkdir(parents=True, exist_ok=True)
 
 ensure_dir_exists(DATA_DIR)
-ensure_dir_exists(SESSION_FILE_DIR) # For filesystem-based sessions
+# ensure_dir_exists(SESSION_FILE_DIR) # Removed for cookie sessions
 ensure_dir_exists(FLOOR_MAP_UPLOAD_FOLDER)
 ensure_dir_exists(RESOURCE_IMAGE_UPLOAD_FOLDER)
 ensure_dir_exists(basedir / 'instance') # Often used for SQLite DBs or other instance-specific files

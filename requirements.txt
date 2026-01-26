@@ -11,9 +11,9 @@ Flask-Mail>=0.9
 requests>=2.25
 gunicorn
 
-azure-storage-file-share
+# azure-storage-file-share # Removed
 
-APScheduler
+# APScheduler # Removed as internal scheduler is disabled
 
 Flask-Migrate
 Pillow>=9.0.0
