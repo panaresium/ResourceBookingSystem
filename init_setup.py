@@ -180,31 +180,37 @@ def init_db(force=False):
         ensure_all_migrations()
 
         if not force:
-            query = "SELECT 1 FROM user LIMIT 1"
+            # Check for any evidence of existing configuration to prevent accidental overwrite
             try:
-                result = db.session.execute(db.text(query)).scalar_one_or_none()
-                if result is not None:
-                    current_app.logger.warning("init_db aborted: existing data detected. Pass force=True to reset.")
+                user_exists = db.session.query(User.id).first() is not None
+                role_exists = db.session.query(Role.id).first() is not None
+                resource_exists = db.session.query(Resource.id).first() is not None
+
+                if user_exists or role_exists or resource_exists:
+                    current_app.logger.info("init_db aborted: Existing data (Users, Roles, or Resources) detected. Pass force=True to reset.")
                     return
             except Exception as e:
                 current_app.logger.info(f"Could not check for existing data: {e}")
 
-        current_app.logger.info("Attempting to delete existing data...")
-        db.session.query(AuditLog).delete()
-        db.session.query(WaitlistEntry).delete()
-        db.session.query(Booking).delete()
-        db.session.execute(resource_roles_table.delete())
-        db.session.query(Resource).delete()
-        db.session.query(FloorMap).delete()
-        db.session.execute(user_roles_table.delete())
-        db.session.query(User).delete()
-        db.session.query(Role).delete()
-        try:
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            current_app.logger.exception("Error committing deletions:")
-            raise
+        if force:
+            current_app.logger.info("Force flag set. Deleting existing data...")
+            db.session.query(AuditLog).delete()
+            db.session.query(WaitlistEntry).delete()
+            db.session.query(Booking).delete()
+            db.session.execute(resource_roles_table.delete())
+            db.session.query(Resource).delete()
+            db.session.query(FloorMap).delete()
+            db.session.execute(user_roles_table.delete())
+            db.session.query(User).delete()
+            db.session.query(Role).delete()
+            try:
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                current_app.logger.exception("Error committing deletions:")
+                raise
+        else:
+            current_app.logger.info("No existing data detected (or checks passed). Proceeding to seed default data without deletion.")
 
         current_app.logger.info("Creating default roles and users...")
         try:
