@@ -26,6 +26,9 @@ ENV PORT=8080
 ENV PYTHONUNBUFFERED=1
 ENV FLASK_APP=app.py
 
+# Create a volume for persistent data
+VOLUME ["/app/data"]
+
 # Expose port
 EXPOSE 8080
 
