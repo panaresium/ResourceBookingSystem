@@ -14,7 +14,7 @@ from extensions import db # socketio and mail removed
 # Assuming models.py contains these model definitions
 from models import Booking, Resource, User, WaitlistEntry, BookingSettings, ResourcePIN, FloorMap # Added ResourcePIN & FloorMap
 # Assuming utils.py contains these helper functions
-from utils import add_audit_log, parse_simple_rrule, send_email, send_teams_notification, check_booking_permission, generate_booking_image, get_current_effective_time # Added get_current_effective_time
+from utils import add_audit_log, parse_simple_rrule, send_email, send_teams_notification, check_booking_permission, generate_booking_image, get_current_effective_time, retry_on_db_error
 # Assuming auth.py contains permission_required decorator
 from auth import permission_required
 from models import MaintenanceSchedule
@@ -248,6 +248,7 @@ def _fetch_user_bookings_data(user_name, booking_type, page, per_page, status_fi
 
 @api_bookings_bp.route('/bookings/upcoming', methods=['GET'])
 @login_required
+@retry_on_db_error
 def get_upcoming_bookings():
     logger = current_app.logger
     try:
@@ -285,6 +286,7 @@ def get_upcoming_bookings():
 
 @api_bookings_bp.route('/bookings/past', methods=['GET'])
 @login_required
+@retry_on_db_error
 def get_past_bookings():
     logger = current_app.logger
     try:
@@ -320,6 +322,7 @@ def get_past_bookings():
 
 @api_bookings_bp.route('/bookings', methods=['POST'])
 @login_required
+@retry_on_db_error
 def create_booking():
     # Define lists of active statuses (lowercase)
     # These statuses are considered "active" for conflict checks or quota counting.
@@ -707,6 +710,7 @@ def create_booking():
 
 @api_bookings_bp.route('/bookings/my_bookings', methods=['GET'])
 @login_required
+@retry_on_db_error
 def get_my_bookings():
     logger = current_app.logger
     try:
@@ -875,6 +879,7 @@ def get_my_bookings():
 
 @api_bookings_bp.route('/bookings/my_bookings_for_date', methods=['GET'])
 @login_required
+@retry_on_db_error
 def get_my_bookings_for_date():
     active_booking_statuses_for_user_schedule = ['approved', 'pending', 'checked_in', 'confirmed']
 
@@ -936,6 +941,7 @@ def get_my_bookings_for_date():
 
 @api_bookings_bp.route('/bookings/calendar', methods=['GET'])
 @login_required
+@retry_on_db_error
 def bookings_calendar():
     """Return bookings for the current user in FullCalendar format, optionally filtered by status."""
     try:
@@ -1033,6 +1039,7 @@ def bookings_calendar():
 
 @api_bookings_bp.route('/bookings/my_booked_resources', methods=['GET'])
 @login_required
+@retry_on_db_error
 def get_my_booked_resources():
     """
     Returns a list of unique resources the current user has booked.
@@ -1080,6 +1087,7 @@ def get_my_booked_resources():
 
 @api_bookings_bp.route('/bookings/<int:booking_id>', methods=['PUT'])
 @login_required
+@retry_on_db_error
 def update_booking_by_user(booking_id):
     """
     Allows an authenticated user to update the title, start_time, or end_time of their own booking.
@@ -1489,6 +1497,7 @@ def update_booking_by_user(booking_id):
 
 @api_bookings_bp.route('/bookings/<int:booking_id>', methods=['DELETE'])
 @login_required
+@retry_on_db_error
 def delete_booking_by_user(booking_id):
     """
     Allows an authenticated user to delete their own booking.
@@ -1674,6 +1683,7 @@ def delete_booking_by_user(booking_id):
 
 @api_bookings_bp.route('/bookings/<int:booking_id>/check_in', methods=['POST'])
 @login_required
+@retry_on_db_error
 def check_in_booking(booking_id):
     """
     Allows an authenticated user to check into their booking.
@@ -1886,6 +1896,7 @@ def check_in_booking(booking_id):
 
 @api_bookings_bp.route('/bookings/<int:booking_id>/check_out', methods=['POST'])
 @login_required
+@retry_on_db_error
 def check_out_booking(booking_id):
     """
     Allows an authenticated user to check out of their booking.
@@ -2016,6 +2027,7 @@ def check_out_booking(booking_id):
 
 
 @api_bookings_bp.route('/bookings/check-in-qr/<string:token>', methods=['GET'])
+@retry_on_db_error
 def qr_check_in(token):
     """
     Allows check-in to a booking using a time-limited token (e.g., from a QR code).
@@ -2125,6 +2137,7 @@ def qr_check_in(token):
         return jsonify({'error': 'Check-in failed due to a server error.'}), 500
 
 @api_bookings_bp.route('/r/<int:resource_id>/checkin', methods=['GET'])
+@retry_on_db_error
 def resource_pin_check_in(resource_id):
     logger = current_app.logger
     pin_value = request.args.get('pin')

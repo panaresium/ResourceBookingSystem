@@ -34,6 +34,7 @@ from sqlalchemy.sql import func as sqlfunc
 # New imports for task management
 import uuid
 import threading
+from functools import wraps
 # from datetime import datetime # Already imported
 
 # Global lists for logging (if these are the sole modifiers)
@@ -63,6 +64,26 @@ DEFAULT_SCHEDULER_SETTINGS = {
 # --- Task Management Infrastructure ---
 task_statuses = {}
 task_lock = threading.Lock()
+
+def retry_on_db_error(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        retries = 3
+        delay = 3
+        for i in range(retries):
+            try:
+                return f(*args, **kwargs)
+            except exc.OperationalError as e:
+                logger = current_app.logger if current_app else logging.getLogger(__name__)
+                if i < retries - 1:
+                    logger.warning(f"DB OperationalError in {f.__name__}: {e}. Retrying in {delay} seconds... (Attempt {i+1}/{retries})")
+                    time_module.sleep(delay)
+                else:
+                    logger.error(f"DB OperationalError in {f.__name__}: {e}. Max retries reached.")
+                    raise e
+            except Exception as e:
+                raise e
+    return decorated_function
 
 def create_task(task_type="generic"):
     # Creates a new task entry and returns its ID.
@@ -2062,6 +2083,7 @@ def reschedule_unified_backup_jobs(app_instance):
 # However, to be explicit about what this module provides (especially after adding new functions):
 __all__ = [
     'create_task', 'get_task_status', 'update_task_log', 'mark_task_done', # New task functions
+    'retry_on_db_error',
     'get_current_effective_time', 'check_booking_permission',
     'get_detailed_map_availability_for_user', 'check_resources_availability_for_user',
     'load_scheduler_settings', 'save_scheduler_settings', 'add_audit_log',

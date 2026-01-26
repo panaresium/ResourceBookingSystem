@@ -16,7 +16,7 @@ from r2_storage import r2_storage
 from models import FloorMap, Resource, Booking, Role # Role removed if no longer needed
 from auth import permission_required
 # Assuming these utils will be moved to utils.py or are already there
-from utils import add_audit_log, allowed_file, _get_map_configuration_data, _import_map_configuration_data, check_resources_availability_for_user, get_detailed_map_availability_for_user, _get_map_configuration_data_zip
+from utils import add_audit_log, allowed_file, _get_map_configuration_data, _import_map_configuration_data, check_resources_availability_for_user, get_detailed_map_availability_for_user, _get_map_configuration_data_zip, retry_on_db_error
 
 # Conditional import for Storage (R2)
 try:
@@ -35,6 +35,7 @@ def init_api_maps_routes(app):
 
 @api_maps_bp.route('/locations-availability', methods=['GET'])
 @login_required
+@retry_on_db_error
 def get_locations_availability():
     date_str = request.args.get('date')
     target_date = None
@@ -90,6 +91,7 @@ def get_locations_availability():
 
 @api_maps_bp.route('/maps-availability', methods=['GET'])
 @login_required
+@retry_on_db_error
 def get_maps_availability():
     date_str = request.args.get('date')
     target_date = None
@@ -159,6 +161,7 @@ def get_maps_availability():
 
 
 @api_maps_bp.route('/maps', methods=['GET'])
+@retry_on_db_error
 def get_public_floor_maps():
     try:
         maps = FloorMap.query.all()
@@ -190,6 +193,7 @@ def get_public_floor_maps():
 @api_maps_bp.route('/admin/maps', methods=['POST'])
 @login_required
 @permission_required('manage_floor_maps')
+@retry_on_db_error
 def upload_floor_map():
     if 'map_image' not in request.files:
         current_app.logger.warning("Map image missing in upload request.")
@@ -224,23 +228,22 @@ def upload_floor_map():
         filename = secure_filename(original_filename).lower()
         current_app.logger.info(f"Upload attempt: original='{original_filename}', standardized='{filename}' by user '{current_user.username}'")
 
-        # Check using the standardized filename
-        existing_map_by_filename = FloorMap.query.filter_by(image_filename=filename).first()
-        if existing_map_by_filename:
-            current_app.logger.warning(f"Duplicate check: Found existing map by standardized filename '{filename}'. ID: {existing_map_by_filename.id}")
-            return jsonify({'error': 'A map with this image filename (or similar after standardization) already exists.'}), 409
-        else:
-            current_app.logger.info(f"Duplicate check: No existing map found for standardized filename '{filename}'. Proceeding with upload.")
-
-        # Note: existing_map_by_name check can remain as is, as map names might have legitimate case differences.
-        existing_map_by_name = FloorMap.query.filter_by(name=map_name).first()
-        if existing_map_by_name: # This check is fine as is
-            current_app.logger.warning(f"Attempt to upload map with duplicate name: {map_name}")
-            return jsonify({'error': 'A map with this name already exists.'}), 409
-
         storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
         file_path = None
         try:
+            # Check using the standardized filename
+            existing_map_by_filename = FloorMap.query.filter_by(image_filename=filename).first()
+            if existing_map_by_filename:
+                current_app.logger.warning(f"Duplicate check: Found existing map by standardized filename '{filename}'. ID: {existing_map_by_filename.id}")
+                return jsonify({'error': 'A map with this image filename (or similar after standardization) already exists.'}), 409
+            else:
+                current_app.logger.info(f"Duplicate check: No existing map found for standardized filename '{filename}'. Proceeding with upload.")
+
+            # Note: existing_map_by_name check can remain as is, as map names might have legitimate case differences.
+            existing_map_by_name = FloorMap.query.filter_by(name=map_name).first()
+            if existing_map_by_name: # This check is fine as is
+                current_app.logger.warning(f"Attempt to upload map with duplicate name: {map_name}")
+                return jsonify({'error': 'A map with this name already exists.'}), 409
             if storage_provider == 'r2':
                 if not r2_storage.upload_file(file, filename, 'floor_map_uploads'):
                     raise Exception("Failed to upload map to R2.")
@@ -304,6 +307,7 @@ def upload_floor_map():
 @api_maps_bp.route('/admin/maps', methods=['GET'])
 @login_required
 @permission_required('manage_floor_maps')
+@retry_on_db_error
 def get_floor_maps():
     try:
         maps = FloorMap.query.all()
@@ -333,6 +337,7 @@ def get_floor_maps():
 @api_maps_bp.route('/admin/maps/<int:map_id>', methods=['DELETE'])
 @login_required
 @permission_required('manage_floor_maps')
+@retry_on_db_error
 def delete_floor_map(map_id):
     floor_map = FloorMap.query.get(map_id)
     if not floor_map:
@@ -380,6 +385,7 @@ def delete_floor_map(map_id):
 @api_maps_bp.route('/admin/maps/export_configuration', methods=['GET'])
 @login_required
 @permission_required('manage_floor_maps')
+@retry_on_db_error
 def export_map_configuration():
     try:
         zip_buffer, zip_filename = _get_map_configuration_data_zip()
@@ -405,6 +411,7 @@ def export_map_configuration():
 @api_maps_bp.route('/admin/maps/import_configuration', methods=['POST'])
 @login_required
 @permission_required('manage_floor_maps')
+@retry_on_db_error
 def import_map_configuration():
     if 'file' not in request.files:
         current_app.logger.warning("Import map configuration: No file part in request.")
@@ -517,6 +524,7 @@ def import_map_configuration():
 
 @api_maps_bp.route('/map_details/<int:map_id>', methods=['GET'])
 @login_required
+@retry_on_db_error
 def get_map_details(map_id):
     active_booking_statuses_for_conflict_map_details = ['approved', 'pending', 'checked_in', 'confirmed']
 
@@ -669,6 +677,7 @@ def get_map_details(map_id):
 @api_maps_bp.route('/admin/maps/<int:map_id>/offsets', methods=['PUT'])
 @login_required
 @permission_required('manage_floor_maps')
+@retry_on_db_error
 def update_floor_map_offsets(map_id):
     floor_map = FloorMap.query.get(map_id)
     if not floor_map:

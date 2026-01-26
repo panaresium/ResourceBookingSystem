@@ -31,7 +31,7 @@ from utils import (
     # New imports for task management
     create_task, get_task_status, update_task_log, mark_task_done,
     # Imports for scheduler settings if not already present (they should be in utils)
-    load_scheduler_settings, save_scheduler_settings, save_scheduler_settings_from_json_data, # Added for selective restore
+    load_scheduler_settings, save_scheduler_settings, save_scheduler_settings_from_json_data, retry_on_db_error # Added for selective restore
 )
 import threading # Added for threading
 import tempfile # Added for selective restore manifest download
@@ -109,6 +109,7 @@ api_system_bp = Blueprint('api_system', __name__)
 @api_system_bp.route('/api/task/<task_id>/status', methods=['GET'])
 @login_required
 @permission_required('manage_system') # Or appropriate permission, adjust as needed
+@retry_on_db_error
 def get_task_status_api(task_id):
     # Uses get_task_status from utils
     status = get_task_status(task_id)
@@ -119,6 +120,7 @@ def get_task_status_api(task_id):
 @api_system_bp.route('/api/admin/logs', methods=['GET'])
 @login_required
 @permission_required('view_audit_logs')
+@retry_on_db_error
 def get_audit_logs():
     """Fetches audit logs with pagination."""
     try:
@@ -192,6 +194,7 @@ def debug_list_routes():
 @api_system_bp.route('/api/admin/booking_data_protection/manual_backup', methods=['POST'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_manual_booking_data_backup_json():
     user_id_for_audit = current_user.id if hasattr(current_user, 'id') else None
     username_for_audit = current_user.username if hasattr(current_user, 'username') else "System"
@@ -253,6 +256,7 @@ def api_manual_booking_data_backup_json():
 @api_system_bp.route('/api/admin/booking_data_protection/list_backups', methods=['GET'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_list_booking_data_backups():
     # ... (original code) ...
     current_app.logger.info(f"User {current_user.username} requested list of unified booking data backups.")
@@ -268,6 +272,7 @@ def api_list_booking_data_backups():
 @api_system_bp.route('/api/admin/booking_data_protection/restore', methods=['POST'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_unified_booking_data_point_in_time_restore():
     user_id_for_audit = current_user.id if hasattr(current_user, 'id') else None
     username_for_audit = current_user.username if hasattr(current_user, 'username') else "System"
@@ -344,6 +349,7 @@ def api_unified_booking_data_point_in_time_restore():
 @api_system_bp.route('/api/admin/booking_data_protection/delete', methods=['POST'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_delete_booking_data_backup():
     # This is likely quick, so may not need full task refactoring.
     task_id = uuid.uuid4().hex
@@ -368,6 +374,7 @@ def api_delete_booking_data_backup():
 @api_system_bp.route('/api/admin/booking_data_protection/download/<string:backup_type>/<path:filename>', methods=['GET'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_download_booking_data_backup(backup_type, filename):
     # ... (original code, this is a direct download, not a task) ...
     current_app.logger.info(f"User {current_user.username} requested download of unified backup: Type='{backup_type}', Filename='{filename}'.")
@@ -382,6 +389,7 @@ def api_download_booking_data_backup(backup_type, filename):
 @api_system_bp.route('/api/admin/backup/booking_data/download_set/<string:full_backup_filename>', methods=['GET'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_download_backup_set_zip(full_backup_filename):
     current_app.logger.info(f"User {current_user.username} requested download of backup set for: {full_backup_filename}.")
     task_id = create_task(task_type='download_backup_set_zip') # Create a task for potential logging
@@ -419,6 +427,7 @@ def api_download_backup_set_zip(full_backup_filename):
 @api_system_bp.route('/api/admin/settings/unified_backup_schedule', methods=['GET'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def get_unified_backup_schedule():
     # ... (original code) ...
     settings = load_unified_backup_schedule_settings(current_app)
@@ -427,6 +436,7 @@ def get_unified_backup_schedule():
 @api_system_bp.route('/api/admin/settings/unified_backup_schedule', methods=['POST'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def update_unified_backup_schedule():
     # ... (original code) ...
     data = request.get_json()
@@ -446,6 +456,7 @@ def update_unified_backup_schedule():
 @api_system_bp.route('/api/admin/one_click_backup', methods=['POST'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_one_click_backup():
     user_id_for_audit = current_user.id if hasattr(current_user, 'id') else None
     username_for_audit = current_user.username if hasattr(current_user, 'username') else "System"
@@ -567,6 +578,7 @@ def api_one_click_backup():
 # ... (original code for list_backups, no changes needed here) ...
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_list_backups():
     global azure_import_error_message
     try:
@@ -606,6 +618,7 @@ def api_list_backups():
 @api_system_bp.route('/api/admin/one_click_restore', methods=['POST'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_one_click_restore():
     # This endpoint is complex and involves multiple steps after the main restore_full_backup call.
     # For now, only refactoring the initial call to restore_full_backup to be async.
@@ -1042,6 +1055,7 @@ def api_one_click_restore():
 @api_system_bp.route('/api/admin/restore_dry_run/<string:backup_timestamp>', methods=['POST'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_restore_dry_run(backup_timestamp):
     # This function calls restore_full_backup(dry_run=True). If restore_full_backup is now async,
     # this should also become async.
@@ -1091,6 +1105,7 @@ def api_restore_dry_run(backup_timestamp):
 @api_system_bp.route('/api/admin/selective_restore', methods=['POST'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_selective_restore():
     user_id_for_audit = current_user.id if hasattr(current_user, 'id') else None
     username_for_audit = current_user.username if hasattr(current_user, 'username') else "System"
@@ -1503,6 +1518,7 @@ def api_selective_restore():
 @api_system_bp.route('/api/admin/verify_backup', methods=['POST'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_verify_backup():
     user_id_for_audit = current_user.id if hasattr(current_user, 'id') else None
     username_for_audit = current_user.username if hasattr(current_user, 'username') else "System"
@@ -1552,6 +1568,7 @@ def api_verify_backup():
 # ... (original, no change) ...
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def get_backup_schedule():
     current_app.logger.info(f"User {current_user.username} fetching backup schedule configuration (from JSON).")
     try:
@@ -1568,6 +1585,7 @@ def get_backup_schedule():
 # ... (original, no change) ...
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def update_backup_schedule():
     current_app.logger.info(f"User {current_user.username} attempting to update backup schedule (to JSON).")
     data = request.get_json()
@@ -1605,6 +1623,7 @@ def update_backup_schedule():
 @api_system_bp.route('/api/admin/delete_backup/<string:backup_timestamp>', methods=['POST'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_delete_backup_set(backup_timestamp):
     user_id_for_audit = current_user.id if hasattr(current_user, 'id') else None
     username_for_audit = current_user.username if hasattr(current_user, 'username') else "System"
@@ -1653,6 +1672,7 @@ def api_delete_backup_set(backup_timestamp):
 @api_system_bp.route('/api/admin/bulk_delete_system_backups', methods=['POST'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_bulk_delete_system_backups():
     user_id_for_audit = current_user.id if hasattr(current_user, 'id') else None
     username_for_audit = current_user.username if hasattr(current_user, 'username') else "System"
@@ -1717,6 +1737,7 @@ def api_bulk_delete_system_backups():
 @api_system_bp.route('/api/admin/restore_bookings_from_full_db', methods=['POST'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_restore_bookings_from_full_db():
     user_id_for_audit = current_user.id if hasattr(current_user, 'id') else None
     username_for_audit = current_user.username if hasattr(current_user, 'username') else "System"
@@ -1781,6 +1802,7 @@ def api_restore_bookings_from_full_db():
 @api_system_bp.route('/api/admin/settings/auto_restore_booking_data_on_startup', methods=['GET'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def get_auto_restore_booking_data_setting():
     try:
         scheduler_settings = load_scheduler_settings()
@@ -1795,6 +1817,7 @@ def get_auto_restore_booking_data_setting():
 @api_system_bp.route('/api/admin/settings/auto_restore_booking_data_on_startup', methods=['POST'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def update_auto_restore_booking_data_setting():
     data = request.get_json()
     if data is None or 'is_enabled' not in data or not isinstance(data['is_enabled'], bool):
@@ -1831,6 +1854,7 @@ def init_api_system_routes(app):
 
 @api_system_bp.route('/api/system/booking_settings', methods=['GET'])
 @login_required
+@retry_on_db_error
 def get_booking_settings():
     try:
         settings = BookingSettings.query.first()
@@ -1865,6 +1889,7 @@ def get_booking_settings():
 @api_system_bp.route('/api/admin/view_db_raw_top100', methods=['GET'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_admin_view_db_raw_top100():
     raw_data = {}
     model_map = {mapper.class_.__tablename__: mapper.class_ for mapper in db.Model.registry.mappers if hasattr(mapper.class_, '__tablename__')}
@@ -1904,6 +1929,7 @@ def api_admin_view_db_raw_top100():
 @api_system_bp.route('/api/admin/db/table_names', methods=['GET'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_admin_get_table_names():
     try:
         all_table_names = list(db.metadata.tables.keys())
@@ -1923,6 +1949,7 @@ def api_admin_get_table_names():
 @api_system_bp.route('/api/admin/db/table_info/<string:table_name>', methods=['GET'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_admin_get_table_info(table_name: str):
     try:
         if table_name not in db.metadata.tables:
@@ -1936,6 +1963,7 @@ def api_admin_get_table_info(table_name: str):
 @api_system_bp.route('/api/admin/db/table_data/<string:table_name>', methods=['GET'])
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_admin_get_table_data(table_name: str):
     if table_name not in db.metadata.tables: return jsonify({'success': False, 'message': 'Table not found.'}), 404
     table_obj = db.metadata.tables[table_name]
@@ -1983,6 +2011,7 @@ def api_admin_get_table_data(table_name: str):
 # ... (original, no change) ...
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_admin_cleanup_system_data():
     try:
         num_bookings_deleted = Booking.query.delete(); add_audit_log(action="DB_CLEANUP", details=f"Deleted {num_bookings_deleted} Bookings.", user_id=current_user.id)
@@ -1999,6 +2028,7 @@ def api_admin_cleanup_system_data():
 # ... (original, no change) ...
 @login_required
 @permission_required('manage_system')
+@retry_on_db_error
 def api_admin_reload_configurations():
     try:
         map_data = _get_map_configuration_data(); add_audit_log(action="RELOAD_CONFIG_MAP", details="Reloaded map config.", user_id=current_user.id)
@@ -2010,6 +2040,7 @@ def api_admin_reload_configurations():
 @api_system_bp.route('/api/settings/booking_config_status', methods=['GET'])
 # ... (original, no change) ...
 @login_required
+@retry_on_db_error
 def get_booking_config_status():
     try:
         settings = BookingSettings.query.first()
