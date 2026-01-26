@@ -580,6 +580,17 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
             logger.error(f"Error parsing map coordinates '{map_coordinates_str}' for resource {resource_id}: {e}")
             return None
 
+        # Apply offsets from floor map configuration if available
+        # These offsets are configured in Map Management and should be added to the resource's relative coordinates.
+        if floor_map:
+            offset_x = getattr(floor_map, 'offset_x', 0)
+            offset_y = getattr(floor_map, 'offset_y', 0)
+            if offset_x is not None:
+                original_ref_x += offset_x
+            if offset_y is not None:
+                original_ref_y += offset_y
+            logger.debug(f"Applied map offsets: x={offset_x}, y={offset_y}. New ref coords: ({original_ref_x}, {original_ref_y})")
+
         # Define reference dimensions for the input coordinates
         ref_width = 800
         ref_height = 600
