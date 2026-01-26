@@ -951,9 +951,7 @@ def api_one_click_restore():
                         {"name": "Floor Maps", "azure_subdir": "floor_map_uploads", "local_target_dir": azure_backup.FLOOR_MAP_UPLOADS},
                         {"name": "Resource Uploads", "azure_subdir": "resource_uploads", "local_target_dir": azure_backup.RESOURCE_UPLOADS}
                     ]
-                    service_client = azure_backup._get_service_client() # Get service client again, or pass from above
-                    system_backup_share_name = os.environ.get('AZURE_SYSTEM_BACKUP_SHARE', 'system-backups')
-                    share_client = service_client.get_share_client(system_backup_share_name)
+                    share_client = None # Not needed for R2, passed as dummy
 
                     for media_src in media_sources_to_restore:
                         azure_full_media_subdir_path = f"{media_base_path_on_share}/{media_src['azure_subdir']}"
@@ -1155,27 +1153,9 @@ def api_selective_restore():
                     add_audit_log(action="SELECTIVE_RESTORE_SETUP_ERROR", details=f"Task {task_id_param}: {message}", user_id=user_id_audit, username=username_audit)
                     return
 
-                # Initialize Azure service client
-                try:
-                    service_client = _get_service_client()
-                    update_task_log(task_id_param, "Azure service client initialized.", level="info")
-                except RuntimeError as e: # Catch specific RuntimeError for client init
-                    update_task_log(task_id_param, f"Failed to initialize Azure service client: {str(e)}", level="error")
-                    mark_task_done(task_id_param, success=False, result_message=f"Azure client init failed: {str(e)}")
-                    add_audit_log(action="SELECTIVE_RESTORE_AZURE_CLIENT_ERROR", details=f"Task {task_id_param}: {str(e)}", user_id=user_id_audit, username=username_audit)
-                    return
-
-                # Initialize a single share client for the unified system backup share
-                system_backup_share_name = os.environ.get('AZURE_SYSTEM_BACKUP_SHARE', 'system-backups')
-                system_share_client = service_client.get_share_client(system_backup_share_name)
-
-                if not azure_backup._client_exists(system_share_client): # Use the helper from azure_backup
-                    error_msg = f"System backup share '{system_backup_share_name}' not found. Cannot proceed with restore."
-                    update_task_log(task_id_param, error_msg, level="error")
-                    mark_task_done(task_id_param, success=False, result_message=error_msg)
-                    add_audit_log(action="SELECTIVE_RESTORE_SHARE_NOT_FOUND", details=f"Task {task_id_param}: {error_msg}", user_id=user_id_audit, username=username_audit)
-                    return
-                update_task_log(task_id_param, f"Successfully connected to system backup share: '{system_backup_share_name}'.", level="info")
+                # Initialize client (Dummy for R2 as it uses global client)
+                system_share_client = None
+                update_task_log(task_id_param, "R2 client check bypassed (using global configuration).", level="info")
 
                 # Download and Parse Manifest
                 manifest_filename_on_share = f"backup_manifest_{backup_ts_param}.json"

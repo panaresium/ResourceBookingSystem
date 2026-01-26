@@ -48,15 +48,11 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 DATA_DIR = os.path.join(basedir, 'data')
 SCHEDULER_SETTINGS_FILE_PATH = os.path.join(DATA_DIR, 'scheduler_settings.json')
 
-DEFAULT_FULL_BACKUP_SCHEDULE = {
-    "is_enabled": False, "schedule_type": "daily", "day_of_week": None, "time_of_day": "02:00"
-}
 DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE = {
     "is_enabled": False, "schedule_type": "interval", "interval_minutes": 60,
     "booking_backup_type": "full_export", "range": "all"
 }
 DEFAULT_SCHEDULER_SETTINGS = {
-    "full_backup": DEFAULT_FULL_BACKUP_SCHEDULE.copy(),
     "booking_csv_backup": DEFAULT_BOOKING_CSV_BACKUP_SCHEDULE.copy(),
     "auto_restore_booking_records_on_startup": False
 }

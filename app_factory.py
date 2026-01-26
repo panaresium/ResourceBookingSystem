@@ -48,7 +48,6 @@ from r2_storage import r2_storage
 # Imports for processing downloaded configs during startup restore
 from utils import (
     load_scheduler_settings,  # Added for new setting
-    DEFAULT_FULL_BACKUP_SCHEDULE,  # Added for full backup job scheduling
     _import_map_configuration_data,
     _import_resource_configurations_data,
     _import_user_configurations_data,
