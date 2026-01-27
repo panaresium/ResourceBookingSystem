@@ -1267,12 +1267,14 @@ def update_booking_by_user(booking_id):
 
                     user_own_conflict = None
                     if not conflicting_booking: # Only check if no resource conflict
+                        active_conflict_statuses = ['approved', 'pending', 'checked_in', 'confirmed']
                         user_own_conflict = Booking.query.filter(
                             Booking.user_name == current_user.username,
                             Booking.resource_id != booking.resource_id,
                             Booking.id != booking_id,
                             Booking.start_time < booking.end_time, # Uses new booking.end_time
-                            Booking.end_time > booking.start_time    # Uses new booking.start_time
+                            Booking.end_time > booking.start_time,   # Uses new booking.start_time
+                            sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_conflict_statuses)
                         ).first()
 
                     user_self_conflict_check = None
