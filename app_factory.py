@@ -325,7 +325,7 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
 
         # Check if DB connection failed at startup
         if app.config.get('DB_CONNECTION_FAILED'):
-            if request.endpoint == 'ui.serve_login':
+            if request.endpoint == 'ui.serve_login' or (request.endpoint and 'static' in request.endpoint):
                 return None
             if request.path.startswith('/api/'):
                 return jsonify({'error': 'Database connection failed', 'details': app.config.get('DB_CONNECTION_ERROR')}), 503
