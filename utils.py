@@ -1889,9 +1889,12 @@ def _import_user_configurations_data(user_config_data: dict) -> tuple[dict, int]
                 if 'password_hash' in user_item and user_item['password_hash']:
                     new_user.password_hash = user_item['password_hash']
                 else:
-                    # Set a default unguessable password or handle as needed
-                    # For restore, if no hash, they might need to reset or use SSO
-                    pass
+                    # Set a default unguessable password if missing, as DB requires it.
+                    # User will need to reset password or use SSO.
+                    import uuid
+                    default_pw = str(uuid.uuid4())
+                    new_user.set_password(default_pw)
+                    warnings.append(f"User '{username}' (Backup ID {backup_user_id}) created with a random default password because 'password_hash' was missing in backup.")
 
                 # Handle user roles for new user
                 backed_up_user_role_ids = user_item.get('assigned_role_ids', [])
