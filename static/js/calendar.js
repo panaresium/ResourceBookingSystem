@@ -62,6 +62,18 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const apiData = await apiCall(`/api/resources/${resourceId}/availability?date=${dateStr}`);
 
+            // Fetch user's other bookings if allow_multiple is disallowed
+            let userBookings = [];
+            const allowMultiple = calendarEl && calendarEl.dataset.allowMultiple === 'true';
+            if (!allowMultiple) {
+                try {
+                    userBookings = await apiCall(`/api/bookings/my_bookings_for_date?date=${dateStr}`);
+                } catch (err) {
+                    console.error("Failed to fetch user bookings for conflict check:", err);
+                    // Fail gracefully? Or block? Let's proceed but maybe warn in console.
+                }
+            }
+
             // apiData structure: { booked_slots: [], standard_slot_statuses: { "first_half": {...}, ... } }
             const bookedSlots = apiData.booked_slots || [];
             const slotStatuses = apiData.standard_slot_statuses || {};
@@ -92,6 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Check for booking conflicts, excluding the current booking
                 let isBooked = false;
+                let isUserConflict = false;
                 const [slotStartStr, slotEndStr] = slot.value.split(',');
 
                 // Convert slot strings to comparable minutes
@@ -103,6 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const slotStartMins = parseTime(slotStartStr);
                 const slotEndMins = parseTime(slotEndStr);
 
+                // Check resource availability
                 for (const booking of bookedSlots) {
                     if (String(booking.booking_id) === String(bookingIdToExclude)) continue;
 
@@ -116,10 +130,31 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
+                // Check user conflicts (if applicable)
+                if (!isBooked && !allowMultiple) {
+                    for (const uBooking of userBookings) {
+                        if (String(uBooking.booking_id) === String(bookingIdToExclude)) continue;
+
+                        const ubStartMins = parseTime(uBooking.start_time);
+                        const ubEndMins = parseTime(uBooking.end_time);
+
+                        if (slotStartMins < ubEndMins && slotEndMins > ubStartMins) {
+                            isUserConflict = true;
+                            break;
+                        }
+                    }
+                }
+
                 if (isBooked) {
                     const option = document.createElement('option');
                     option.value = slot.value;
                     option.textContent = `${slot.text} (Unavailable)`;
+                    option.disabled = true;
+                    cebmEditSlots.appendChild(option);
+                } else if (isUserConflict) {
+                    const option = document.createElement('option');
+                    option.value = slot.value;
+                    option.textContent = `${slot.text} (Conflict)`;
                     option.disabled = true;
                     cebmEditSlots.appendChild(option);
                 } else {
