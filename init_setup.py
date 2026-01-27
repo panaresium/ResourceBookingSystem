@@ -5,8 +5,10 @@ import os
 import pathlib
 import json
 import subprocess # For checking sqlite3 CLI availability
+import time as time_module
 from werkzeug.security import generate_password_hash
 from datetime import datetime, date, timedelta, time
+from sqlalchemy import text
 
 # Define BASE_DIR early as it's used by check_sqlite_cli_availability and others
 BASE_DIR = pathlib.Path(__file__).resolve().parent
@@ -173,11 +175,92 @@ def init_db(force=False):
         # ... (rest of init_db)
         current_app.logger.info(f"Database URI used by init_db: {current_app.config.get('SQLALCHEMY_DATABASE_URI')}")
         current_app.logger.info("Starting database initialization...")
-        current_app.logger.info("Creating database tables (db.create_all())...")
-        db.create_all()
-        current_app.logger.info("Database tables creation/verification step completed.")
-        current_app.logger.info("Ensuring all schema elements (columns) are present after table creation.")
-        ensure_all_migrations()
+
+        # Verify connection first with retry logic
+        db_connected = False
+        retry_count = 0
+        max_retries = current_app.config.get('DB_CONNECT_MAX_RETRIES', 3)
+        retry_delay = current_app.config.get('DB_CONNECT_RETRY_DELAY', 3)
+
+        while retry_count <= max_retries:
+            try:
+                # Attempt to connect and execute a simple query
+                with db.engine.connect() as connection:
+                    connection.execute(text('SELECT 1'))
+                db_connected = True
+                current_app.logger.info("Database connection verified successfully.")
+                break
+            except Exception as e:
+                retry_count += 1
+                current_app.logger.warning(f"Database connection failed (Attempt {retry_count}/{max_retries + 1}): {e}")
+                if retry_count <= max_retries:
+                    current_app.logger.info(f"Retrying in {retry_delay} seconds...")
+                    time_module.sleep(retry_delay)
+                else:
+                    current_app.logger.error("All database connection attempts failed. Aborting initialization to prevent data loss assumption.")
+                    return # Exit safely, do not assume empty DB
+
+        # Check FORCE_INITIALIZE_DB flag
+        force_init_env = os.environ.get('FORCE_INITIALIZE_DB', 'false').lower() == 'true'
+
+        # If force=True is passed to function (CLI arg), it overrides env var check for strictly enabling init,
+        # BUT we still prioritize safety checks for existing data below.
+        # However, the requirement is: "if force_Initialized_db is true, only then the app allow to re-initialize the db"
+        # So we should respect that flag for the automatic initialization part.
+
+        # Check for existing data first (always safe)
+        existing_data_detected = False
+        try:
+            # We can only query if tables exist. If tables don't exist, this might throw ProgrammingError.
+            # db.create_all() handles "if not exists" logic for table creation, but we want to know if we SHOULD run it.
+            # If we run db.create_all() first, we can then check for data.
+            # But running db.create_all() itself is a form of initialization (creating structure).
+            # If the user wants "Ask Admin", we might want to skip even db.create_all() if the flag is false?
+            # However, create_all is generally safe (idempotent). The risk is deciding to SEED/DELETE based on "empty".
+
+            # Let's proceed with create_all() to ensure we can check for data.
+            # If connection failed, we returned above.
+            current_app.logger.info("Creating/Verifying database tables (db.create_all())...")
+            db.create_all()
+            current_app.logger.info("Database tables creation/verification step completed.")
+            current_app.logger.info("Ensuring all schema elements (columns) are present after table creation.")
+            ensure_all_migrations()
+
+            # Now check for data
+            user_exists = db.session.query(User.id).first() is not None
+            role_exists = db.session.query(Role.id).first() is not None
+            resource_exists = db.session.query(Resource.id).first() is not None
+
+            if user_exists or role_exists or resource_exists:
+                existing_data_detected = True
+        except Exception as e:
+            # If check fails (e.g. DB error despite connection success), assume data might exist for safety
+            current_app.logger.error(f"Error checking for existing data: {e}. Aborting initialization.")
+            return
+
+        if existing_data_detected:
+            # If data exists, we NEVER delete unless explicit CLI force flag is used (legacy safety).
+            # The new requirement is "Stop and Wait" / "Ask Admin".
+            # If data exists, we just finish. The app is ready.
+            if not force:
+                current_app.logger.info("init_db aborted: Existing data (Users, Roles, or Resources) detected. The database is initialized.")
+                return
+            else:
+                # CLI force flag provided -> Delete data
+                current_app.logger.info("Force flag set via CLI. Deleting existing data...")
+                # Proceed to deletion block below...
+        else:
+            # No existing data detected (Empty DB)
+            # Check environment flag to allow initialization
+            if not force_init_env and not force:
+                current_app.logger.warning("Database is empty, but FORCE_INITIALIZE_DB is not set to 'true'.")
+                current_app.logger.warning("Skipping automatic data seeding/initialization. Administrator must confirm initialization via UI or set the flag.")
+                return
+
+        # If we reach here, either:
+        # 1. Data exists AND force=True (CLI) -> Wipe and Re-seed
+        # 2. Data does NOT exist AND force_init_env=True -> Seed
+        # 3. Data does NOT exist AND force=True (CLI) -> Seed
 
         if not force:
             # Check for any evidence of existing configuration to prevent accidental overwrite
