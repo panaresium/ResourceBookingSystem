@@ -136,12 +136,14 @@ def serve_calendar():
     # Get global_time_offset_hours and restricted_past status
     time_offset_value = 0 # Default
     restricted_past = True # Always restrict past dates for date picker as per requirement
+    allow_multiple = False # Default
 
     try:
         booking_settings_record = BookingSettings.query.first()
         if booking_settings_record:
             if booking_settings_record.global_time_offset_hours is not None:
                 time_offset_value = booking_settings_record.global_time_offset_hours
+            allow_multiple = booking_settings_record.allow_multiple_resources_same_time
 
     except Exception as e:
         current_app.logger.error(f"Error fetching BookingSettings for calendar page: {e}", exc_info=True)
@@ -151,7 +153,8 @@ def serve_calendar():
     return render_template("calendar.html",
                            global_time_offset_hours=time_offset_value,
                            floors=floors,
-                           restricted_past=restricted_past)
+                           restricted_past=restricted_past,
+                           allow_multiple=allow_multiple)
 
 @ui_bp.route('/map_view/<int:map_id>')
 def serve_map_view(map_id):
