@@ -903,10 +903,14 @@ def import_resources_admin():
     except json.JSONDecodeError: return jsonify({'error': 'Invalid JSON.'}), 400
     if not isinstance(resources_data, list): return jsonify({'error': 'JSON must be a list.'}), 400
 
-    # _import_resource_configurations_data now returns:
-    # (updated_count, created_count, errors_list, warnings_list, status_code, message_str)
-    updated_count, created_count, errors_list, warnings_list, status_code, message = \
-        _import_resource_configurations_data(resources_data)
+    # _import_resource_configurations_data now returns: (summary, status_code)
+    summary, status_code = _import_resource_configurations_data(resources_data)
+
+    updated_count = summary.get('updated', 0)
+    created_count = summary.get('created', 0)
+    errors_list = summary.get('errors', [])
+    warnings_list = summary.get('warnings', [])
+    message = summary.get('message', '')
 
     # Audit log uses the comprehensive message and detailed errors/warnings
     audit_details = f"User {current_user.username} imported resource configurations. Result: {message}. Errors: {errors_list}. Warnings: {warnings_list}."
