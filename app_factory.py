@@ -325,18 +325,9 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
 
         # Check if DB connection failed at startup
         if app.config.get('DB_CONNECTION_FAILED'):
-            error_message = app.config.get('DB_CONNECTION_ERROR', 'Unknown Error')
-            return render_template_string("""
-                <html>
-                <head><title>Database Error</title></head>
-                <body style="font-family: sans-serif; padding: 20px; text-align: center;">
-                    <h1>Database Connection Failed</h1>
-                    <p>The application could not connect to the database after multiple attempts.</p>
-                    <p style="color: red;">Error: {{ error }}</p>
-                    <p>Please check your configuration and ensure the database server is running.</p>
-                </body>
-                </html>
-            """, error=error_message), 503
+            if request.endpoint == 'ui.serve_login':
+                return None
+            return redirect(url_for('ui.serve_login'))
 
         # Check if setup is needed (no admin user)
         # Using a simple query. Performance hit is negligible for low traffic or initial setup.
