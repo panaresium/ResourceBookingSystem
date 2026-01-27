@@ -133,17 +133,40 @@ def serve_my_bookings_page():
 @login_required
 def serve_calendar():
     current_app.logger.info(f"User {current_user.username} accessed Calendar page.")
-    # Get global_time_offset_hours
+    # Get global_time_offset_hours and restricted_past status
     time_offset_value = 0 # Default
+    restricted_past = True # Default to safe restriction
+
     try:
         booking_settings_record = BookingSettings.query.first()
-        if booking_settings_record and booking_settings_record.global_time_offset_hours is not None:
-            time_offset_value = booking_settings_record.global_time_offset_hours
+        if booking_settings_record:
+            if booking_settings_record.global_time_offset_hours is not None:
+                time_offset_value = booking_settings_record.global_time_offset_hours
+
+            allow_past = booking_settings_record.allow_past_bookings
+            can_manage = current_user.has_permission('manage_bookings')
+            # If past bookings are allowed globally, OR user has permission, then NOT restricted.
+            if allow_past or can_manage:
+                restricted_past = False
+            else:
+                restricted_past = True
+        else:
+            # No settings found, assume defaults (allow_past=False)
+            if current_user.has_permission('manage_bookings'):
+                restricted_past = False
+            else:
+                restricted_past = True
+
     except Exception as e:
         current_app.logger.error(f"Error fetching BookingSettings for calendar page: {e}", exc_info=True)
-        # time_offset_value remains 0
+        # Fallback: time_offset_value=0. Safe default: restrict past for non-admins.
+        restricted_past = not current_user.has_permission('manage_bookings')
+
     floors = FloorMap.query.order_by(FloorMap.display_order).all()
-    return render_template("calendar.html", global_time_offset_hours=time_offset_value, floors=floors)
+    return render_template("calendar.html",
+                           global_time_offset_hours=time_offset_value,
+                           floors=floors,
+                           restricted_past=restricted_past)
 
 @ui_bp.route('/map_view/<int:map_id>')
 def serve_map_view(map_id):

@@ -375,8 +375,11 @@ def get_unavailable_dates():
             # Log the components for debugging
             logger.debug(f"For date {current_processing_date}: now_utc={now}, global_time_offset_hours={global_time_offset_hours}, effective_venue_now_utc={effective_venue_now_utc}, past_adjustment_hours={past_adjustment_hours}, effective_cutoff_datetime_utc={effective_cutoff_datetime_utc}")
 
+            # Exception: Users with 'manage_bookings' permission can book past dates.
+            user_can_book_past = target_user.has_permission('manage_bookings')
+
             # New Rule for allow_past_bookings == FALSE and strictly past dates
-            if booking_settings and not booking_settings.allow_past_bookings and date_is_past:
+            if booking_settings and not booking_settings.allow_past_bookings and date_is_past and not user_can_book_past:
                 unavailable_dates_set.add(current_processing_date.strftime('%Y-%m-%d'))
                 logger.debug(f"Date {current_processing_date} is strictly past and allow_past_bookings is false. Added to unavailable. Skipping slot checks.")
                 current_iter_date += timedelta(days=1)
@@ -465,6 +468,9 @@ def get_unavailable_dates():
                     cutoff_for_slot_passing_local_naive = effective_venue_now_local_naive_for_check - timedelta(hours=past_adjustment_hours)
                     # A slot is "passed" if its local start time is before this local cutoff time
                     is_slot_time_passed = slot_start_local_naive < cutoff_for_slot_passing_local_naive
+
+                    if user_can_book_past:
+                        is_slot_time_passed = False
 
                     logger.debug(f"[VERBOSE_UNAVAIL]   Attempting to check if slot passed (local time logic). Venue Local Cutoff: {cutoff_for_slot_passing_local_naive.isoformat()}, Slot Start (Local): {slot_start_local_naive.isoformat()}, Passed?: {is_slot_time_passed}")
 

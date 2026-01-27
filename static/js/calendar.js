@@ -35,8 +35,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize flatpickr on the edit date input once
     let editDateFlatpickr;
     if (cebmEditDate) {
+        const restrictedPast = calendarEl.dataset.restrictedPast === 'true';
         editDateFlatpickr = flatpickr(cebmEditDate, {
             dateFormat: "Y-m-d",
+            minDate: restrictedPast ? "today" : null,
             disable: [], // Will be updated
             onChange: function(selectedDates, dateStr, instance) {
                 const bookingId = cebmBookingId.value;
