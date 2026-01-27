@@ -80,6 +80,9 @@ def serve_resources():
 
 @ui_bp.route("/login")
 def serve_login():
+    if current_app.config.get('DB_CONNECTION_FAILED'):
+        error_message = current_app.config.get('DB_CONNECTION_ERROR', 'Unknown database connection error')
+        flash(f"Database Connection Failed: {error_message}. Please contact the administrator.", "error")
     return render_template("login.html")
 
 @ui_bp.route('/logout')

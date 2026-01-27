@@ -327,6 +327,8 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
         if app.config.get('DB_CONNECTION_FAILED'):
             if request.endpoint == 'ui.serve_login':
                 return None
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Database connection failed', 'details': app.config.get('DB_CONNECTION_ERROR')}), 503
             return redirect(url_for('ui.serve_login'))
 
         # Check if setup is needed (no admin user)
