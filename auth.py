@@ -29,6 +29,8 @@ auth_bp = Blueprint('auth', __name__)
 # --- Flask-Login Setup ---
 @login_manager.user_loader
 def load_user(user_id):
+    if current_app.config.get('DB_CONNECTION_FAILED'):
+        return None
     return db.session.get(User, int(user_id))
 
 @login_manager.unauthorized_handler
