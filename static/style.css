@@ -28,7 +28,7 @@
 .fc-unavailable-date {
     background-color: #eeeeee !important; /* Light grey background */
     color: #aaaaaa !important; /* Darker grey text */
-    pointer-events: none; /* Make it non-interactive */
+    /* pointer-events: none; REMOVED to allow clicking existing events. New selections blocked by selectAllow. */
 }
 
 /* Make unavailable date cells appear more "disabled" */
