@@ -66,21 +66,27 @@ DEFAULT_SCHEDULER_SETTINGS = {
 def retry_on_db_error(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        retries = 3
-        delay = 3
-        for i in range(retries):
+        # Fetch retry settings from config, defaulting to env vars or safe fallbacks
+        retries = current_app.config.get('DB_CONNECT_MAX_RETRIES', 3)
+        delay = current_app.config.get('DB_CONNECT_RETRY_DELAY', 3)
+
+        for i in range(retries + 1): # Attempt 0 + retries
             try:
                 return f(*args, **kwargs)
             except exc.OperationalError as e:
                 logger = current_app.logger if current_app else logging.getLogger(__name__)
-                if i < retries - 1:
+                if i < retries:
                     logger.warning(f"DB OperationalError in {f.__name__}: {e}. Retrying in {delay} seconds... (Attempt {i+1}/{retries})")
-                    db.session.rollback()
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass # Rollback might fail if connection is gone, that's okay
                     time_module.sleep(delay)
                 else:
-                    logger.error(f"DB OperationalError in {f.__name__}: {e}. Max retries reached.")
+                    logger.error(f"DB OperationalError in {f.__name__}: {e}. Max retries reached ({retries}).")
                     raise e
             except Exception as e:
+                # Re-raise other exceptions immediately
                 raise e
     return decorated_function
 
