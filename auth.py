@@ -15,7 +15,7 @@ from models import User
 # Assuming db, login_manager, oauth, csrf are in extensions.py
 from extensions import db, login_manager, oauth, csrf
 # Assuming add_audit_log is in utils.py
-from utils import add_audit_log
+from utils import add_audit_log, retry_on_db_error
 
 # This will be imported from config.py in the app factory context
 # For now, define it here or ensure it's available when get_google_flow is called.
@@ -71,6 +71,7 @@ def login_google():
     return redirect(authorization_url)
 
 @auth_bp.route('/login/google/callback')
+@retry_on_db_error
 def login_google_callback():
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     state = session.pop('oauth_state', None)
@@ -180,6 +181,7 @@ def link_google_auth():
 
 @auth_bp.route('/profile/link/google/callback')
 @login_required
+@retry_on_db_error
 def link_google_callback():
     logger = current_app.logger
     state = session.pop('oauth_link_state', None)
@@ -250,6 +252,7 @@ def link_google_callback():
 
 @auth_bp.route('/profile/unlink/google', methods=['POST'])
 @login_required
+@retry_on_db_error
 # @csrf.protect # Add this if you have CSRFProtect initialized and are using Flask-WTF forms for the button
 def unlink_google_account():
     logger = current_app.logger
@@ -292,6 +295,7 @@ def link_facebook_auth():
 
 @auth_bp.route('/profile/link/facebook/callback')
 @login_required
+@retry_on_db_error
 def link_facebook_callback():
     logger = current_app.logger
     link_user_id = session.pop('oauth_link_facebook_user_id', None)
@@ -357,6 +361,7 @@ def link_facebook_callback():
 
 @auth_bp.route('/profile/unlink/facebook', methods=['POST'])
 @login_required
+@retry_on_db_error
 # @csrf.protect # Add this if CSRFProtect is globally enabled
 def unlink_facebook_account():
     logger = current_app.logger
@@ -397,6 +402,7 @@ def link_instagram_auth():
 
 @auth_bp.route('/profile/link/instagram/callback')
 @login_required
+@retry_on_db_error
 def link_instagram_callback():
     logger = current_app.logger
     link_user_id = session.pop('oauth_link_instagram_user_id', None)
@@ -466,6 +472,7 @@ def link_instagram_callback():
 
 @auth_bp.route('/profile/unlink/instagram', methods=['POST'])
 @login_required
+@retry_on_db_error
 # @csrf.protect
 def unlink_instagram_account():
     logger = current_app.logger
@@ -502,6 +509,7 @@ def permission_required(permission):
 # --- API Authentication Routes ---
 @auth_bp.route('/api/auth/login', methods=['POST'])
 @csrf.exempt
+@retry_on_db_error
 def api_login():
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     data = request.get_json()
