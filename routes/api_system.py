@@ -909,17 +909,17 @@ def api_selective_restore():
                             errors_list.append(f"Database restore failed: {db_msg or db_err}")
                             update_task_log(task_id_param, f"Database component restore failed: {db_msg or db_err}", level="ERROR")
                     else:
-                        update_task_log(task_id_param, "Database component not found in manifest or 'path_in_backup' missing. Skipping database restore.", level="ERROR")
-                        overall_success = False; errors_list.append("Database component not in manifest or path missing.")
+                        # Soften this to a warning instead of error, as backups often exclude DB (Postgres)
+                        update_task_log(task_id_param, "Database component not found in manifest or 'path_in_backup' missing. Skipping database restore.", level="WARNING")
+                        actions_summary.append("Database restore skipped (not in backup).")
+                        # overall_success = False # Do not fail task for this
 
                 # --- Configuration Components Restore ---
                 config_component_map = {
                     "map_config": {"import_func": _import_map_configuration_data, "name_in_manifest": "map_config", "display_name": "Map Configuration", "azure_func": azure_backup.download_map_config_component},
                     "resource_configs": {"import_func": _import_resource_configurations_data, "name_in_manifest": "resource_configs", "display_name": "Resource Configurations", "azure_func": azure_backup.download_resource_config_component},
                     "user_configs": {"import_func": _import_user_configurations_data, "name_in_manifest": "user_configs", "display_name": "User Configurations", "azure_func": azure_backup.download_user_config_component},
-                    "scheduler_settings": {"import_func": utils.save_scheduler_settings_from_json_data, "name_in_manifest": "scheduler_settings", "display_name": "Scheduler Settings", "azure_func": azure_backup.download_scheduler_settings_component},
-                    "general_configs": {"import_func": _import_general_configurations_data, "name_in_manifest": "general_configs", "display_name": "General Application Settings", "azure_func": azure_backup.download_general_config_component},
-                    "unified_booking_backup_schedule": {"import_func": utils.save_unified_backup_schedule_settings, "name_in_manifest": "unified_booking_backup_schedule", "display_name": "Unified Backup Schedule", "azure_func": azure_backup.download_unified_schedule_component}
+                    "general_configs": {"import_func": _import_general_configurations_data, "name_in_manifest": "general_configs", "display_name": "General Application Settings", "azure_func": azure_backup.download_general_config_component}
                 }
 
                 for comp_key_internal, comp_details in config_component_map.items():
@@ -1070,81 +1070,6 @@ def api_selective_restore():
                             update_task_log(task_id_param, f"Resource Uploads media restore failed: {media_msg or media_err}", level="ERROR")
                     handled_in_selective_restore.append("resource_uploads")
 
-                # --- Configuration Components Restore (Ensure this loop skips handled media components) ---
-                config_component_map = {
-                    "map_config": {"import_func": _import_map_configuration_data, "name_in_manifest": "map_config", "display_name": "Map Configuration", "azure_func": azure_backup.download_map_config_component},
-                    "resource_configs": {"import_func": _import_resource_configurations_data, "name_in_manifest": "resource_configs", "display_name": "Resource Configurations", "azure_func": azure_backup.download_resource_config_component},
-                    "user_configs": {"import_func": _import_user_configurations_data, "name_in_manifest": "user_configs", "display_name": "User Configurations", "azure_func": azure_backup.download_user_config_component},
-                    "scheduler_settings": {"import_func": utils.save_scheduler_settings_from_json_data, "name_in_manifest": "scheduler_settings", "display_name": "Scheduler Settings", "azure_func": azure_backup.download_scheduler_settings_component}
-                }
-
-                for comp_key_internal, comp_details in config_component_map.items():
-                    if comp_key_internal not in components_param or comp_key_internal in handled_in_selective_restore: # Skip if not selected or already handled (e.g. media)
-                        if comp_key_internal in handled_in_selective_restore:
-                             update_task_log(task_id_param, f"Component '{comp_key_internal}' was handled by media restore logic, skipping in config loop.", level="DEBUG")
-                        continue # Skip this iteration
-
-                    update_task_log(task_id_param, f"Processing {comp_details['display_name']} component restore.", level="info")
-
-                    comp_manifest_entry = next((c for c in manifest_data["components"] if c.get("name") == comp_details["name_in_manifest"]), None)
-
-                    if not comp_manifest_entry or not comp_manifest_entry.get("path_in_backup"):
-                        update_task_log(task_id_param, f"{comp_details['display_name']} not found in manifest or 'path_in_backup' missing. Skipping.", level="ERROR")
-                        overall_success = False; errors_list.append(f"{comp_details['display_name']} not in manifest or path missing.")
-                        continue
-
-                    full_component_file_path_on_share = f"{azure_backup.FULL_SYSTEM_BACKUPS_BASE_DIR}/backup_{backup_ts_param}/{comp_manifest_entry['path_in_backup']}"
-                    update_task_log(task_id_param, f"{comp_details['display_name']} path on share: {full_component_file_path_on_share}", level="DEBUG")
-
-                    cfg_success, cfg_msg, downloaded_cfg_path, cfg_err = comp_details['azure_func'](
-                        system_share_client, full_component_file_path_on_share, task_id=task_id_param, dry_run=dry_run_mode
-                    )
-
-                    if cfg_success and downloaded_cfg_path:
-                        update_task_log(task_id_param, f"{comp_details['display_name']} downloaded to '{downloaded_cfg_path}'. Attempting to apply...", level="INFO")
-                        if not dry_run_mode:
-                            try:
-                                with open(downloaded_cfg_path, 'r', encoding='utf-8') as f:
-                                    json_data_for_import = json.load(f)
-
-                                summary_dict, status_code = comp_details['import_func'](json_data_for_import)
-
-                                component_apply_message = summary_dict.get('message', f"Applying {comp_details['display_name']} completed.")
-                                component_errors = summary_dict.get('errors', [])
-                                component_warnings = summary_dict.get('warnings', [])
-
-                                if status_code < 300:
-                                    actions_summary.append(f"{comp_details['display_name']} processed: {component_apply_message}")
-                                    log_level_for_component = "SUCCESS"
-                                    if component_errors:
-                                        overall_success = False; log_level_for_component = "ERROR"; errors_list.append(f"{comp_details['display_name']} apply errors: {component_errors}")
-                                    elif component_warnings:
-                                        log_level_for_component = "WARNING"
-
-                                    update_task_log(task_id_param, f"{comp_details['display_name']} apply finished. Status: {status_code}. Msg: {component_apply_message}", detail=f"Errors: {component_errors}, Warnings: {component_warnings}", level=log_level_for_component)
-
-                                    if not component_errors and os.path.exists(downloaded_cfg_path):
-                                        os.remove(downloaded_cfg_path)
-                                    elif component_errors:
-                                        update_task_log(task_id_param, f"Downloaded file {downloaded_cfg_path} for {comp_details['display_name']} kept due to import errors.", level="WARNING")
-                                else:
-                                    overall_success = False; errors_list.append(f"{comp_details['display_name']} apply failed (status {status_code}): {component_errors}")
-                                    update_task_log(task_id_param, f"Failed to apply {comp_details['display_name']}. Status: {status_code}. Msg: {component_apply_message}", detail=f"Errors: {component_errors}, Warnings: {component_warnings}", level="ERROR")
-                                    if downloaded_cfg_path and os.path.exists(downloaded_cfg_path):
-                                        update_task_log(task_id_param, f"Downloaded file {downloaded_cfg_path} for {comp_details['display_name']} kept due to import failure.", level="WARNING")
-                            except Exception as e_apply:
-                                overall_success = False; errors_list.append(f"{comp_details['display_name']} apply exception: {str(e_apply)}")
-                                update_task_log(task_id_param, f"Error applying downloaded {comp_details['display_name']}: {str(e_apply)}", level="CRITICAL", detail=traceback.format_exc())
-                                if downloaded_cfg_path and os.path.exists(downloaded_cfg_path):
-                                    update_task_log(task_id_param, f"Downloaded file {downloaded_cfg_path} for {comp_details['display_name']} kept due to apply error.", level="WARNING")
-                        else:
-                            actions_summary.append(f"{comp_details['display_name']} download simulated to {downloaded_cfg_path}. Import/apply step skipped in dry run.")
-                            update_task_log(task_id_param, f"{comp_details['display_name']} download simulated. Import/apply skipped in dry run.", level="INFO")
-                            if downloaded_cfg_path and os.path.exists(downloaded_cfg_path) and "simulated_downloaded" in downloaded_cfg_path :
-                                os.remove(downloaded_cfg_path)
-                    elif not cfg_success :
-                        overall_success = False; errors_list.append(f"{comp_details['display_name']} download failed: {cfg_msg or cfg_err}")
-                        update_task_log(task_id_param, f"{comp_details['display_name']} download failed: {cfg_msg or cfg_err}", level="ERROR")
 
                 # Finalization
                 if dry_run_mode:
