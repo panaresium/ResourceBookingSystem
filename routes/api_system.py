@@ -2,6 +2,7 @@ import os
 import uuid
 import json
 import math # Added for math.ceil
+import traceback
 from datetime import datetime, timezone, timedelta, time
 
 from flask import Blueprint, jsonify, request, current_app, url_for, Response
@@ -504,15 +505,19 @@ def api_one_click_restore():
                     try:
                         with open(local_res_cfg_path, 'r', encoding='utf-8') as f:
                             res_data = json.load(f)
-                        # _import_resource_configurations_data returns: updated_count, created_count, errors, warnings, status_code, message
-                        _, _, errors, warnings, status, msg = _import_resource_configurations_data(res_data)
-                        if status < 300 :
-                            update_task_log(task_id_param, f"Resource configurations applied: {msg}", level="success" if not errors and not warnings else "warning")
-                            restore_ops_summary.append(f"Resource configs: {msg}")
+                        # _import_resource_configurations_data returns: (summary, status_code)
+                        summary_res, status_res = _import_resource_configurations_data(res_data)
+                        res_msg = summary_res.get('message', 'Processed')
+                        res_errors = summary_res.get('errors', [])
+                        res_warnings = summary_res.get('warnings', [])
+
+                        if status_res < 300 :
+                            update_task_log(task_id_param, f"Resource configurations applied: {res_msg}", level="success" if not res_errors and not res_warnings else "warning")
+                            restore_ops_summary.append(f"Resource configs: {res_msg}")
                         else:
                             overall_success = False
-                            update_task_log(task_id_param, f"Resource configurations import failed: {msg}", detail=json.dumps(errors), level="error")
-                            restore_ops_summary.append(f"Resource configs error: {msg}")
+                            update_task_log(task_id_param, f"Resource configurations import failed: {res_msg}", detail=json.dumps(res_errors), level="error")
+                            restore_ops_summary.append(f"Resource configs error: {res_msg}")
                         if os.path.exists(local_res_cfg_path): os.remove(local_res_cfg_path)
                     except Exception as e_res_apply:
                         overall_success = False
@@ -529,14 +534,14 @@ def api_one_click_restore():
                     try:
                         with open(local_user_cfg_path, 'r', encoding='utf-8') as f:
                             user_data = json.load(f)
-                        result_dict = _import_user_configurations_data(user_data) # Returns a dict
-                        if result_dict.get('success'):
-                            update_task_log(task_id_param, f"User configurations applied: {result_dict.get('message', 'Success')}", level="success")
-                            restore_ops_summary.append(f"User configs: {result_dict.get('message', 'Success')}")
+                        summary_user, status_user = _import_user_configurations_data(user_data)
+                        if status_user < 300:
+                            update_task_log(task_id_param, f"User configurations applied: {summary_user.get('message', 'Success')}", level="success")
+                            restore_ops_summary.append(f"User configs: {summary_user.get('message', 'Success')}")
                         else:
                             overall_success = False
-                            update_task_log(task_id_param, f"User configurations import failed: {result_dict.get('message', 'Unknown error')}", detail=json.dumps(result_dict.get('errors')), level="error")
-                            restore_ops_summary.append(f"User configs error: {result_dict.get('message', 'Unknown error')}")
+                            update_task_log(task_id_param, f"User configurations import failed: {summary_user.get('message', 'Unknown error')}", detail=json.dumps(summary_user.get('errors')), level="error")
+                            restore_ops_summary.append(f"User configs error: {summary_user.get('message', 'Unknown error')}")
                         if os.path.exists(local_user_cfg_path): os.remove(local_user_cfg_path)
                     except Exception as e_user_apply:
                         overall_success = False

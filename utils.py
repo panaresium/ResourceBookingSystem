@@ -1303,7 +1303,7 @@ def _get_resource_configurations_data() -> list:
 
     return all_resources_data
 
-def _import_resource_configurations_data(resources_data_list: list): # Return type will be bool or dict
+def _import_resource_configurations_data(resources_data_list: list) -> tuple[dict, int]:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
 
     resources_processed = 0
@@ -1625,13 +1625,15 @@ def _import_resource_configurations_data(resources_data_list: list): # Return ty
     final_message = " ".join(final_message_parts)
     logger.info(f"Resource configurations import result: {final_message}")
 
-    if not errors and status_code == 200:
-        # Success case: return tuple (updated_count, created_count, errors, warnings, status_code, message)
-        return resources_updated, created_count, [], [], 200, final_message
-    else:
-        # Failure/warnings case: extract details and return tuple
-        # The variables final_message, errors, warnings, status_code, resources_updated, created_count are already available.
-        return resources_updated, created_count, errors, warnings, status_code, final_message
+    summary = {
+        'processed': resources_processed,
+        'created': created_count,
+        'updated': resources_updated,
+        'errors': errors,
+        'warnings': warnings,
+        'message': final_message
+    }
+    return summary, status_code
 
 
 def _get_user_configurations_data() -> dict:
@@ -1719,7 +1721,7 @@ def _get_user_configurations_data() -> dict:
         'message': f"Exported {num_users_exported} users and {num_roles_exported} roles."
     }
 
-def _import_user_configurations_data(user_config_data: dict): # Return type will be bool or dict
+def _import_user_configurations_data(user_config_data: dict) -> tuple[dict, int]:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
     logger.info(f"Importing user and role configurations. Processing {len(user_config_data.get('roles', []))} roles and {len(user_config_data.get('users', []))} users.")
 
@@ -1899,20 +1901,19 @@ def _import_user_configurations_data(user_config_data: dict): # Return type will
     final_message = " ".join(final_message_parts)
     logger.info(f"User configurations import result: {final_message}")
 
-    # Standardize return type: dictionary with status and details
-    return {
-        'success': not errors and status_code < 400, # Consider success if no hard errors and status code is ok
+    # Standardize return type: tuple(summary_dict, status_code)
+    summary = {
+        'success': not errors and status_code < 400,
         'message': final_message,
         'errors': errors,
         'warnings': warnings,
-        'status_code': status_code,
         'roles_processed': roles_processed,
         'roles_created': roles_created,
         'roles_updated': roles_updated,
         'users_processed': users_processed,
         'users_updated': users_updated
-        # 'users_created': 0 # Explicitly if not supported
     }
+    return summary, status_code
 
 def _load_schedule_from_json():
     logger = current_app.logger if current_app else logging.getLogger(__name__)
