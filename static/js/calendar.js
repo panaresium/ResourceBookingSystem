@@ -321,8 +321,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                 .then(response => {
                                     cebmStatusMessage.textContent = response.message || 'Booking deleted successfully!';
                                     cebmStatusMessage.className = 'status-message success-message';
-                                    const eventToRemove = calendarInstance.getEventById(bookingId);
-                                    if (eventToRemove) eventToRemove.remove();
+
+                                    // Refresh calendar and unavailable dates
+                                    if (calendarInstance) calendarInstance.refetchEvents();
+                                    fetchUnavailableDates();
+
                                     setTimeout(() => {
                                         calendarEditBookingModal.style.display = 'none';
                                         cebmStatusMessage.textContent = '';
@@ -587,8 +590,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 cebmStatusMessage.textContent = 'Booking updated successfully!';
                 cebmStatusMessage.className = 'status-message success-message';
 
-                // Refresh calendar
+                // Refresh calendar and unavailable dates
                 if (calendarInstance) calendarInstance.refetchEvents();
+                fetchUnavailableDates();
 
                 setTimeout(() => {
                     calendarEditBookingModal.style.display = 'none';
