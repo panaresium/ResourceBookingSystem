@@ -325,11 +325,32 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
 
         # Check if DB connection failed at startup
         if app.config.get('DB_CONNECTION_FAILED'):
-            if request.endpoint == 'ui.serve_login' or (request.endpoint and 'static' in request.endpoint):
-                return None
-            if request.path.startswith('/api/'):
-                return jsonify({'error': 'Database connection failed', 'details': app.config.get('DB_CONNECTION_ERROR')}), 503
-            return redirect(url_for('ui.serve_login'))
+            # Attempt to reconnect if this is a user-initiated request (page refresh/login attempt)
+            # We don't want to retry on every static asset request, but the main page or login/api calls warrant a check.
+            is_static = request.endpoint and 'static' in request.endpoint
+            if not is_static:
+                # Simple check: try to run a lightweight query
+                try:
+                    with app.app_context():
+                        with db.engine.connect() as connection:
+                            connection.execute(text('SELECT 1'))
+                    # If we get here, connection works!
+                    app.config['DB_CONNECTION_FAILED'] = False
+                    app.config.pop('DB_CONNECTION_ERROR', None)
+                    app.logger.info("Database connection recovered successfully.")
+                except Exception as e:
+                    # Still failed, update error message and proceed to error handling
+                    app.config['DB_CONNECTION_FAILED'] = True
+                    app.config['DB_CONNECTION_ERROR'] = str(e)
+                    app.logger.warning(f"Database reconnection attempt failed: {e}")
+
+            # Re-check flag after potential recovery
+            if app.config.get('DB_CONNECTION_FAILED'):
+                if request.endpoint == 'ui.serve_login' or is_static:
+                    return None
+                if request.path.startswith('/api/'):
+                    return jsonify({'error': 'Database connection failed', 'details': app.config.get('DB_CONNECTION_ERROR')}), 503
+                return redirect(url_for('ui.serve_login'))
 
         # Check if setup is needed (no admin user)
         # Using a simple query. Performance hit is negligible for low traffic or initial setup.
