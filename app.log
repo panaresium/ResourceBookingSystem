@@ -1,0 +1,129 @@
+INFO: [config.py] SERVER_NAME environment variable not set. Flask will use the request's Host header.
+INFO: [config.py] Final effective SERVER_NAME: None
+INFO: [config.py] Final effective APPLICATION_ROOT: /
+INFO: [config.py] Final effective PREFERRED_URL_SCHEME: http
+INFO: [config.py] Using Postgres database from DATABASE_URL.
+PRINT_DEBUG: APP.PY - About to call create_app()
+[2026-01-27 04:43:29,822] INFO in app_factory: ERROR_DIAG: APP_FACTORY - create_app function entered.
+[2026-01-27 04:43:30,096] INFO in r2_storage: R2 Storage client initialized successfully.
+[2026-01-27 04:43:33,940] INFO in app_factory: Database connection verified successfully at startup.
+INFO:root:Flask app.logger level set to INFO (effective: 20).
+INFO:root:Cleared existing handlers from app.logger.
+INFO:root:Added new explicit StreamHandler to app.logger.
+INFO:root:Ensured app.logger.propagate is False.
+INFO:root:Application log level is INFO. Setting verbose Azure SDK loggers to WARNING.
+[2026-01-27 04:43:34,047] INFO in app_factory: Internal APScheduler disabled for Cloud Run compatibility. Use external scheduler to trigger tasks via API.
+[2026-01-27 04:43:34,048] INFO in app_factory: Flask app created and configured via factory.
+[2026-01-27 04:43:34,048] INFO in app: Logger level set to: INFO
+ * Serving Flask app 'app_factory'
+ * Debug mode: off
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.2:5000
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:19] "GET /login HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:19] "GET /static/style.css HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:19] "GET /static/libs/flatpickr/flatpickr.min.css HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:19] "GET /static/libs/flatpickr/flatpickr.min.js HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:19] "GET /static/js/script.js HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:21] "GET /api/auth/status HTTP/1.1" 200 -
+[2026-01-27 04:44:23,544] INFO in auth: User 'admin' logged in successfully.
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:23] "POST /api/auth/login HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:24] "GET /api/auth/status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:26] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:26] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:26] "[36mGET /static/libs/flatpickr/flatpickr.min.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:26] "[36mGET /static/libs/flatpickr/flatpickr.min.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:26] "[36mGET /static/js/script.js HTTP/1.1[0m" 304 -
+[2026-01-27 04:44:27,331] INFO in ui: User admin accessed Calendar page.
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:27] "GET /api/auth/status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:27] "GET /calendar HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:28] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:28] "GET /static/js/calendar.js HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:28] "[36mGET /static/libs/flatpickr/flatpickr.min.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:28] "[36mGET /static/libs/flatpickr/flatpickr.min.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:28] "[36mGET /static/js/script.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:29] "GET /api/auth/status HTTP/1.1" 200 -
+[2026-01-27 04:44:29,230] INFO in api_resources: get_unavailable_dates: Processing for user 1. Effective server date for logic: 2026-01-27. Date range: 2026-01-27 to 2027-01-27.
+[2026-01-27 04:44:29,230] INFO in api_resources: Relevant settings: AllowPastBookings=False, PastBookingHoursAdjustment=0, GlobalTimeOffset=0 hrs.
+[2026-01-27 04:44:30,222] INFO in ui: User 'admin' logged out via /logout.
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:30] "[32mGET /logout HTTP/1.1[0m" 302 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:31] "[32mGET /resources HTTP/1.1[0m" 302 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:31] "GET /login?next=http://localhost:5000/resources HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:32] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:32] "[36mGET /static/libs/flatpickr/flatpickr.min.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:32] "[36mGET /static/libs/flatpickr/flatpickr.min.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:32] "[36mGET /static/js/script.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:32] "[31m[1mGET /api/bookings/calendar HTTP/1.1[0m" 401 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:32] "GET /api/auth/status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:33] "GET /login HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:33] "[36mGET /static/libs/flatpickr/flatpickr.min.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:33] "[36mGET /static/libs/flatpickr/flatpickr.min.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:33] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:33] "[36mGET /static/js/script.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:34] "GET /api/auth/status HTTP/1.1" 200 -
+[2026-01-27 04:44:35,591] WARNING in auth: Invalid login attempt for username: user
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:44:36] "[31m[1mPOST /api/auth/login HTTP/1.1[0m" 401 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:38] "GET /login HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:38] "GET /static/js/script.js HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:38] "GET /static/libs/flatpickr/flatpickr.min.css HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:38] "GET /static/libs/flatpickr/flatpickr.min.js HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:38] "GET /static/style.css HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:39] "GET /api/auth/status HTTP/1.1" 200 -
+[2026-01-27 04:45:40,380] INFO in auth: User 'admin' logged in successfully.
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:40] "POST /api/auth/login HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:41] "GET /api/auth/status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:43] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:43] "[36mGET /static/libs/flatpickr/flatpickr.min.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:43] "[36mGET /static/libs/flatpickr/flatpickr.min.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:43] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:43] "[36mGET /static/js/script.js HTTP/1.1[0m" 304 -
+[2026-01-27 04:45:44,058] INFO in ui: User admin accessed Calendar page.
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:44] "GET /api/auth/status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:44] "GET /calendar HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:44] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:44] "[36mGET /static/libs/flatpickr/flatpickr.min.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:44] "[36mGET /static/libs/flatpickr/flatpickr.min.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:44] "GET /static/js/calendar.js HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:44] "[36mGET /static/js/script.js HTTP/1.1[0m" 304 -
+[2026-01-27 04:45:45,486] INFO in ui: User 'admin' logged out via /logout.
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:45] "GET /api/auth/status HTTP/1.1" 200 -
+[2026-01-27 04:45:45,802] INFO in api_resources: get_unavailable_dates: Processing for user 1. Effective server date for logic: 2026-01-27. Date range: 2026-01-27 to 2027-01-27.
+[2026-01-27 04:45:45,802] INFO in api_resources: Relevant settings: AllowPastBookings=False, PastBookingHoursAdjustment=0, GlobalTimeOffset=0 hrs.
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:45] "[32mGET /logout HTTP/1.1[0m" 302 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:46] "[32mGET /resources HTTP/1.1[0m" 302 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:47] "GET /login?next=http://localhost:5000/resources HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:47] "[36mGET /static/libs/flatpickr/flatpickr.min.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:47] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:47] "[36mGET /static/libs/flatpickr/flatpickr.min.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:47] "[36mGET /static/js/script.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:47] "[31m[1mGET /api/bookings/calendar HTTP/1.1[0m" 401 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:47] "GET /api/auth/status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:49] "GET /login HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:49] "[36mGET /static/libs/flatpickr/flatpickr.min.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:49] "[36mGET /static/libs/flatpickr/flatpickr.min.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:49] "[36mGET /static/js/script.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:49] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:49] "GET /api/auth/status HTTP/1.1" 200 -
+[2026-01-27 04:45:50,804] INFO in auth: User 'user' logged in successfully.
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:51] "POST /api/auth/login HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:52] "GET /api/auth/status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:53] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:53] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:53] "[36mGET /static/libs/flatpickr/flatpickr.min.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:53] "[36mGET /static/libs/flatpickr/flatpickr.min.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:53] "[36mGET /static/js/script.js HTTP/1.1[0m" 304 -
+[2026-01-27 04:45:54,498] INFO in ui: User user accessed Calendar page.
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:54] "GET /api/auth/status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:55] "GET /calendar HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:55] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:55] "[36mGET /static/libs/flatpickr/flatpickr.min.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:55] "[36mGET /static/js/calendar.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:55] "[36mGET /static/libs/flatpickr/flatpickr.min.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:55] "[36mGET /static/js/script.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:45:56] "GET /api/auth/status HTTP/1.1" 200 -
+[2026-01-27 04:45:56,454] INFO in api_resources: get_unavailable_dates: Processing for user 2. Effective server date for logic: 2026-01-27. Date range: 2026-01-27 to 2027-01-27.
+[2026-01-27 04:45:56,454] INFO in api_resources: Relevant settings: AllowPastBookings=False, PastBookingHoursAdjustment=0, GlobalTimeOffset=0 hrs.
+[2026-01-27 04:47:01,956] INFO in api_resources: get_unavailable_dates: Finished for user 1. No unavailable dates found within the processed range (2026-01-27 to 2027-01-27). All dates appear to have some availability.
+INFO:werkzeug:127.0.0.1 - - [27/Jan/2026 04:47:02] "GET /api/resources/unavailable_dates?user_id=1 HTTP/1.1" 200 -

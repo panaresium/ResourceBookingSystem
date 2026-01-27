@@ -422,12 +422,14 @@ def create_booking():
         past_booking_cutoff_time = now_for_logic - timedelta(hours=effective_past_booking_hours)
 
         if new_booking_start_time < past_booking_cutoff_time:
-            current_app.logger.warning(
-                f"Booking attempt by {current_user.username} for resource {resource_id} at {new_booking_start_time} "
-                f"is before the allowed cutoff time of {past_booking_cutoff_time} "
-                f"(current time (effective): {now_for_logic}, adjustment: {effective_past_booking_hours} hours, and past bookings are generally disabled)."
-            )
-            return jsonify({'error': 'Booking time is outside the allowed window for past or future bookings as per current settings.'}), 400
+            # Exception: Users with 'manage_bookings' permission can book past dates.
+            if not current_user.has_permission('manage_bookings'):
+                current_app.logger.warning(
+                    f"Booking attempt by {current_user.username} for resource {resource_id} at {new_booking_start_time} "
+                    f"is before the allowed cutoff time of {past_booking_cutoff_time} "
+                    f"(current time (effective): {now_for_logic}, adjustment: {effective_past_booking_hours} hours, and past bookings are generally disabled)."
+                )
+                return jsonify({'error': 'Booking time is outside the allowed window for past or future bookings as per current settings.'}), 400
 
     # Enforce max_booking_days_in_future
     if max_booking_days_in_future_effective is not None:
@@ -1199,11 +1201,13 @@ def update_booking_by_user(booking_id):
                     past_booking_cutoff_time = now_for_logic - timedelta(hours=effective_past_booking_hours)
 
                     if parsed_new_start_time < past_booking_cutoff_time:
-                        current_app.logger.warning(
-                            f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' attempted to update booking to a past time slot. "
-                            f"Proposed start: {parsed_new_start_time}, Cutoff: {past_booking_cutoff_time}"
-                        )
-                        return jsonify({'error': 'Cannot update booking to a time slot that is already in the past.'}), 400
+                        # Exception: Users with 'manage_bookings' permission can book past dates.
+                        if not current_user.has_permission('manage_bookings'):
+                            current_app.logger.warning(
+                                f"[API PUT /api/bookings/{booking_id}] User '{current_user.username}' attempted to update booking to a past time slot. "
+                                f"Proposed start: {parsed_new_start_time}, Cutoff: {past_booking_cutoff_time}"
+                            )
+                            return jsonify({'error': 'Cannot update booking to a time slot that is already in the past.'}), 400
             # ---> END OF NEW VALIDATION LOGIC <---
 
             current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] --- Detailed Time Comparison ---")
