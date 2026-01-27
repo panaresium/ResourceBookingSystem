@@ -1733,6 +1733,7 @@ def _import_user_configurations_data(user_config_data: dict) -> tuple[dict, int]
     roles_updated = 0
     users_processed = 0
     users_updated = 0
+    users_created = 0
 
     errors = []
     warnings = []
@@ -1871,8 +1872,50 @@ def _import_user_configurations_data(user_config_data: dict) -> tuple[dict, int]
                 db.session.add(user)
                 users_updated += 1
             else:
-                # User creation logic could be added here if desired, but current logs say it's skipped.
-                warnings.append(f"User with backup ID {backup_user_id} ('{username}') not found in DB. Skipped (user creation from backup is not currently supported by this import function).")
+                # Create new user
+                new_user = User(id=backup_user_id, username=username, email=user_item.get('email'))
+                new_user.is_admin = user_item.get('is_admin', False)
+                new_user.first_name = user_item.get('first_name')
+                new_user.last_name = user_item.get('last_name')
+                new_user.phone = user_item.get('phone')
+                new_user.section = user_item.get('section')
+                new_user.department = user_item.get('department')
+                new_user.position = user_item.get('position')
+                new_user.is_active = user_item.get('is_active', True)
+                new_user.google_id = user_item.get('google_id')
+                new_user.google_email = user_item.get('google_email')
+
+                # Handle password
+                if 'password_hash' in user_item and user_item['password_hash']:
+                    new_user.password_hash = user_item['password_hash']
+                else:
+                    # Set a default unguessable password or handle as needed
+                    # For restore, if no hash, they might need to reset or use SSO
+                    pass
+
+                # Handle user roles for new user
+                backed_up_user_role_ids = user_item.get('assigned_role_ids', [])
+                actual_db_roles_for_user = []
+                if isinstance(backed_up_user_role_ids, list):
+                    for b_role_id in backed_up_user_role_ids:
+                        actual_db_role_id = backup_to_new_role_id_mapping.get(b_role_id)
+                        if actual_db_role_id:
+                            role_obj = db.session.get(Role, actual_db_role_id)
+                            if role_obj:
+                                actual_db_roles_for_user.append(role_obj)
+                            else:
+                                warnings.append(f"For New User '{username}' (Backup ID {backup_user_id}), mapped Role ID {actual_db_role_id} not found in DB. Skipping assignment.")
+                        elif b_role_id is not None:
+                             # Try to find role by ID directly if mapping missed it (e.g. pre-existing role)
+                             role_obj_direct = db.session.get(Role, b_role_id)
+                             if role_obj_direct:
+                                 actual_db_roles_for_user.append(role_obj_direct)
+                             else:
+                                 warnings.append(f"For New User '{username}' (Backup ID {backup_user_id}), backup Role ID {b_role_id} could not be mapped. Skipping assignment.")
+                new_user.roles = actual_db_roles_for_user
+
+                db.session.add(new_user)
+                users_created += 1
 
         except Exception as e_user:
             error_msg = f"Error processing user (Backup ID: {backup_user_id}, Username: {username}): {str(e_user)}"
@@ -1890,7 +1933,7 @@ def _import_user_configurations_data(user_config_data: dict) -> tuple[dict, int]
 
     final_message_parts = [
         f"Roles processed: {roles_processed} (Created: {roles_created}, Updated: {roles_updated}).",
-        f"Users processed: {users_processed} (Updated: {users_updated})." # Assuming creation is not supported based on logs
+        f"Users processed: {users_processed} (Created: {users_created}, Updated: {users_updated})."
     ]
     if warnings:
         final_message_parts.append(f"Warnings: {'; '.join(warnings)}")
@@ -1911,7 +1954,8 @@ def _import_user_configurations_data(user_config_data: dict) -> tuple[dict, int]
         'roles_created': roles_created,
         'roles_updated': roles_updated,
         'users_processed': users_processed,
-        'users_updated': users_updated
+        'users_updated': users_updated,
+        'users_created': users_created
     }
     return summary, status_code
 
