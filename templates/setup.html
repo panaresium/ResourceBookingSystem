@@ -42,6 +42,17 @@
                             <input type="password" class="form-control" id="confirm_password" name="confirm_password" required>
                         </div>
 
+                        {% if require_confirmation %}
+                        <div class="alert alert-warning mt-4">
+                            <h5><i class="bi bi-shield-lock"></i> Authorization Required</h5>
+                            <p class="mb-2">To confirm initialization of the database, please enter the system's default admin password.</p>
+                            <div class="mb-3">
+                                <label for="admin_password_confirmation" class="form-label">Default Admin Password (from .env)</label>
+                                <input type="password" class="form-control" id="admin_password_confirmation" name="admin_password_confirmation" required>
+                            </div>
+                        </div>
+                        {% endif %}
+
                         <hr>
 
                         <div class="d-grid gap-2">
