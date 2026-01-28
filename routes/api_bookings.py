@@ -1335,6 +1335,11 @@ def update_booking_by_user(booking_id):
             # If we reach here and time_changed is true, it means new times are set on booking object and no conflicts were found.
             if time_changed: # This condition is now based on the initial comparison
                 current_app.logger.info(f"[API PUT /api/bookings/{booking_id}] All conflict checks passed for time change. Setting changes_made=True.")
+
+                # Update display times
+                booking.booking_display_start_time = parsed_new_start_time.time()
+                booking.booking_display_end_time = parsed_new_end_time.time()
+
                 changes_made = True
                 # The booking object already has the new start/end times from the tentative update.
                 change_details_list.append(f"time from {old_start_time.isoformat()} to {booking.start_time.isoformat()}-{booking.end_time.isoformat()}")
