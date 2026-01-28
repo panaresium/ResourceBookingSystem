@@ -585,9 +585,15 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
             logger.warning(f"Could not apply EXIF transpose to image for resource {resource_id}: {e}")
 
         # Parse coordinates from input string (these are relative to ref_width, ref_height)
+        original_ref_w = None
+        original_ref_h = None
         try:
             coords = json.loads(map_coordinates_str)
             original_ref_x, original_ref_y = int(coords['x']), int(coords['y'])
+            # Try to get width and height if available
+            if 'width' in coords and 'height' in coords:
+                original_ref_w = int(coords['width'])
+                original_ref_h = int(coords['height'])
         except (json.JSONDecodeError, TypeError, KeyError, ValueError) as e:
             logger.error(f"Error parsing map coordinates '{map_coordinates_str}' for resource {resource_id}: {e}")
             return None
@@ -665,8 +671,19 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
         avg_scale_to_drawing_img = (scale_to_drawing_img_x + scale_to_drawing_img_y) / 2.0
 
         font_size_on_drawing_img = max(10, int(base_font_size * avg_scale_to_drawing_img))
-        rect_width_on_drawing_img = max(10, int(base_rect_width * scale_to_drawing_img_x))
-        rect_height_on_drawing_img = max(5, int(base_rect_height * scale_to_drawing_img_y))
+
+        # Calculate rectangle dimensions
+        if original_ref_w is not None and original_ref_h is not None:
+            # Use defined area dimensions
+            rect_width_on_drawing_img = int(original_ref_w * scale_to_drawing_img_x)
+            rect_height_on_drawing_img = int(original_ref_h * scale_to_drawing_img_y)
+            logger.info(f"Using defined area dimensions: {original_ref_w}x{original_ref_h} -> {rect_width_on_drawing_img}x{rect_height_on_drawing_img}")
+        else:
+            # Fallback to fixed size marker
+            rect_width_on_drawing_img = max(10, int(base_rect_width * scale_to_drawing_img_x))
+            rect_height_on_drawing_img = max(5, int(base_rect_height * scale_to_drawing_img_y))
+            logger.info(f"Using fallback fixed dimensions -> {rect_width_on_drawing_img}x{rect_height_on_drawing_img}")
+
         # Increased base outline width from 2 to 3 for better visibility
         outline_width_on_drawing_img = max(1, int(3 * avg_scale_to_drawing_img))
 
