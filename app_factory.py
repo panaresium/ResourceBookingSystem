@@ -352,6 +352,54 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
                     return jsonify({'error': 'Database connection failed', 'details': app.config.get('DB_CONNECTION_ERROR')}), 503
                 return redirect(url_for('ui.serve_login'))
 
+        # Check if setup is needed (no admin user)
+        # Allow login page access to render errors if redirected there
+        if request.endpoint == 'ui.serve_login':
+            return
+
+        try:
+            # We need to be careful about DB not existing yet or table not existing
+            # If table doesn't exist, we definitely need setup (or at least migrations).
+            from models import User
+            # sqlalchemy.exc.OperationalError, ProgrammingError are imported at the top
+
+            # We specifically look for an admin.
+            # Using try/except within the query execution to catch missing tables
+
+            # This query might raise OperationalError if table doesn't exist
+            admin_exists = db.session.query(User.id).filter_by(is_admin=True).first() is not None
+
+            # If we get here, DB structure is likely OK and admin exists
+            app.config['DB_TABLES_MISSING'] = False
+            app.config.pop('DB_TABLES_ERROR', None)
+            app.config['SETUP_REQUIRED'] = False
+
+            if not admin_exists:
+                app.config['SETUP_REQUIRED'] = True
+                if request.path.startswith('/api/'):
+                     return jsonify({'error': 'System setup required', 'details': 'No admin user found'}), 503
+                return redirect(url_for('ui.serve_login'))
+
+        except (OperationalError, ProgrammingError) as e:
+            # Table might not exist. This is a critical setup case.
+            app.logger.warning(f"Database check failed (tables likely missing): {e}. Redirecting to login.")
+            app.config['DB_TABLES_MISSING'] = True
+            app.config['DB_TABLES_ERROR'] = str(e)
+
+            if request.path.startswith('/api/'):
+                 return jsonify({'error': 'Database tables missing', 'details': str(e)}), 503
+            return redirect(url_for('ui.serve_login'))
+
+        except Exception as e:
+            # If DB error (e.g. table missing), redirect to setup where db.create_all() can fix it
+            app.logger.error(f"Unexpected error in setup check: {e}")
+            app.config['DB_TABLES_MISSING'] = True
+            app.config['DB_TABLES_ERROR'] = str(e)
+
+            if request.path.startswith('/api/'):
+                 return jsonify({'error': 'System check failed', 'details': str(e)}), 500
+            return redirect(url_for('ui.serve_login'))
+
     # 8. Register Error Handlers - Skip if testing
     if not testing:
         @app.errorhandler(CSRFError)

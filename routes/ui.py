@@ -83,6 +83,11 @@ def serve_login():
     if current_app.config.get('DB_CONNECTION_FAILED'):
         error_message = current_app.config.get('DB_CONNECTION_ERROR', 'Unknown database connection error')
         flash(f"Database Connection Failed: {error_message}. Please contact the administrator.", "error")
+    elif current_app.config.get('DB_TABLES_MISSING'):
+        error_message = current_app.config.get('DB_TABLES_ERROR', 'Tables missing')
+        flash(f"Database Error: {error_message}. Please contact the administrator to initialize the system.", "error")
+    elif current_app.config.get('SETUP_REQUIRED'):
+        flash("System setup required. Please contact the administrator to initialize the system at /setup.", "warning")
     return render_template("login.html")
 
 @ui_bp.route('/logout')
