@@ -1191,7 +1191,7 @@ body.high-contrast footer {
     height: 600px;
     background-size: contain;
     background-repeat: no-repeat;
-    background-position: center center;
+    background-position: left top;
     border: 1px solid var(--border-color);
     margin: 20px auto;
 }
