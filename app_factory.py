@@ -352,31 +352,6 @@ def create_app(config_object=config, testing=False, start_scheduler=True): # Add
                     return jsonify({'error': 'Database connection failed', 'details': app.config.get('DB_CONNECTION_ERROR')}), 503
                 return redirect(url_for('ui.serve_login'))
 
-        # Check if setup is needed (no admin user)
-        # Using a simple query. Performance hit is negligible for low traffic or initial setup.
-        # For production with high traffic, this check should be cached or disabled after setup.
-        try:
-            # We need to be careful about DB not existing yet or table not existing
-            # If table doesn't exist, we definitely need setup (or at least migrations).
-            from models import User
-            # sqlalchemy.exc.OperationalError, ProgrammingError are imported at the top
-
-            # We specifically look for an admin.
-            # Using try/except within the query execution to catch missing tables
-            try:
-                admin_exists = db.session.query(User.id).filter_by(is_admin=True).first() is not None
-                if not admin_exists:
-                    return redirect(url_for('setup.setup_system'))
-            except (OperationalError, ProgrammingError) as e:
-                # Table might not exist. This is a critical setup case.
-                app.logger.warning(f"Database check failed (tables likely missing): {e}. Redirecting to setup.")
-                return redirect(url_for('setup.setup_system'))
-
-        except Exception as e:
-            # If DB error (e.g. table missing), redirect to setup where db.create_all() can fix it
-            app.logger.error(f"Unexpected error in setup check: {e}")
-            return redirect(url_for('setup.setup_system'))
-
     # 8. Register Error Handlers - Skip if testing
     if not testing:
         @app.errorhandler(CSRFError)
