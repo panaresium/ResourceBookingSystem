@@ -3,7 +3,7 @@ import json
 import logging
 import tempfile
 import re
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 import requests
 from datetime import datetime, date, timedelta, time, timezone # Ensure all are here
 from flask import url_for, jsonify, current_app, has_app_context
@@ -578,6 +578,12 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
                 return None
             img = Image.open(image_path)
 
+        # Handle EXIF orientation to match browser display
+        try:
+            img = ImageOps.exif_transpose(img)
+        except Exception as e:
+            logger.warning(f"Could not apply EXIF transpose to image for resource {resource_id}: {e}")
+
         # Parse coordinates from input string (these are relative to ref_width, ref_height)
         try:
             coords = json.loads(map_coordinates_str)
@@ -607,12 +613,10 @@ def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_
         # We calculate the effective displayed dimensions to serve as the reference coordinate space.
         container_max_width = 800
         container_max_height = 600
-        display_ratio = min(container_max_width / original_img_width, container_max_height / original_img_height)
+        # Cap ratio at 1.0 to match 'max-width' behavior in Setup page (no upscaling for small images)
+        display_ratio = min(1.0, container_max_width / original_img_width, container_max_height / original_img_height)
 
         # Determine effective dimensions in the 800x600 container
-        # If the image is smaller than the container, it might not be scaled up if using max-width/height logic,
-        # but 'contain' usually scales up. The standard behavior here is scaling to fit.
-        # Assuming browser scales up or down to fit the container.
         ref_width = int(original_img_width * display_ratio)
         ref_height = int(original_img_height * display_ratio)
 
