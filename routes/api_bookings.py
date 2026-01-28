@@ -1267,26 +1267,32 @@ def update_booking_by_user(booking_id):
 
                     user_own_conflict = None
                     if not conflicting_booking: # Only check if no resource conflict
-                        active_conflict_statuses = ['approved', 'pending', 'checked_in', 'confirmed']
-                        user_own_conflict = Booking.query.filter(
-                            Booking.user_name == current_user.username,
-                            Booking.resource_id != booking.resource_id,
-                            Booking.id != booking_id,
-                            Booking.start_time < booking.end_time, # Uses new booking.end_time
-                            Booking.end_time > booking.start_time,   # Uses new booking.start_time
-                            sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_conflict_statuses)
-                        ).first()
+                        # Check allow_multiple_resources_same_time setting
+                        allow_multiple = booking_settings.allow_multiple_resources_same_time if booking_settings else False
+
+                        if not allow_multiple:
+                            active_conflict_statuses = ['approved', 'pending', 'checked_in', 'confirmed']
+                            user_own_conflict = Booking.query.filter(
+                                Booking.user_name == current_user.username,
+                                Booking.resource_id != booking.resource_id,
+                                Booking.id != booking_id,
+                                Booking.start_time < booking.end_time, # Uses new booking.end_time
+                                Booking.end_time > booking.start_time,   # Uses new booking.start_time
+                                sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_conflict_statuses)
+                            ).first()
 
                     user_self_conflict_check = None
                     if not conflicting_booking and not user_own_conflict: # Only if no other conflicts
-                        active_conflict_statuses_for_self_check = ['approved', 'pending', 'checked_in', 'confirmed']
-                        user_self_conflict_check = Booking.query.filter(
-                            Booking.user_name == current_user.username,
-                            Booking.id != booking_id,
-                            Booking.start_time < booking.end_time, # Uses new booking.end_time
-                            Booking.end_time > booking.start_time,  # Uses new booking.start_time
-                            sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_conflict_statuses_for_self_check)
-                        ).first()
+                        # Also skip this check if multiple bookings allowed
+                        if not allow_multiple:
+                            active_conflict_statuses_for_self_check = ['approved', 'pending', 'checked_in', 'confirmed']
+                            user_self_conflict_check = Booking.query.filter(
+                                Booking.user_name == current_user.username,
+                                Booking.id != booking_id,
+                                Booking.start_time < booking.end_time, # Uses new booking.end_time
+                                Booking.end_time > booking.start_time,  # Uses new booking.start_time
+                                sqlfunc.trim(sqlfunc.lower(Booking.status)).in_(active_conflict_statuses_for_self_check)
+                            ).first()
 
                 if conflicting_booking:
                     current_app.logger.warning(f"[API PUT /api/bookings/{booking_id}] Update for user '{current_user.username}' on resource ID {booking.resource_id} "
