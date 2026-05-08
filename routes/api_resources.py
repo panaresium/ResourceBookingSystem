@@ -606,7 +606,7 @@ def get_all_resources_admin():
                 return jsonify({'error': f"Invalid map_id format: '{map_id_str}'. Must be an integer."}), 400
 
         resources = query.all()
-        resources_list = [resource_to_dict(r) for r in resources]
+        resources_list = [resource_to_dict(r, include_sensitive=True) for r in resources]
         return jsonify(resources_list), 200
     except Exception as e:
         logger.exception("Error fetching all resources for admin:")
@@ -651,7 +651,7 @@ def create_resource():
         if new_resource.current_pin:
             audit_details += " PIN set."
         add_audit_log(action="CREATE_RESOURCE", details=audit_details)
-        return jsonify(resource_to_dict(new_resource)), 201
+        return jsonify(resource_to_dict(new_resource, include_sensitive=True)), 201
     except Exception as e:
         db.session.rollback()
         logger.exception("Error creating resource:")
@@ -663,7 +663,7 @@ def create_resource():
 @retry_on_db_error
 def get_resource_details_admin(resource_id):
     resource = Resource.query.get_or_404(resource_id) # Use get_or_404 for convenience
-    resource_data = resource_to_dict(resource) # Assuming this helper serializes main resource fields
+    resource_data = resource_to_dict(resource, include_sensitive=True) # Assuming this helper serializes main resource fields
 
     # Fetch and serialize associated PINs
     pins_data = [{
@@ -749,7 +749,7 @@ def update_resource_details_admin(resource_id):
             else:
                 add_audit_log(action="CLEAR_RESOURCE_PIN", details=f"Resource ID {resource.id} ('{resource.name}') PIN cleared by {current_user.username}.")
 
-        return jsonify(resource_to_dict(resource)), 200
+        return jsonify(resource_to_dict(resource, include_sensitive=True)), 200
     except Exception as e:
         db.session.rollback()
         logger.exception(f"Error updating resource {resource_id}:")
@@ -796,7 +796,7 @@ def publish_resource_admin(resource_id):
     try:
         db.session.commit()
         add_audit_log(action="PUBLISH_RESOURCE", details=f"Resource {resource_id} ('{resource.name}') published by {current_user.username}.")
-        return jsonify({'message': 'Resource published.', 'resource': resource_to_dict(resource)}), 200
+        return jsonify({'message': 'Resource published.', 'resource': resource_to_dict(resource, include_sensitive=True)}), 200
     except Exception as e:
         db.session.rollback(); logger.exception(f"Error publishing resource {resource_id}:")
         return jsonify({'error': 'Failed to publish resource.'}), 500
@@ -872,7 +872,7 @@ def export_all_resources_admin():
         resources = Resource.query.options(
             joinedload(Resource.roles)
         ).all()
-        resources_list = [resource_to_dict(r) for r in resources]
+        resources_list = [resource_to_dict(r, include_sensitive=True) for r in resources]
         response = jsonify(resources_list)
         response.headers['Content-Disposition'] = 'attachment; filename=resources_export.json'
         response.mimetype = 'application/json'
@@ -1033,7 +1033,7 @@ def create_resources_bulk_admin():
     try:
         db.session.commit()
         add_audit_log(action="BULK_CREATE_RESOURCES", details=f"{len(created_resources)} resources created by {current_user.username}. Skipped: {len(skipped)}.")
-        return jsonify({'created': [resource_to_dict(r) for r in created_resources], 'skipped': skipped}), 201
+        return jsonify({'created': [resource_to_dict(r, include_sensitive=True) for r in created_resources], 'skipped': skipped}), 201
     except Exception as e:
         db.session.rollback(); logger.exception("Error bulk creating resources:")
         return jsonify({'error': 'Server error during bulk create.'}), 500
@@ -1326,7 +1326,7 @@ def update_resource_map_info_admin(resource_id):
     try:
         db.session.commit()
         add_audit_log(action="UPDATE_RESOURCE_MAP_INFO", details=f"Map info for resource ID {resource.id} updated by {current_user.username}.")
-        return jsonify(resource_to_dict(resource)), 200
+        return jsonify(resource_to_dict(resource, include_sensitive=True)), 200
     except Exception as e:
         db.session.rollback(); logger.exception(f"Error updating map info for resource {resource_id}:")
         return jsonify({'error': 'Failed to update map info.'}), 500

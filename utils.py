@@ -480,7 +480,7 @@ def add_audit_log(action: str, details: str, user_id: int = None, username: str 
         logger.error(f"Error adding audit log: {e}", exc_info=True)
         db.session.rollback()
 
-def resource_to_dict(resource: Resource) -> dict:
+def resource_to_dict(resource: Resource, include_sensitive: bool = False) -> dict:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
 
     storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
@@ -503,7 +503,7 @@ def resource_to_dict(resource: Resource) -> dict:
                 'notes': pin_obj.notes
             })
 
-    return {
+    resource_data = {
         'id': resource.id,
         'name': resource.name,
         'capacity': resource.capacity,
@@ -514,8 +514,6 @@ def resource_to_dict(resource: Resource) -> dict:
         'image_filename': resource.image_filename, # Changed from image_url to image_filename
         'image_url': image_url, # Added image_url
         'published_at': resource.published_at.isoformat() if resource.published_at else None,
-        'allowed_user_ids': resource.allowed_user_ids, # Assuming this is already a string or None
-        'roles': [{'id': r.id, 'name': r.name} for r in resource.roles],
         'floor_map_id': resource.floor_map_id,
         'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
         'is_under_maintenance': resource.is_under_maintenance,
@@ -523,11 +521,19 @@ def resource_to_dict(resource: Resource) -> dict:
         # New fields added below
         'max_recurrence_count': resource.max_recurrence_count,
         'scheduled_status': resource.scheduled_status,
-        'current_pin': resource.current_pin,
         'scheduled_status_at': resource.scheduled_status_at.isoformat() if resource.scheduled_status_at else None,
-        'map_allowed_role_ids': resource.map_allowed_role_ids, # Expected to be JSON string or None
-        'resource_pins': resource_pins_list
     }
+
+    if include_sensitive:
+        resource_data.update({
+            'allowed_user_ids': resource.allowed_user_ids, # Assuming this is already a string or None
+            'roles': [{'id': r.id, 'name': r.name} for r in resource.roles],
+            'current_pin': resource.current_pin,
+            'map_allowed_role_ids': resource.map_allowed_role_ids, # Expected to be JSON string or None
+            'resource_pins': resource_pins_list,
+        })
+
+    return resource_data
 
 def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_name: str) -> bytes | None:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
