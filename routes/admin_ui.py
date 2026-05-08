@@ -355,7 +355,7 @@ def update_booking_settings():
             settings.check_in_minutes_before = 15
             settings.check_in_minutes_after = 15
             settings.checkin_reminder_minutes_before = 30
-            settings.resource_checkin_url_requires_login = False
+            settings.resource_checkin_url_requires_login = 'resource_checkin_url_requires_login' in request.form
             settings.allow_check_in_without_pin = True
             settings.enable_auto_checkout = False
             settings.auto_checkout_delay_minutes = 60
