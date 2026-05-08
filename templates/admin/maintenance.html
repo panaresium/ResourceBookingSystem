@@ -264,17 +264,29 @@ document.addEventListener('DOMContentLoaded', function() {
                     details = `${schedule.start_date} to ${schedule.end_date}`;
                 }
 
-                const row = `
-                    <tr>
-                        <td>${schedule.name}</td>
-                        <td>${schedule.is_availability ? 'Availability' : 'Maintenance'}</td>
-                        <td>${details}</td>
-                        <td>
-                            <button class="btn btn-sm btn-danger delete-schedule" data-id="${schedule.id}">Delete</button>
-                        </td>
-                    </tr>
-                `;
-                tableBody.innerHTML += row;
+                const row = document.createElement('tr');
+
+                const nameCell = document.createElement('td');
+                nameCell.textContent = schedule.name || '';
+                row.appendChild(nameCell);
+
+                const typeCell = document.createElement('td');
+                typeCell.textContent = schedule.is_availability ? 'Availability' : 'Maintenance';
+                row.appendChild(typeCell);
+
+                const detailsCell = document.createElement('td');
+                detailsCell.textContent = details;
+                row.appendChild(detailsCell);
+
+                const actionCell = document.createElement('td');
+                const deleteButton = document.createElement('button');
+                deleteButton.className = 'btn btn-sm btn-danger delete-schedule';
+                deleteButton.dataset.id = schedule.id;
+                deleteButton.textContent = 'Delete';
+                actionCell.appendChild(deleteButton);
+                row.appendChild(actionCell);
+
+                tableBody.appendChild(row);
             });
         });
     }

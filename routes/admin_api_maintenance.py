@@ -6,6 +6,9 @@ from datetime import time, date
 
 admin_api_maintenance_bp = Blueprint('admin_api_maintenance', __name__, url_prefix='/admin/api/maintenance')
 
+ALLOWED_SCHEDULE_TYPES = {'recurring_day', 'specific_day', 'date_range'}
+ALLOWED_RESOURCE_SELECTION_TYPES = {'all', 'building', 'floor', 'specific'}
+
 @admin_api_maintenance_bp.route('/schedules', methods=['POST'])
 @login_required
 @permission_required('manage_maintenance')
@@ -15,6 +18,15 @@ def create_maintenance_schedule():
     # Basic validation
     if not data or not data.get('name') or not data.get('schedule_type'):
         return jsonify({'error': 'Missing required fields'}), 400
+
+    schedule_type = data.get('schedule_type')
+    resource_selection_type = data.get('resource_selection_type')
+
+    if schedule_type not in ALLOWED_SCHEDULE_TYPES:
+        return jsonify({'error': 'Invalid schedule_type'}), 400
+
+    if resource_selection_type not in ALLOWED_RESOURCE_SELECTION_TYPES:
+        return jsonify({'error': 'Invalid resource_selection_type'}), 400
 
     try:
         day_of_week = data.get('day_of_week')
@@ -36,13 +48,13 @@ def create_maintenance_schedule():
 
         new_schedule = MaintenanceSchedule(
             name=data['name'],
-            schedule_type=data['schedule_type'],
+            schedule_type=schedule_type,
             day_of_week=day_of_week,
             day_of_month=day_of_month,
             start_date=start_date,
             end_date=end_date,
             is_availability=is_availability,
-            resource_selection_type=data['resource_selection_type'],
+            resource_selection_type=resource_selection_type,
             resource_ids=data.get('resource_ids'),
             building_id=data.get('building_id'),
             floor_ids=floor_ids
