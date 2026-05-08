@@ -42,7 +42,13 @@ def get_resources():
             for tag in [t.strip().lower() for t in tags.split(',') if t.strip()]:
                 query = query.filter(Resource.tags.ilike(f'%{tag}%'))
 
-        resources_list = [resource_to_dict(r) for r in query.all()]
+        resources_list = []
+        for resource in query.all():
+            resource_data = resource_to_dict(resource)
+            resource_data.pop('current_pin', None)
+            resource_data.pop('resource_pins', None)
+            resources_list.append(resource_data)
+
         logger.info("Successfully fetched published resources.")
         return jsonify(resources_list), 200
     except Exception as e:
