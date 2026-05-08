@@ -1368,8 +1368,11 @@ def _import_resource_configurations_data(resources_data_list: list) -> tuple[dic
                 resource.image_filename = resource_data.get('image_filename', resource.image_filename)
                 resource.floor_map_id = resource_data.get('floor_map_id', resource.floor_map_id)
                 map_coordinates_data = resource_data.get('map_coordinates')
+                imported_map_allowed_roles = None
                 if map_coordinates_data is not None: # Could be dict or already JSON string
                     if isinstance(map_coordinates_data, dict):
+                        if 'allowed_role_ids' in map_coordinates_data:
+                            imported_map_allowed_roles = map_coordinates_data.get('allowed_role_ids')
                         resource.map_coordinates = json.dumps(map_coordinates_data)
                     else: # Assume it's a valid JSON string or None
                         resource.map_coordinates = map_coordinates_data
@@ -1378,7 +1381,10 @@ def _import_resource_configurations_data(resources_data_list: list) -> tuple[dic
 
                 resource.max_recurrence_count = resource_data.get('max_recurrence_count', resource.max_recurrence_count)
                 resource.scheduled_status = resource_data.get('scheduled_status', resource.scheduled_status)
-                resource.map_allowed_role_ids = resource_data.get('map_allowed_role_ids', resource.map_allowed_role_ids)
+                if 'map_allowed_role_ids' in resource_data:
+                    resource.map_allowed_role_ids = resource_data.get('map_allowed_role_ids')
+                elif imported_map_allowed_roles is not None:
+                    resource.map_allowed_role_ids = json.dumps(imported_map_allowed_roles)
                 resource.current_pin = resource_data.get('current_pin', resource.current_pin)
 
                 scheduled_status_at_str = resource_data.get('scheduled_status_at')
@@ -1526,8 +1532,11 @@ def _import_resource_configurations_data(resources_data_list: list) -> tuple[dic
                 new_resource.image_filename = resource_data.get('image_filename')
                 new_resource.floor_map_id = resource_data.get('floor_map_id')
                 map_coordinates_data_new = resource_data.get('map_coordinates')
+                imported_map_allowed_roles_new = None
                 if map_coordinates_data_new is not None:
                     if isinstance(map_coordinates_data_new, dict):
+                        if 'allowed_role_ids' in map_coordinates_data_new:
+                            imported_map_allowed_roles_new = map_coordinates_data_new.get('allowed_role_ids')
                         new_resource.map_coordinates = json.dumps(map_coordinates_data_new)
                     else:
                         new_resource.map_coordinates = map_coordinates_data_new
@@ -1537,7 +1546,10 @@ def _import_resource_configurations_data(resources_data_list: list) -> tuple[dic
 
                 new_resource.max_recurrence_count = resource_data.get('max_recurrence_count')
                 new_resource.scheduled_status = resource_data.get('scheduled_status')
-                new_resource.map_allowed_role_ids = resource_data.get('map_allowed_role_ids')
+                if 'map_allowed_role_ids' in resource_data:
+                    new_resource.map_allowed_role_ids = resource_data.get('map_allowed_role_ids')
+                elif imported_map_allowed_roles_new is not None:
+                    new_resource.map_allowed_role_ids = json.dumps(imported_map_allowed_roles_new)
                 new_resource.current_pin = resource_data.get('current_pin')
 
                 scheduled_status_at_str_new = resource_data.get('scheduled_status_at')
