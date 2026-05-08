@@ -665,6 +665,7 @@ class TestPastBookingLogic(AppTests):
                 "capacity": 20,
                 "equipment": "New Projector",
                 "status": "published", # Ensure this is a valid status
+                "map_coordinates": {"x": 10, "y": 20, "allowed_role_ids": [101, 102]},
                 "tags": "updated, test",
                 "booking_restriction": None, # Assuming 'none' is not a defined value, use None or valid one
                 "published_at": datetime.utcnow().isoformat() + "Z", # Example, ensure format is correct
@@ -710,6 +711,11 @@ class TestPastBookingLogic(AppTests):
             self.assertEqual(updated_resource.capacity, 20)
             self.assertEqual(updated_resource.equipment, "New Projector")
             self.assertEqual(updated_resource.status, "published")
+            self.assertEqual(updated_resource.map_allowed_role_ids, "[101, 102]")
+            self.assertEqual(
+                json.loads(updated_resource.map_coordinates),
+                {"x": 10, "y": 20, "allowed_role_ids": [101, 102]}
+            )
 
         self.logout()
 

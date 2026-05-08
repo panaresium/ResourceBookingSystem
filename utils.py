@@ -480,7 +480,7 @@ def add_audit_log(action: str, details: str, user_id: int = None, username: str 
         logger.error(f"Error adding audit log: {e}", exc_info=True)
         db.session.rollback()
 
-def resource_to_dict(resource: Resource) -> dict:
+def resource_to_dict(resource: Resource, include_sensitive: bool = False) -> dict:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
 
     storage_provider = current_app.config.get('STORAGE_PROVIDER', 'local')
@@ -492,7 +492,7 @@ def resource_to_dict(resource: Resource) -> dict:
             image_url = url_for('static', filename=f'resource_uploads/{resource.image_filename}', _external=False)
 
 
-    return {
+    resource_data = {
         'id': resource.id,
         'name': resource.name,
         'capacity': resource.capacity,
@@ -503,8 +503,6 @@ def resource_to_dict(resource: Resource) -> dict:
         'image_filename': resource.image_filename, # Changed from image_url to image_filename
         'image_url': image_url, # Added image_url
         'published_at': resource.published_at.isoformat() if resource.published_at else None,
-        'allowed_user_ids': resource.allowed_user_ids, # Assuming this is already a string or None
-        'roles': [{'id': r.id, 'name': r.name} for r in resource.roles],
         'floor_map_id': resource.floor_map_id,
         'map_coordinates': json.loads(resource.map_coordinates) if resource.map_coordinates else None,
         'is_under_maintenance': resource.is_under_maintenance,
@@ -515,6 +513,17 @@ def resource_to_dict(resource: Resource) -> dict:
         'scheduled_status_at': resource.scheduled_status_at.isoformat() if resource.scheduled_status_at else None,
         'map_allowed_role_ids': resource.map_allowed_role_ids # Expected to be JSON string or None
     }
+
+    if include_sensitive:
+        resource_data.update({
+            'allowed_user_ids': resource.allowed_user_ids, # Assuming this is already a string or None
+            'roles': [{'id': r.id, 'name': r.name} for r in resource.roles],
+            'current_pin': resource.current_pin,
+            'map_allowed_role_ids': resource.map_allowed_role_ids, # Expected to be JSON string or None
+            'resource_pins': resource_pins_list,
+        })
+
+    return resource_data
 
 def generate_booking_image(resource_id: int, map_coordinates_str: str, resource_name: str) -> bytes | None:
     logger = current_app.logger if current_app else logging.getLogger(__name__)
@@ -1355,8 +1364,11 @@ def _import_resource_configurations_data(resources_data_list: list) -> tuple[dic
                 resource.image_filename = resource_data.get('image_filename', resource.image_filename)
                 resource.floor_map_id = resource_data.get('floor_map_id', resource.floor_map_id)
                 map_coordinates_data = resource_data.get('map_coordinates')
+                imported_map_allowed_roles = None
                 if map_coordinates_data is not None: # Could be dict or already JSON string
                     if isinstance(map_coordinates_data, dict):
+                        if 'allowed_role_ids' in map_coordinates_data:
+                            imported_map_allowed_roles = map_coordinates_data.get('allowed_role_ids')
                         resource.map_coordinates = json.dumps(map_coordinates_data)
                     else: # Assume it's a valid JSON string or None
                         resource.map_coordinates = map_coordinates_data
@@ -1365,7 +1377,10 @@ def _import_resource_configurations_data(resources_data_list: list) -> tuple[dic
 
                 resource.max_recurrence_count = resource_data.get('max_recurrence_count', resource.max_recurrence_count)
                 resource.scheduled_status = resource_data.get('scheduled_status', resource.scheduled_status)
-                resource.map_allowed_role_ids = resource_data.get('map_allowed_role_ids', resource.map_allowed_role_ids)
+                if 'map_allowed_role_ids' in resource_data:
+                    resource.map_allowed_role_ids = resource_data.get('map_allowed_role_ids')
+                elif imported_map_allowed_roles is not None:
+                    resource.map_allowed_role_ids = json.dumps(imported_map_allowed_roles)
                 resource.current_pin = resource_data.get('current_pin', resource.current_pin)
 
                 scheduled_status_at_str = resource_data.get('scheduled_status_at')
@@ -1513,8 +1528,11 @@ def _import_resource_configurations_data(resources_data_list: list) -> tuple[dic
                 new_resource.image_filename = resource_data.get('image_filename')
                 new_resource.floor_map_id = resource_data.get('floor_map_id')
                 map_coordinates_data_new = resource_data.get('map_coordinates')
+                imported_map_allowed_roles_new = None
                 if map_coordinates_data_new is not None:
                     if isinstance(map_coordinates_data_new, dict):
+                        if 'allowed_role_ids' in map_coordinates_data_new:
+                            imported_map_allowed_roles_new = map_coordinates_data_new.get('allowed_role_ids')
                         new_resource.map_coordinates = json.dumps(map_coordinates_data_new)
                     else:
                         new_resource.map_coordinates = map_coordinates_data_new
@@ -1524,7 +1542,10 @@ def _import_resource_configurations_data(resources_data_list: list) -> tuple[dic
 
                 new_resource.max_recurrence_count = resource_data.get('max_recurrence_count')
                 new_resource.scheduled_status = resource_data.get('scheduled_status')
-                new_resource.map_allowed_role_ids = resource_data.get('map_allowed_role_ids')
+                if 'map_allowed_role_ids' in resource_data:
+                    new_resource.map_allowed_role_ids = resource_data.get('map_allowed_role_ids')
+                elif imported_map_allowed_roles_new is not None:
+                    new_resource.map_allowed_role_ids = json.dumps(imported_map_allowed_roles_new)
                 new_resource.current_pin = resource_data.get('current_pin')
 
                 scheduled_status_at_str_new = resource_data.get('scheduled_status_at')
