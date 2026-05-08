@@ -491,17 +491,6 @@ def resource_to_dict(resource: Resource, include_sensitive: bool = False) -> dic
         else:
             image_url = url_for('static', filename=f'resource_uploads/{resource.image_filename}', _external=False)
 
-    # Prepare resource_pins data
-    resource_pins_list = []
-    if hasattr(resource, 'pins'): # Check if the relationship exists
-        for pin_obj in resource.pins:
-            resource_pins_list.append({
-                'id': pin_obj.id,
-                'pin_value': pin_obj.pin_value,
-                'is_active': pin_obj.is_active,
-                'created_at': pin_obj.created_at.isoformat() if pin_obj.created_at else None,
-                'notes': pin_obj.notes
-            })
 
     resource_data = {
         'id': resource.id,
@@ -522,6 +511,7 @@ def resource_to_dict(resource: Resource, include_sensitive: bool = False) -> dic
         'max_recurrence_count': resource.max_recurrence_count,
         'scheduled_status': resource.scheduled_status,
         'scheduled_status_at': resource.scheduled_status_at.isoformat() if resource.scheduled_status_at else None,
+        'map_allowed_role_ids': resource.map_allowed_role_ids # Expected to be JSON string or None
     }
 
     if include_sensitive:
